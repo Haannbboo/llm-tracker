@@ -1,0 +1,19 @@
+providers:
+  my-provider:
+    base_url: https://api.example.com/v1
+    api_key: sk-...
+    models:
+      - model-name
+
+  # another-provider:
+  #   base_url: https://api.another.com/v1
+  #   api_key: sk-...
+  #   models:
+  #     - another-model
+
+server:
+  host: 0.0.0.0
+  port: 4000
+
+db:
+  path: ~/.llm-tracker/usage.db
