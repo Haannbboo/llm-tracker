@@ -27,4 +27,4 @@ fi
 
 echo ""
 echo "Done. Start the proxy with:"
-echo "  .venv/bin/python proxy.py"
+echo "  .venv/bin/python src/proxy.py"

@@ -37,7 +37,7 @@ providers:
 ## Running
 
 ```bash
-.venv/bin/python proxy.py
+.venv/bin/python src/proxy.py
 ```
 
 Proxy starts on `http://localhost:4000` by default.
