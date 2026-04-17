@@ -29,6 +29,7 @@ type UsageRow = {
 }
 
 type LoadState = 'idle' | 'loading' | 'ready' | 'error'
+type ActiveFilter = { provider: string; model: string } | null
 
 const numberFormatter = new Intl.NumberFormat()
 const compactFormatter = new Intl.NumberFormat(undefined, {
@@ -80,6 +81,7 @@ function App() {
   const [summary, setSummary] = useState<UsageSummary[]>([])
   const [usageRows, setUsageRows] = useState<UsageRow[]>([])
   const [limit, setLimit] = useState(50)
+  const [activeFilter, setActiveFilter] = useState<ActiveFilter>(null)
   const [loadState, setLoadState] = useState<LoadState>('idle')
   const [error, setError] = useState<string | null>(null)
 
@@ -91,9 +93,17 @@ function App() {
       setError(null)
 
       try {
+        const usageUrl = new URL('/usage', window.location.origin)
+        usageUrl.searchParams.set('limit', String(limit))
+
+        if (activeFilter) {
+          usageUrl.searchParams.set('provider', activeFilter.provider)
+          usageUrl.searchParams.set('model', activeFilter.model)
+        }
+
         const [summaryResponse, usageResponse] = await Promise.all([
           fetch('/usage/summary', { signal: controller.signal }),
-          fetch(`/usage?limit=${limit}`, { signal: controller.signal }),
+          fetch(`${usageUrl.pathname}${usageUrl.search}`, { signal: controller.signal }),
         ])
 
         if (!summaryResponse.ok || !usageResponse.ok) {
@@ -125,47 +135,79 @@ function App() {
     void loadUsage()
 
     return () => controller.abort()
-  }, [limit])
+  }, [activeFilter, limit])
+
+  const filteredSummary = useMemo(() => {
+    if (!activeFilter) {
+      return summary
+    }
+
+    return summary.filter(
+      (row) =>
+        row.provider === activeFilter.provider && row.model === activeFilter.model,
+    )
+  }, [activeFilter, summary])
 
   const totals = useMemo(() => {
-    const requests = summary.reduce((sum, row) => sum + value(row.requests), 0)
-    const promptTokens = summary.reduce((sum, row) => sum + value(row.prompt_tokens), 0)
-    const completionTokens = summary.reduce(
+    const requests = filteredSummary.reduce((sum, row) => sum + value(row.requests), 0)
+    const promptTokens = filteredSummary.reduce(
+      (sum, row) => sum + value(row.prompt_tokens),
+      0,
+    )
+    const completionTokens = filteredSummary.reduce(
       (sum, row) => sum + value(row.completion_tokens),
       0,
     )
-    const reasoningTokens = summary.reduce(
+    const reasoningTokens = filteredSummary.reduce(
       (sum, row) => sum + value(row.reasoning_tokens),
       0,
     )
-    const cachedTokens = summary.reduce((sum, row) => sum + value(row.cached_tokens), 0)
-    const totalTokens = summary.reduce((sum, row) => sum + value(row.total_tokens), 0)
-    const latencyWeight = summary.reduce(
+    const cachedTokens = filteredSummary.reduce(
+      (sum, row) => sum + value(row.cached_tokens),
+      0,
+    )
+    const totalTokens = filteredSummary.reduce((sum, row) => sum + value(row.total_tokens), 0)
+    const latencyWeight = filteredSummary.reduce(
       (sum, row) => sum + value(row.avg_latency_ms) * value(row.requests),
       0,
     )
-    const providers = new Set(summary.map((row) => row.provider))
+    const providers = new Set(filteredSummary.map((row) => row.provider))
 
-    return {
-      avgLatency: requests === 0 ? 0 : latencyWeight / requests,
-      cachedTokens,
-      completionTokens,
-      modelCount: summary.length,
-      promptTokens,
-      providerCount: providers.size,
-      reasoningTokens,
-      requests,
-      totalTokens,
+      return {
+        avgLatency: requests === 0 ? 0 : latencyWeight / requests,
+        cachedTokens,
+        completionTokens,
+        modelCount: filteredSummary.length,
+        promptTokens,
+        providerCount: providers.size,
+        reasoningTokens,
+        requests,
+        totalTokens,
     }
-  }, [summary])
+  }, [filteredSummary])
 
   const topModels = summary.slice(0, 6)
+  const activeFilterLabel = activeFilter
+    ? `${activeFilter.provider} / ${activeFilter.model}`
+    : null
+  const activeModelName = activeFilter?.model ?? null
+  const activeProviderName = activeFilter?.provider ?? null
   const statusText =
     loadState === 'loading'
       ? 'Refreshing usage API...'
       : loadState === 'error'
         ? 'Usage API unavailable'
-        : `${formatNumber(totals.requests)} requests tracked`
+        : activeFilterLabel
+          ? `${formatNumber(totals.requests)} requests for ${activeFilterLabel}`
+          : `${formatNumber(totals.requests)} requests tracked`
+
+  function handleModelCardClick(provider: string, model: string) {
+    setActiveFilter((current) =>
+      current?.provider === provider && current?.model === model
+        ? null
+        : { provider, model },
+    )
+  }
 
   return (
     <>
@@ -242,7 +284,21 @@ function App() {
         <section className="model-grid" aria-label="Model usage cards">
           {topModels.length > 0 ? (
             topModels.map((row, index) => (
-              <article className="model-card" key={`${row.provider}:${row.model}`}>
+              <button
+                type="button"
+                className={`model-card ${
+                  activeFilter?.provider === row.provider &&
+                  activeFilter?.model === row.model
+                    ? 'is-active'
+                    : ''
+                }`}
+                key={`${row.provider}:${row.model}`}
+                onClick={() => handleModelCardClick(row.provider, row.model)}
+                aria-pressed={
+                  activeFilter?.provider === row.provider &&
+                  activeFilter?.model === row.model
+                }
+              >
                 <span className="model-rank">{String(index + 1).padStart(2, '0')}</span>
                 <p>{row.provider}</p>
                 <h3>{row.model}</h3>
@@ -250,7 +306,7 @@ function App() {
                   <span>{formatNumber(row.requests)} requests</span>
                   <strong>{formatCompact(row.total_tokens)} tokens</strong>
                 </div>
-              </article>
+              </button>
             ))
           ) : (
             <EmptyState title="No usage yet" text="Send traffic through the proxy and this model matrix will populate automatically." />
@@ -262,7 +318,7 @@ function App() {
             <div className="panel-heading">
               <div>
                 <p className="eyebrow">Token composition</p>
-                <h2>Where usage accumulates</h2>
+                <h2>{activeModelName ? `Usage for ${activeModelName}` : 'Where usage accumulates'}</h2>
               </div>
             </div>
             <div className="token-chart">
@@ -277,7 +333,7 @@ function App() {
             <div className="panel-heading">
               <div>
                 <p className="eyebrow">Efficiency</p>
-                <h2>Cache and reasoning signals</h2>
+                <h2>{activeProviderName ? `Signals for ${activeProviderName}` : 'Cache and reasoning signals'}</h2>
               </div>
             </div>
             <div className="signal-list">
@@ -293,17 +349,28 @@ function App() {
           <div className="panel-heading">
             <div>
               <p className="eyebrow">Recent activity</p>
-              <h2>Latest proxy requests</h2>
+              <h2>{activeModelName ? `Latest ${activeModelName} requests` : 'Latest proxy requests'}</h2>
             </div>
-            <select
-              aria-label="Number of recent requests"
-              value={limit}
-              onChange={(event) => setLimit(Number(event.target.value))}
-            >
-              <option value="25">25 rows</option>
-              <option value="50">50 rows</option>
-              <option value="100">100 rows</option>
-            </select>
+            <div className="request-controls">
+              {activeFilterLabel ? (
+                <button
+                  type="button"
+                  className="filter-chip"
+                  onClick={() => setActiveFilter(null)}
+                >
+                  {activeFilterLabel} x
+                </button>
+              ) : null}
+              <select
+                aria-label="Number of recent requests"
+                value={limit}
+                onChange={(event) => setLimit(Number(event.target.value))}
+              >
+                <option value="25">25 rows</option>
+                <option value="50">50 rows</option>
+                <option value="100">100 rows</option>
+              </select>
+            </div>
           </div>
           <div className="table-wrap">
             <table>

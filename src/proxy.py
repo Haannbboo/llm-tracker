@@ -295,6 +295,32 @@ def fetch_usage_rows(query: str, params: tuple[Any, ...] = ()) -> list[dict[str,
     return [dict(row) for row in rows]
 
 
+def build_usage_query(
+    *,
+    limit: int,
+    provider: str | None = None,
+    model: str | None = None,
+) -> tuple[str, tuple[Any, ...]]:
+    query = "SELECT * FROM usage"
+    clauses: list[str] = []
+    params: list[Any] = []
+
+    if provider:
+        clauses.append("provider = ?")
+        params.append(provider)
+
+    if model:
+        clauses.append("model = ?")
+        params.append(model)
+
+    if clauses:
+        query = f"{query} WHERE {' AND '.join(clauses)}"
+
+    query = f"{query} ORDER BY id DESC LIMIT ?"
+    params.append(limit)
+    return query, tuple(params)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_db(CONFIG["db"]["path"])
@@ -331,8 +357,13 @@ async def list_models():
 
 
 @app.get("/usage")
-async def get_usage(limit: int = 100):
-    return fetch_usage_rows("SELECT * FROM usage ORDER BY id DESC LIMIT ?", (limit,))
+async def get_usage(
+    limit: int = 100,
+    provider: str | None = None,
+    model: str | None = None,
+):
+    query, params = build_usage_query(limit=limit, provider=provider, model=model)
+    return fetch_usage_rows(query, params)
 
 
 @app.get("/usage/summary")

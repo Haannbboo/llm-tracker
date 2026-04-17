@@ -48,8 +48,8 @@ def proxy_module(tmp_path: Path):
             os.environ["HOME"] = previous_home
 
 
-def test_build_model_map_returns_provider_configs(proxy_module):
-    model_map = proxy_module.build_model_map(
+def test_build_maps_returns_provider_configs(proxy_module):
+    provider_map, model_map = proxy_module.build_maps(
         {
             "providers": {
                 "alpha": {
@@ -69,9 +69,9 @@ def test_build_model_map_returns_provider_configs(proxy_module):
     assert model_map["alpha-1"] == proxy_module.ProviderConfig(
         name="alpha",
         base_url="https://alpha.example/v1",
-        api_key="alpha-key",
     )
     assert model_map["beta-1"].name == "beta"
+    assert provider_map["alpha"].name == "alpha"
 
 
 def test_extract_usage_supports_responses_format_and_details(proxy_module):
@@ -125,7 +125,7 @@ def test_build_upstream_url_strips_duplicate_v1_prefix(proxy_module):
     assert url == "https://api.example.com/v1/chat/completions"
 
 
-def test_build_forward_headers_replaces_auth_and_filters_hop_by_hop_fields(proxy_module):
+def test_build_forward_headers_filters_hop_by_hop_fields(proxy_module):
     request = proxy_module.Request(
         {
             "type": "http",
@@ -141,17 +141,9 @@ def test_build_forward_headers_replaces_auth_and_filters_hop_by_hop_fields(proxy
         }
     )
 
-    headers = proxy_module.build_forward_headers(
-        request,
-        proxy_module.ProviderConfig(
-            name="alpha",
-            base_url="https://api.example.com/v1",
-            api_key="provider-key",
-        ),
-    )
+    headers = proxy_module.build_forward_headers(request)
 
-    assert headers["Authorization"] == "Bearer provider-key"
-    assert headers["Content-Type"] == "application/json"
+    assert headers["authorization"] == "Bearer caller-token"
     assert headers["x-request-id"] == "abc123"
     assert headers["accept"] == "application/json"
     assert "host" not in headers
@@ -159,8 +151,9 @@ def test_build_forward_headers_replaces_auth_and_filters_hop_by_hop_fields(proxy
 
 
 def test_resolve_provider_supports_prefix_matches(proxy_module):
-    provider = proxy_module.resolve_provider("gpt-4.1-mini")
+    provider, upstream_model = proxy_module.resolve_provider("test-provider/gpt-4.1-mini")
     assert provider.name == "test-provider"
+    assert upstream_model == "gpt-4.1-mini"
 
 
 def test_build_usage_record_includes_provider_metadata(proxy_module):
@@ -168,7 +161,6 @@ def test_build_usage_record_includes_provider_metadata(proxy_module):
         provider=proxy_module.ProviderConfig(
             name="alpha",
             base_url="https://api.example.com/v1",
-            api_key="provider-key",
         ),
         model="alpha-1",
         endpoint="/v1/responses",
@@ -190,3 +182,24 @@ def test_build_usage_record_includes_provider_metadata(proxy_module):
     assert record["status"] == 201
     assert record["total_tokens"] == 15
     assert "ts" in record
+
+
+def test_build_usage_query_without_filters(proxy_module):
+    query, params = proxy_module.build_usage_query(limit=25)
+
+    assert query == "SELECT * FROM usage ORDER BY id DESC LIMIT ?"
+    assert params == (25,)
+
+
+def test_build_usage_query_with_provider_and_model_filters(proxy_module):
+    query, params = proxy_module.build_usage_query(
+        limit=50,
+        provider="vectorengine",
+        model="gpt-5.4-medium",
+    )
+
+    assert (
+        query
+        == "SELECT * FROM usage WHERE provider = ? AND model = ? ORDER BY id DESC LIMIT ?"
+    )
+    assert params == ("vectorengine", "gpt-5.4-medium", 50)

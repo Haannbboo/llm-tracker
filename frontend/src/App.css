@@ -309,13 +309,40 @@ h3 {
 }
 
 .model-card {
+  appearance: none;
   background: #ffffff;
+  border: 1px solid transparent;
   border-radius: 24px;
   box-shadow: var(--shadow-brand);
+  cursor: pointer;
+  font: inherit;
   min-height: 210px;
+  min-width: 0;
   overflow: hidden;
   padding: 24px;
   position: relative;
+  text-align: left;
+  transition:
+    transform 180ms ease,
+    box-shadow 180ms ease,
+    border-color 180ms ease;
+}
+
+.model-card:hover {
+  transform: translateY(-2px);
+}
+
+.model-card:focus-visible {
+  border-color: var(--brand-blue);
+  outline: 0;
+}
+
+.model-card.is-active {
+  border-color: rgba(20, 86, 240, 0.22);
+  box-shadow:
+    0 18px 28px -10px rgba(20, 86, 240, 0.24),
+    var(--shadow-brand);
+  transform: translateY(-2px);
 }
 
 .model-card::before {
@@ -448,6 +475,15 @@ h3 {
   margin-top: 18px;
 }
 
+.request-controls {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  justify-content: flex-end;
+}
+
+.filter-chip,
 select {
   appearance: none;
   background: #f0f0f0;
@@ -456,6 +492,13 @@ select {
   color: var(--text-strong);
   font: 600 13px/1.5 var(--font-ui);
   padding: 10px 34px 10px 14px;
+}
+
+.filter-chip {
+  background: rgba(20, 86, 240, 0.08);
+  color: var(--brand-blue);
+  cursor: pointer;
+  padding-right: 14px;
 }
 
 .table-wrap {
@@ -561,5 +604,9 @@ footer span:first-child {
   .metrics-grid,
   .model-grid {
     grid-template-columns: 1fr;
+  }
+
+  .request-controls {
+    justify-content: flex-start;
   }
 }
