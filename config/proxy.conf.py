@@ -4,7 +4,9 @@ import yaml
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-with open(os.path.expanduser("~/.llm-tracker/config.yaml"), encoding="utf-8") as config_file:
+with open(
+    os.path.expanduser("~/.llm-tracker/config.yaml"), encoding="utf-8"
+) as config_file:
     cfg = yaml.safe_load(config_file) or {}
 server = cfg.get("server", {})
 

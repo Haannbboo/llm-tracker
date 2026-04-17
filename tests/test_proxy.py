@@ -35,7 +35,7 @@ def proxy_module(tmp_path: Path):
 
     previous_home = os.environ.get("HOME")
     os.environ["HOME"] = str(tmp_path)
-    
+
     # Clear modules to ensure fresh imports with mocked HOME
     for mod in ["src.proxy", "config.app", "src.database", "src.utils", "src.api"]:
         sys.modules.pop(mod, None)
@@ -53,13 +53,16 @@ def proxy_module(tmp_path: Path):
         else:
             os.environ["HOME"] = previous_home
 
+
 @pytest.fixture
 def config_module(proxy_module):
     return importlib.import_module("config.app")
 
+
 @pytest.fixture
 def utils_module(proxy_module):
     return importlib.import_module("src.utils")
+
 
 @pytest.fixture
 def api_module(proxy_module):
@@ -169,7 +172,9 @@ def test_build_forward_headers_filters_hop_by_hop_fields(proxy_module):
 
 
 def test_resolve_provider_supports_prefix_matches(proxy_module):
-    provider, upstream_model = proxy_module.resolve_provider("test-provider/gpt-4.1-mini")
+    provider, upstream_model = proxy_module.resolve_provider(
+        "test-provider/gpt-4.1-mini"
+    )
     assert provider.name == "test-provider"
     assert upstream_model == "gpt-4.1-mini"
 

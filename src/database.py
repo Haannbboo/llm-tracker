@@ -3,10 +3,12 @@ from pathlib import Path
 from typing import Any
 from config.app import CONFIG
 
+
 def connect_db(db_path: str) -> sqlite3.Connection:
     connection = sqlite3.connect(db_path)
     connection.row_factory = sqlite3.Row
     return connection
+
 
 def init_db(db_path: str) -> None:
     Path(db_path).parent.mkdir(parents=True, exist_ok=True)
@@ -30,6 +32,7 @@ def init_db(db_path: str) -> None:
             """
         )
 
+
 def log_usage(db_path: str, **fields: Any) -> None:
     with connect_db(db_path) as connection:
         connection.execute(
@@ -44,6 +47,7 @@ def log_usage(db_path: str, **fields: Any) -> None:
             """,
             fields,
         )
+
 
 def fetch_usage_rows(query: str, params: tuple[Any, ...] = ()) -> list[dict[str, Any]]:
     with connect_db(CONFIG["db"]["path"]) as connection:

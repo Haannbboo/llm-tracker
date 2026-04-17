@@ -1,6 +1,7 @@
 from typing import Any
 from datetime import datetime, timezone
 
+
 def extract_usage(usage: dict[str, Any]) -> dict[str, int]:
     """Normalize usage fields across chat completions and responses API formats."""
     prompt_tokens = usage.get("prompt_tokens") or usage.get("input_tokens", 0)
@@ -11,7 +12,9 @@ def extract_usage(usage: dict[str, Any]) -> dict[str, int]:
         usage.get("input_tokens_details") or usage.get("prompt_tokens_details") or {}
     )
     output_details = (
-        usage.get("output_tokens_details") or usage.get("completion_tokens_details") or {}
+        usage.get("output_tokens_details")
+        or usage.get("completion_tokens_details")
+        or {}
     )
 
     return {
@@ -22,6 +25,7 @@ def extract_usage(usage: dict[str, Any]) -> dict[str, int]:
         "total_tokens": total_tokens,
     }
 
+
 def extract_stream_usage(message: dict[str, Any]) -> dict[str, int] | None:
     if usage := message.get("usage"):
         return extract_usage(usage)
@@ -31,6 +35,7 @@ def extract_stream_usage(message: dict[str, Any]) -> dict[str, int] | None:
         return extract_usage(usage)
 
     return None
+
 
 def build_usage_record(
     *,

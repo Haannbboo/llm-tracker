@@ -21,6 +21,7 @@ from .utils import extract_usage, extract_stream_usage, build_usage_record
 
 REQUEST_TIMEOUT_SECONDS = 300
 
+
 def resolve_provider(model: str) -> tuple[ProviderConfig, str]:
     """Returns (provider, upstream_model). Strips provider prefix if present."""
     for sep in ("/", "."):
@@ -46,7 +47,11 @@ def build_upstream_url(base_url: str, path: str) -> str:
 
 
 def build_forward_headers(request: Request) -> dict[str, str]:
-    return {k: v for k, v in request.headers.items() if k.lower() not in {"host", "content-length"}}
+    return {
+        k: v
+        for k, v in request.headers.items()
+        if k.lower() not in {"host", "content-length"}
+    }
 
 
 def parse_json_body(body: bytes) -> dict[str, Any]:
@@ -70,7 +75,9 @@ async def stream_upstream_response(
 
     try:
         async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT_SECONDS) as client:
-            async with client.stream("POST", url, headers=headers, content=body) as response:
+            async with client.stream(
+                "POST", url, headers=headers, content=body
+            ) as response:
                 status = response.status_code
                 buffer = ""
 

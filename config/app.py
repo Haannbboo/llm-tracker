@@ -21,12 +21,16 @@ def load_config(path: str = CONFIG_PATH) -> dict[str, Any]:
     return config
 
 
-def build_maps(config: dict[str, Any]) -> tuple[dict[str, ProviderConfig], dict[str, ProviderConfig]]:
+def build_maps(
+    config: dict[str, Any],
+) -> tuple[dict[str, ProviderConfig], dict[str, ProviderConfig]]:
     provider_map: dict[str, ProviderConfig] = {}
     model_map: dict[str, ProviderConfig] = {}
 
     for provider_name, provider in config["providers"].items():
-        provider_config = ProviderConfig(name=provider_name, base_url=provider["base_url"])
+        provider_config = ProviderConfig(
+            name=provider_name, base_url=provider["base_url"]
+        )
         provider_map[provider_name] = provider_config
         for model in provider.get("models", []):
             model_map[model] = provider_config

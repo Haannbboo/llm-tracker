@@ -4,6 +4,7 @@ from config.app import CONFIG
 from .database import fetch_usage_rows, init_db
 from contextlib import asynccontextmanager
 
+
 def build_usage_query(
     *,
     limit: int,
@@ -29,12 +30,15 @@ def build_usage_query(
     params.append(limit)
     return query, tuple(params)
 
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_db(CONFIG["db"]["path"])
     yield
 
+
 app = FastAPI(title="llm-tracker-api", lifespan=lifespan)
+
 
 @app.get("/usage")
 async def get_usage(
@@ -44,6 +48,7 @@ async def get_usage(
 ):
     query, params = build_usage_query(limit=limit, provider=provider, model=model)
     return fetch_usage_rows(query, params)
+
 
 @app.get("/usage/summary")
 async def usage_summary():
@@ -63,7 +68,9 @@ async def usage_summary():
         """
     )
 
+
 if __name__ == "__main__":
     import uvicorn
+
     port = CONFIG["server"].get("api_port", CONFIG["server"]["port"] + 1)
     uvicorn.run(app, host=CONFIG["server"]["host"], port=port)
