@@ -1,7 +1,11 @@
 __pycache__/
 *.pyc
 .venv/
+logs/
 *.db
 *.db-shm
 *.db-wal
+
+# LLM related
 DESIGN.md
+AGENTS.md

@@ -35,21 +35,39 @@ def proxy_module(tmp_path: Path):
 
     previous_home = os.environ.get("HOME")
     os.environ["HOME"] = str(tmp_path)
-    sys.modules.pop("src.proxy", None)
+    
+    # Clear modules to ensure fresh imports with mocked HOME
+    for mod in ["src.proxy", "src.config", "src.database", "src.utils", "src.api"]:
+        sys.modules.pop(mod, None)
 
     try:
+        # We still import proxy as the entry point for most things in this test file
+        # but we might need to import others too.
         module = importlib.import_module("src.proxy")
         yield module
     finally:
-        sys.modules.pop("src.proxy", None)
+        for mod in ["src.proxy", "src.config", "src.database", "src.utils", "src.api"]:
+            sys.modules.pop(mod, None)
         if previous_home is None:
             os.environ.pop("HOME", None)
         else:
             os.environ["HOME"] = previous_home
 
+@pytest.fixture
+def config_module(proxy_module):
+    return importlib.import_module("src.config")
 
-def test_build_maps_returns_provider_configs(proxy_module):
-    provider_map, model_map = proxy_module.build_maps(
+@pytest.fixture
+def utils_module(proxy_module):
+    return importlib.import_module("src.utils")
+
+@pytest.fixture
+def api_module(proxy_module):
+    return importlib.import_module("src.api")
+
+
+def test_build_maps_returns_provider_configs(config_module):
+    provider_map, model_map = config_module.build_maps(
         {
             "providers": {
                 "alpha": {
@@ -66,7 +84,7 @@ def test_build_maps_returns_provider_configs(proxy_module):
         }
     )
 
-    assert model_map["alpha-1"] == proxy_module.ProviderConfig(
+    assert model_map["alpha-1"] == config_module.ProviderConfig(
         name="alpha",
         base_url="https://alpha.example/v1",
     )
@@ -74,8 +92,8 @@ def test_build_maps_returns_provider_configs(proxy_module):
     assert provider_map["alpha"].name == "alpha"
 
 
-def test_extract_usage_supports_responses_format_and_details(proxy_module):
-    usage = proxy_module.extract_usage(
+def test_extract_usage_supports_responses_format_and_details(utils_module):
+    usage = utils_module.extract_usage(
         {
             "input_tokens": 11,
             "output_tokens": 7,
@@ -93,8 +111,8 @@ def test_extract_usage_supports_responses_format_and_details(proxy_module):
     }
 
 
-def test_extract_stream_usage_reads_nested_response_payload(proxy_module):
-    usage = proxy_module.extract_stream_usage(
+def test_extract_stream_usage_reads_nested_response_payload(utils_module):
+    usage = utils_module.extract_stream_usage(
         {
             "type": "response.completed",
             "response": {
@@ -156,12 +174,9 @@ def test_resolve_provider_supports_prefix_matches(proxy_module):
     assert upstream_model == "gpt-4.1-mini"
 
 
-def test_build_usage_record_includes_provider_metadata(proxy_module):
-    record = proxy_module.build_usage_record(
-        provider=proxy_module.ProviderConfig(
-            name="alpha",
-            base_url="https://api.example.com/v1",
-        ),
+def test_build_usage_record_includes_provider_metadata(utils_module):
+    record = utils_module.build_usage_record(
+        provider_name="alpha",
         model="alpha-1",
         endpoint="/v1/responses",
         latency_ms=42,
@@ -184,15 +199,15 @@ def test_build_usage_record_includes_provider_metadata(proxy_module):
     assert "ts" in record
 
 
-def test_build_usage_query_without_filters(proxy_module):
-    query, params = proxy_module.build_usage_query(limit=25)
+def test_build_usage_query_without_filters(api_module):
+    query, params = api_module.build_usage_query(limit=25)
 
     assert query == "SELECT * FROM usage ORDER BY id DESC LIMIT ?"
     assert params == (25,)
 
 
-def test_build_usage_query_with_provider_and_model_filters(proxy_module):
-    query, params = proxy_module.build_usage_query(
+def test_build_usage_query_with_provider_and_model_filters(api_module):
+    query, params = api_module.build_usage_query(
         limit=50,
         provider="vectorengine",
         model="gpt-5.4-medium",

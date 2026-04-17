@@ -26,9 +26,10 @@ The proxy never touches your credentials. `ANTHROPIC_AUTH_TOKEN` / `Authorizatio
 ## Setup
 
 ```bash
-uv venv --python 3.14
-uv pip install fastapi uvicorn httpx pyyaml
+bash scripts/start.sh
 ```
+
+This bootstraps `uv` if needed, creates `.venv`, installs `requirements.txt`, ensures `~/.llm-tracker/config.yaml` exists, and starts the proxy/API services under Supervisor.
 
 ## Configuration
 
@@ -52,11 +53,30 @@ providers:
 
 ## Running
 
+The project is split into two servers: the **Proxy** (routing and logging) and the **API** (usage stats and frontend connection).
+
+**Start both services under Supervisor:**
 ```bash
-.venv/bin/python src/proxy.py
+bash scripts/start.sh
 ```
 
-Proxy starts on `http://localhost:4000` by default.
+**Reload both services:**
+```bash
+bash scripts/restart.sh
+```
+This sends `SIGHUP` to the managed proxy and API processes through Supervisor.
+
+**Stop both services:**
+```bash
+bash scripts/stop.sh
+```
+
+**Inspect process status:**
+```bash
+uv run --with supervisor supervisorctl -c ~/.llm-tracker/supervisord.conf status
+```
+
+Supervisor runtime files live under `~/.llm-tracker/run/`, and `scripts/start.sh` regenerates the Supervisor config at `~/.llm-tracker/supervisord.conf`. Logs remain in the repo `logs/` directory.
 
 ## Pointing agents at the proxy
 
@@ -75,14 +95,27 @@ export ANTHROPIC_MODEL=claude-sonnet-4-5  # must match a model name in config
 base_url = "http://localhost:4000/v1"
 ```
 
+## Frontend dev server
+
+The Vite frontend proxies `/usage` requests to the API server, not the proxy server.
+
+```bash
+cd frontend
+LLM_TRACKER_API_URL=http://localhost:4001 npm run dev
+```
+
+If `LLM_TRACKER_API_URL` is unset, the frontend defaults to `http://localhost:4001`.
+
 ## Usage API
+
+The Usage API now runs on its own port (default `4001`):
 
 ```bash
 # Recent requests
-curl http://localhost:4000/usage
+curl http://localhost:4001/usage
 
 # Totals grouped by provider/model
-curl http://localhost:4000/usage/summary
+curl http://localhost:4001/usage/summary
 ```
 
 ## Logged fields

@@ -12,6 +12,7 @@ providers:
 server:
   host: 0.0.0.0
   port: 4000
+  api_port: 4001
 
 db:
   path: ~/.llm-tracker/usage.db
