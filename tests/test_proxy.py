@@ -37,7 +37,7 @@ def proxy_module(tmp_path: Path):
     os.environ["HOME"] = str(tmp_path)
     
     # Clear modules to ensure fresh imports with mocked HOME
-    for mod in ["src.proxy", "src.config", "src.database", "src.utils", "src.api"]:
+    for mod in ["src.proxy", "config.app", "src.database", "src.utils", "src.api"]:
         sys.modules.pop(mod, None)
 
     try:
@@ -46,7 +46,7 @@ def proxy_module(tmp_path: Path):
         module = importlib.import_module("src.proxy")
         yield module
     finally:
-        for mod in ["src.proxy", "src.config", "src.database", "src.utils", "src.api"]:
+        for mod in ["src.proxy", "config.app", "src.database", "src.utils", "src.api"]:
             sys.modules.pop(mod, None)
         if previous_home is None:
             os.environ.pop("HOME", None)
@@ -55,7 +55,7 @@ def proxy_module(tmp_path: Path):
 
 @pytest.fixture
 def config_module(proxy_module):
-    return importlib.import_module("src.config")
+    return importlib.import_module("config.app")
 
 @pytest.fixture
 def utils_module(proxy_module):

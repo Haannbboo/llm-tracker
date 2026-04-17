@@ -1,7 +1,7 @@
 import sqlite3
 from pathlib import Path
 from typing import Any
-from .config import CONFIG
+from config.app import CONFIG
 
 def connect_db(db_path: str) -> sqlite3.Connection:
     connection = sqlite3.connect(db_path)

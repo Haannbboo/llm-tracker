@@ -15,7 +15,7 @@ import httpx
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 
-from .config import CONFIG, MODEL_MAP, PROVIDER_MAP, ProviderConfig
+from config.app import CONFIG, MODEL_MAP, PROVIDER_MAP, ProviderConfig
 from .database import init_db, log_usage
 from .utils import extract_usage, extract_stream_usage, build_usage_record
 

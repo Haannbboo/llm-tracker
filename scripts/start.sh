@@ -63,7 +63,7 @@ supervisor.rpcinterface_factory = supervisor.rpcinterface:make_main_rpcinterface
 serverurl=unix://${SOCKET_PATH}
 
 [program:llm-tracker-proxy]
-command=${PYTHON} -m gunicorn -c ${ROOT_DIR}/gunicorn/proxy.conf.py src.proxy:app
+command=${PYTHON} -m gunicorn -c ${ROOT_DIR}/config/proxy.conf.py src.proxy:app
 directory=${ROOT_DIR}
 autostart=true
 autorestart=true
@@ -74,7 +74,7 @@ stdout_logfile=${ROOT_DIR}/logs/proxy.stdout.log
 stderr_logfile=${ROOT_DIR}/logs/proxy.stderr.log
 
 [program:llm-tracker-api]
-command=${PYTHON} -m gunicorn -c ${ROOT_DIR}/gunicorn/api.conf.py src.api:app
+command=${PYTHON} -m gunicorn -c ${ROOT_DIR}/config/api.conf.py src.api:app
 directory=${ROOT_DIR}
 autostart=true
 autorestart=true

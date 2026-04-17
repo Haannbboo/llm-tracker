@@ -1,6 +1,6 @@
 from typing import Any
 from fastapi import FastAPI
-from .config import CONFIG
+from config.app import CONFIG
 from .database import fetch_usage_rows, init_db
 from contextlib import asynccontextmanager
 
