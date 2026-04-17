@@ -30,7 +30,6 @@ CONFIG_PATH = "~/.llm-tracker/config.yaml"
 class ProviderConfig:
     name: str
     base_url: str
-    api_key: str
 
 
 def load_config(path: str = CONFIG_PATH) -> dict[str, Any]:
@@ -41,23 +40,21 @@ def load_config(path: str = CONFIG_PATH) -> dict[str, Any]:
     return config
 
 
-def build_model_map(config: dict[str, Any]) -> dict[str, ProviderConfig]:
+def build_maps(config: dict[str, Any]) -> tuple[dict[str, ProviderConfig], dict[str, ProviderConfig]]:
+    provider_map: dict[str, ProviderConfig] = {}
     model_map: dict[str, ProviderConfig] = {}
 
     for provider_name, provider in config["providers"].items():
-        provider_config = ProviderConfig(
-            name=provider_name,
-            base_url=provider["base_url"],
-            api_key=provider["api_key"],
-        )
+        provider_config = ProviderConfig(name=provider_name, base_url=provider["base_url"])
+        provider_map[provider_name] = provider_config
         for model in provider.get("models", []):
             model_map[model] = provider_config
 
-    return model_map
+    return provider_map, model_map
 
 
 CONFIG = load_config()
-MODEL_MAP = build_model_map(CONFIG)
+PROVIDER_MAP, MODEL_MAP = build_maps(CONFIG)
 
 
 def connect_db(db_path: str) -> sqlite3.Connection:
@@ -127,13 +124,16 @@ def extract_usage(usage: dict[str, Any]) -> dict[str, int]:
     }
 
 
-def resolve_provider(model: str) -> ProviderConfig:
-    if model in MODEL_MAP:
-        return MODEL_MAP[model]
+def resolve_provider(model: str) -> tuple[ProviderConfig, str]:
+    """Returns (provider, upstream_model). Strips provider prefix if present."""
+    for sep in ("/", "."):
+        if sep in model:
+            provider_name, upstream_model = model.split(sep, 1)
+            if provider_name in PROVIDER_MAP:
+                return PROVIDER_MAP[provider_name], upstream_model
 
-    for configured_model, provider in MODEL_MAP.items():
-        if model.startswith(configured_model) or configured_model.startswith(model):
-            return provider
+    if model in MODEL_MAP:
+        return MODEL_MAP[model], model
 
     raise HTTPException(
         status_code=404,
@@ -148,17 +148,8 @@ def build_upstream_url(base_url: str, path: str) -> str:
     return f"{base_url.rstrip('/')}/{stripped_path}"
 
 
-def build_forward_headers(request: Request, provider: ProviderConfig) -> dict[str, str]:
-    headers = {
-        "Authorization": f"Bearer {provider.api_key}",
-        "Content-Type": "application/json",
-    }
-
-    for key, value in request.headers.items():
-        if key.lower() not in {"host", "authorization", "content-length"}:
-            headers[key] = value
-
-    return headers
+def build_forward_headers(request: Request) -> dict[str, str]:
+    return {k: v for k, v in request.headers.items() if k.lower() not in {"host", "content-length"}}
 
 
 def build_usage_record(
@@ -254,10 +245,14 @@ async def forward(request: Request, path: str):
     body = await request.body()
     body_json = parse_json_body(body)
     model = body_json.get("model", "")
-    provider = resolve_provider(model)
+    provider, upstream_model = resolve_provider(model)
+
+    if upstream_model != model:
+        body_json["model"] = upstream_model
+        body = json.dumps(body_json).encode()
 
     url = build_upstream_url(provider.base_url, path)
-    headers = build_forward_headers(request, provider)
+    headers = build_forward_headers(request)
     started_at = time.monotonic()
 
     if body_json.get("stream", False):
@@ -317,6 +312,11 @@ async def chat_completions(request: Request):
 @app.post("/v1/responses")
 async def responses(request: Request):
     return await forward(request, "/v1/responses")
+
+
+@app.post("/v1/messages")
+async def messages(request: Request):
+    return await forward(request, "/v1/messages")
 
 
 @app.get("/v1/models")

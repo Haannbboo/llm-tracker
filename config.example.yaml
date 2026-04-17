@@ -1,13 +1,11 @@
 providers:
   my-provider:
     base_url: https://api.example.com/v1
-    api_key: sk-...
     models:
       - model-name
 
   # another-provider:
   #   base_url: https://api.another.com/v1
-  #   api_key: sk-...
   #   models:
   #     - another-model
 
