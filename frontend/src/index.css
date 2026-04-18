@@ -1,56 +1,49 @@
 :root {
-  --brand-blue: #1456f0;
-  --sky-blue: #3daeff;
-  --brand-pink: #ea5ec1;
-  --text-primary: #222222;
-  --text-strong: #18181b;
-  --text-secondary: #45515e;
-  --text-muted: #8e8e93;
-  --dark-surface: #181e25;
-  --border-soft: #f2f3f5;
-  --border: #e5e7eb;
-  --success-bg: #e8ffea;
-  --shadow-soft: rgba(0, 0, 0, 0.08) 0 4px 6px;
-  --shadow-card: rgba(36, 36, 36, 0.08) 0 12px 16px -4px;
-  --shadow-brand: rgba(44, 30, 116, 0.16) 0 0 15px;
-  --font-ui: 'DM Sans', 'Helvetica Neue', Helvetica, Arial, sans-serif;
-  --font-display: 'Outfit', 'Helvetica Neue', Helvetica, Arial, sans-serif;
-  --font-poppins: 'Poppins', 'Helvetica Neue', Helvetica, Arial, sans-serif;
-  --font-data: 'Roboto', 'Helvetica Neue', Helvetica, Arial, sans-serif;
+  --sidebar-bg: #f8fafc;
+  --sidebar-item-active-bg: #e0f2fe;
+  --sidebar-item-active-color: #0369a1;
+  --sidebar-header-bg: #3b82f6;
+  
+  --main-bg: #f1f5f9;
+  --card-bg: #ffffff;
+  --border-color: #e2e8f0;
+  
+  --text-primary: #1e293b;
+  --text-secondary: #64748b;
+  --text-muted: #94a3b8;
 
-  background: #ffffff;
-  color: var(--text-primary);
-  font-family: var(--font-ui);
-  font-synthesis: none;
-  line-height: 1.5;
-  text-rendering: optimizeLegibility;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
+  /* Colors for icons and charts */
+  --color-blue: #3b82f6;
+  --color-green: #22c55e;
+  --color-yellow: #eab308;
+  --color-pink: #ec4899;
+  --color-purple: #a855f7;
+
+  --font-sans: 'Inter', ui-sans-serif, system-ui, -apple-system, sans-serif;
 }
 
 * {
   box-sizing: border-box;
-}
-
-html {
-  scroll-behavior: smooth;
+  margin: 0;
+  padding: 0;
 }
 
 body {
-  background:
-    radial-gradient(circle at top left, rgba(61, 174, 255, 0.12), transparent 30%),
-    radial-gradient(circle at 88% 8%, rgba(234, 94, 193, 0.1), transparent 24%),
-    #ffffff;
-  margin: 0;
-  min-width: 320px;
+  background-color: var(--main-bg);
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  font-size: 14px;
 }
 
-button,
-input,
-select {
+button {
+  cursor: pointer;
+  border: none;
+  background: none;
   font: inherit;
+  transition: all 0.2s;
 }
 
 a {
-  text-underline-offset: 3px;
+  text-decoration: none;
+  color: inherit;
 }

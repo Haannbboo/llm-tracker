@@ -51,30 +51,19 @@ function formatCompact(input: number | null | undefined) {
 
 function formatLatency(input: number | null | undefined) {
   const latency = value(input)
-  return latency >= 1000 ? `${(latency / 1000).toFixed(1)}s` : `${Math.round(latency)}ms`
+  return latency >= 1000 ? `${(latency / 1000).toFixed(2)}s` : `${Math.round(latency)}ms`
 }
 
 function formatTime(input: string) {
   const date = new Date(input)
-
-  if (Number.isNaN(date.valueOf())) {
-    return input
-  }
-
+  if (Number.isNaN(date.valueOf())) return input
   return new Intl.DateTimeFormat(undefined, {
     month: 'short',
     day: 'numeric',
     hour: '2-digit',
     minute: '2-digit',
+    hour12: false
   }).format(date)
-}
-
-function tokenPercent(part: number, total: number) {
-  if (total === 0) {
-    return '0%'
-  }
-
-  return `${Math.max(4, Math.round((part / total) * 100))}%`
 }
 
 function App() {
@@ -107,7 +96,7 @@ function App() {
         ])
 
         if (!summaryResponse.ok || !usageResponse.ok) {
-          throw new Error('Usage API returned an unsuccessful response.')
+          throw new Error('Failed to fetch usage data')
         }
 
         const [summaryData, usageData] = (await Promise.all([
@@ -118,356 +107,287 @@ function App() {
         setSummary(summaryData)
         setUsageRows(usageData)
         setLoadState('ready')
-      } catch (requestError) {
-        if (controller.signal.aborted) {
-          return
-        }
-
+      } catch (err) {
+        if (controller.signal.aborted) return
         setLoadState('error')
-        setError(
-          requestError instanceof Error
-            ? requestError.message
-            : 'Unable to load usage data.',
-        )
+        setError(err instanceof Error ? err.message : 'Unknown error')
       }
     }
 
     void loadUsage()
-
     return () => controller.abort()
   }, [activeFilter, limit])
 
-  const filteredSummary = useMemo(() => {
-    if (!activeFilter) {
-      return summary
-    }
+  const totals = useMemo(() => {
+    const data = activeFilter 
+      ? summary.filter(s => s.provider === activeFilter.provider && s.model === activeFilter.model)
+      : summary
 
-    return summary.filter(
-      (row) =>
-        row.provider === activeFilter.provider && row.model === activeFilter.model,
-    )
+    const requests = data.reduce((sum, row) => sum + value(row.requests), 0)
+    const promptTokens = data.reduce((sum, row) => sum + value(row.prompt_tokens), 0)
+    const completionTokens = data.reduce((sum, row) => sum + value(row.completion_tokens), 0)
+    const reasoningTokens = data.reduce((sum, row) => sum + value(row.reasoning_tokens), 0)
+    const cachedTokens = data.reduce((sum, row) => sum + value(row.cached_tokens), 0)
+    const totalTokens = data.reduce((sum, row) => sum + value(row.total_tokens), 0)
+    const latencyWeight = data.reduce((sum, row) => sum + value(row.avg_latency_ms) * value(row.requests), 0)
+
+    return {
+      requests,
+      promptTokens,
+      completionTokens,
+      reasoningTokens,
+      cachedTokens,
+      totalTokens,
+      avgLatency: requests === 0 ? 0 : latencyWeight / requests,
+    }
   }, [activeFilter, summary])
 
-  const totals = useMemo(() => {
-    const requests = filteredSummary.reduce((sum, row) => sum + value(row.requests), 0)
-    const promptTokens = filteredSummary.reduce(
-      (sum, row) => sum + value(row.prompt_tokens),
-      0,
-    )
-    const completionTokens = filteredSummary.reduce(
-      (sum, row) => sum + value(row.completion_tokens),
-      0,
-    )
-    const reasoningTokens = filteredSummary.reduce(
-      (sum, row) => sum + value(row.reasoning_tokens),
-      0,
-    )
-    const cachedTokens = filteredSummary.reduce(
-      (sum, row) => sum + value(row.cached_tokens),
-      0,
-    )
-    const totalTokens = filteredSummary.reduce((sum, row) => sum + value(row.total_tokens), 0)
-    const latencyWeight = filteredSummary.reduce(
-      (sum, row) => sum + value(row.avg_latency_ms) * value(row.requests),
-      0,
-    )
-    const providers = new Set(filteredSummary.map((row) => row.provider))
-
-      return {
-        avgLatency: requests === 0 ? 0 : latencyWeight / requests,
-        cachedTokens,
-        completionTokens,
-        modelCount: filteredSummary.length,
-        promptTokens,
-        providerCount: providers.size,
-        reasoningTokens,
-        requests,
-        totalTokens,
-    }
-  }, [filteredSummary])
-
-  const topModels = summary.slice(0, 6)
-  const activeFilterLabel = activeFilter
-    ? `${activeFilter.provider} / ${activeFilter.model}`
-    : null
-  const activeModelName = activeFilter?.model ?? null
-  const activeProviderName = activeFilter?.provider ?? null
-  const statusText =
-    loadState === 'loading'
-      ? 'Refreshing usage API...'
-      : loadState === 'error'
-        ? 'Usage API unavailable'
-        : activeFilterLabel
-          ? `${formatNumber(totals.requests)} requests for ${activeFilterLabel}`
-          : `${formatNumber(totals.requests)} requests tracked`
-
-  function handleModelCardClick(provider: string, model: string) {
-    setActiveFilter((current) =>
-      current?.provider === provider && current?.model === model
-        ? null
-        : { provider, model },
-    )
-  }
-
   return (
-    <>
-      <header className="site-header">
-        <a className="brand" href="#overview" aria-label="llm-tracker dashboard">
-          <span className="brand-mark">L</span>
+    <div className="app">
+      <aside className="sidebar">
+        <div className="sidebar-header">
+          <div className="icon">☁️</div>
           <span>llm-tracker</span>
-        </a>
-        <nav className="nav-pills" aria-label="Dashboard sections">
-          <a href="#overview">Overview</a>
-          <a href="#models">Models</a>
-          <a href="#requests">Requests</a>
-        </nav>
-      </header>
-
-      <main>
-        <section className="hero" id="overview">
-          <div className="hero-copy">
-            <p className="eyebrow">Usage intelligence for OpenAI-compatible traffic</p>
-            <h1>Track every token moving through your LLM proxy.</h1>
-            <p className="hero-text">
-              Monitor spend pressure, model mix, latency, cache efficiency, and
-              reasoning load from the lightweight usage logs already collected by
-              llm-tracker.
-            </p>
-            <div className="hero-actions">
-              <a className="primary-action" href="#requests">
-                Inspect requests
-              </a>
-              <a className="secondary-action" href="#models">
-                Compare models
-              </a>
-            </div>
+        </div>
+        <div className="sidebar-menu">
+          <div className="menu-group">
+            <div className="menu-title">Main</div>
+            <button className="menu-item active">
+              <span>💻</span> Dashboard
+            </button>
+            <button className="menu-item">
+              <span>🔑</span> API Keys
+            </button>
+            <button className="menu-item">
+              <span>📖</span> Logs
+            </button>
+            <button className="menu-item">
+              <span>🖼️</span> Image Gen
+            </button>
+            <button className="menu-item">
+              <span>⚙️</span> Tasks
+            </button>
           </div>
-
-          <aside className="hero-card" aria-label="Total token usage">
-            <div className="orb orb-one"></div>
-            <div className="orb orb-two"></div>
-            <p>Total tokens</p>
-            <strong>{formatCompact(totals.totalTokens)}</strong>
-            <span>
-              {formatCompact(totals.promptTokens)} input ·{' '}
-              {formatCompact(totals.completionTokens)} output
-            </span>
-            <div className="hero-bars" aria-hidden="true">
-              <span style={{ height: tokenPercent(totals.promptTokens, totals.totalTokens) }} />
-              <span style={{ height: tokenPercent(totals.completionTokens, totals.totalTokens) }} />
-              <span style={{ height: tokenPercent(totals.reasoningTokens, totals.totalTokens) }} />
-              <span style={{ height: tokenPercent(totals.cachedTokens, totals.totalTokens) }} />
-              <span style={{ height: tokenPercent(totals.requests, Math.max(totals.requests, 1)) }} />
-            </div>
-          </aside>
-        </section>
-
-        <section className="metrics-grid" aria-label="Usage metrics">
-          <MetricCard label="Requests" value={formatNumber(totals.requests)} note="Total tracked proxy calls" />
-          <MetricCard label="Input tokens" value={formatNumber(totals.promptTokens)} note="Prompt load across providers" />
-          <MetricCard label="Output tokens" value={formatNumber(totals.completionTokens)} note="Generated response volume" />
-          <MetricCard label="Avg latency" value={formatLatency(totals.avgLatency)} note="Weighted by request count" />
-        </section>
-
-        <section className="section-header" id="models">
-          <div>
-            <p className="eyebrow">Model matrix</p>
-            <h2>Provider and model mix</h2>
+          <div className="menu-group">
+            <div className="menu-title">User</div>
+            <button className="menu-item">
+              <span>💰</span> Wallet
+            </button>
+            <button className="menu-item">
+              <span>🧾</span> Billing
+            </button>
+            <button className="menu-item">
+              <span>👤</span> Settings
+            </button>
           </div>
-          <div className={`status-pill ${loadState === 'error' ? 'is-error' : ''}`}>
-            {statusText}
-          </div>
-        </section>
+        </div>
+      </aside>
 
-        {error ? <div className="notice">{error}</div> : null}
-
-        <section className="model-grid" aria-label="Model usage cards">
-          {topModels.length > 0 ? (
-            topModels.map((row, index) => (
-              <button
-                type="button"
-                className={`model-card ${
-                  activeFilter?.provider === row.provider &&
-                  activeFilter?.model === row.model
-                    ? 'is-active'
-                    : ''
-                }`}
-                key={`${row.provider}:${row.model}`}
-                onClick={() => handleModelCardClick(row.provider, row.model)}
-                aria-pressed={
-                  activeFilter?.provider === row.provider &&
-                  activeFilter?.model === row.model
-                }
-              >
-                <span className="model-rank">{String(index + 1).padStart(2, '0')}</span>
-                <p>{row.provider}</p>
-                <h3>{row.model}</h3>
-                <div className="model-card-footer">
-                  <span>{formatNumber(row.requests)} requests</span>
-                  <strong>{formatCompact(row.total_tokens)} tokens</strong>
+      <main className="main">
+        <header className="top-navbar">
+          <div className="navbar-title">Dashboard</div>
+          <div className="navbar-right">
+             <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                <span style={{ fontSize: '18px' }}>📢</span>
+                <span style={{ fontSize: '18px' }}>🌐</span>
+                <div style={{ padding: '6px 12px', background: '#f1f5f9', borderRadius: '16px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <div style={{ background: '#fbbf24', width: 24, height: 24, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontSize: '12px', fontWeight: 'bold' }}>G</div>
+                  <span style={{ fontSize: '13px', fontWeight: 600 }}>ghbhanbo</span>
+                  <span style={{ fontSize: '10px' }}>▼</span>
                 </div>
-              </button>
-            ))
-          ) : (
-            <EmptyState title="No usage yet" text="Send traffic through the proxy and this model matrix will populate automatically." />
-          )}
-        </section>
+             </div>
+          </div>
+        </header>
 
-        <section className="usage-layout">
-          <article className="panel chart-panel">
-            <div className="panel-heading">
-              <div>
-                <p className="eyebrow">Token composition</p>
-                <h2>{activeModelName ? `Usage for ${activeModelName}` : 'Where usage accumulates'}</h2>
+        <div className="content-body">
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <div className="welcome-msg">👋 Hello, ghbhanbo</div>
+            <select 
+              style={{ padding: '8px 12px', borderRadius: '8px', border: '1px solid var(--border-color)', outline: 'none' }}
+              value={activeFilter ? `${activeFilter.provider}|${activeFilter.model}` : ''}
+              onChange={(e) => {
+                if (!e.target.value) setActiveFilter(null)
+                else {
+                  const [provider, model] = e.target.value.split('|')
+                  setActiveFilter({ provider, model })
+                }
+              }}
+            >
+              <option value="">🌐 All Models</option>
+              {summary.map(s => (
+                <option key={`${s.provider}:${s.model}`} value={`${s.provider}|${s.model}`}>
+                  {s.model}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="widgets-grid">
+            <div className="widget">
+              <div className="widget-header"><span>💼</span> Account</div>
+              <div className="widget-body">
+                <div className="icon-box icon-blue">💰</div>
+                <div className="stat-group">
+                  <div className="stat-label">Balance</div>
+                  <div className="stat-value">$ 25.16</div>
+                </div>
+              </div>
+              <div className="widget-body" style={{ marginTop: '12px' }}>
+                <div className="icon-box icon-purple">📉</div>
+                <div className="stat-group">
+                  <div className="stat-label">Spent</div>
+                  <div className="stat-value">$ 212.02</div>
+                </div>
               </div>
             </div>
-            <div className="token-chart">
-              <TokenBar label="Input" value={totals.promptTokens} total={totals.totalTokens} />
-              <TokenBar label="Output" value={totals.completionTokens} total={totals.totalTokens} />
-              <TokenBar label="Reasoning" value={totals.reasoningTokens} total={totals.totalTokens} />
-              <TokenBar label="Cached" value={totals.cachedTokens} total={totals.totalTokens} />
-            </div>
-          </article>
-
-          <article className="panel">
-            <div className="panel-heading">
-              <div>
-                <p className="eyebrow">Efficiency</p>
-                <h2>{activeProviderName ? `Signals for ${activeProviderName}` : 'Cache and reasoning signals'}</h2>
+            
+            <div className="widget">
+              <div className="widget-header"><span>📈</span> Usage</div>
+              <div className="widget-body">
+                <div className="icon-box icon-green">🚀</div>
+                <div className="stat-group">
+                  <div className="stat-label">Requests</div>
+                  <div className="stat-value">{formatNumber(totals.requests)}</div>
+                </div>
+              </div>
+              <div className="widget-body" style={{ marginTop: '12px' }}>
+                <div className="icon-box icon-blue">⏱️</div>
+                <div className="stat-group">
+                  <div className="stat-label">Latency</div>
+                  <div className="stat-value">{formatLatency(totals.avgLatency)}</div>
+                </div>
               </div>
             </div>
-            <div className="signal-list">
-              <Signal label="Cached tokens" value={formatNumber(totals.cachedTokens)} />
-              <Signal label="Reasoning tokens" value={formatNumber(totals.reasoningTokens)} />
-              <Signal label="Models observed" value={formatNumber(totals.modelCount)} />
-              <Signal label="Providers observed" value={formatNumber(totals.providerCount)} />
-            </div>
-          </article>
-        </section>
 
-        <section className="panel request-panel" id="requests">
-          <div className="panel-heading">
-            <div>
-              <p className="eyebrow">Recent activity</p>
-              <h2>{activeModelName ? `Latest ${activeModelName} requests` : 'Latest proxy requests'}</h2>
+            <div className="widget">
+              <div className="widget-header"><span>⚡</span> Resources</div>
+              <div className="widget-body">
+                <div className="icon-box icon-yellow">🪙</div>
+                <div className="stat-group">
+                  <div className="stat-label">Cost Estimate</div>
+                  <div className="stat-value">$ {(totals.requests * 0.0001).toFixed(2)}</div>
+                </div>
+              </div>
+              <div className="widget-body" style={{ marginTop: '12px' }}>
+                <div className="icon-box icon-pink">🎟️</div>
+                <div className="stat-group">
+                  <div className="stat-label">Tokens</div>
+                  <div className="stat-value">{formatCompact(totals.totalTokens)}</div>
+                </div>
+              </div>
             </div>
-            <div className="request-controls">
-              {activeFilterLabel ? (
-                <button
-                  type="button"
-                  className="filter-chip"
-                  onClick={() => setActiveFilter(null)}
-                >
-                  {activeFilterLabel} x
-                </button>
-              ) : null}
-              <select
-                aria-label="Number of recent requests"
-                value={limit}
-                onChange={(event) => setLimit(Number(event.target.value))}
-              >
-                <option value="25">25 rows</option>
-                <option value="50">50 rows</option>
-                <option value="100">100 rows</option>
-              </select>
+
+            <div className="widget">
+              <div className="widget-header"><span>⏱️</span> Performance</div>
+              <div className="widget-body">
+                <div className="icon-box icon-blue">🔄</div>
+                <div className="stat-group">
+                  <div className="stat-label">RPM</div>
+                  <div className="stat-value">0.071</div>
+                </div>
+              </div>
+              <div className="widget-body" style={{ marginTop: '12px' }}>
+                <div className="icon-box icon-yellow">🔂</div>
+                <div className="stat-group">
+                  <div className="stat-label">TPM</div>
+                  <div className="stat-value">4143.06</div>
+                </div>
+              </div>
             </div>
           </div>
-          <div className="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>Time</th>
-                  <th>Provider</th>
-                  <th>Model</th>
-                  <th>Endpoint</th>
-                  <th>Tokens</th>
-                  <th>Latency</th>
-                  <th>Status</th>
-                </tr>
-              </thead>
-              <tbody>
-                {usageRows.length > 0 ? (
-                  usageRows.map((row) => (
-                    <tr key={row.id}>
-                      <td>{formatTime(row.ts)}</td>
-                      <td>{row.provider}</td>
-                      <td>{row.model}</td>
-                      <td>{row.endpoint}</td>
-                      <td>{formatNumber(row.total_tokens)}</td>
-                      <td>{formatLatency(row.latency_ms)}</td>
-                      <td>
-                        <span className={value(row.status) >= 400 ? 'status bad' : 'status'}>
-                          {row.status ?? 'n/a'}
-                        </span>
-                      </td>
+
+          <div className="content-grid">
+            <div className="panel">
+              <div className="panel-tabs">
+                <div className="tab active"><span>🕒</span> Activity</div>
+                <div className="tab"><span>📊</span> Distribution</div>
+                <div className="tab"><span>📈</span> Trends</div>
+                <div className="tab"><span>🏆</span> Ranking</div>
+              </div>
+              <div className="panel-body">
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '16px' }}>
+                   <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                      <button style={{ padding: '4px 8px', background: '#f1f5f9', borderRadius: '4px' }}>◀</button>
+                      <span style={{ fontWeight: 600, fontSize: '13px' }}>📅 Apr 2026</span>
+                      <button style={{ padding: '4px 8px', background: '#f1f5f9', borderRadius: '4px' }}>▶</button>
+                      <button style={{ padding: '4px 12px', background: 'var(--color-blue)', color: 'white', borderRadius: '16px', fontSize: '12px', fontWeight: 600 }}>Today</button>
+                   </div>
+                   <div style={{ fontSize: '13px' }}>
+                      Logs: <span style={{ color: 'var(--color-blue)', fontWeight: 600 }}>{usageRows.length}</span> | 
+                      Limit: <select value={limit} onChange={(e) => setLimit(Number(e.target.value))} style={{ border: 'none', background: 'transparent', fontWeight: 600, outline: 'none' }}>
+                        <option value={25}>25</option>
+                        <option value={50}>50</option>
+                        <option value={100}>100</option>
+                      </select>
+                   </div>
+                </div>
+                <table className="table">
+                  <thead>
+                    <tr>
+                      <th>Time</th>
+                      <th>Model</th>
+                      <th>Tokens</th>
+                      <th>Latency</th>
+                      <th>Status</th>
                     </tr>
-                  ))
-                ) : (
-                  <tr>
-                    <td colSpan={7}>No recent requests found.</td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
+                  </thead>
+                  <tbody>
+                    {usageRows.map(row => (
+                      <tr key={row.id}>
+                        <td style={{ color: '#64748b' }}>{formatTime(row.ts)}</td>
+                        <td>
+                          <div style={{ fontWeight: 600 }}>{row.model}</div>
+                        </td>
+                        <td style={{ fontWeight: 600, color: 'var(--color-blue)' }}>{formatNumber(row.total_tokens)}</td>
+                        <td>{formatLatency(row.latency_ms)}</td>
+                        <td>
+                          <span className={`badge ${value(row.status) >= 400 ? 'badge-error' : 'badge-success'}`}>
+                            {row.status ?? '200'}
+                          </span>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <div className="panel">
+              <div className="panel-tabs">
+                <div className="tab active"><span>🔌</span> API Info</div>
+              </div>
+              <div className="panel-body">
+                <div className="api-item">
+                  <div className="api-title">
+                     <span className="badge" style={{ background: '#dbeafe', color: 'var(--color-blue)' }}>Main</span> 
+                     Primary Hub
+                     <div style={{ marginLeft: 'auto', display: 'flex', gap: '8px' }}>
+                        <button style={{ padding: '2px 8px', border: '1px solid #e2e8f0', borderRadius: '4px', fontSize: '11px' }}>⏱️ Ping</button>
+                        <button style={{ padding: '2px 8px', border: '1px solid #e2e8f0', borderRadius: '4px', fontSize: '11px' }}>↗️ Goto</button>
+                     </div>
+                  </div>
+                  <div className="api-link">https://api.llm-tracker.local</div>
+                  <div className="api-desc">US High-Availability Cluster</div>
+                </div>
+                
+                <div className="api-item">
+                  <div className="api-title">
+                     <span className="badge" style={{ background: '#e0e7ff', color: 'var(--color-purple)' }}>Alt</span> 
+                     Fallback Hub
+                     <div style={{ marginLeft: 'auto', display: 'flex', gap: '8px' }}>
+                        <button style={{ padding: '2px 8px', border: '1px solid #e2e8f0', borderRadius: '4px', fontSize: '11px' }}>⏱️ Ping</button>
+                        <button style={{ padding: '2px 8px', border: '1px solid #e2e8f0', borderRadius: '4px', fontSize: '11px' }}>↗️ Goto</button>
+                     </div>
+                  </div>
+                  <div className="api-link">https://proxy.llm-tracker.local</div>
+                  <div className="api-desc">EU Failover Node</div>
+                </div>
+              </div>
+            </div>
           </div>
-        </section>
+        </div>
       </main>
-
-      <footer>
-        <span>llm-tracker</span>
-        <span>Pass-through proxy visibility for model traffic.</span>
-      </footer>
-    </>
-  )
-}
-
-function MetricCard({
-  label,
-  note,
-  value: metricValue,
-}: {
-  label: string
-  note: string
-  value: string
-}) {
-  return (
-    <article className="metric-card">
-      <span>{label}</span>
-      <strong>{metricValue}</strong>
-      <p>{note}</p>
-    </article>
-  )
-}
-
-function TokenBar({ label, total, value: barValue }: { label: string; total: number; value: number }) {
-  return (
-    <div className="token-row">
-      <div>
-        <span>{label}</span>
-        <strong>{formatNumber(barValue)}</strong>
-      </div>
-      <div className="track">
-        <span style={{ width: tokenPercent(barValue, total) }} />
-      </div>
     </div>
-  )
-}
-
-function Signal({ label, value: signalValue }: { label: string; value: string }) {
-  return (
-    <div>
-      <span>{label}</span>
-      <strong>{signalValue}</strong>
-    </div>
-  )
-}
-
-function EmptyState({ text, title }: { text: string; title: string }) {
-  return (
-    <article className="empty-state">
-      <h3>{title}</h3>
-      <p>{text}</p>
-    </article>
   )
 }
 
