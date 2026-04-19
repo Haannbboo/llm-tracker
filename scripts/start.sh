@@ -58,22 +58,8 @@ CODEX_EOF
   echo "==> Codex OTLP telemetry configured"
 fi
 
-# Configure Gemini CLI OTLP telemetry if Gemini is installed
-GEMINI_CONFIG="${HOME}/.gemini/settings.json"
-if [[ -f "${GEMINI_CONFIG}" ]]; then
-  python3 - "${GEMINI_CONFIG}" << 'PY_EOF'
-import json, sys
-path = sys.argv[1]
-with open(path) as f:
-    s = json.load(f)
-desired = {"enabled": True, "target": "local", "otlpEndpoint": "http://localhost:4002", "otlpProtocol": "http"}
-if s.get("telemetry") != desired:
-    s["telemetry"] = desired
-    with open(path, "w") as f:
-        json.dump(s, f, indent=2)
-    print("==> Gemini OTLP telemetry configured")
-PY_EOF
-fi
+# Install Gemini CLI hook and configure OTLP telemetry in user settings (~/.gemini)
+bash "${ROOT_DIR}/scripts/setup-gemini.sh"
 
 # Generate supervisord.conf (references project gunicorn configs)
 cat > "${SUPERVISORD_CONF}" <<EOF

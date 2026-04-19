@@ -30,6 +30,7 @@ bash scripts/start.sh
 ```
 
 This bootstraps `uv` if needed, creates `.venv`, installs `requirements.txt`, ensures `~/.llm-tracker/config.yaml` exists, and starts the proxy/API services under Supervisor.
+It also configures project-local Gemini telemetry and `BeforeModel`/`AfterModel` hooks in [.gemini/settings.json](/Users/hanbo/Documents/llm-tracker/.gemini/settings.json) so Gemini TTFT is captured without hand-editing the settings file.
 
 ## Configuration
 
@@ -133,3 +134,21 @@ curl http://localhost:4001/usage/summary
 | `total_tokens` | Total tokens |
 | `latency_ms` | End-to-end proxy latency |
 | `status` | HTTP status code |
+
+## Tracking Status
+
+The following table shows which metrics are currently captured for each integration:
+
+| Metric | Gemini CLI | Claude Code | Codex | Direct Proxy |
+| :--- | :---: | :---: | :---: | :---: |
+| Input Tokens | ✅ | ✅ | ✅ | ✅ |
+| Output Tokens | ✅ | ✅ | ✅ | ✅ |
+| Cached Tokens (Read) | ✅ | ✅ | ✅ | ✅ |
+| Cached  | ❌ | ✅ | ❌ | ❌ |
+| Reasoning Tokens | ✅ | ❌ | ✅ | ✅ |
+| Tool Tokens | ✅ | ❌ | ✅ | ❌ |
+| Latency | ✅ | ✅ | ✅ | ✅ |
+| TTFT (time to first token) | ✅ (Hook) | ❌ | ✅ (OTLP) | ❌ |
+
+
+*Note: Claude Code telemetry currently lacks TTFT — its OTLP payload has no first-chunk timestamp. Gemini CLI captures TTFT via a shell hook (time from request sent to first streaming chunk). Codex captures true TTFT natively via OTLP.*

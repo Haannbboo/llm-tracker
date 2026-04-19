@@ -30,6 +30,7 @@ PROJECT_MODULES = [
     "config.app",
     "src.api",
     "src.database",
+    "src.otlp",
     "src.proxy",
     "src.utils",
 ]
@@ -81,6 +82,11 @@ def database_module(load_module: Callable[[str], ModuleType]) -> ModuleType:
 @pytest.fixture
 def proxy_module(load_module: Callable[[str], ModuleType]) -> ModuleType:
     return load_module("src.proxy")
+
+
+@pytest.fixture
+def otlp_module(load_module: Callable[[str], ModuleType]) -> ModuleType:
+    return load_module("src.otlp")
 
 
 @pytest.fixture

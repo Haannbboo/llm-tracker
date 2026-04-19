@@ -14,6 +14,7 @@ CLAUDE_EVENT = "api_request"
 CODEX_EVENT = "codex.sse_event"
 CODEX_API_REQUEST_EVENT = "codex.api_request"
 CODEX_DEBUG_FILE = "/tmp/codex-otlp-debug.json"
+GEMINI_HOOK_DIR = os.path.join(os.environ.get("TMPDIR", "/tmp"), "llm-tracker-gemini")
 
 # State cache for merging Codex events: conversation_id -> {duration_ms, ttft_ms, timestamp}
 codex_state = {}
@@ -39,7 +40,45 @@ def _resource_attr(resource: dict, key: str):
     return _attr(resource.get("attributes", []), key)
 
 
-def _parse_gemini_record(record: dict, attrs: list) -> None:
+def _consume_gemini_ttft(session_id: str) -> tuple[int | None, int | None]:
+    if not session_id:
+        return None, None
+
+    queue_path = os.path.join(GEMINI_HOOK_DIR, f"queue-{session_id}.jsonl")
+    try:
+        with open(queue_path, encoding="utf-8") as f:
+            lines = f.readlines()
+    except OSError:
+        return None, None
+
+    if not lines:
+        return None, None
+
+    entry_line = lines[0]
+    remaining = lines[1:]
+    if remaining:
+        with open(queue_path, "w", encoding="utf-8") as f:
+            f.writelines(remaining)
+    else:
+        try:
+            os.unlink(queue_path)
+        except OSError:
+            pass
+
+    try:
+        entry = json.loads(entry_line)
+    except json.JSONDecodeError:
+        return None, None
+
+    ttft_ms = entry.get("ttft_ms")
+    latency_ms = entry.get("latency_ms")
+    return (
+        int(ttft_ms) if ttft_ms is not None else None,
+        int(latency_ms) if latency_ms is not None else None,
+    )
+
+
+def _parse_gemini_record(record: dict, attrs: list, session_id: str) -> None:
     time_ns = record.get("timeUnixNano", "0")
     ts = datetime.fromtimestamp(int(time_ns) / 1e9, tz=timezone.utc).isoformat()
 
@@ -48,17 +87,22 @@ def _parse_gemini_record(record: dict, attrs: list) -> None:
     thoughts_tokens = _attr(attrs, "thoughts_token_count")
     tool_tokens = _attr(attrs, "tool_token_count")
 
-    # Sum up all generated tokens to get the true completion total.
-    # This ensures accuracy even if total_token_count calculation in the CLI is ambiguous.
     completion_total = (
         int(visible_tokens or 0) + int(thoughts_tokens or 0) + int(tool_tokens or 0)
     )
+    model = _attr(attrs, "model") or "gemini-unknown"
+    role = _attr(attrs, "role") or ""
+    sid = _attr(attrs, "session.id") or session_id
+    ttft_ms, hook_latency_ms = (
+        _consume_gemini_ttft(sid) if role == "main" else (None, None)
+    )
+    latency_ms = _attr(attrs, "duration_ms")
 
     log_usage(
         CONFIG["db"]["path"],
         ts=ts,
         provider="google",
-        model=_attr(attrs, "model") or "gemini-unknown",
+        model=model,
         endpoint="generate-otlp",
         prompt_tokens=input_tokens,
         completion_tokens=completion_total,
@@ -66,8 +110,8 @@ def _parse_gemini_record(record: dict, attrs: list) -> None:
         reasoning_tokens=thoughts_tokens,
         tool_tokens=tool_tokens,
         total_tokens=_attr(attrs, "total_token_count"),
-        latency_ms=_attr(attrs, "duration_ms"),
-        ttft_ms=None,  # TODO: capture from gemini_cli.api.request.latency metric or BeforeModel hook
+        latency_ms=latency_ms if latency_ms is not None else hook_latency_ms,
+        ttft_ms=ttft_ms,
         cache_creation_tokens=None,
         status=_attr(attrs, "status_code"),
     )
@@ -182,12 +226,12 @@ def _parse_codex_record(record: dict, attrs: list) -> None:
     )
 
 
-def _parse_log_record(record: dict, service_name: str) -> None:
+def _parse_log_record(record: dict, service_name: str, session_id: str) -> None:
     attrs = record.get("attributes", [])
     event_name = _attr(attrs, "event.name") or ""
 
     if event_name == GEMINI_EVENT:
-        _parse_gemini_record(record, attrs)
+        _parse_gemini_record(record, attrs, session_id)
     elif event_name == CLAUDE_EVENT and service_name == "claude-code":
         _parse_claude_record(record, attrs)
     elif event_name == CODEX_EVENT and service_name == "codex_cli_rs":
@@ -229,6 +273,7 @@ async def receive_logs(request: Request):
     for resource_log in body.get("resourceLogs", []):
         resource = resource_log.get("resource", {})
         service_name = _resource_attr(resource, "service.name") or ""
+        session_id = _resource_attr(resource, "session.id") or ""
         # Dump first unrecognised resource block to discover service name
         if service_name not in (
             "claude-code",
@@ -241,7 +286,7 @@ async def receive_logs(request: Request):
                 )
         for scope_log in resource_log.get("scopeLogs", []):
             for record in scope_log.get("logRecords", []):
-                _parse_log_record(record, service_name)
+                _parse_log_record(record, service_name, session_id)
     return {}
 
 
