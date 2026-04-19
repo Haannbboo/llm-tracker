@@ -43,17 +43,28 @@ def _parse_gemini_record(record: dict, attrs: list) -> None:
     time_ns = record.get("timeUnixNano", "0")
     ts = datetime.fromtimestamp(int(time_ns) / 1e9, tz=timezone.utc).isoformat()
 
+    input_tokens = _attr(attrs, "input_token_count")
+    visible_tokens = _attr(attrs, "output_token_count")
+    thoughts_tokens = _attr(attrs, "thoughts_token_count")
+    tool_tokens = _attr(attrs, "tool_token_count")
+
+    # Sum up all generated tokens to get the true completion total.
+    # This ensures accuracy even if total_token_count calculation in the CLI is ambiguous.
+    completion_total = (
+        int(visible_tokens or 0) + int(thoughts_tokens or 0) + int(tool_tokens or 0)
+    )
+
     log_usage(
         CONFIG["db"]["path"],
         ts=ts,
         provider="google",
         model=_attr(attrs, "model") or "gemini-unknown",
         endpoint="generate-otlp",
-        prompt_tokens=_attr(attrs, "input_token_count"),
-        completion_tokens=_attr(attrs, "output_token_count"),
+        prompt_tokens=input_tokens,
+        completion_tokens=completion_total,
         cached_tokens=_attr(attrs, "cached_content_token_count"),
-        reasoning_tokens=_attr(attrs, "thoughts_token_count"),
-        tool_tokens=_attr(attrs, "tool_token_count"),
+        reasoning_tokens=thoughts_tokens,
+        tool_tokens=tool_tokens,
         total_tokens=_attr(attrs, "total_token_count"),
         latency_ms=_attr(attrs, "duration_ms"),
         ttft_ms=None,  # TODO: capture from gemini_cli.api.request.latency metric or BeforeModel hook

@@ -26,6 +26,7 @@ type UsageRow = {
   total_tokens: number | null
   latency_ms: number | null
   ttft_ms: number | null
+  tool_tokens: number | null
   status: number | null
 }
 
@@ -669,10 +670,14 @@ function App() {
                                   Reasoning {formatNumber(row.reasoning_tokens)} ({Math.round((value(row.reasoning_tokens) / (value(row.completion_tokens) || 1)) * 100)}%)
                                 </div>
                               )}
+                              {value(row.tool_tokens) > 0 && (
+                                <div style={{ fontSize: '9px', color: 'var(--color-blue)', fontWeight: 700 }}>
+                                  Tools {formatNumber(row.tool_tokens)} ({Math.round((value(row.tool_tokens) / (value(row.completion_tokens) || 1)) * 100)}%)
+                                </div>
+                              )}
                             </div>
-                            {value(row.reasoning_tokens) > 0 && (
+                            {(value(row.reasoning_tokens) > 0 || value(row.tool_tokens) > 0) && (
                               <div 
-                                title={`Reasoning: ${formatNumber(row.reasoning_tokens)} tokens`}
                                 style={{ 
                                   width: '100%', 
                                   height: '3px', 
@@ -680,14 +685,31 @@ function App() {
                                   borderRadius: '2px', 
                                   marginTop: '4px', 
                                   overflow: 'hidden',
-                                  border: '1px solid #e2e8f0'
+                                  border: '1px solid #e2e8f0',
+                                  display: 'flex'
                                 }}
                               >
-                                <div style={{ 
-                                  width: `${(value(row.reasoning_tokens) / (value(row.completion_tokens) || 1)) * 100}%`, 
-                                  height: '100%', 
-                                  background: '#64748b' 
-                                }} />
+                                {value(row.reasoning_tokens) > 0 && (
+                                  <div 
+                                    title={`Reasoning: ${formatNumber(row.reasoning_tokens)} tokens`}
+                                    style={{ 
+                                      width: `${(value(row.reasoning_tokens) / (value(row.completion_tokens) || 1)) * 100}%`, 
+                                      height: '100%', 
+                                      background: '#64748b' 
+                                    }} 
+                                  />
+                                )}
+                                {value(row.tool_tokens) > 0 && (
+                                  <div 
+                                    title={`Tools: ${formatNumber(row.tool_tokens)} tokens`}
+                                    style={{ 
+                                      width: `${(value(row.tool_tokens) / (value(row.completion_tokens) || 1)) * 100}%`, 
+                                      height: '100%', 
+                                      background: 'var(--color-blue)',
+                                      opacity: 0.6
+                                    }} 
+                                  />
+                                )}
                               </div>
                             )}
                           </td>
