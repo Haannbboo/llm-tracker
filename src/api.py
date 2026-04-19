@@ -61,7 +61,7 @@ def build_usage_query(
     if clauses:
         query = f"{query} WHERE {' AND '.join(clauses)}"
 
-    query = f"{query} ORDER BY id DESC LIMIT ? OFFSET ?"
+    query = f"{query} ORDER BY ts DESC LIMIT ? OFFSET ?"
     params.extend([limit, offset])
     return query, tuple(params)
 

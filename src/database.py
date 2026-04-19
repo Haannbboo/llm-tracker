@@ -34,6 +34,7 @@ def init_db(db_path: str) -> None:
             )
             """
         )
+        connection.execute("CREATE INDEX IF NOT EXISTS idx_usage_ts ON usage (ts DESC)")
 
 
 def log_usage(db_path: str, **fields: Any) -> None:
