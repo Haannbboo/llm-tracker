@@ -18,6 +18,9 @@ def load_config(path: str = CONFIG_PATH) -> dict[str, Any]:
         config = yaml.safe_load(config_file)
 
     config["db"]["path"] = os.path.expanduser(config["db"]["path"])
+    config["server"].setdefault(
+        "otlp_port", config["server"].get("api_port", config["server"]["port"] + 1) + 1
+    )
     return config
 
 

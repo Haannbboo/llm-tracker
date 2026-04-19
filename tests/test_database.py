@@ -14,6 +14,9 @@ def test_init_db_log_usage_and_fetch_rows(database_module, isolated_home):
         cached_tokens=2,
         total_tokens=15,
         latency_ms=123,
+        ttft_ms=None,
+        tool_tokens=None,
+        cache_creation_tokens=None,
         status=200,
     )
 
@@ -32,6 +35,9 @@ def test_init_db_log_usage_and_fetch_rows(database_module, isolated_home):
             "cached_tokens": 2,
             "total_tokens": 15,
             "latency_ms": 123,
+            "ttft_ms": None,
+            "tool_tokens": None,
+            "cache_creation_tokens": None,
             "status": 200,
         }
     ]

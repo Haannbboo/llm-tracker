@@ -27,6 +27,9 @@ def init_db(db_path: str) -> None:
                 cached_tokens     INTEGER,
                 total_tokens      INTEGER,
                 latency_ms        INTEGER,
+                ttft_ms           INTEGER,
+                tool_tokens       INTEGER,
+                cache_creation_tokens INTEGER,
                 status            INTEGER
             )
             """
@@ -39,10 +42,12 @@ def log_usage(db_path: str, **fields: Any) -> None:
             """
             INSERT INTO usage (
                 ts, provider, model, endpoint, prompt_tokens, completion_tokens,
-                reasoning_tokens, cached_tokens, total_tokens, latency_ms, status
+                reasoning_tokens, cached_tokens, total_tokens, latency_ms, ttft_ms,
+                tool_tokens, cache_creation_tokens, status
             ) VALUES (
                 :ts, :provider, :model, :endpoint, :prompt_tokens, :completion_tokens,
-                :reasoning_tokens, :cached_tokens, :total_tokens, :latency_ms, :status
+                :reasoning_tokens, :cached_tokens, :total_tokens, :latency_ms, :ttft_ms,
+                :tool_tokens, :cache_creation_tokens, :status
             )
             """,
             fields,
