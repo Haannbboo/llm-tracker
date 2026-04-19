@@ -25,6 +25,7 @@ type UsageRow = {
   cached_tokens: number | null
   total_tokens: number | null
   latency_ms: number | null
+  ttft_ms: number | null
   status: number | null
 }
 
@@ -80,7 +81,7 @@ function getSinceDate(option: DateRangeOption): string | null {
 function getModelColor(model: string): string {
   const m = model.toLowerCase()
   if (m.includes('gpt-5') || m.includes('gpt-4')) return '#dcdcdc' // RGB 220 220 220
-  if (m.includes('claude-4') || m.includes('claude-3')) return '#cc7c5e' // RGB 204 124 94
+  if (m.includes('claude')) return '#cc7c5e' // RGB 204 124 94
   if (m.includes('gemini')) return '#528af2' // RGB 82 138 242
   if (m.includes('minimax')) return '#ec6b53' // RGB 236 107 83
   return '#f1f5f9'
@@ -88,8 +89,8 @@ function getModelColor(model: string): string {
 
 function getModelTextColor(model: string): string {
   const m = model.toLowerCase()
-  if (m.includes('gpt-5') || m.includes('gpt-4')) return '#1a1a1a' // Dark gray for light gray bg
-  return '#ffffff' // White for the other more vibrant colors
+  if (m.includes('gpt-5') || m.includes('gpt-4')) return '#475569'
+  return getModelColor(model)
 }
 
 function getModelIcon(model: string) {
@@ -597,10 +598,10 @@ function App() {
                     <thead>
                       <tr>
                         <th style={{ width: '120px' }}>Time</th>
-                        <th style={{ width: '160px' }}>Model</th>
+                        <th style={{ width: '160px', padding: '12px 8px' }}>Model</th>
                         <th>Input</th>
                         <th>Output</th>
-                        <th>Latency</th>
+                        <th style={{ padding: '12px 8px' }}>TTFT / Latency</th>
                         <th style={{ width: '80px' }}>Status</th>
                       </tr>
                     </thead>
@@ -608,7 +609,7 @@ function App() {
                       {usageRows.map(row => (
                         <tr key={row.id}>
                           <td style={{ color: '#64748b' }}>{formatTime(row.ts)}</td>
-                          <td>
+                          <td style={{ padding: '8px' }}>
                             <div style={{ 
                               padding: '4px 6px', 
                               borderRadius: '6px', 
@@ -616,8 +617,8 @@ function App() {
                               alignItems: 'center',
                               gap: '4px',
                               fontSize: '11px',
-                              backgroundColor: getModelColor(row.model) + '26',
-                              color: row.model.toLowerCase().includes('gpt') ? '#475569' : getModelColor(row.model),
+                              backgroundColor: getModelColor(row.model) + (row.model.toLowerCase().includes('gpt-5') || row.model.toLowerCase().includes('gpt-4') ? '80' : '26'),
+                              color: getModelTextColor(row.model),
                               maxWidth: '140px'
                             }}>
                               {getModelIcon(row.model)}
@@ -660,8 +661,62 @@ function App() {
                               </div>
                             )}
                           </td>
-                          <td style={{ fontWeight: 600, color: 'var(--color-blue)' }}>{formatNumber(row.completion_tokens)}</td>
-                          <td>{formatLatency(row.latency_ms)}</td>
+                          <td style={{ fontWeight: 600, color: 'var(--color-blue)', verticalAlign: 'top' }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+                              <div>{formatNumber(row.completion_tokens)}</div>
+                              {value(row.reasoning_tokens) > 0 && (
+                                <div style={{ fontSize: '9px', color: '#64748b', fontWeight: 700 }}>
+                                  Reasoning {formatNumber(row.reasoning_tokens)} ({Math.round((value(row.reasoning_tokens) / (value(row.completion_tokens) || 1)) * 100)}%)
+                                </div>
+                              )}
+                            </div>
+                            {value(row.reasoning_tokens) > 0 && (
+                              <div 
+                                title={`Reasoning: ${formatNumber(row.reasoning_tokens)} tokens`}
+                                style={{ 
+                                  width: '100%', 
+                                  height: '3px', 
+                                  background: '#f1f5f9', 
+                                  borderRadius: '2px', 
+                                  marginTop: '4px', 
+                                  overflow: 'hidden',
+                                  border: '1px solid #e2e8f0'
+                                }}
+                              >
+                                <div style={{ 
+                                  width: `${(value(row.reasoning_tokens) / (value(row.completion_tokens) || 1)) * 100}%`, 
+                                  height: '100%', 
+                                  background: '#64748b' 
+                                }} />
+                              </div>
+                            )}
+                          </td>
+                          <td style={{ padding: '8px' }}>
+                            <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+                              {value(row.ttft_ms) > 0 && (
+                                <div style={{ 
+                                  backgroundColor: '#dcfce780', 
+                                  color: '#15803d', 
+                                  padding: '2px 12px', 
+                                  borderRadius: '999px', 
+                                  fontSize: '12px', 
+                                  whiteSpace: 'nowrap'
+                                }} title="Time To First Token">
+                                  {formatLatency(row.ttft_ms)}
+                                </div>
+                              )}
+                              <div style={{ 
+                                backgroundColor: '#ffedd580', 
+                                color: '#9a3412', 
+                                padding: '2px 12px', 
+                                borderRadius: '999px', 
+                                fontSize: '12px', 
+                                whiteSpace: 'nowrap'
+                              }} title="Total Latency">
+                                {formatLatency(row.latency_ms)}
+                              </div>
+                            </div>
+                          </td>
                           <td>
                             <span className={`badge ${value(row.status) >= 400 ? 'badge-error' : 'badge-success'}`}>
                               {row.status ?? '200'}
