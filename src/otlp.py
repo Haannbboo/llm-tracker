@@ -10,7 +10,7 @@ from config.app import CONFIG
 from .database import init_db, log_usage
 
 GEMINI_EVENT = "gemini_cli.api_response"
-CLAUDE_EVENT = "api_request"
+CLAUDE_EVENT = "claude_code.api_request"
 CODEX_EVENT = "codex.sse_event"
 CODEX_API_REQUEST_EVENT = "codex.api_request"
 CODEX_DEBUG_FILE = "/tmp/codex-otlp-debug.json"
@@ -40,11 +40,11 @@ def _resource_attr(resource: dict, key: str):
     return _attr(resource.get("attributes", []), key)
 
 
-def _consume_gemini_ttft(session_id: str) -> tuple[int | None, int | None]:
+def _consume_hook_ttft(hook_dir: str, session_id: str) -> tuple[int | None, int | None]:
     if not session_id:
         return None, None
 
-    queue_path = os.path.join(GEMINI_HOOK_DIR, f"queue-{session_id}.jsonl")
+    queue_path = os.path.join(hook_dir, f"queue-{session_id}.jsonl")
     try:
         with open(queue_path, encoding="utf-8") as f:
             lines = f.readlines()
@@ -94,7 +94,7 @@ def _parse_gemini_record(record: dict, attrs: list, session_id: str) -> None:
     role = _attr(attrs, "role") or ""
     sid = _attr(attrs, "session.id") or session_id
     ttft_ms, hook_latency_ms = (
-        _consume_gemini_ttft(sid) if role == "main" else (None, None)
+        _consume_hook_ttft(GEMINI_HOOK_DIR, sid) if role == "main" else (None, None)
     )
     latency_ms = _attr(attrs, "duration_ms")
 
@@ -117,7 +117,7 @@ def _parse_gemini_record(record: dict, attrs: list, session_id: str) -> None:
     )
 
 
-def _parse_claude_record(record: dict, attrs: list) -> None:
+def _parse_claude_record(record: dict, attrs: list, session_id: str) -> None:
     time_ns = record.get("timeUnixNano", "0")
     ts = datetime.fromtimestamp(int(time_ns) / 1e9, tz=timezone.utc).isoformat()
 
@@ -130,7 +130,6 @@ def _parse_claude_record(record: dict, attrs: list) -> None:
     prompt_tokens = (int(input_tokens or 0)) + (int(cache_read or 0))
 
     total = prompt_tokens + int(output_tokens or 0) + int(cache_create or 0)
-
     log_usage(
         CONFIG["db"]["path"],
         ts=ts,
@@ -232,8 +231,10 @@ def _parse_log_record(record: dict, service_name: str, session_id: str) -> None:
 
     if event_name == GEMINI_EVENT:
         _parse_gemini_record(record, attrs, session_id)
-    elif event_name == CLAUDE_EVENT and service_name == "claude-code":
-        _parse_claude_record(record, attrs)
+    elif (
+        event_name == CLAUDE_EVENT or event_name == "api_request"
+    ) and service_name == "claude-code":
+        _parse_claude_record(record, attrs, session_id)
     elif event_name == CODEX_EVENT and service_name == "codex_cli_rs":
         _parse_codex_record(record, attrs)
     elif event_name == CODEX_API_REQUEST_EVENT and service_name == "codex_cli_rs":

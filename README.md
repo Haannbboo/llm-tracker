@@ -144,11 +144,11 @@ The following table shows which metrics are currently captured for each integrat
 | Input Tokens | ✅ | ✅ | ✅ | ✅ |
 | Output Tokens | ✅ | ✅ | ✅ | ✅ |
 | Cached Tokens (Read) | ✅ | ✅ | ✅ | ✅ |
-| Cached  | ❌ | ✅ | ❌ | ❌ |
+| Cached Tokens (Write) | ❌ | ✅ | ❌ | ❌ |
 | Reasoning Tokens | ✅ | ❌ | ✅ | ✅ |
 | Tool Tokens | ✅ | ❌ | ✅ | ❌ |
 | Latency | ✅ | ✅ | ✅ | ✅ |
 | TTFT (time to first token) | ✅ (Hook) | ❌ | ✅ (OTLP) | ❌ |
 
 
-*Note: Claude Code telemetry currently lacks TTFT — its OTLP payload has no first-chunk timestamp. Gemini CLI captures TTFT via a shell hook (time from request sent to first streaming chunk). Codex captures true TTFT natively via OTLP.*
+*Note: Gemini CLI captures TTFT via a shell hook (time from request sent to first streaming chunk) because its OTLP payload lacks a first-chunk timestamp. Codex captures true TTFT natively via OTLP. Claude Code has no BeforeModel/AfterModel hook equivalents, so TTFT is unavailable.*

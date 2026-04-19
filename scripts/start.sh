@@ -58,7 +58,7 @@ CODEX_EOF
   echo "==> Codex OTLP telemetry configured"
 fi
 
-# Install Gemini CLI hook and configure OTLP telemetry in user settings (~/.gemini)
+# Install Gemini CLI hook and configure OTLP telemetry
 bash "${ROOT_DIR}/scripts/setup-gemini.sh"
 
 # Generate supervisord.conf (references project gunicorn configs)

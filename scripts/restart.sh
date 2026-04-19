@@ -10,7 +10,7 @@ if [[ ! -f "${SUPERVISORD_CONF}" ]]; then
   exit 1
 fi
 
-# Refresh Gemini CLI hook and OTLP telemetry in user settings (~/.gemini)
+# Refresh Gemini CLI hook and configure OTLP telemetry
 bash "${ROOT_DIR}/scripts/setup-gemini.sh"
 
 for prog in llm-tracker-proxy llm-tracker-api llm-tracker-otlp; do

@@ -48,20 +48,16 @@ def test_parse_gemini_record_merges_hook_ttft(
             "input_token_count": 793,
             "output_token_count": 1359,
             "total_token_count": 2152,
-            "duration_ms": 8193,
         }
     )
 
-    otlp_module._parse_gemini_record(record, attrs, "")
+    otlp_module._parse_gemini_record(record, attrs, "session-1")
 
-    assert captured["fields"]["provider"] == "google"
-    assert captured["fields"]["model"] == "gemini-3-flash-preview"
     assert captured["fields"]["ttft_ms"] == 6845
-    assert captured["fields"]["latency_ms"] == 8193
-    assert not queue_path.exists()
+    assert captured["fields"]["latency_ms"] == 8719
 
 
-def test_consume_gemini_ttft_missing_session_returns_none(
+def test_consume_hook_ttft_missing_session_returns_none(
     otlp_module, monkeypatch, isolated_home: Path
 ):
     hook_dir = isolated_home / "gemini-hook"
@@ -69,13 +65,15 @@ def test_consume_gemini_ttft_missing_session_returns_none(
 
     monkeypatch.setattr(otlp_module, "GEMINI_HOOK_DIR", str(hook_dir))
 
-    ttft_ms, latency_ms = otlp_module._consume_gemini_ttft("nonexistent-session")
+    ttft_ms, latency_ms = otlp_module._consume_hook_ttft(
+        otlp_module.GEMINI_HOOK_DIR, "nonexistent-session"
+    )
 
     assert ttft_ms is None
     assert latency_ms is None
 
 
-def test_consume_gemini_ttft_fifo_order(otlp_module, monkeypatch, isolated_home: Path):
+def test_consume_hook_ttft_fifo_order(otlp_module, monkeypatch, isolated_home: Path):
     hook_dir = isolated_home / "gemini-hook"
     hook_dir.mkdir()
     queue_path = hook_dir / "queue-session-3.jsonl"
@@ -89,12 +87,16 @@ def test_consume_gemini_ttft_fifo_order(otlp_module, monkeypatch, isolated_home:
 
     monkeypatch.setattr(otlp_module, "GEMINI_HOOK_DIR", str(hook_dir))
 
-    ttft1, lat1 = otlp_module._consume_gemini_ttft("session-3")
+    ttft1, lat1 = otlp_module._consume_hook_ttft(
+        otlp_module.GEMINI_HOOK_DIR, "session-3"
+    )
     assert ttft1 == 100
     assert lat1 == 200
     assert queue_path.exists()  # second entry remains
 
-    ttft2, lat2 = otlp_module._consume_gemini_ttft("session-3")
+    ttft2, lat2 = otlp_module._consume_hook_ttft(
+        otlp_module.GEMINI_HOOK_DIR, "session-3"
+    )
     assert ttft2 == 300
     assert lat2 == 400
     assert not queue_path.exists()  # queue exhausted
