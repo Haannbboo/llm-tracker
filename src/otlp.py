@@ -15,7 +15,7 @@ CODEX_EVENT = "codex.sse_event"
 CODEX_API_REQUEST_EVENT = "codex.api_request"
 CODEX_DEBUG_FILE = "/tmp/codex-otlp-debug.json"
 
-# State cache for merging Codex events: conversation_id -> {duration_ms, timestamp}
+# State cache for merging Codex events: conversation_id -> {duration_ms, ttft_ms, timestamp}
 codex_state = {}
 
 
@@ -99,14 +99,23 @@ def _parse_codex_api_request(record: dict, attrs: list) -> None:
     conv_id = _attr(attrs, "conversation.id")
     duration = _attr(attrs, "duration_ms")
     if conv_id and duration is not None:
-        codex_state[conv_id] = {
-            "duration_ms": int(duration),
-            "ts": time.time(),
-        }
+        if conv_id not in codex_state:
+            codex_state[conv_id] = {"ts": time.time()}
+        codex_state[conv_id]["duration_ms"] = int(duration)
 
 
 def _parse_codex_record(record: dict, attrs: list) -> None:
     event_kind = _attr(attrs, "event.kind")
+    conv_id = _attr(attrs, "conversation.id")
+
+    if event_kind == "response.created":
+        duration = _attr(attrs, "duration_ms")
+        if conv_id and duration is not None:
+            if conv_id not in codex_state:
+                codex_state[conv_id] = {"ts": time.time()}
+            codex_state[conv_id]["ttft_ms"] = int(duration)
+        return
+
     if event_kind != "response.completed":
         return
 
@@ -126,11 +135,15 @@ def _parse_codex_record(record: dict, attrs: list) -> None:
     reasoning_tokens = _attr(attrs, "reasoning_token_count")
     tool_tokens = _attr(attrs, "tool_token_count")
     latency_ms = _attr(attrs, "duration_ms")
+    ttft_ms = None
 
-    # Try to get better latency from the state cache
-    conv_id = _attr(attrs, "conversation.id")
+    # Try to get better latency and ttft from the state cache
     if conv_id in codex_state:
-        latency_ms = codex_state[conv_id]["duration_ms"]
+        state = codex_state[conv_id]
+        if "duration_ms" in state:
+            latency_ms = state["duration_ms"]
+        if "ttft_ms" in state:
+            ttft_ms = state["ttft_ms"]
         del codex_state[conv_id]
 
     prompt_tokens = int(input_tokens or 0)
@@ -152,7 +165,7 @@ def _parse_codex_record(record: dict, attrs: list) -> None:
         tool_tokens=int(tool_tokens) if tool_tokens is not None else None,
         total_tokens=total_tokens,
         latency_ms=int(latency_ms) if latency_ms is not None else None,
-        ttft_ms=None,
+        ttft_ms=int(ttft_ms) if ttft_ms is not None else None,
         cache_creation_tokens=None,
         status=None,
     )
