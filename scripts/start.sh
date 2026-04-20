@@ -24,7 +24,7 @@ fi
 # Create venv
 if [[ ! -x "${PYTHON}" ]]; then
   echo "==> Creating venv..."
-  uv venv --python 3.14 "${VENV_DIR}"
+  uv venv --python 3.13 "${VENV_DIR}"
 fi
 
 # Install deps when requirements.txt changes
@@ -40,8 +40,10 @@ fi
 
 mkdir -p "${ROOT_DIR}/logs" "${RUNTIME_DIR}"
 
-# Seed config
-if [[ ! -f "${CONFIG_PATH}" ]]; then
+# Seed config without overwriting an existing user config.
+if [[ -e "${CONFIG_PATH}" || -L "${CONFIG_PATH}" ]]; then
+  echo "==> Config already exists at ${CONFIG_PATH}"
+else
   cp "${ROOT_DIR}/config.example.yaml" "${CONFIG_PATH}"
   echo "==> Config created at ${CONFIG_PATH}"
 fi
