@@ -30,9 +30,18 @@ type UsageRow = {
   status: number | null
 }
 
+type DailyUsage = {
+  period: string
+  requests: number
+  prompt_tokens: number | null
+  completion_tokens: number | null
+  cached_tokens: number | null
+  total_tokens: number | null
+}
+
 type LoadState = 'idle' | 'loading' | 'ready' | 'error'
 type ActiveFilter = { provider: string; model: string } | null
-type DateRangeOption = '1h' | '6h' | '24h' | '7d' | 'custom'
+type DateRangeOption = '5h' | '24h' | '7d' | '30d' | 'custom'
 
 const numberFormatter = new Intl.NumberFormat()
 const compactFormatter = new Intl.NumberFormat(undefined, {
@@ -72,11 +81,20 @@ function formatTime(input: string) {
 function getSinceDate(option: DateRangeOption): string | null {
   if (option === 'custom') return null
   const now = new Date()
-  if (option === '1h') now.setHours(now.getHours() - 1)
-  else if (option === '6h') now.setHours(now.getHours() - 6)
+  if (option === '5h') now.setHours(now.getHours() - 5)
   else if (option === '24h') now.setHours(now.getHours() - 24)
   else if (option === '7d') now.setDate(now.getDate() - 7)
+  else if (option === '30d') now.setDate(now.getDate() - 30)
   return now.toISOString()
+}
+
+function getTimezoneOffset(): string {
+  const offset = -new Date().getTimezoneOffset();
+  const absOffset = Math.abs(offset);
+  const hours = Math.floor(absOffset / 60);
+  const mins = absOffset % 60;
+  const sign = offset >= 0 ? '+' : '-';
+  return `${sign}${String(hours).padStart(2, '0')}:${String(mins).padStart(2, '0')}`;
 }
 
 function getModelColor(model: string): string {
@@ -211,11 +229,182 @@ function ModelSelector({
   );
 }
 
+function TrendChart({ 
+  data, 
+  title
+}: { 
+  data: DailyUsage[], 
+  title: string
+}) {
+  const maxTokens = Math.max(...data.map(x => value(x.total_tokens)), 1);
+  const maxRequests = Math.max(...data.map(x => value(x.requests)), 1);
+  const paddingX = 60; // Internal horizontal padding
+  const chartWidth = 1000 - (paddingX * 2);
+  
+  return (
+    <div className="widget" style={{ minHeight: '400px', width: '100%' }}>
+      <div className="widget-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <span>📈 {title}</span>
+        <div style={{ display: 'flex', gap: '16px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <div style={{ width: '12px', height: '12px', background: '#94a3b8', borderRadius: '2px' }} />
+            <span style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)' }}>Input</span>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <div style={{ width: '12px', height: '12px', background: 'var(--color-green)', borderRadius: '2px' }} />
+            <span style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)' }}>Cached</span>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <div style={{ width: '12px', height: '12px', background: 'var(--color-blue)', borderRadius: '2px' }} />
+            <span style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)' }}>Output</span>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <div style={{ width: '12px', height: '3px', background: 'var(--color-pink)', borderRadius: '2px' }} />
+            <span style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)' }}>Requests</span>
+          </div>
+        </div>
+      </div>
+      <div style={{ 
+        flex: 1, 
+        padding: '20px 0',
+        height: '280px',
+        position: 'relative',
+        display: 'flex',
+        flexDirection: 'column'
+      }}>
+        {data.length === 0 ? (
+          <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-muted)' }}>No trend data available</div>
+        ) : (
+          <>
+            <svg 
+              viewBox="0 0 1000 200" 
+              preserveAspectRatio="none"
+              style={{ width: '100%', height: '220px', overflow: 'visible' }}
+            >
+              {[0, 0.25, 0.5, 0.75, 1].map(tick => (
+                <line 
+                  key={tick}
+                  x1="0" y1={200 - tick * 200} 
+                  x2="1000" y2={200 - tick * 200} 
+                  stroke="#f1f5f9" 
+                  strokeWidth="1"
+                />
+              ))}
+
+              {/* Stacked Bars for Tokens */}
+              {data.map((d, i) => {
+                const x = paddingX + (i / (Math.max(data.length - 1, 1))) * chartWidth;
+                const barWidth = Math.min(chartWidth / (data.length * 1.5), 60);
+                
+                const cached = value(d.cached_tokens);
+                const input = Math.max(0, value(d.prompt_tokens) - cached);
+                const output = value(d.completion_tokens);
+                
+                const hInput = (input / maxTokens) * 200;
+                const hCached = (cached / maxTokens) * 200;
+                const hOutput = (output / maxTokens) * 200;
+
+                return (
+                  <g key={i}>
+                    {/* Input */}
+                    <rect 
+                      x={x - barWidth/2} y={200 - hInput} 
+                      width={barWidth} height={hInput} 
+                      fill="#94a3b8" 
+                    />
+                    {/* Cached */}
+                    <rect 
+                      x={x - barWidth/2} y={200 - hInput - hCached} 
+                      width={barWidth} height={hCached} 
+                      fill="var(--color-green)" 
+                    />
+                    {/* Output */}
+                    <rect 
+                      x={x - barWidth/2} y={200 - hInput - hCached - hOutput} 
+                      width={barWidth} height={hOutput} 
+                      fill="var(--color-blue)" 
+                    />
+                    <title>
+                      {`${d.period}\nInput: ${formatNumber(input)}\nCached: ${formatNumber(cached)}\nOutput: ${formatNumber(output)}\nTotal: ${formatNumber(value(d.total_tokens))}`}
+                    </title>
+                  </g>
+                );
+              })}
+
+              {/* Line for Requests */}
+              {(() => {
+                const points = data.map((d, i) => {
+                  const x = paddingX + (i / (Math.max(data.length - 1, 1))) * chartWidth;
+                  const y = 200 - (value(d.requests) / maxRequests) * 200;
+                  return `${x},${y}`;
+                }).join(' ');
+
+                return (
+                  <>
+                    <polyline
+                      points={points}
+                      fill="none"
+                      stroke="var(--color-pink)"
+                      strokeWidth="3"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
+                    {data.map((d, i) => {
+                      const x = paddingX + (i / (Math.max(data.length - 1, 1))) * chartWidth;
+                      const y = 200 - (value(d.requests) / maxRequests) * 200;
+                      return (
+                        <circle 
+                          key={i} 
+                          cx={x} cy={y} r="3" 
+                          fill="white" 
+                          stroke="var(--color-pink)" 
+                          strokeWidth="2"
+                        >
+                          <title>{`${d.period} - Requests: ${formatNumber(value(d.requests))}`}</title>
+                        </circle>
+                      );
+                    })}
+                  </>
+                );
+              })()}
+            </svg>
+
+            <div style={{ 
+              display: 'flex', 
+              justifyContent: 'space-between', 
+              marginTop: '20px',
+              borderTop: '1px solid #f1f5f9',
+              paddingTop: '10px',
+              paddingLeft: `${(paddingX / 1000) * 100}%`,
+              paddingRight: `${(paddingX / 1000) * 100}%`
+            }}>
+              {data.map((d, i) => {
+                if (data.length > 12 && i % Math.ceil(data.length / 12) !== 0 && i !== data.length - 1) {
+                  return null;
+                }
+                const label = d.period.includes(':') 
+                  ? d.period.split(' ')[1] 
+                  : d.period.split('-').slice(1).join('/');
+                return (
+                  <div key={d.period} style={{ fontSize: '10px', color: 'var(--text-muted)' }}>
+                    {label}
+                  </div>
+                );
+              })}
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function App() {
   const [view, setView] = useState<'dashboard' | 'logs' | 'settings'>('dashboard')
   const [refreshTrigger, setRefreshTrigger] = useState(0)
   const [summary, setSummary] = useState<UsageSummary[]>([])
   const [usageRows, setUsageRows] = useState<UsageRow[]>([])
+  const [dailyUsage, setDailyUsage] = useState<DailyUsage[]>([])
   const [totalLogs, setTotalLogs] = useState(0)
   const [limit, setLimit] = useState(10)
   const [page, setPage] = useState(1)
@@ -279,25 +468,40 @@ function App() {
         if (since) countUrl.searchParams.set('since', since)
         if (until) countUrl.searchParams.set('until', until)
 
-        const [summaryResponse, usageResponse, countResponse] = await Promise.all([
+        const dailyUrl = new URL('/usage/daily', window.location.origin)
+        if (activeFilter) {
+          dailyUrl.searchParams.set('provider', activeFilter.provider)
+          dailyUrl.searchParams.set('model', activeFilter.model)
+        }
+        if (since) dailyUrl.searchParams.set('since', since)
+        if (until) dailyUrl.searchParams.set('until', until)
+        dailyUrl.searchParams.set('tz_offset', getTimezoneOffset())
+        if (dateRange === '5h' || dateRange === '24h') {
+          dailyUrl.searchParams.set('granularity', 'hour')
+        }
+
+        const [summaryResponse, usageResponse, countResponse, dailyResponse] = await Promise.all([
           fetch(summaryUrl.toString(), { signal: controller.signal }),
           fetch(usageUrl.toString(), { signal: controller.signal }),
           fetch(countUrl.toString(), { signal: controller.signal }),
+          fetch(dailyUrl.toString(), { signal: controller.signal }),
         ])
 
-        if (!summaryResponse.ok || !usageResponse.ok || !countResponse.ok) {
+        if (!summaryResponse.ok || !usageResponse.ok || !countResponse.ok || !dailyResponse.ok) {
           throw new Error('Failed to fetch usage data')
         }
 
-        const [summaryData, usageData, countData] = (await Promise.all([
+        const [summaryData, usageData, countData, dailyData] = (await Promise.all([
           summaryResponse.json(),
           usageResponse.json(),
           countResponse.json(),
-        ])) as [UsageSummary[], UsageRow[], { total: number }]
+          dailyResponse.json(),
+        ])) as [UsageSummary[], UsageRow[], { total: number }, DailyUsage[]]
 
         setSummary(summaryData)
         setUsageRows(usageData)
         setTotalLogs(countData.total)
+        setDailyUsage(dailyData)
         setLoadState('ready')
       } catch (err) {
         if (controller.signal.aborted) return
@@ -415,10 +619,10 @@ function App() {
                     value={dateRange}
                     onChange={(e) => setDateRange(e.target.value as DateRangeOption)}
                   >
-                    <option value="1h">Last 1 Hour</option>
-                    <option value="6h">Last 6 Hours</option>
+                    <option value="5h">Last 5 Hours</option>
                     <option value="24h">Last 24 Hours</option>
                     <option value="7d">Last 7 Days</option>
+                    <option value="30d">Last 30 Days</option>
                     <option value="custom">Custom Range</option>
                   </select>
                   <ModelSelector 
@@ -509,7 +713,15 @@ function App() {
                 </div>
               </div>
 
+              <div style={{ marginTop: '24px' }}>
+                <TrendChart 
+                  data={dailyUsage}
+                  title={`${(dateRange === '5h' || dateRange === '24h') ? 'Hourly' : 'Daily'} Usage Trend`}
+                />
+              </div>
+
               <div className="content-grid">
+
               </div>
             </>
           )}
@@ -533,10 +745,10 @@ function App() {
                     value={dateRange}
                     onChange={(e) => setDateRange(e.target.value as DateRangeOption)}
                   >
-                    <option value="1h">Last 1 Hour</option>
-                    <option value="6h">Last 6 Hours</option>
+                    <option value="5h">Last 5 Hours</option>
                     <option value="24h">Last 24 Hours</option>
                     <option value="7d">Last 7 Days</option>
+                    <option value="30d">Last 30 Days</option>
                     <option value="custom">Custom Range</option>
                   </select>
                 </div>
@@ -602,7 +814,16 @@ function App() {
                         <th style={{ width: '160px', padding: '12px 8px' }}>Model</th>
                         <th>Input</th>
                         <th>Output</th>
-                        <th style={{ padding: '12px 8px' }}>TTFT / Latency</th>
+                        <th style={{ padding: '12px 8px' }}>
+                          <div className="has-tooltip">
+                            TTFT / Latency
+                            <div className="tooltip-text">
+                              <b>Claude Code:</b> No TTFT<br/>
+                              <b>Gemini CLI:</b> Time to first chunk<br/>
+                              <b>Codex:</b> Actual TTFT
+                            </div>
+                          </div>
+                        </th>
                         <th style={{ width: '80px' }}>Status</th>
                       </tr>
                     </thead>

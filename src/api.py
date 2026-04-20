@@ -162,6 +162,57 @@ async def usage_summary(
     )
 
 
+@app.get("/usage/daily")
+async def usage_daily(
+    since: str | None = None,
+    until: str | None = None,
+    provider: str | None = None,
+    model: str | None = None,
+    granularity: str = "day",
+    tz_offset: str = "+00:00",
+):
+    clauses: list[str] = []
+    params: list[Any] = []
+
+    if since:
+        clauses.append("ts >= ?")
+        params.append(since)
+    if until:
+        clauses.append("ts <= ?")
+        params.append(until)
+    if provider:
+        clauses.append("provider = ?")
+        params.append(provider)
+    if model:
+        clauses.append("model = ?")
+        params.append(model)
+
+    where_clause = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+
+    # Choose grouping format based on granularity
+    group_format = "%Y-%m-%d %H:00" if granularity == "hour" else "%Y-%m-%d"
+
+    # Apply timezone offset to the timestamp before grouping
+    # SQLite strftime supports modifiers like '+08:00' or '-05:00'
+    ts_expr = f"datetime(ts, '{tz_offset}')"
+
+    return fetch_usage_rows(
+        f"""
+        SELECT strftime('{group_format}', {ts_expr}) AS period,
+               COUNT(*)               AS requests,
+               SUM(prompt_tokens)     AS prompt_tokens,
+               SUM(completion_tokens) AS completion_tokens,
+               SUM(cached_tokens)     AS cached_tokens,
+               SUM(total_tokens)      AS total_tokens
+        FROM usage
+        {where_clause}
+        GROUP BY period
+        ORDER BY period ASC
+        """,
+        tuple(params),
+    )
+
+
 @app.post("/usage")
 async def post_usage(entry: UsageEntry):
     log_usage(CONFIG["db"]["path"], **entry.model_dump())

@@ -189,7 +189,6 @@
 .panel {
   background: white;
   border-radius: 16px;
-  overflow: hidden;
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
 }
 
@@ -252,6 +251,55 @@
 
 .badge-success { background: #dcfce7; color: #15803d; }
 .badge-error { background: #fee2e2; color: #b91c1c; }
+
+/* Tooltip */
+.has-tooltip {
+  position: relative;
+  display: inline-block;
+  border-bottom: 1px dotted var(--text-muted);
+  padding-bottom: 2px;
+  cursor: default;
+  z-index: 10;
+}
+
+.has-tooltip .tooltip-text {
+  visibility: hidden;
+  width: 200px;
+  background-color: #1e293b;
+  color: #fff;
+  text-align: left;
+  border-radius: 6px;
+  padding: 8px 12px;
+  position: absolute;
+  z-index: 1000;
+  bottom: 125%;
+  left: 50%;
+  margin-left: -100px;
+  opacity: 0;
+  transition: opacity 0.2s;
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1.6;
+  text-transform: none;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+  pointer-events: none;
+}
+
+.has-tooltip .tooltip-text::after {
+  content: "";
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  margin-left: -5px;
+  border-width: 5px;
+  border-style: solid;
+  border-color: #1e293b transparent transparent transparent;
+}
+
+.has-tooltip:hover .tooltip-text {
+  visibility: visible;
+  opacity: 1;
+}
 
 .api-item {
   margin-bottom: 20px;

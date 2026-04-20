@@ -11,6 +11,12 @@ def extract_usage(usage: dict[str, Any]) -> dict[str, int]:
     input_details = (
         usage.get("input_tokens_details") or usage.get("prompt_tokens_details") or {}
     )
+
+    # Support OpenAI (cached_tokens) and Anthropic (cache_read_input_tokens)
+    cached_tokens = (
+        input_details.get("cached_tokens") or usage.get("cache_read_input_tokens") or 0
+    )
+
     output_details = (
         usage.get("output_tokens_details")
         or usage.get("completion_tokens_details")
@@ -21,7 +27,7 @@ def extract_usage(usage: dict[str, Any]) -> dict[str, int]:
         "prompt_tokens": prompt_tokens,
         "completion_tokens": completion_tokens,
         "reasoning_tokens": output_details.get("reasoning_tokens", 0),
-        "cached_tokens": input_details.get("cached_tokens", 0),
+        "cached_tokens": cached_tokens,
         "total_tokens": total_tokens,
     }
 

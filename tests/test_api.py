@@ -36,3 +36,9 @@ def test_build_usage_query_with_provider_and_model_filters(api_module):
         == "SELECT * FROM usage WHERE provider = ? AND model = ? ORDER BY ts DESC LIMIT ? OFFSET ?"
     )
     assert params == ("vectorengine", "gpt-5.4-medium", 50, 0)
+
+
+def test_usage_daily_endpoint_exists(api_module):
+    # This just verifies the endpoint function is defined
+    assert hasattr(api_module, "usage_daily")
+    assert callable(api_module.usage_daily)
