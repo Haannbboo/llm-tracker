@@ -2,22 +2,68 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-SUPERVISORD_CONF="${HOME}/.llm-tracker/supervisord.conf"
+CONFIG_DIR="${HOME}/.llm-tracker"
+CONFIG_PATH="${CONFIG_DIR}/config.yaml"
+SUPERVISORD_CONF="${CONFIG_DIR}/supervisord.conf"
 SUPERVISORCTL="${ROOT_DIR}/.venv/bin/supervisorctl"
+PYTHON="${ROOT_DIR}/.venv/bin/python"
 
 if [[ ! -f "${SUPERVISORD_CONF}" ]]; then
   echo "Not running. Run scripts/start.sh first." >&2
   exit 1
 fi
 
+OTLP_PORT=""
+while [[ $# -gt 0 ]]; do
+  case $1 in
+    --otlp-port)
+      OTLP_PORT="$2"
+      shift 2
+      ;;
+    *)
+      echo "Unknown argument: $1" >&2
+      exit 1
+      ;;
+  esac
+done
+
+if [[ -n "${OTLP_PORT}" ]]; then
+  echo "==> Updating OTLP port to ${OTLP_PORT} in ${CONFIG_PATH}..."
+  "${PYTHON}" -c "
+import yaml
+from pathlib import Path
+p = Path('${CONFIG_PATH}')
+c = yaml.safe_load(p.read_text()) or {}
+server = c.setdefault('server', {})
+server['otlp_port'] = int('${OTLP_PORT}')
+p.write_text(yaml.dump(c, sort_keys=False))
+"
+
+  # Update Codex OTLP telemetry if Codex is installed
+  CODEX_CONFIG="${HOME}/.codex/config.toml"
+  if [[ -f "${CODEX_CONFIG}" ]]; then
+    "${PYTHON}" "${ROOT_DIR}/scripts/configure-codex-settings.py" "${CODEX_CONFIG}" "${OTLP_PORT}"
+  fi
+fi
+
 # Refresh Gemini CLI hook and configure OTLP telemetry
-bash "${ROOT_DIR}/scripts/setup-gemini.sh"
+bash "${ROOT_DIR}/scripts/setup-gemini.sh" "${OTLP_PORT}"
+
+# Configure Claude Code telemetry if Claude is installed
+if [[ -d "${HOME}/.claude" ]]; then
+  "${PYTHON}" "${ROOT_DIR}/scripts/configure-claude-settings.py" "${HOME}/.claude/settings.json" "${OTLP_PORT}"
+fi
 
 for prog in llm-tracker-proxy llm-tracker-api llm-tracker-otlp; do
   status="$("${SUPERVISORCTL}" -c "${SUPERVISORD_CONF}" status "${prog}" 2>/dev/null | awk '{print $2}' || true)"
   if [[ "${status}" == "RUNNING" ]]; then
-    echo "==> Sending SIGHUP to ${prog} (graceful reload)..."
-    "${SUPERVISORCTL}" -c "${SUPERVISORD_CONF}" signal HUP "${prog}"
+    if [[ "${prog}" == "llm-tracker-otlp" && -n "${OTLP_PORT}" ]]; then
+      echo "==> Restarting ${prog} (port changed)..."
+      "${SUPERVISORCTL}" -c "${SUPERVISORD_CONF}" restart "${prog}"
+    else
+      echo "==> Sending SIGHUP to ${prog} (graceful reload)..."
+      "${SUPERVISORCTL}" -c "${SUPERVISORD_CONF}" signal HUP "${prog}"
+    fi
   else
     echo "==> Starting ${prog} (was not running)..."
     "${SUPERVISORCTL}" -c "${SUPERVISORD_CONF}" start "${prog}"

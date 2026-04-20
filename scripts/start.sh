@@ -49,19 +49,21 @@ else
 fi
 
 # Configure Codex OTLP telemetry if Codex is installed
-CODEX_CONFIG="${HOME}/.codex/config.toml"
-if [[ -f "${CODEX_CONFIG}" ]] && ! grep -q "\[otel\]" "${CODEX_CONFIG}"; then
-  cat >> "${CODEX_CONFIG}" << 'CODEX_EOF'
+OTLP_PORT=$("${PYTHON}" -c "import yaml; from pathlib import Path; p = Path('${CONFIG_PATH}'); c = yaml.safe_load(p.read_text()) or {}; print(c.get('server', {}).get('otlp_port', 4002))" 2>/dev/null || echo "4002")
 
-[otel]
-environment = "dev"
-exporter = { otlp-http = { endpoint = "http://localhost:4002/v1/logs", protocol = "json" } }
-CODEX_EOF
-  echo "==> Codex OTLP telemetry configured"
+CODEX_CONFIG="${HOME}/.codex/config.toml"
+if [[ -f "${CODEX_CONFIG}" ]]; then
+  "${PYTHON}" "${ROOT_DIR}/scripts/configure-codex-settings.py" "${CODEX_CONFIG}" "${OTLP_PORT}"
 fi
 
 # Install Gemini CLI hook and configure OTLP telemetry
-bash "${ROOT_DIR}/scripts/setup-gemini.sh"
+bash "${ROOT_DIR}/scripts/setup-gemini.sh" "${OTLP_PORT}"
+
+# Configure Claude Code telemetry if Claude is installed
+CLAUDE_SETTINGS="${HOME}/.claude/settings.json"
+if [[ -d "${HOME}/.claude" ]]; then
+  "${PYTHON}" "${ROOT_DIR}/scripts/configure-claude-settings.py" "${CLAUDE_SETTINGS}" "${OTLP_PORT}"
+fi
 
 # Generate supervisord.conf (references project gunicorn configs)
 cat > "${SUPERVISORD_CONF}" <<EOF
