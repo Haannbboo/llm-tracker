@@ -8,6 +8,7 @@ from fastapi import FastAPI, Request
 
 from config.app import CONFIG
 from .database import init_db, log_usage
+from .provider_parser import parse_provider
 
 GEMINI_EVENT = "gemini_cli.api_response"
 CLAUDE_EVENT = "claude_code.api_request"
@@ -101,7 +102,7 @@ def _parse_gemini_record(record: dict, attrs: list, session_id: str) -> None:
     log_usage(
         CONFIG["db"]["url"],
         ts=ts,
-        provider="google",
+        provider=parse_provider("gemini"),
         model=model,
         endpoint="generate-otlp",
         prompt_tokens=input_tokens,
@@ -133,7 +134,7 @@ def _parse_claude_record(record: dict, attrs: list, session_id: str) -> None:
     log_usage(
         CONFIG["db"]["url"],
         ts=ts,
-        provider="anthropic",
+        provider=parse_provider("claude"),
         model=_attr(attrs, "model") or "claude-unknown",
         endpoint="generate-otlp",
         prompt_tokens=prompt_tokens,
@@ -207,7 +208,7 @@ def _parse_codex_record(record: dict, attrs: list) -> None:
     log_usage(
         CONFIG["db"]["url"],
         ts=ts,
-        provider="openai",
+        provider=parse_provider("codex"),
         model=_attr(attrs, "model") or "codex-unknown",
         endpoint="generate-otlp",
         prompt_tokens=prompt_tokens,

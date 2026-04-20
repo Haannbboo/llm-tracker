@@ -33,6 +33,7 @@ PROJECT_MODULES = [
     "src.otlp",
     "src.proxy",
     "src.utils",
+    "src.provider_parser",
 ]
 
 
