@@ -39,7 +39,6 @@ type DailyUsage = {
   total_tokens: number | null
 }
 
-type LoadState = 'idle' | 'loading' | 'ready' | 'error'
 type ActiveFilter = { provider: string; model: string } | null
 type DateRangeOption = '5h' | '24h' | '7d' | '30d' | 'custom'
 
@@ -417,7 +416,6 @@ function App() {
   const [configContent, setConfigContent] = useState('')
   const [configStatus, setConfigStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle')
   
-  const [loadState, setLoadState] = useState<LoadState>('idle')
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
@@ -437,7 +435,6 @@ function App() {
         return
       }
 
-      setLoadState('loading')
       setError(null)
 
       try {
@@ -502,10 +499,8 @@ function App() {
         setUsageRows(usageData)
         setTotalLogs(countData.total)
         setDailyUsage(dailyData)
-        setLoadState('ready')
       } catch (err) {
         if (controller.signal.aborted) return
-        setLoadState('error')
         setError(err instanceof Error ? err.message : 'Unknown error')
       }
     }
@@ -891,13 +886,8 @@ function App() {
                                   Reasoning {formatNumber(row.reasoning_tokens)} ({Math.round((value(row.reasoning_tokens) / (value(row.completion_tokens) || 1)) * 100)}%)
                                 </div>
                               )}
-                              {value(row.tool_tokens) > 0 && (
-                                <div style={{ fontSize: '9px', color: 'var(--color-blue)', fontWeight: 700 }}>
-                                  Tools {formatNumber(row.tool_tokens)} ({Math.round((value(row.tool_tokens) / (value(row.completion_tokens) || 1)) * 100)}%)
-                                </div>
-                              )}
                             </div>
-                            {(value(row.reasoning_tokens) > 0 || value(row.tool_tokens) > 0) && (
+                            {value(row.reasoning_tokens) > 0 && (
                               <div 
                                 style={{ 
                                   width: '100%', 
@@ -917,17 +907,6 @@ function App() {
                                       width: `${(value(row.reasoning_tokens) / (value(row.completion_tokens) || 1)) * 100}%`, 
                                       height: '100%', 
                                       background: '#64748b' 
-                                    }} 
-                                  />
-                                )}
-                                {value(row.tool_tokens) > 0 && (
-                                  <div 
-                                    title={`Tools: ${formatNumber(row.tool_tokens)} tokens`}
-                                    style={{ 
-                                      width: `${(value(row.tool_tokens) / (value(row.completion_tokens) || 1)) * 100}%`, 
-                                      height: '100%', 
-                                      background: 'var(--color-blue)',
-                                      opacity: 0.6
                                     }} 
                                   />
                                 )}
