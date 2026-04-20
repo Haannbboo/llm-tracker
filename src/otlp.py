@@ -99,7 +99,7 @@ def _parse_gemini_record(record: dict, attrs: list, session_id: str) -> None:
     latency_ms = _attr(attrs, "duration_ms")
 
     log_usage(
-        CONFIG["db"]["path"],
+        CONFIG["db"]["url"],
         ts=ts,
         provider="google",
         model=model,
@@ -131,7 +131,7 @@ def _parse_claude_record(record: dict, attrs: list, session_id: str) -> None:
 
     total = prompt_tokens + int(output_tokens or 0) + int(cache_create or 0)
     log_usage(
-        CONFIG["db"]["path"],
+        CONFIG["db"]["url"],
         ts=ts,
         provider="anthropic",
         model=_attr(attrs, "model") or "claude-unknown",
@@ -205,7 +205,7 @@ def _parse_codex_record(record: dict, attrs: list) -> None:
     total_tokens = prompt_tokens + completion_tokens
 
     log_usage(
-        CONFIG["db"]["path"],
+        CONFIG["db"]["url"],
         ts=ts,
         provider="openai",
         model=_attr(attrs, "model") or "codex-unknown",
@@ -255,7 +255,7 @@ def _parse_log_record(record: dict, service_name: str, session_id: str) -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    init_db(CONFIG["db"]["path"])
+    init_db(CONFIG["db"]["url"])
     yield
 
 
@@ -292,10 +292,10 @@ async def receive_logs(request: Request):
 
 
 @app.post("/v1/metrics")
-async def receive_metrics():
+async def receive_metrics(request: Request):
     return {}
 
 
 @app.post("/v1/traces")
-async def receive_traces():
+async def receive_traces(request: Request):
     return {}

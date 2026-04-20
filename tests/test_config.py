@@ -19,6 +19,42 @@ providers: {}
     config = config_module.load_config(str(config_path))
 
     assert config["db"]["path"] == str(Path(tmp_path, ".llm-tracker/usage.db"))
+    assert config["db"]["url"] == f"sqlite:///{Path(tmp_path, '.llm-tracker/usage.db')}"
+
+
+def test_load_config_keeps_database_url(config_module, tmp_path):
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        """
+server:
+  host: 127.0.0.1
+db:
+  url: postgresql+psycopg://user:pass@db.example.edu:5432/llm_tracker
+providers: {}
+""",
+        encoding="utf-8",
+    )
+
+    config = config_module.load_config(str(config_path))
+
+    assert (
+        config["db"]["url"]
+        == "postgresql+psycopg://user:pass@db.example.edu:5432/llm_tracker"
+    )
+
+
+def test_get_config_path_prefers_env_override(config_module, tmp_path, monkeypatch):
+    config_path = tmp_path / "custom-config.yaml"
+    monkeypatch.setenv("LLM_TRACKER_CONFIG", str(config_path))
+
+    assert config_module.get_config_path() == str(config_path)
+
+
+def test_get_tracker_home_prefers_env_override(config_module, tmp_path, monkeypatch):
+    tracker_home = tmp_path / "tracker-home"
+    monkeypatch.setenv("LLM_TRACKER_HOME", str(tracker_home))
+
+    assert config_module.get_tracker_home() == str(tracker_home)
 
 
 def test_build_maps_returns_provider_configs(config_module):

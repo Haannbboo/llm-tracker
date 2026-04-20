@@ -1,9 +1,18 @@
 import os
 import yaml
-from typing import Any
-from fastapi import FastAPI, HTTPException
-from config.app import CONFIG, CONFIG_PATH
-from .database import fetch_usage_rows, init_db, log_usage
+from fastapi import FastAPI, HTTPException, Request
+from config.app import (
+    CONFIG,
+    CONFIG_PATH,
+)
+from .database import (
+    aggregate_usage_by_period,
+    count_usage,
+    fetch_recent_usage,
+    init_db,
+    log_usage,
+    summarize_usage,
+)
 from contextlib import asynccontextmanager
 from pydantic import BaseModel
 
@@ -29,46 +38,9 @@ class UsageEntry(BaseModel):
     status: int | None = None
 
 
-def build_usage_query(
-    *,
-    limit: int,
-    offset: int = 0,
-    provider: str | None = None,
-    model: str | None = None,
-    since: str | None = None,
-    until: str | None = None,
-) -> tuple[str, tuple[Any, ...]]:
-    query = "SELECT * FROM usage"
-    clauses: list[str] = []
-    params: list[Any] = []
-
-    if provider:
-        clauses.append("provider = ?")
-        params.append(provider)
-
-    if model:
-        clauses.append("model = ?")
-        params.append(model)
-
-    if since:
-        clauses.append("ts >= ?")
-        params.append(since)
-
-    if until:
-        clauses.append("ts <= ?")
-        params.append(until)
-
-    if clauses:
-        query = f"{query} WHERE {' AND '.join(clauses)}"
-
-    query = f"{query} ORDER BY ts DESC LIMIT ? OFFSET ?"
-    params.extend([limit, offset])
-    return query, tuple(params)
-
-
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    init_db(CONFIG["db"]["path"])
+    init_db(CONFIG["db"]["url"])
     yield
 
 
@@ -84,7 +56,7 @@ async def get_usage(
     since: str | None = None,
     until: str | None = None,
 ):
-    query, params = build_usage_query(
+    return fetch_recent_usage(
         limit=limit,
         offset=offset,
         provider=provider,
@@ -92,7 +64,6 @@ async def get_usage(
         since=since,
         until=until,
     )
-    return fetch_usage_rows(query, params)
 
 
 @app.get("/usage/count")
@@ -102,28 +73,14 @@ async def get_usage_count(
     since: str | None = None,
     until: str | None = None,
 ):
-    query = "SELECT COUNT(*) AS total FROM usage"
-    clauses: list[str] = []
-    params: list[Any] = []
-
-    if provider:
-        clauses.append("provider = ?")
-        params.append(provider)
-    if model:
-        clauses.append("model = ?")
-        params.append(model)
-    if since:
-        clauses.append("ts >= ?")
-        params.append(since)
-    if until:
-        clauses.append("ts <= ?")
-        params.append(until)
-
-    if clauses:
-        query = f"{query} WHERE {' AND '.join(clauses)}"
-
-    rows = fetch_usage_rows(query, tuple(params))
-    return {"total": rows[0]["total"] if rows else 0}
+    return {
+        "total": count_usage(
+            provider=provider,
+            model=model,
+            since=since,
+            until=until,
+        )
+    }
 
 
 @app.get("/usage/summary")
@@ -131,35 +88,7 @@ async def usage_summary(
     since: str | None = None,
     until: str | None = None,
 ):
-    clauses: list[str] = []
-    params: list[Any] = []
-
-    if since:
-        clauses.append("ts >= ?")
-        params.append(since)
-    if until:
-        clauses.append("ts <= ?")
-        params.append(until)
-
-    where_clause = f"WHERE {' AND '.join(clauses)}" if clauses else ""
-
-    return fetch_usage_rows(
-        f"""
-        SELECT provider, model,
-               COUNT(*)               AS requests,
-               SUM(prompt_tokens)     AS prompt_tokens,
-               SUM(completion_tokens) AS completion_tokens,
-               SUM(reasoning_tokens)  AS reasoning_tokens,
-               SUM(cached_tokens)     AS cached_tokens,
-               SUM(total_tokens)      AS total_tokens,
-               AVG(latency_ms)        AS avg_latency_ms
-        FROM usage
-        {where_clause}
-        GROUP BY provider, model
-        ORDER BY total_tokens DESC
-        """,
-        tuple(params),
-    )
+    return summarize_usage(since=since, until=until)
 
 
 @app.get("/usage/daily")
@@ -171,51 +100,19 @@ async def usage_daily(
     granularity: str = "day",
     tz_offset: str = "+00:00",
 ):
-    clauses: list[str] = []
-    params: list[Any] = []
-
-    if since:
-        clauses.append("ts >= ?")
-        params.append(since)
-    if until:
-        clauses.append("ts <= ?")
-        params.append(until)
-    if provider:
-        clauses.append("provider = ?")
-        params.append(provider)
-    if model:
-        clauses.append("model = ?")
-        params.append(model)
-
-    where_clause = f"WHERE {' AND '.join(clauses)}" if clauses else ""
-
-    # Choose grouping format based on granularity
-    group_format = "%Y-%m-%d %H:00" if granularity == "hour" else "%Y-%m-%d"
-
-    # Apply timezone offset to the timestamp before grouping
-    # SQLite strftime supports modifiers like '+08:00' or '-05:00'
-    ts_expr = f"datetime(ts, '{tz_offset}')"
-
-    return fetch_usage_rows(
-        f"""
-        SELECT strftime('{group_format}', {ts_expr}) AS period,
-               COUNT(*)               AS requests,
-               SUM(prompt_tokens)     AS prompt_tokens,
-               SUM(completion_tokens) AS completion_tokens,
-               SUM(cached_tokens)     AS cached_tokens,
-               SUM(total_tokens)      AS total_tokens
-        FROM usage
-        {where_clause}
-        GROUP BY period
-        ORDER BY period ASC
-        """,
-        tuple(params),
+    return aggregate_usage_by_period(
+        since=since,
+        until=until,
+        provider=provider,
+        model=model,
+        granularity=granularity,
+        tz_offset=tz_offset,
     )
 
 
 @app.post("/usage")
 async def post_usage(entry: UsageEntry):
-    log_usage(CONFIG["db"]["path"], **entry.model_dump())
+    log_usage(CONFIG["db"]["url"], **entry.model_dump())
     return {"status": "ok"}
 
 

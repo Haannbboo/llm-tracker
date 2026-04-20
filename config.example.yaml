@@ -16,3 +16,6 @@ server:
 
 db:
   path: ~/.llm-tracker/usage.db
+  # For PostgreSQL/MySQL, use `url` instead of `path`, for example:
+  # url: postgresql+psycopg://user:password@db-host:5432/llm_tracker
+  # url: mysql+pymysql://user:password@db-host:3306/llm_tracker

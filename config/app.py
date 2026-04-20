@@ -4,7 +4,9 @@ from typing import Any
 
 import yaml
 
-CONFIG_PATH = "~/.llm-tracker/config.yaml"
+DEFAULT_TRACKER_HOME = "~/.llm-tracker"
+CONFIG_ENV_VAR = "LLM_TRACKER_CONFIG"
+TRACKER_HOME_ENV_VAR = "LLM_TRACKER_HOME"
 
 
 @dataclass(frozen=True)
@@ -13,14 +15,50 @@ class ProviderConfig:
     base_url: str
 
 
-def load_config(path: str = CONFIG_PATH) -> dict[str, Any]:
-    with open(os.path.expanduser(path), encoding="utf-8") as config_file:
+def expand_path(path: str) -> str:
+    return os.path.expanduser(path)
+
+
+def get_tracker_home() -> str:
+    return expand_path(os.environ.get(TRACKER_HOME_ENV_VAR, DEFAULT_TRACKER_HOME))
+
+
+def get_config_path(path: str | None = None) -> str:
+    if path:
+        return expand_path(path)
+    return expand_path(
+        os.environ.get(CONFIG_ENV_VAR, os.path.join(get_tracker_home(), "config.yaml"))
+    )
+
+
+CONFIG_PATH = get_config_path()
+
+
+def load_config(path: str | None = None) -> dict[str, Any]:
+    with open(get_config_path(path), encoding="utf-8") as config_file:
         config = yaml.safe_load(config_file)
 
-    config["db"]["path"] = os.path.expanduser(config["db"]["path"])
-    config["server"].setdefault(
-        "otlp_port", config["server"].get("api_port", config["server"]["port"] + 1) + 1
-    )
+    config = config or {}
+    server = config.setdefault("server", {})
+    db = config.setdefault("db", {})
+    config.setdefault("providers", {})
+
+    server.setdefault("host", "0.0.0.0")
+    server.setdefault("port", 4000)
+    server.setdefault("api_port", server["port"] + 1)
+    server.setdefault("otlp_port", server["api_port"] + 1)
+
+    if "url" not in db:
+        db.setdefault("path", os.path.join(get_tracker_home(), "usage.db"))
+        db["path"] = expand_path(db["path"])
+        db["url"] = f"sqlite:///{db['path']}"
+    elif isinstance(db["url"], str) and db["url"].startswith("sqlite:///"):
+        sqlite_path = db["url"][10:]
+        if sqlite_path.startswith("~"):
+            db["url"] = f"sqlite:///{expand_path(sqlite_path)}"
+
+    if "path" in db and isinstance(db["path"], str):
+        db["path"] = expand_path(db["path"])
     return config
 
 

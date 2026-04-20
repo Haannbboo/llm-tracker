@@ -102,7 +102,7 @@ async def stream_upstream_response(
     finally:
         latency_ms = int((time.monotonic() - started_at) * 1000)
         log_usage(
-            CONFIG["db"]["path"],
+            CONFIG["db"]["url"],
             **build_usage_record(
                 provider_name=provider.name,
                 model=model,
@@ -148,7 +148,7 @@ async def forward(request: Request, path: str):
     latency_ms = int((time.monotonic() - started_at) * 1000)
     response_json = response.json()
     log_usage(
-        CONFIG["db"]["path"],
+        CONFIG["db"]["url"],
         **build_usage_record(
             provider_name=provider.name,
             model=model,
@@ -164,7 +164,7 @@ async def forward(request: Request, path: str):
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    init_db(CONFIG["db"]["path"])
+    init_db(CONFIG["db"]["url"])
     yield
 
 

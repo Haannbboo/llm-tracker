@@ -20,7 +20,7 @@ def test_init_db_log_usage_and_fetch_rows(database_module, isolated_home):
         status=200,
     )
 
-    rows = database_module.fetch_usage_rows("SELECT * FROM usage")
+    rows = database_module.fetch_recent_usage(limit=10)
 
     assert rows == [
         {
