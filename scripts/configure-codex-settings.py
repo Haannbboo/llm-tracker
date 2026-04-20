@@ -37,7 +37,7 @@ def main():
         # Match the endpoint line specifically within or after [otel]
         new_content = re.sub(
             r'(endpoint\s*=\s*"http://localhost:)([0-9]+)(/v1/logs")',
-            rf"\1{otlp_port}\3",
+            rf"\g<1>{otlp_port}\g<3>",
             content,
         )
         if new_content != content:
