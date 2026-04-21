@@ -40,7 +40,7 @@ type DailyUsage = {
 }
 
 type ActiveFilter = { provider: string; model: string } | null
-type DateRangeOption = '5h' | '24h' | '7d' | '30d' | 'custom'
+type DateRangeOption = '5h' | '24h' | '7d' | '30d' | 'all' | 'custom'
 
 const numberFormatter = new Intl.NumberFormat()
 const compactFormatter = new Intl.NumberFormat(undefined, {
@@ -78,7 +78,7 @@ function formatTime(input: string) {
 }
 
 function getSinceDate(option: DateRangeOption): string | null {
-  if (option === 'custom') return null
+  if (option === 'custom' || option === 'all') return null
   const now = new Date()
   if (option === '5h') now.setHours(now.getHours() - 5)
   else if (option === '24h') now.setHours(now.getHours() - 24)
@@ -783,6 +783,7 @@ function App() {
                     <option value="24h">Last 24 Hours</option>
                     <option value="7d">Last 7 Days</option>
                     <option value="30d">Last 30 Days</option>
+                    <option value="all">All Time</option>
                     <option value="custom">Custom Range</option>
                   </select>
                   <ModelSelector 
@@ -918,6 +919,7 @@ function App() {
                     <option value="24h">Last 24 Hours</option>
                     <option value="7d">Last 7 Days</option>
                     <option value="30d">Last 30 Days</option>
+                    <option value="all">All Time</option>
                     <option value="custom">Custom Range</option>
                   </select>
                 </div>
