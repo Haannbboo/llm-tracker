@@ -96,6 +96,25 @@ function getTimezoneOffset(): string {
   return `${sign}${String(hours).padStart(2, '0')}:${String(mins).padStart(2, '0')}`;
 }
 
+const PALETTE = [
+  '#8b5cf6', // Violet
+  '#10b981', // Emerald
+  '#f59e0b', // Amber
+  '#06b6d4', // Cyan
+  '#84cc16', // Lime
+  '#f43f5e', // Rose
+  '#6366f1', // Indigo
+  '#a855f7', // Purple
+  '#ec4899', // Pink
+  '#3b82f6', // Blue
+];
+
+const FIXED_PROVIDER_COLORS: Record<string, string> = {
+  'anthropic': '#cc7c5e',
+  'google': '#528af2',
+  'openai': '#94a3b8', // Using the slate-ish gray for OpenAI/GPT
+};
+
 function getModelColor(model: string): string {
   const m = model.toLowerCase()
   if (m.includes('gpt-5') || m.includes('gpt-4')) return '#dcdcdc' // RGB 220 220 220
@@ -109,6 +128,10 @@ function getModelTextColor(model: string): string {
   const m = model.toLowerCase()
   if (m.includes('gpt-5') || m.includes('gpt-4')) return '#475569'
   return getModelColor(model)
+}
+
+function getProviderColor(provider: string, providerColors: Record<string, string>): string {
+  return providerColors[provider] || '#94a3b8';
 }
 
 function getModelIcon(model: string) {
@@ -400,14 +423,17 @@ function TrendChart({
 
 function ModelTokenChart({ 
   summary, 
-  title 
+  title,
+  providerColors
 }: { 
   summary: UsageSummary[], 
-  title: string 
+  title: string,
+  providerColors: Record<string, string>
 }) {
   const aggregated = useMemo(() => {
     const map = new Map<string, {
       model: string,
+      provider: string,
       total_tokens: number,
       prompt_tokens: number,
       completion_tokens: number,
@@ -417,6 +443,7 @@ function ModelTokenChart({
     for (const s of summary) {
       const existing = map.get(s.model) || {
         model: s.model,
+        provider: s.provider,
         total_tokens: 0,
         prompt_tokens: 0,
         completion_tokens: 0,
@@ -453,13 +480,20 @@ function ModelTokenChart({
             const completion = s.completion_tokens;
             const cached = s.cached_tokens;
             const activePrompt = Math.max(0, prompt - cached);
+            const mColor = getModelColor(s.model);
             
             return (
               <div key={s.model} style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '12px' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontWeight: 600 }}>
                     {getModelIcon(s.model)}
-                    <span>{s.model}</span>
+                    <span style={{ 
+                      padding: '1px 6px', 
+                      borderRadius: '4px', 
+                      backgroundColor: mColor + (s.model.toLowerCase().includes('gpt-5') || s.model.toLowerCase().includes('gpt-4') ? '80' : '26'),
+                      color: getModelTextColor(s.model),
+                      fontSize: '11px'
+                    }}>{s.model}</span>
                   </div>
                   <div style={{ color: 'var(--text-secondary)', fontWeight: 700 }}>{formatCompact(total)}</div>
                 </div>
@@ -523,6 +557,30 @@ function App() {
   const [configStatus, setConfigStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle')
   
   const [error, setError] = useState<string | null>(null)
+
+  const providerColors = useMemo(() => {
+    const allProviders = Array.from(new Set(summary.map(s => s.provider))).sort();
+    const map: Record<string, string> = {};
+    
+    // First, assign fixed colors
+    allProviders.forEach(p => {
+      const lowP = p.toLowerCase();
+      if (FIXED_PROVIDER_COLORS[lowP]) {
+        map[p] = FIXED_PROVIDER_COLORS[lowP];
+      }
+    });
+
+    // Then, assign rotational colors to the rest
+    let paletteIdx = 0;
+    allProviders.forEach(p => {
+      if (!map[p]) {
+        map[p] = PALETTE[paletteIdx % PALETTE.length];
+        paletteIdx++;
+      }
+    });
+    
+    return map;
+  }, [summary]);
 
   useEffect(() => {
     const controller = new AbortController()
@@ -825,6 +883,7 @@ function App() {
                   <ModelTokenChart 
                     summary={summary}
                     title="Usage by Model"
+                    providerColors={providerColors}
                   />
                 </div>
               </div>
@@ -920,7 +979,8 @@ function App() {
                     <thead>
                       <tr>
                         <th style={{ width: '120px' }}>Time</th>
-                        <th style={{ width: '160px', padding: '12px 8px' }}>Model</th>
+                        <th style={{ width: '150px', padding: '12px 8px' }}>Model</th>
+                        <th style={{ width: '120px', padding: '12px 8px' }}>Provider</th>
                         <th>Input</th>
                         <th>Output</th>
                         <th style={{ padding: '12px 8px' }}>
@@ -950,7 +1010,8 @@ function App() {
                               fontSize: '11px',
                               backgroundColor: getModelColor(row.model) + (row.model.toLowerCase().includes('gpt-5') || row.model.toLowerCase().includes('gpt-4') ? '80' : '26'),
                               color: getModelTextColor(row.model),
-                              maxWidth: '140px'
+                              maxWidth: '140px',
+                              fontWeight: 600
                             }}>
                               {getModelIcon(row.model)}
                               <span style={{ 
@@ -960,6 +1021,21 @@ function App() {
                               }}>
                                 {row.model}
                               </span>
+                            </div>
+                          </td>
+                          <td style={{ padding: '8px' }}>
+                            <div style={{
+                              padding: '2px 8px',
+                              borderRadius: '4px',
+                              display: 'inline-flex',
+                              fontSize: '10px',
+                              backgroundColor: getProviderColor(row.provider, providerColors) + '22',
+                              color: getProviderColor(row.provider, providerColors),
+                              width: 'fit-content',
+                              border: `1px solid ${getProviderColor(row.provider, providerColors)}44`,
+                              fontWeight: 600
+                            }}>
+                              {row.provider}
                             </div>
                           </td>
                           <td style={{ verticalAlign: 'top' }}>
@@ -1062,7 +1138,7 @@ function App() {
                       ))}
                       {usageRows.length === 0 && (
                         <tr>
-                          <td colSpan={6} style={{ textAlign: 'center', padding: '40px', color: 'var(--text-muted)' }}>
+                          <td colSpan={7} style={{ textAlign: 'center', padding: '40px', color: 'var(--text-muted)' }}>
                             No requests found for the selected filters.
                           </td>
                         </tr>
