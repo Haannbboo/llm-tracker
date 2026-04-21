@@ -1,6 +1,6 @@
 # llm-tracker
 
-A **pure pass-through proxy** for LLM providers with usage logging. It does not inspect, modify, or manage credentials — every request is forwarded byte-for-byte with all original headers intact. The only thing it adds is a statistics record in SQLite.
+A transparent proxy for LLM providers with usage logging. It does not inspect, modify, or manage credentials: authorization headers such as `ANTHROPIC_AUTH_TOKEN`, `Authorization`, and `x-api-key` are forwarded unchanged. The proxy reads request metadata needed for routing and logging, may normalize provider-prefixed model names before forwarding, and records usage in the configured database.
 
 ## How it works
 
@@ -9,7 +9,7 @@ Claude Code / Codex
     │  (your real API key in headers, your model in body)
     ▼
 llm-tracker proxy  ←── reads `model` field to know which base_url to forward to
-    │  (headers unchanged, body unchanged)
+    │  (credentials unchanged, body forwarded except provider-prefix normalization)
     ▼
 Upstream provider (Anthropic, OpenAI, VectorEngine, MiniMax, ...)
 ```
@@ -19,9 +19,9 @@ The proxy never touches your credentials. `ANTHROPIC_AUTH_TOKEN` / `Authorizatio
 ## Features
 
 - Supports `/v1/chat/completions`, `/v1/responses`, and `/v1/messages` (Anthropic)
-- Logs prompt, completion, reasoning, and cached tokens per request
-- SQLite storage, no external dependencies
-- `/usage` and `/usage/summary` endpoints for querying logs
+- Logs prompt, completion, reasoning, cached, cache creation, tool, latency, and TTFT fields where available
+- SQLite storage by default, with PostgreSQL/MySQL support via SQLAlchemy
+- Usage API endpoints for recent rows, summaries, counts, daily/hourly aggregation, and config editing
 
 ## Setup
 
@@ -29,8 +29,8 @@ The proxy never touches your credentials. `ANTHROPIC_AUTH_TOKEN` / `Authorizatio
 bash scripts/start.sh
 ```
 
-This bootstraps `uv` if needed, creates `.venv`, installs `requirements.txt`, ensures `~/.llm-tracker/config.yaml` exists, and starts the proxy/API services under Supervisor.
-It also configures project-local Gemini telemetry and `BeforeModel`/`AfterModel` hooks in [.gemini/settings.json](/Users/hanbo/Documents/llm-tracker/.gemini/settings.json) so Gemini TTFT is captured without hand-editing the settings file.
+This bootstraps `uv` if needed, creates `.venv`, installs `requirements.txt`, ensures `~/.llm-tracker/config.yaml` exists, and starts the proxy, API, and OTLP services under Supervisor.
+It also configures Codex OTLP telemetry when `~/.codex/config.toml` exists, installs the Gemini hook at `~/.gemini/llm-tracker-hook.sh`, and writes Gemini telemetry plus `BeforeModel`/`AfterModel` hooks to `~/.gemini/settings.json`. Project-local Gemini llm-tracker hooks are removed to avoid duplicate telemetry.
 
 ## Configuration
 
@@ -52,22 +52,74 @@ providers:
 
 `base_url` is the only required field per provider — no `api_key` needed. The proxy routes by matching the `model` field in the request body to a provider, then forwards to that provider's `base_url`.
 
+## Backend Database
+
+By default, usage is stored in local SQLite:
+
+```yaml
+db:
+  path: ~/.llm-tracker/usage.db
+```
+
+To switch to PostgreSQL or MySQL, replace `db.path` with `db.url` in `~/.llm-tracker/config.yaml`:
+
+```yaml
+db:
+  url: postgresql+psycopg://user:password@db-host:5432/llm_tracker?sslmode=require
+```
+
+```yaml
+db:
+  url: mysql+pymysql://user:password@db-host:3306/llm_tracker
+```
+
+Then restart the services:
+
+```bash
+bash scripts/restart.sh
+```
+
+The app creates the `usage` table automatically if it does not exist.
+
+### Migrating Existing SQLite Data
+
+If you already have local SQLite history, migrate it once after setting `db.url`:
+
+```bash
+uv run python scripts/migrate_usage.py --source-url sqlite:///$HOME/.llm-tracker/usage.db
+```
+
+The migration target defaults to `db.url` from `~/.llm-tracker/config.yaml`. The script refuses to write into a non-empty target by default. To safely re-run a migration and skip rows that already exist by `id`, use:
+
+```bash
+uv run python scripts/migrate_usage.py \
+  --source-url sqlite:///$HOME/.llm-tracker/usage.db \
+  --allow-nonempty-target \
+  --skip-existing
+```
+
+Passwords in database URLs must be URL-encoded if they contain reserved characters such as `@`, `:`, `/`, `#`, or `?`.
+
 ## Running
 
-The project is split into two servers: the **Proxy** (routing and logging) and the **API** (usage stats and frontend connection).
+The project is split into three managed services:
 
-**Start both services under Supervisor:**
+- **Proxy**: routes provider requests and logs direct proxy usage on port `4000` by default.
+- **API**: serves usage stats and config editing endpoints on port `4001` by default.
+- **OTLP**: receives telemetry logs from Codex, Gemini CLI, and Claude Code on port `4002` by default.
+
+**Start all services under Supervisor:**
 ```bash
 bash scripts/start.sh
 ```
 
-**Reload both services:**
+**Reload all services:**
 ```bash
 bash scripts/restart.sh
 ```
-This sends `SIGHUP` to the managed proxy and API processes through Supervisor.
+This refreshes Gemini telemetry setup and sends `SIGHUP` to the managed proxy, API, and OTLP processes through Supervisor.
 
-**Stop both services:**
+**Stop all services:**
 ```bash
 bash scripts/stop.sh
 ```
@@ -107,6 +159,14 @@ LLM_TRACKER_API_URL=http://localhost:4001 npm run dev
 
 If `LLM_TRACKER_API_URL` is unset, the frontend defaults to `http://localhost:4001`.
 
+## Testing
+
+Run tests through Python so the repository root is on the import path:
+
+```bash
+uv run python -m pytest
+```
+
 ## Usage API
 
 The Usage API now runs on its own port (default `4001`):
@@ -117,6 +177,15 @@ curl http://localhost:4001/usage
 
 # Totals grouped by provider/model
 curl http://localhost:4001/usage/summary
+
+# Total row count, with optional filters
+curl http://localhost:4001/usage/count
+
+# Daily or hourly aggregate data
+curl "http://localhost:4001/usage/daily?granularity=day"
+
+# Read the active config
+curl http://localhost:4001/config
 ```
 
 ## Logged fields
@@ -126,13 +195,16 @@ curl http://localhost:4001/usage/summary
 | `ts` | UTC timestamp |
 | `provider` | Provider name from config |
 | `model` | Model name |
-| `endpoint` | `/v1/chat/completions`, `/v1/responses`, or `/v1/messages` |
+| `endpoint` | Proxy endpoint such as `/v1/chat/completions`, `/v1/responses`, `/v1/messages`, or OTLP endpoint marker `generate-otlp` |
 | `prompt_tokens` | Input tokens |
 | `completion_tokens` | Output tokens |
 | `reasoning_tokens` | Reasoning tokens (from output details) |
 | `cached_tokens` | Cache hits (from input details) |
 | `total_tokens` | Total tokens |
-| `latency_ms` | End-to-end proxy latency |
+| `latency_ms` | End-to-end latency when available |
+| `ttft_ms` | Time to first token when available |
+| `tool_tokens` | Tool-use tokens when reported by the integration |
+| `cache_creation_tokens` | Cache write tokens when reported by the integration |
 | `status` | HTTP status code |
 
 ## Tracking Status
