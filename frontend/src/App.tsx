@@ -547,6 +547,7 @@ function App() {
   const [totalLogs, setTotalLogs] = useState(0)
   const [limit, setLimit] = useState(10)
   const [page, setPage] = useState(1)
+  const [jumpPage, setJumpPage] = useState('')
   
   const [activeFilter, setActiveFilter] = useState<ActiveFilter>(null)
   const [dateRange, setDateRange] = useState<DateRangeOption>('24h')
@@ -1223,6 +1224,40 @@ function App() {
                     >
                       Next ▶
                     </button>
+
+                    <div style={{ marginLeft: '8px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>Jump:</span>
+                      <input
+                        type="text"
+                        value={jumpPage}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          if (val === '' || /^\d+$/.test(val)) {
+                            setJumpPage(val);
+                          }
+                        }}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            const p = parseInt(jumpPage);
+                            if (!isNaN(p) && p >= 1 && p <= totalPages) {
+                              setPage(p);
+                              setJumpPage('');
+                            }
+                          }
+                        }}
+                        placeholder={String(page)}
+                        style={{
+                          width: '40px',
+                          height: '28px',
+                          padding: '0 4px',
+                          borderRadius: '4px',
+                          border: '1px solid var(--border-color)',
+                          fontSize: '12px',
+                          textAlign: 'center',
+                          outline: 'none'
+                        }}
+                      />
+                    </div>
                     
                     <div style={{ marginLeft: '12px', height: '16px', width: '1px', background: 'var(--border-color)' }} />
                     
