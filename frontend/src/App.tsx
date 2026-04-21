@@ -398,6 +398,112 @@ function TrendChart({
   );
 }
 
+function ModelTokenChart({ 
+  summary, 
+  title 
+}: { 
+  summary: UsageSummary[], 
+  title: string 
+}) {
+  const aggregated = useMemo(() => {
+    const map = new Map<string, {
+      model: string,
+      total_tokens: number,
+      prompt_tokens: number,
+      completion_tokens: number,
+      cached_tokens: number
+    }>();
+
+    for (const s of summary) {
+      const existing = map.get(s.model) || {
+        model: s.model,
+        total_tokens: 0,
+        prompt_tokens: 0,
+        completion_tokens: 0,
+        cached_tokens: 0
+      };
+      
+      existing.total_tokens += value(s.total_tokens);
+      existing.prompt_tokens += value(s.prompt_tokens);
+      existing.completion_tokens += value(s.completion_tokens);
+      existing.cached_tokens += value(s.cached_tokens);
+      
+      map.set(s.model, existing);
+    }
+    
+    return Array.from(map.values())
+      .sort((a, b) => b.total_tokens - a.total_tokens)
+      .slice(0, 6);
+  }, [summary]);
+
+  const maxTokens = Math.max(...aggregated.map(s => s.total_tokens), 1);
+  
+  return (
+    <div className="widget" style={{ flex: 1 }}>
+      <div className="widget-header">
+        <span>📊 {title}</span>
+      </div>
+      <div style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
+        {aggregated.length === 0 ? (
+          <div style={{ padding: '40px', textAlign: 'center', color: 'var(--text-muted)' }}>No data available</div>
+        ) : (
+          aggregated.map(s => {
+            const total = s.total_tokens;
+            const prompt = s.prompt_tokens;
+            const completion = s.completion_tokens;
+            const cached = s.cached_tokens;
+            const activePrompt = Math.max(0, prompt - cached);
+            
+            return (
+              <div key={s.model} style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '12px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontWeight: 600 }}>
+                    {getModelIcon(s.model)}
+                    <span>{s.model}</span>
+                  </div>
+                  <div style={{ color: 'var(--text-secondary)', fontWeight: 700 }}>{formatCompact(total)}</div>
+                </div>
+                <div style={{ 
+                  height: '8px', 
+                  width: '100%', 
+                  background: '#f1f5f9', 
+                  borderRadius: '4px', 
+                  overflow: 'hidden',
+                  display: 'flex'
+                }}>
+                  <div 
+                    title={`Input: ${formatNumber(activePrompt)}`}
+                    style={{ width: `${(activePrompt / maxTokens) * 100}%`, height: '100%', background: '#94a3b8' }} 
+                  />
+                  <div 
+                    title={`Cached: ${formatNumber(cached)}`}
+                    style={{ width: `${(cached / maxTokens) * 100}%`, height: '100%', background: 'var(--color-green)' }} 
+                  />
+                  <div 
+                    title={`Output: ${formatNumber(completion)}`}
+                    style={{ width: `${(completion / maxTokens) * 100}%`, height: '100%', background: 'var(--color-blue)' }} 
+                  />
+                </div>
+              </div>
+            );
+          })
+        )}
+      </div>
+      <div style={{ padding: '0 20px 20px', display: 'flex', gap: '12px', fontSize: '10px', color: 'var(--text-muted)' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+          <div style={{ width: '8px', height: '8px', background: '#94a3b8', borderRadius: '2px' }} /> Input
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+          <div style={{ width: '8px', height: '8px', background: 'var(--color-green)', borderRadius: '2px' }} /> Cached
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+          <div style={{ width: '8px', height: '8px', background: 'var(--color-blue)', borderRadius: '2px' }} /> Output
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function App() {
   const [view, setView] = useState<'dashboard' | 'logs' | 'settings'>('dashboard')
   const [refreshTrigger, setRefreshTrigger] = useState(0)
@@ -708,11 +814,19 @@ function App() {
                 </div>
               </div>
 
-              <div style={{ marginTop: '24px' }}>
-                <TrendChart 
-                  data={dailyUsage}
-                  title={`${(dateRange === '5h' || dateRange === '24h') ? 'Hourly' : 'Daily'} Usage Trend`}
-                />
+              <div style={{ marginTop: '24px', display: 'flex', gap: '24px', alignItems: 'stretch' }}>
+                <div style={{ flex: 2 }}>
+                  <TrendChart 
+                    data={dailyUsage}
+                    title={`${(dateRange === '5h' || dateRange === '24h') ? 'Hourly' : 'Daily'} Usage Trend`}
+                  />
+                </div>
+                <div style={{ flex: 1, display: 'flex' }}>
+                  <ModelTokenChart 
+                    summary={summary}
+                    title="Usage by Model"
+                  />
+                </div>
               </div>
 
               <div className="content-grid">
