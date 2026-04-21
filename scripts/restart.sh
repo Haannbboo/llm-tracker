@@ -27,7 +27,9 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+PORT_CHANGED=false
 if [[ -n "${OTLP_PORT}" ]]; then
+  PORT_CHANGED=true
   echo "==> Updating OTLP port to ${OTLP_PORT} in ${CONFIG_PATH}..."
   "${PYTHON}" -c "
 import yaml
@@ -38,12 +40,15 @@ server = c.setdefault('server', {})
 server['otlp_port'] = int('${OTLP_PORT}')
 p.write_text(yaml.dump(c, sort_keys=False))
 "
+else
+  # Read current port from config
+  OTLP_PORT=$("${PYTHON}" -c "import yaml; from pathlib import Path; p = Path('${CONFIG_PATH}'); c = yaml.safe_load(p.read_text()) or {}; print(c.get('server', {}).get('otlp_port', 4002))" 2>/dev/null || echo "4002")
+fi
 
-  # Update Codex OTLP telemetry if Codex is installed
-  CODEX_CONFIG="${HOME}/.codex/config.toml"
-  if [[ -f "${CODEX_CONFIG}" ]]; then
-    "${PYTHON}" "${ROOT_DIR}/scripts/configure-codex-settings.py" "${CODEX_CONFIG}" "${OTLP_PORT}"
-  fi
+# Update Codex OTLP telemetry if Codex is installed
+CODEX_CONFIG="${HOME}/.codex/config.toml"
+if [[ -f "${CODEX_CONFIG}" ]]; then
+  "${PYTHON}" "${ROOT_DIR}/scripts/configure-codex-settings.py" "${CODEX_CONFIG}" "${OTLP_PORT}"
 fi
 
 # Refresh Gemini CLI hook and configure OTLP telemetry
@@ -57,7 +62,7 @@ fi
 for prog in llm-tracker-proxy llm-tracker-api llm-tracker-otlp; do
   status="$("${SUPERVISORCTL}" -c "${SUPERVISORD_CONF}" status "${prog}" 2>/dev/null | awk '{print $2}' || true)"
   if [[ "${status}" == "RUNNING" ]]; then
-    if [[ "${prog}" == "llm-tracker-otlp" && -n "${OTLP_PORT}" ]]; then
+    if [[ "${prog}" == "llm-tracker-otlp" && "${PORT_CHANGED}" == "true" ]]; then
       echo "==> Restarting ${prog} (port changed)..."
       "${SUPERVISORCTL}" -c "${SUPERVISORD_CONF}" restart "${prog}"
     else

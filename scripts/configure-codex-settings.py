@@ -34,10 +34,10 @@ def main():
         # Update existing endpoint port
         import re
 
-        # Match the endpoint line specifically within or after [otel]
+        # Match the entire exporter line to ensure we fix any broken formatting
         new_content = re.sub(
-            r'(endpoint\s*=\s*"http://localhost:)([0-9]+)(/v1/logs")',
-            rf"\g<1>{otlp_port}\g<3>",
+            r"(exporter\s*=\s*\{\s*otlp-http\s*=\s*\{\s*)[^\}]+(\}\s*\})",
+            rf'\g<1>endpoint = "http://localhost:{otlp_port}/v1/logs", protocol = "json" \g<2>',
             content,
         )
         if new_content != content:
