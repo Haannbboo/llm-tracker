@@ -83,6 +83,7 @@ serverurl=unix://${SOCKET_PATH}
 
 [program:llm-tracker-proxy]
 command=${PYTHON} -m gunicorn -c ${ROOT_DIR}/config/proxy.conf.py src.proxy:app
+environment=OBJC_DISABLE_INITIALIZE_FORK_SAFETY=YES
 directory=${ROOT_DIR}
 autostart=true
 autorestart=true
@@ -94,6 +95,7 @@ stderr_logfile=${ROOT_DIR}/logs/proxy.stderr.log
 
 [program:llm-tracker-api]
 command=${PYTHON} -m gunicorn -c ${ROOT_DIR}/config/api.conf.py src.api:app
+environment=OBJC_DISABLE_INITIALIZE_FORK_SAFETY=YES
 directory=${ROOT_DIR}
 autostart=true
 autorestart=true
@@ -105,6 +107,7 @@ stderr_logfile=${ROOT_DIR}/logs/api.stderr.log
 
 [program:llm-tracker-otlp]
 command=${PYTHON} -m gunicorn -c ${ROOT_DIR}/config/otlp.conf.py src.otlp:app
+environment=OBJC_DISABLE_INITIALIZE_FORK_SAFETY=YES
 directory=${ROOT_DIR}
 autostart=true
 autorestart=true
