@@ -20,6 +20,7 @@ type UsageRow = {
   model: string
   endpoint: string
   prompt_tokens: number | null
+  prompt_length: number | null
   completion_tokens: number | null
   reasoning_tokens: number | null
   cached_tokens: number | null
@@ -555,6 +556,7 @@ function App() {
   const [customUntil, setCustomUntil] = useState('')
   
   const [configContent, setConfigContent] = useState('')
+  const [configParsed, setConfigParsed] = useState<any>(null)
   const [configStatus, setConfigStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle')
   
   const [error, setError] = useState<string | null>(null)
@@ -593,6 +595,7 @@ function App() {
           if (response.ok) {
             const data = await response.json()
             setConfigContent(data.content)
+            setConfigParsed(data.parsed)
           }
         } catch (err) {
           console.error('Failed to load config:', err)
@@ -740,18 +743,12 @@ function App() {
             <button className={`menu-item ${view === 'dashboard' ? 'active' : ''}`} onClick={() => setView('dashboard')}>
               <span>📊</span> Dashboard
             </button>
-            <button className="menu-item">
-              <span>📈</span> Analytics
-            </button>
             <button className={`menu-item ${view === 'logs' ? 'active' : ''}`} onClick={() => setView('logs')}>
               <span>📜</span> Request Logs
             </button>
           </div>
           <div className="menu-group">
             <div className="menu-title">Management</div>
-            <button className="menu-item">
-              <span>🔑</span> API Keys
-            </button>
             <button className={`menu-item ${view === 'settings' ? 'active' : ''}`} onClick={() => setView('settings')}>
               <span>⚙️</span> Settings
             </button>
@@ -984,7 +981,7 @@ function App() {
                         <th style={{ width: '120px' }}>Time</th>
                         <th style={{ width: '150px', padding: '12px 8px' }}>Model</th>
                         <th style={{ width: '120px', padding: '12px 8px' }}>Provider</th>
-                        <th>Input</th>
+                        <th style={{ minWidth: '140px' }}>Input (Prompt)</th>
                         <th>Output</th>
                         <th style={{ padding: '12px 8px' }}>
                           <div className="has-tooltip">
@@ -1043,7 +1040,15 @@ function App() {
                           </td>
                           <td style={{ verticalAlign: 'top' }}>
                             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
-                              <div style={{ color: 'var(--text-secondary)' }}>{formatNumber(row.prompt_tokens)}</div>
+                              <div style={{ color: 'var(--text-secondary)', fontWeight: 600 }}>
+                                {formatNumber(row.prompt_tokens)}
+                                <span style={{ fontSize: '10px', fontWeight: 400, marginLeft: '4px', color: '#64748b' }}>tokens</span>
+                                {value(row.prompt_length) > 0 && (
+                                  <span style={{ fontSize: '10px', fontWeight: 400, marginLeft: '6px', color: '#94a3b8' }}>
+                                    (Prompt: {formatNumber(row.prompt_length)} chars)
+                                  </span>
+                                )}
+                              </div>
                               {value(row.cached_tokens) > 0 && (
                                 <div style={{ fontSize: '9px', color: 'var(--color-green)', fontWeight: 700 }}>
                                   Cache read {formatNumber(row.cached_tokens)} ({Math.round((value(row.cached_tokens) / (value(row.prompt_tokens) || 1)) * 100)}%)
@@ -1288,33 +1293,113 @@ function App() {
           )}
 
           {view === 'settings' && (
-            <div className="settings-page">
+            <div className="settings-page" style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
               <div className="panel">
                 <div className="panel-tabs">
-                  <div className="tab active"><span>⚙️</span> Configuration (YAML)</div>
+                  <div className="tab active"><span>🔌</span> Active Providers</div>
+                </div>
+                <div className="panel-body" style={{ padding: '0' }}>
+                  <table className="table">
+                    <thead>
+                      <tr>
+                        <th>Provider</th>
+                        <th>Base URL</th>
+                        <th>Models</th>
+                        <th>Color</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {configParsed?.providers ? Object.entries(configParsed.providers).map(([name, conf]: [string, any]) => {
+                        const models = conf.models || [];
+                        const color = getProviderColor(name, providerColors);
+                        return (
+                          <tr key={name}>
+                            <td style={{ fontWeight: 700 }}>{name}</td>
+                            <td style={{ fontSize: '12px', color: '#64748b', fontFamily: 'var(--font-mono)' }}>{conf.base_url}</td>
+                            <td>
+                              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
+                                {models.map((m: string) => (
+                                  <span key={m} style={{ 
+                                    fontSize: '10px', 
+                                    padding: '2px 6px', 
+                                    background: '#f1f5f9', 
+                                    borderRadius: '4px',
+                                    color: '#475569',
+                                    border: '1px solid #e2e8f0'
+                                  }}>{m}</span>
+                                ))}
+                              </div>
+                            </td>
+                            <td>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                <div style={{ width: '12px', height: '12px', borderRadius: '3px', background: color }} />
+                                <span style={{ fontSize: '11px', color: '#64748b', fontFamily: 'var(--font-mono)' }}>{color}</span>
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      }) : (
+                        <tr>
+                          <td colSpan={4} style={{ textAlign: 'center', padding: '24px', color: 'var(--text-muted)' }}>
+                            No providers configured in config.yaml.
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              <div className="panel">
+                <div className="panel-tabs">
+                  <div className="tab active"><span>📝</span> Configuration (YAML)</div>
                 </div>
                 <div className="panel-body">
                   <p style={{ fontSize: '13px', color: 'var(--text-secondary)', marginBottom: '16px' }}>
-                    Edit your proxy configuration directly. Changes require a server restart to take effect.
+                    Directly edit your <code>config.yaml</code>. Providers and routing are defined here.
                   </p>
                   
-                  <textarea
-                    value={configContent}
-                    onChange={(e) => setConfigContent(e.target.value)}
-                    style={{
-                      width: '100%',
-                      height: '400px',
-                      padding: '16px',
+                  <div style={{ position: 'relative', background: '#1e293b', borderRadius: '8px', overflow: 'hidden', border: '1px solid #334155' }}>
+                    <div style={{ 
+                      position: 'absolute', 
+                      top: 0, 
+                      left: 0, 
+                      width: '40px', 
+                      bottom: 0, 
+                      background: '#0f172a', 
+                      borderRight: '1px solid #334155',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      paddingTop: '16px',
+                      alignItems: 'center',
+                      color: '#475569',
+                      fontSize: '11px',
                       fontFamily: 'var(--font-mono)',
-                      fontSize: '13px',
-                      border: '1px solid var(--border-color)',
-                      borderRadius: '8px',
-                      outline: 'none',
-                      lineHeight: '1.6',
-                      background: '#f8fafc'
-                    }}
-                    spellCheck={false}
-                  />
+                      userSelect: 'none'
+                    }}>
+                      {Array.from({ length: 20 }, (_, i) => <div key={i} style={{ height: '20.8px' }}>{i + 1}</div>)}
+                    </div>
+                    <textarea
+                      value={configContent}
+                      onChange={(e) => setConfigContent(e.target.value)}
+                      style={{
+                        width: '100%',
+                        height: '420px',
+                        padding: '16px 16px 16px 56px',
+                        fontFamily: 'var(--font-mono)',
+                        fontSize: '13px',
+                        border: 'none',
+                        outline: 'none',
+                        lineHeight: '1.6',
+                        background: 'transparent',
+                        color: '#e2e8f0',
+                        resize: 'vertical',
+                        whiteSpace: 'pre',
+                        overflowX: 'auto'
+                      }}
+                      spellCheck={false}
+                    />
+                  </div>
                   
                   {error && view === 'settings' && (
                     <div style={{ 
@@ -1347,7 +1432,8 @@ function App() {
                         fontSize: '14px',
                         fontWeight: 700,
                         opacity: configStatus === 'saving' ? 0.7 : 1,
-                        cursor: configStatus === 'saving' ? 'not-allowed' : 'pointer'
+                        cursor: configStatus === 'saving' ? 'not-allowed' : 'pointer',
+                        boxShadow: '0 2px 4px rgba(0,0,0,0.1)'
                       }}
                     >
                       {configStatus === 'saving' ? 'Saving...' : 'Save Configuration'}

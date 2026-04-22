@@ -45,6 +45,7 @@ def test_parse_gemini_record_merges_hook_ttft(
             "model": "gemini-3-flash-preview",
             "role": "main",
             "session.id": "session-1",
+            "prompt_length": 4321,
             "input_token_count": 793,
             "output_token_count": 1359,
             "total_token_count": 2152,
@@ -55,6 +56,239 @@ def test_parse_gemini_record_merges_hook_ttft(
 
     assert captured["fields"]["ttft_ms"] == 6845
     assert captured["fields"]["latency_ms"] == 8719
+    assert captured["fields"]["prompt_length"] == 4321
+
+
+def test_prompt_length_tracker_records_and_consumes_matching_prompt_event(otlp_module):
+    # This verifies the basic tracker contract: a prompt-only event stores the length,
+    # and the later usage event for the same prompt/session consumes that exact value once.
+    tracker = otlp_module.PromptLengthTracker({"gemini_cli.user_prompt"})
+
+    prompt_attrs = _attrs(
+        {
+            "event.name": "gemini_cli.user_prompt",
+            "session.id": "gemini-session-1",
+            "prompt_id": "prompt-1",
+            "prompt_length": 3210,
+        }
+    )
+    tracker.record_prompt_event("gemini-cli", prompt_attrs, "gemini-session-1")
+
+    response_attrs = _attrs(
+        {
+            "event.name": "gemini_cli.api_response",
+            "session.id": "gemini-session-1",
+            "prompt_id": "prompt-1",
+        }
+    )
+
+    assert (
+        tracker.consume_for_usage_event(
+            "gemini-cli", response_attrs, "gemini-session-1"
+        )
+        == 3210
+    )
+    assert (
+        tracker.consume_for_usage_event(
+            "gemini-cli", response_attrs, "gemini-session-1"
+        )
+        == 0
+    )
+
+
+def test_parse_claude_record_uses_prompt_length_from_prior_prompt_event(
+    otlp_module, monkeypatch
+):
+    captured = {}
+    monkeypatch.setattr(
+        otlp_module,
+        "log_usage",
+        lambda db_path, **fields: captured.update(
+            {"db_path": db_path, "fields": fields}
+        ),
+    )
+
+    prompt_record = {
+        "timeUnixNano": "0",
+        "attributes": _attrs(
+            {
+                "event.name": "user_prompt",
+                "session.id": "claude-session-1",
+                "prompt.id": "prompt-1",
+                "prompt_length": 2468,
+            }
+        ),
+    }
+    otlp_module._parse_log_record(prompt_record, "claude-code", "claude-session-1")
+
+    response_ts = datetime(2026, 4, 22, 21, 0, 0, tzinfo=timezone.utc)
+    response_record = {
+        "timeUnixNano": str(int(response_ts.timestamp() * 1_000_000_000)),
+        "attributes": _attrs(
+            {
+                "event.name": "api_request",
+                "session.id": "claude-session-1",
+                "prompt.id": "prompt-1",
+                "model": "claude-test",
+                "input_tokens": 120,
+                "output_tokens": 20,
+                "cache_read_tokens": 5,
+                "cache_creation_tokens": 0,
+                "duration_ms": 900,
+            }
+        ),
+    }
+
+    otlp_module._parse_log_record(response_record, "claude-code", "claude-session-1")
+
+    assert captured["fields"]["prompt_length"] == 2468
+
+
+def test_parse_codex_record_uses_prompt_length_from_prior_prompt_event(
+    otlp_module, monkeypatch
+):
+    captured = {}
+    monkeypatch.setattr(
+        otlp_module,
+        "log_usage",
+        lambda db_path, **fields: captured.update(
+            {"db_path": db_path, "fields": fields}
+        ),
+    )
+
+    prompt_record = {
+        "timeUnixNano": "0",
+        "attributes": _attrs(
+            {
+                "event.name": "codex.user_prompt",
+                "conversation.id": "conv-1",
+                "model": "gpt-5.4",
+                "prompt_length": 88,
+            }
+        ),
+    }
+    otlp_module._parse_log_record(prompt_record, "codex_cli_rs", "")
+
+    response_ts = datetime(2026, 4, 22, 21, 5, 0, tzinfo=timezone.utc)
+    response_record = {
+        "timeUnixNano": str(int(response_ts.timestamp() * 1_000_000_000)),
+        "attributes": _attrs(
+            {
+                "event.name": "codex.sse_event",
+                "event.kind": "response.completed",
+                "conversation.id": "conv-1",
+                "model": "gpt-5.4",
+                "input_token_count": 500,
+                "output_token_count": 100,
+                "cached_token_count": 10,
+                "reasoning_token_count": 20,
+                "tool_token_count": 5,
+                "duration_ms": 2000,
+            }
+        ),
+    }
+
+    otlp_module._parse_log_record(response_record, "codex_cli_rs", "")
+
+    assert captured["fields"]["prompt_length"] == 88
+
+
+def test_parse_gemini_record_uses_prompt_length_from_prior_prompt_event(
+    otlp_module, monkeypatch
+):
+    captured = {}
+    monkeypatch.setattr(
+        otlp_module,
+        "log_usage",
+        lambda db_path, **fields: captured.update(
+            {"db_path": db_path, "fields": fields}
+        ),
+    )
+
+    prompt_record = {
+        "timeUnixNano": "0",
+        "attributes": _attrs(
+            {
+                "event.name": "gemini_cli.user_prompt",
+                "session.id": "gemini-session-1",
+                "prompt_id": "prompt-1",
+                "prompt_length": 3210,
+            }
+        ),
+    }
+    otlp_module._parse_log_record(prompt_record, "gemini-cli", "gemini-session-1")
+
+    response_ts = datetime(2026, 4, 22, 21, 10, 0, tzinfo=timezone.utc)
+    response_record = {
+        "timeUnixNano": str(int(response_ts.timestamp() * 1_000_000_000)),
+        "attributes": _attrs(
+            {
+                "event.name": "gemini_cli.api_response",
+                "session.id": "gemini-session-1",
+                "prompt_id": "prompt-1",
+                "model": "gemini-3-flash-preview",
+                "role": "main",
+                "input_token_count": 700,
+                "output_token_count": 90,
+                "total_token_count": 790,
+            }
+        ),
+    }
+
+    otlp_module._parse_log_record(response_record, "gemini-cli", "gemini-session-1")
+
+    assert captured["fields"]["prompt_length"] == 3210
+
+
+def test_inline_prompt_length_is_not_queued_for_next_request(otlp_module, monkeypatch):
+    captured = []
+    monkeypatch.setattr(
+        otlp_module,
+        "log_usage",
+        lambda db_path, **fields: captured.append(fields),
+    )
+
+    response_ts_1 = datetime(2026, 4, 22, 21, 15, 0, tzinfo=timezone.utc)
+    response_record_1 = {
+        "timeUnixNano": str(int(response_ts_1.timestamp() * 1_000_000_000)),
+        "attributes": _attrs(
+            {
+                "event.name": "gemini_cli.api_response",
+                "session.id": "gemini-session-inline",
+                "model": "gemini-3-flash-preview",
+                "role": "main",
+                "prompt_length": 999,
+                "input_token_count": 700,
+                "output_token_count": 90,
+                "total_token_count": 790,
+            }
+        ),
+    }
+    otlp_module._parse_log_record(
+        response_record_1, "gemini-cli", "gemini-session-inline"
+    )
+
+    response_ts_2 = datetime(2026, 4, 22, 21, 16, 0, tzinfo=timezone.utc)
+    response_record_2 = {
+        "timeUnixNano": str(int(response_ts_2.timestamp() * 1_000_000_000)),
+        "attributes": _attrs(
+            {
+                "event.name": "gemini_cli.api_response",
+                "session.id": "gemini-session-inline",
+                "model": "gemini-3-flash-preview",
+                "role": "main",
+                "input_token_count": 710,
+                "output_token_count": 95,
+                "total_token_count": 805,
+            }
+        ),
+    }
+    otlp_module._parse_log_record(
+        response_record_2, "gemini-cli", "gemini-session-inline"
+    )
+
+    assert captured[0]["prompt_length"] == 999
+    assert captured[1]["prompt_length"] == 0
 
 
 def test_consume_hook_ttft_missing_session_returns_none(

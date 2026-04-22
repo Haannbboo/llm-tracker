@@ -197,6 +197,7 @@ curl http://localhost:4001/config
 | `model` | Model name |
 | `endpoint` | Proxy endpoint such as `/v1/chat/completions`, `/v1/responses`, `/v1/messages`, or OTLP endpoint marker `generate-otlp` |
 | `prompt_tokens` | Input tokens |
+| `prompt_length` | Total characters/bytes in prompt (from OTLP capture) |
 | `completion_tokens` | Output tokens |
 | `reasoning_tokens` | Reasoning tokens (from output details) |
 | `cached_tokens` | Cache hits (from input details) |

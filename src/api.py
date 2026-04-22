@@ -27,6 +27,7 @@ class UsageEntry(BaseModel):
     model: str
     endpoint: str = "generate"
     prompt_tokens: int | None = None
+    prompt_length: int = 0
     completion_tokens: int | None = None
     reasoning_tokens: int | None = None
     cached_tokens: int | None = None
@@ -120,11 +121,15 @@ async def post_usage(entry: UsageEntry):
 async def get_config():
     path = os.path.expanduser(CONFIG_PATH)
     if not os.path.exists(path):
-        return {"content": ""}
+        return {"content": "", "parsed": {}}
     try:
         with open(path, "r", encoding="utf-8") as f:
             content = f.read()
-        return {"content": content}
+        try:
+            parsed = yaml.safe_load(content) or {}
+        except yaml.YAMLError:
+            parsed = {}
+        return {"content": content, "parsed": parsed}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

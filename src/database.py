@@ -13,10 +13,13 @@ from sqlalchemy import (
     and_,
     create_engine,
     func,
+    inspect,
     insert,
     select,
+    text,
 )
 from sqlalchemy.engine import Engine
+from sqlalchemy.exc import SQLAlchemyError
 
 from config.app import CONFIG
 
@@ -31,6 +34,7 @@ usage_table = Table(
     Column("model", String, nullable=False),
     Column("endpoint", String, nullable=False),
     Column("prompt_tokens", Integer),
+    Column("prompt_length", Integer, nullable=False, server_default=text("0")),
     Column("completion_tokens", Integer),
     Column("reasoning_tokens", Integer),
     Column("cached_tokens", Integer),
@@ -75,7 +79,45 @@ def get_engine(db_path: str | None = None) -> Engine:
 
 
 def init_db(db_path: str | None = None) -> None:
-    metadata.create_all(get_engine(db_path))
+    engine = get_engine(db_path)
+    metadata.create_all(engine)
+    _ensure_usage_columns(engine)
+
+
+def _ensure_usage_columns(engine: Engine) -> None:
+    if not _usage_table_exists(engine):
+        return
+
+    existing_columns = _usage_column_names(engine)
+    if "prompt_length" in existing_columns:
+        return
+
+    with engine.begin() as connection:
+        try:
+            if engine.dialect.name == "postgresql":
+                connection.execute(
+                    text(
+                        "ALTER TABLE usage ADD COLUMN IF NOT EXISTS prompt_length INTEGER NOT NULL DEFAULT 0"
+                    )
+                )
+            else:
+                connection.execute(
+                    text(
+                        "ALTER TABLE usage ADD COLUMN prompt_length INTEGER NOT NULL DEFAULT 0"
+                    )
+                )
+        except SQLAlchemyError:
+            # Another process may have added the column after our initial schema check.
+            if "prompt_length" not in _usage_column_names(engine):
+                raise
+
+
+def _usage_table_exists(engine: Engine) -> bool:
+    return "usage" in inspect(engine).get_table_names()
+
+
+def _usage_column_names(engine: Engine) -> set[str]:
+    return {column["name"] for column in inspect(engine).get_columns("usage")}
 
 
 def log_usage(db_path: str | None = None, **fields: Any) -> None:
