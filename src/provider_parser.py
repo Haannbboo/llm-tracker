@@ -11,6 +11,7 @@ from typing import Optional
 # URL-based provider mapping rules (checked in order)
 PROVIDER_RULES: list[tuple[str, str]] = [
     ("api.minimaxi", "MiniMax"),
+    ("codesonline", "codesonline"),
     ("vectorengine", "vectorengine"),
     ("api.anthropic", "Anthropic"),
     ("api.openai", "OpenAI"),

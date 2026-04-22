@@ -13,11 +13,10 @@ def provider_parser_module(load_module) -> pytest.ModuleType:
 
 def _write_claude_settings(home: Path, base_url: str | None) -> None:
     settings = home / ".claude" / "settings.json"
+    settings.parent.mkdir(parents=True, exist_ok=True)
     if base_url is None:
-        settings.parent.mkdir(parents=True, exist_ok=True)
         settings.write_text("{}", encoding="utf-8")
         return
-    settings.parent.mkdir(parents=True, exist_ok=True)
     settings.write_text(
         json.dumps({"env": {"ANTHROPIC_BASE_URL": base_url}}), encoding="utf-8"
     )
@@ -34,108 +33,73 @@ def _write_codex_config(home: Path, base_url: str | None) -> None:
 
 def _write_gemini_settings(home: Path, base_url: str | None) -> None:
     settings = home / ".gemini" / "settings.json"
+    settings.parent.mkdir(parents=True, exist_ok=True)
     if base_url is None:
-        settings.parent.mkdir(parents=True, exist_ok=True)
         settings.write_text("{}", encoding="utf-8")
         return
-    settings.parent.mkdir(parents=True, exist_ok=True)
     settings.write_text(json.dumps({"base_url": base_url}), encoding="utf-8")
 
 
-class TestParseClaudeProvider:
-    def test_minimaxi_url(self, provider_parser_module, isolated_home: Path):
-        _write_claude_settings(isolated_home, "https://api.minimaxi.com/anthropic")
-        result = provider_parser_module.parse_claude_provider()
-        assert result == "MiniMax"
-
-    def test_vectorengine_url(self, provider_parser_module, isolated_home: Path):
-        _write_claude_settings(isolated_home, "https://vectorengine.example.com")
-        result = provider_parser_module.parse_claude_provider()
-        assert result == "vectorengine"
-
-    def test_anthropic_url(self, provider_parser_module, isolated_home: Path):
-        _write_claude_settings(isolated_home, "https://api.anthropic.com")
-        result = provider_parser_module.parse_claude_provider()
-        assert result == "Anthropic"
-
-    def test_missing_file(self, provider_parser_module, isolated_home: Path):
-        result = provider_parser_module.parse_claude_provider()
-        assert result == "unknown"
-
-    def test_empty_config(self, provider_parser_module, isolated_home: Path):
-        _write_claude_settings(isolated_home, None)
-        result = provider_parser_module.parse_claude_provider()
-        assert result == "unknown"
-
-
-class TestParseCodexProvider:
-    def test_openai_url(self, provider_parser_module, isolated_home: Path):
-        _write_codex_config(isolated_home, "https://api.openai.com/v1")
-        result = provider_parser_module.parse_codex_provider()
-        assert result == "OpenAI"
-
-    def test_azure_url(self, provider_parser_module, isolated_home: Path):
-        _write_codex_config(isolated_home, "https://myaccount.openai.azure.com")
-        result = provider_parser_module.parse_codex_provider()
-        assert result == "Azure"
-
-    def test_missing_file(self, provider_parser_module, isolated_home: Path):
-        result = provider_parser_module.parse_codex_provider()
-        assert result == "unknown"
-
-    def test_empty_config(self, provider_parser_module, isolated_home: Path):
-        _write_codex_config(isolated_home, None)
-        result = provider_parser_module.parse_codex_provider()
-        assert result == "unknown"
-
-
-class TestParseGeminiProvider:
-    def test_google_url(self, provider_parser_module, isolated_home: Path):
-        _write_gemini_settings(
-            isolated_home, "https://generativelanguage.googleapis.com"
-        )
-        result = provider_parser_module.parse_gemini_provider()
-        assert result == "Google"
-
-    def test_missing_file(self, provider_parser_module, isolated_home: Path):
-        result = provider_parser_module.parse_gemini_provider()
-        assert result == "unknown"
-
-    def test_empty_config(self, provider_parser_module, isolated_home: Path):
-        _write_gemini_settings(isolated_home, None)
-        result = provider_parser_module.parse_gemini_provider()
-        assert result == "unknown"
+@pytest.mark.parametrize(
+    "url, expected",
+    [
+        ("https://api.minimaxi.com/v1", "MiniMax"),
+        ("https://free.codesonline.dev", "codesonline"),
+        ("https://vectorengine.com", "vectorengine"),
+        ("https://api.anthropic.com", "Anthropic"),
+        ("https://api.openai.com/v1", "OpenAI"),
+        ("https://api.github.com", "GitHub"),
+        ("https://my-resource.openai.azure.com", "Azure"),
+        ("https://generativelanguage.googleapis.com", "Google"),
+        ("https://bedrock-runtime.us-east-1.amazonaws.com", "AWS"),
+        ("http://localhost:8080", "local"),
+        ("http://127.0.0.1:11434", "local"),
+        ("https://unknown.com", "unknown"),
+    ],
+)
+def test_match_url_to_provider(provider_parser_module, url, expected):
+    assert provider_parser_module._match_url_to_provider(url) == expected
 
 
 class TestParseProvider:
-    def test_claude_falls_back_to_anthropic(
-        self, provider_parser_module, isolated_home: Path
-    ):
+    def test_claude_provider(self, provider_parser_module, isolated_home: Path):
+        _write_claude_settings(isolated_home, "https://api.anthropic.com")
+        assert provider_parser_module.parse_provider("claude") == "Anthropic"
+
+    def test_codex_provider(self, provider_parser_module, isolated_home: Path):
+        _write_codex_config(isolated_home, "https://api.openai.com/v1")
+        assert provider_parser_module.parse_provider("codex") == "OpenAI"
+
+    def test_gemini_provider(self, provider_parser_module, isolated_home: Path):
+        _write_gemini_settings(
+            isolated_home, "https://generativelanguage.googleapis.com"
+        )
+        assert provider_parser_module.parse_provider("gemini") == "Google"
+
+    def test_claude_fallback(self, provider_parser_module, isolated_home: Path):
         _write_claude_settings(isolated_home, None)
-        result = provider_parser_module.parse_provider("claude")
-        assert result == "anthropic"
+        assert provider_parser_module.parse_provider("claude") == "anthropic"
 
-    def test_codex_falls_back_to_openai(
-        self, provider_parser_module, isolated_home: Path
-    ):
+    def test_codex_fallback(self, provider_parser_module, isolated_home: Path):
         _write_codex_config(isolated_home, None)
-        result = provider_parser_module.parse_provider("codex")
-        assert result == "openai"
+        assert provider_parser_module.parse_provider("codex") == "openai"
 
-    def test_gemini_falls_back_to_google(
-        self, provider_parser_module, isolated_home: Path
-    ):
+    def test_gemini_fallback(self, provider_parser_module, isolated_home: Path):
         _write_gemini_settings(isolated_home, None)
-        result = provider_parser_module.parse_provider("gemini")
-        assert result == "google"
+        assert provider_parser_module.parse_provider("gemini") == "google"
 
-    def test_unknown_agent(self, provider_parser_module, isolated_home: Path):
-        result = provider_parser_module.parse_provider("unknown-agent")
-        assert result == "unknown"
+    def test_unknown_agent_fallback(self, provider_parser_module, isolated_home: Path):
+        assert provider_parser_module.parse_provider("unknown-agent") == "unknown"
 
-    def test_claude_url_overrides_default(
+    def test_codex_unknown_url_fallback(
         self, provider_parser_module, isolated_home: Path
     ):
-        _write_claude_settings(isolated_home, "https://api.minimaxi.com/anthropic")
-        result = provider_parser_module.parse_provider("claude")
-        assert result == "MiniMax"
+        # This currently falls back to 'openai'
+        _write_codex_config(isolated_home, "https://unknown.example.com")
+        assert provider_parser_module.parse_provider("codex") == "openai"
+
+    def test_codex_codesonline_provider(
+        self, provider_parser_module, isolated_home: Path
+    ):
+        _write_codex_config(isolated_home, "https://free.codesonline.dev")
+        assert provider_parser_module.parse_provider("codex") == "codesonline"
