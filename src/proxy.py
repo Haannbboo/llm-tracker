@@ -129,6 +129,11 @@ async def forward(request: Request, path: str):
     started_at = time.monotonic()
 
     if body_json.get("stream", False):
+        # Ensure usage is included in the stream if not explicitly disabled
+        if "stream_options" not in body_json:
+            body_json["stream_options"] = {"include_usage": True}
+            body = json.dumps(body_json).encode()
+
         return StreamingResponse(
             stream_upstream_response(
                 url=url,
