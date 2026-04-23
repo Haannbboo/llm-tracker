@@ -1,27 +1,51 @@
 # llm-tracker
 
-A transparent proxy for LLM providers with usage logging. It does not inspect, modify, or manage credentials: authorization headers such as `ANTHROPIC_AUTH_TOKEN`, `Authorization`, and `x-api-key` are forwarded unchanged. The proxy reads request metadata needed for routing and logging, may normalize provider-prefixed model names before forwarding, and records usage in the configured database.
+A dual-purpose usage tracker for LLM agent users. It functions as both a **transparent forwarding proxy** and a **lightweight OTLP (OpenTelemetry) collector** designed specifically for coding agents like Claude Code, Gemini CLI, and Codex.
+
+The proxy does not inspect, modify, or manage credentials: authorization headers such as `ANTHROPIC_AUTH_TOKEN`, `Authorization`, and `x-api-key` are forwarded unchanged. It captures usage metrics (tokens, latency, TTFT) either from the proxy response stream or from telemetry logs emitted by the agents themselves.
 
 ## How it works
 
+llm-tracker captures usage data through two primary paths:
+
+### 1. OTLP Collector Path
+For agents that emit OpenTelemetry logs (Gemini CLI, Claude Code, Codex), llm-tracker acts as a local OTLP backend, parsing rich telemetry to capture metrics that a proxy alone cannot see (e.g., internal tool tokens or client-side latency).
+
 ```
-Claude Code / Codex
-    │  (your real API key in headers, your model in body)
+Agent (Gemini CLI / Codex / Claude Code)
+    │  (internal telemetry events)
     ▼
-llm-tracker proxy  ←── reads `model` field to know which base_url to forward to
-    │  (credentials unchanged, body forwarded except provider-prefix normalization)
+llm-tracker OTLP    ←── parses provider-specific schemas
+    │
     ▼
-Upstream provider (Anthropic, OpenAI, VectorEngine, MiniMax, ...)
+Configured Database (SQLite/Postgres)
 ```
 
-The proxy never touches your credentials. `ANTHROPIC_AUTH_TOKEN` / `Authorization` / `x-api-key` pass through exactly as sent by the client.
+### 2. Transparent Proxy Path
+For other tools that support custom base URLs (like OpenClaw), the proxy routes requests and logs usage from the response.
+
+```
+Client (e.g. Claude Code)
+    │  (API key in headers, model in body)
+    ▼
+llm-tracker proxy   ←── resolves upstream provider from `model`
+    │  (credentials unchanged, body forwarded)
+    ▼
+Upstream Provider (Anthropic, OpenAI, etc.)
+```
+
+
 
 ## Features
 
-- Supports `/v1/chat/completions`, `/v1/responses`, and `/v1/messages` (Anthropic)
-- Logs prompt, completion, reasoning, cached, cache creation, tool, latency, and TTFT fields where available
-- SQLite storage by default, with PostgreSQL/MySQL support via SQLAlchemy
-- Usage API endpoints for recent rows, summaries, counts, daily/hourly aggregation, and config editing
+- **Multi-Service Architecture**: Separate high-performance services for Proxying, OTLP collection, and Usage API.
+- **Deep Agent Integration**:
+    - **Gemini CLI**: Captures TTFT via a custom shell hook and merges it with OTLP usage data.
+    - **Claude Code**: Tracks prompt length, cache reads/writes, and completion tokens via OTLP.
+    - **Codex**: Correlates SSE events to calculate TTFT and tracks reasoning/tool tokens.
+- **Transparent Proxying**: Supports `/v1/chat/completions`, `/v1/responses`, and `/v1/messages`.
+- **Flexible Storage**: SQLite by default; supports PostgreSQL and MySQL via SQLAlchemy.
+- **Usage Dashboard**: Built-in Vite frontend for visualizing hourly/daily usage and cost trends.
 
 ## Setup
 
@@ -29,17 +53,14 @@ The proxy never touches your credentials. `ANTHROPIC_AUTH_TOKEN` / `Authorizatio
 bash scripts/start.sh
 ```
 
-This bootstraps `uv` if needed, creates `.venv`, installs `requirements.txt`, ensures `~/.llm-tracker/config.yaml` exists, and starts the proxy, API, and OTLP services under Supervisor.
-It also configures Codex OTLP telemetry when `~/.codex/config.toml` exists, installs the Gemini hook at `~/.gemini/llm-tracker-hook.sh`, and writes Gemini telemetry plus `BeforeModel`/`AfterModel` hooks to `~/.gemini/settings.json`. Project-local Gemini llm-tracker hooks are removed to avoid duplicate telemetry.
+This bootstraps the environment using `uv`, installs dependencies, and starts the services under Supervisor. It also **automatically configures your local agents**:
+- Patches `~/.claude/settings.json` for OTLP telemetry.
+- Patches `~/.codex/config.toml` for OTLP telemetry.
+- Installs the Gemini CLI hook in `~/.gemini/` and enables OTLP in `~/.gemini/settings.json`.
 
 ## Configuration
 
-Copy the example config to `~/.llm-tracker/config.yaml`:
-
-```bash
-mkdir -p ~/.llm-tracker
-cp config.example.yaml ~/.llm-tracker/config.yaml
-```
+Proxy service is configured in `~/.llm-tracker/config.yaml`:
 
 ```yaml
 providers:
@@ -47,10 +68,9 @@ providers:
     base_url: https://api.example.com/v1
     models:
       - model-name-a
-      - model-name-b
 ```
 
-`base_url` is the only required field per provider — no `api_key` needed. The proxy routes by matching the `model` field in the request body to a provider, then forwards to that provider's `base_url`.
+`base_url` is the only required field per provider. The proxy routes by matching the `model` field in the request body to a provider, then forwards to that provider's `base_url`.
 
 ## Backend Database
 
@@ -61,85 +81,46 @@ db:
   path: ~/.llm-tracker/usage.db
 ```
 
-To switch to PostgreSQL or MySQL, replace `db.path` with `db.url` in `~/.llm-tracker/config.yaml`:
+To enable cross-device data sharing, switch to a cloud SQL database, replace `db.path` with `db.url` in `~/.llm-tracker/config.yaml`:
 
 ```yaml
 db:
   url: postgresql+psycopg://user:password@db-host:5432/llm_tracker?sslmode=require
 ```
 
-```yaml
-db:
-  url: mysql+pymysql://user:password@db-host:3306/llm_tracker
-```
+### Migrating Existing SQLite Data (WIP)
 
-Then restart the services:
-
-```bash
-bash scripts/restart.sh
-```
-
-The app creates the `usage` table automatically if it does not exist.
-
-### Migrating Existing SQLite Data
-
-If you already have local SQLite history, migrate it once after setting `db.url`:
+If you have local SQLite history and want to move it to a central database:
 
 ```bash
 uv run python scripts/migrate_usage.py --source-url sqlite:///$HOME/.llm-tracker/usage.db
 ```
 
-The migration target defaults to `db.url` from `~/.llm-tracker/config.yaml`. The script refuses to write into a non-empty target by default. To safely re-run a migration and skip rows that already exist by `id`, use:
-
-```bash
-uv run python scripts/migrate_usage.py \
-  --source-url sqlite:///$HOME/.llm-tracker/usage.db \
-  --allow-nonempty-target \
-  --skip-existing
-```
-
-Passwords in database URLs must be URL-encoded if they contain reserved characters such as `@`, `:`, `/`, `#`, or `?`.
-
 ## Running
 
 The project is split into three managed services:
 
-- **Proxy**: routes provider requests and logs direct proxy usage on port `4000` by default.
-- **API**: serves usage stats and config editing endpoints on port `4001` by default.
-- **OTLP**: receives telemetry logs from Codex, Gemini CLI, and Claude Code on port `4002` by default.
+- **Proxy (Port 4000)**: Routes provider requests and logs usage.
+- **API (Port 4001)**: Serves usage stats and config editing endpoints.
+- **OTLP (Port 4002)**: Receives telemetry logs from Codex, Gemini CLI, and Claude Code.
 
-**Start all services under Supervisor:**
+**Manage services with Supervisor:**
 ```bash
-bash scripts/start.sh
+bash scripts/start.sh    # Start all
+bash scripts/restart.sh  # Reload config and restart
+bash scripts/stop.sh     # Stop all
+bash scripts/status.sh   # Check status of servers
 ```
 
-**Reload all services:**
-```bash
-bash scripts/restart.sh
-```
-This refreshes Gemini telemetry setup and sends `SIGHUP` to the managed proxy, API, and OTLP processes through Supervisor.
-
-**Stop all services:**
-```bash
-bash scripts/stop.sh
-```
-
-**Inspect process status:**
-```bash
-uv run --with supervisor supervisorctl -c ~/.llm-tracker/supervisord.conf status
-```
-
-Supervisor runtime files live under `~/.llm-tracker/run/`, and `scripts/start.sh` regenerates the Supervisor config at `~/.llm-tracker/supervisord.conf`. Logs remain in the repo `logs/` directory.
+Logs are stored in the `logs/` directory. Supervisor runtime files live in `~/.llm-tracker/run/`.
 
 ## Pointing agents at the proxy
 
-Set the base URL to the proxy. Your real API key stays in the client — the proxy forwards it unchanged.
+While OTLP captures telemetry automatically, you can still point agents at the proxy to ensure all traffic is captured.
 
 **Claude Code:**
 ```bash
 export ANTHROPIC_BASE_URL=http://localhost:4000
-export ANTHROPIC_MODEL=claude-sonnet-4-5  # must match a model name in config
-# ANTHROPIC_API_KEY stays as-is — forwarded transparently
 ```
 
 **Codex** (`~/.codex/config.toml`):
@@ -148,80 +129,22 @@ export ANTHROPIC_MODEL=claude-sonnet-4-5  # must match a model name in config
 base_url = "http://localhost:4000/v1"
 ```
 
-## Frontend dev server
+That's it, configure and use the agent normally afterwards.
 
-The Vite frontend proxies `/usage` requests to the API server, not the proxy server.
-
-```bash
-cd frontend
-LLM_TRACKER_API_URL=http://localhost:4001 npm run dev
-```
-
-If `LLM_TRACKER_API_URL` is unset, the frontend defaults to `http://localhost:4001`.
-
-## Testing
-
-Run tests through Python so the repository root is on the import path:
-
-```bash
-uv run python -m pytest
-```
-
-## Usage API
-
-The Usage API now runs on its own port (default `4001`):
-
-```bash
-# Recent requests
-curl http://localhost:4001/usage
-
-# Totals grouped by provider/model
-curl http://localhost:4001/usage/summary
-
-# Total row count, with optional filters
-curl http://localhost:4001/usage/count
-
-# Daily or hourly aggregate data
-curl "http://localhost:4001/usage/daily?granularity=day"
-
-# Read the active config
-curl http://localhost:4001/config
-```
-
-## Logged fields
-
-| Field | Description |
-|---|---|
-| `ts` | UTC timestamp |
-| `provider` | Provider name from config |
-| `model` | Model name |
-| `endpoint` | Proxy endpoint such as `/v1/chat/completions`, `/v1/responses`, `/v1/messages`, or OTLP endpoint marker `generate-otlp` |
-| `prompt_tokens` | Input tokens |
-| `prompt_length` | Total characters/bytes in prompt (from OTLP capture) |
-| `completion_tokens` | Output tokens |
-| `reasoning_tokens` | Reasoning tokens (from output details) |
-| `cached_tokens` | Cache hits (from input details) |
-| `total_tokens` | Total tokens |
-| `latency_ms` | End-to-end latency when available |
-| `ttft_ms` | Time to first token when available |
-| `tool_tokens` | Tool-use tokens when reported by the integration |
-| `cache_creation_tokens` | Cache write tokens when reported by the integration |
-| `status` | HTTP status code |
 
 ## Tracking Status
 
-The following table shows which metrics are currently captured for each integration:
-
 | Metric | Gemini CLI | Claude Code | Codex | Direct Proxy |
 | :--- | :---: | :---: | :---: | :---: |
-| Input Tokens | ✅ | ✅ | ✅ | ✅ |
-| Output Tokens | ✅ | ✅ | ✅ | ✅ |
-| Cached Tokens (Read) | ✅ | ✅ | ✅ | ✅ |
-| Cached Tokens (Write) | ❌ | ✅ | ❌ | ❌ |
-| Reasoning Tokens | ✅ | ❌ | ✅ | ✅ |
-| Tool Tokens | ✅ | ❌ | ✅ | ❌ |
-| Latency | ✅ | ✅ | ✅ | ✅ |
-| TTFT (time to first token) | ✅ (Hook) | ❌ | ✅ (OTLP) | ❌ |
+| Input Tokens | ✅ (OTLP) | ✅ (OTLP) | ✅ (OTLP) | ✅ |
+| Output Tokens | ✅ (OTLP) | ✅ (OTLP) | ✅ (OTLP) | ✅ |
+| Cached Tokens (Read) | ✅ (OTLP) | ✅ (OTLP) | ✅ (OTLP) | ✅ |
+| Cached Tokens (Write) | ❌ | ✅ (OTLP) | ❌ | ❌ |
+| Reasoning Tokens | ✅ (OTLP) | ❌ | ✅ (OTLP) | ✅ |
+| Tool Tokens | ✅ (OTLP) | ❌ | ✅ (OTLP) | ❌ |
+| Prompt Length (in chars) | ✅ (OTLP) | ✅ (OTLP) | ✅ (OTLP) | ❌ |
+| Latency | ✅ (Hook) | ✅ (OTLP) | ✅ (OTLP) | ✅ |
+| TTFT (Time to First Token) | ✅ (Hook) | ❌ | ✅ (OTLP) | ❌ |
 
+*Note: Gemini CLI captures TTFT via a shell hook because its OTLP payload lacks a first-chunk timestamp. Claude Code has no BeforeModel/AfterModel hook equivalents, so TTFT is currently unavailable. In general TTFT is **not** reliable and only only for fun.*
 
-*Note: Gemini CLI captures TTFT via a shell hook (time from request sent to first streaming chunk) because its OTLP payload lacks a first-chunk timestamp. Codex captures true TTFT natively via OTLP. Claude Code has no BeforeModel/AfterModel hook equivalents, so TTFT is unavailable.*
