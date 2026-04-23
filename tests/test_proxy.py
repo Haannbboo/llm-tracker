@@ -114,3 +114,64 @@ async def test_list_models_returns_configured_models(proxy_module):
             {"id": "gpt-4.1", "object": "model", "owned_by": "test-provider"},
         ],
     }
+
+
+@pytest.mark.anyio
+async def test_forward_logs_base_url_id_from_provider_config(proxy_module, monkeypatch):
+    captured = {}
+
+    class FakeResponse:
+        status_code = 200
+
+        def json(self):
+            return {"usage": {"prompt_tokens": 10, "completion_tokens": 5}}
+
+    class FakeAsyncClient:
+        def __init__(self, timeout):
+            self.timeout = timeout
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        async def post(self, url, headers, content):
+            captured["url"] = url
+            return FakeResponse()
+
+    async def receive():
+        return {
+            "type": "http.request",
+            "body": b'{"model":"test-model","stream":false}',
+            "more_body": False,
+        }
+
+    monkeypatch.setattr(proxy_module.httpx, "AsyncClient", FakeAsyncClient)
+    monkeypatch.setattr(
+        proxy_module, "resolve_provider_base_url_id", lambda provider: 7
+    )
+    monkeypatch.setattr(
+        proxy_module,
+        "log_usage",
+        lambda db_path, **fields: captured.update(
+            {"db_path": db_path, "fields": fields}
+        ),
+    )
+
+    request = proxy_module.Request(
+        {
+            "type": "http",
+            "method": "POST",
+            "path": "/v1/responses",
+            "headers": [(b"content-type", b"application/json")],
+        },
+        receive,
+    )
+
+    response = await proxy_module.forward(request, "/v1/responses")
+
+    assert response.status_code == 200
+    assert captured["url"] == "https://api.example.com/v1/responses"
+    assert captured["fields"]["base_url_id"] == 7
+    assert captured["fields"]["provider"] == "test-provider"

@@ -5,6 +5,7 @@ Reads agent config files to find base URLs, then maps them to provider names.
 
 import json
 import re
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
@@ -70,46 +71,38 @@ def _match_url_to_provider(url: str) -> str:
     return "unknown"
 
 
-def parse_claude_provider() -> str:
-    """Parse Claude Code provider from ~/.claude/settings.json."""
+@dataclass(frozen=True)
+class ProviderMetadata:
+    provider: str
+    base_url: str | None
+    source: str | None
+
+
+def parse_claude_base_url() -> Optional[str]:
+    """Parse Claude Code base URL from ~/.claude/settings.json."""
     settings_path = Path.home() / ".claude" / "settings.json"
     config = _load_json(settings_path)
     if not config:
-        return "unknown"
-
-    base_url = _extract_url(config, "env.ANTHROPIC_BASE_URL", "base_url", "url")
-    if not base_url:
-        return "unknown"
-
-    return _match_url_to_provider(base_url)
+        return None
+    return _extract_url(config, "env.ANTHROPIC_BASE_URL", "base_url", "url")
 
 
-def parse_codex_provider() -> str:
-    """Parse Codex provider from ~/.codex/config.toml."""
+def parse_codex_base_url() -> Optional[str]:
+    """Parse Codex base URL from ~/.codex/config.toml."""
     settings_path = Path.home() / ".codex" / "config.toml"
     config = _load_toml(settings_path)
     if not config:
-        return "unknown"
-
-    base_url = _extract_url(config, "base_url", "url", "api_base_url")
-    if not base_url:
-        return "unknown"
-
-    return _match_url_to_provider(base_url)
+        return None
+    return _extract_url(config, "base_url", "url", "api_base_url")
 
 
-def parse_gemini_provider() -> str:
-    """Parse Gemini CLI provider from ~/.gemini/settings.json."""
+def parse_gemini_base_url() -> Optional[str]:
+    """Parse Gemini CLI base URL from ~/.gemini/settings.json."""
     settings_path = Path.home() / ".gemini" / "settings.json"
     config = _load_json(settings_path)
     if not config:
-        return "unknown"
-
-    base_url = _extract_url(config, "base_url", "url", "api_base_url")
-    if not base_url:
-        return "unknown"
-
-    return _match_url_to_provider(base_url)
+        return None
+    return _extract_url(config, "base_url", "url", "api_base_url")
 
 
 PROVIDER_DEFAULTS: dict[str, str] = {
@@ -119,16 +112,31 @@ PROVIDER_DEFAULTS: dict[str, str] = {
 }
 
 
+def parse_provider_metadata(agent: str) -> ProviderMetadata:
+    """Parse provider/base URL metadata for a coding agent config."""
+    if agent == "claude":
+        base_url = parse_claude_base_url()
+        source = "claude_settings"
+    elif agent == "codex":
+        base_url = parse_codex_base_url()
+        source = "codex_config"
+    elif agent == "gemini":
+        base_url = parse_gemini_base_url()
+        source = "gemini_settings"
+    else:
+        return ProviderMetadata(
+            provider=PROVIDER_DEFAULTS.get(agent, "unknown"),
+            base_url=None,
+            source=None,
+        )
+
+    provider = _match_url_to_provider(base_url) if base_url else "unknown"
+    if provider == "unknown":
+        provider = PROVIDER_DEFAULTS.get(agent, "unknown")
+
+    return ProviderMetadata(provider=provider, base_url=base_url, source=source)
+
+
 def parse_provider(agent: str) -> str:
     """Parse provider for a coding agent, with fallback to default."""
-    if agent == "claude":
-        result = parse_claude_provider()
-    elif agent == "codex":
-        result = parse_codex_provider()
-    elif agent == "gemini":
-        result = parse_gemini_provider()
-    else:
-        return PROVIDER_DEFAULTS.get(agent, "unknown")
-    if result == "unknown":
-        return PROVIDER_DEFAULTS.get(agent, "unknown")
-    return result
+    return parse_provider_metadata(agent).provider

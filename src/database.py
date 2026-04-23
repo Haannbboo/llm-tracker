@@ -6,6 +6,7 @@ from typing import Any
 
 from sqlalchemy import (
     Column,
+    ForeignKey,
     Integer,
     MetaData,
     String,
@@ -17,13 +18,23 @@ from sqlalchemy import (
     insert,
     select,
     text,
+    update,
 )
 from sqlalchemy.engine import Engine
-from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
 from config.app import CONFIG
 
 metadata = MetaData()
+
+base_urls_table = Table(
+    "base_urls",
+    metadata,
+    Column("id", Integer, primary_key=True, autoincrement=True),
+    Column("base_url", String, nullable=False, unique=True),
+    Column("provider_name", String),
+    Column("source", String),
+)
 
 usage_table = Table(
     "usage",
@@ -44,6 +55,7 @@ usage_table = Table(
     Column("tool_tokens", Integer),
     Column("cache_creation_tokens", Integer),
     Column("status", Integer),
+    Column("base_url_id", Integer, ForeignKey("base_urls.id"), nullable=True),
 )
 
 _engine_cache: dict[str, Engine] = {}
@@ -81,6 +93,7 @@ def get_engine(db_path: str | None = None) -> Engine:
 def init_db(db_path: str | None = None) -> None:
     engine = get_engine(db_path)
     metadata.create_all(engine)
+    _ensure_base_urls_columns_removed(engine)
     _ensure_usage_columns(engine)
 
 
@@ -88,27 +101,51 @@ def _ensure_usage_columns(engine: Engine) -> None:
     if not _usage_table_exists(engine):
         return
 
-    existing_columns = _usage_column_names(engine)
-    if "prompt_length" in existing_columns:
+    _ensure_usage_column(
+        engine,
+        "prompt_length",
+        sqlite_definition="INTEGER NOT NULL DEFAULT 0",
+        postgresql_definition="INTEGER NOT NULL DEFAULT 0",
+    )
+    _ensure_usage_column(
+        engine,
+        "base_url_id",
+        sqlite_definition="INTEGER REFERENCES base_urls(id)",
+        postgresql_definition="INTEGER REFERENCES base_urls(id)",
+    )
+
+
+def _ensure_usage_column(
+    engine: Engine,
+    column_name: str,
+    *,
+    sqlite_definition: str,
+    postgresql_definition: str,
+) -> None:
+    if column_name in _usage_column_names(engine):
         return
+
+    definition = (
+        postgresql_definition
+        if engine.dialect.name == "postgresql"
+        else sqlite_definition
+    )
 
     with engine.begin() as connection:
         try:
             if engine.dialect.name == "postgresql":
                 connection.execute(
                     text(
-                        "ALTER TABLE usage ADD COLUMN IF NOT EXISTS prompt_length INTEGER NOT NULL DEFAULT 0"
+                        f"ALTER TABLE usage ADD COLUMN IF NOT EXISTS {column_name} {definition}"
                     )
                 )
             else:
                 connection.execute(
-                    text(
-                        "ALTER TABLE usage ADD COLUMN prompt_length INTEGER NOT NULL DEFAULT 0"
-                    )
+                    text(f"ALTER TABLE usage ADD COLUMN {column_name} {definition}")
                 )
         except SQLAlchemyError:
             # Another process may have added the column after our initial schema check.
-            if "prompt_length" not in _usage_column_names(engine):
+            if column_name not in _usage_column_names(engine):
                 raise
 
 
@@ -116,8 +153,133 @@ def _usage_table_exists(engine: Engine) -> bool:
     return "usage" in inspect(engine).get_table_names()
 
 
+def _base_urls_table_exists(engine: Engine) -> bool:
+    return "base_urls" in inspect(engine).get_table_names()
+
+
 def _usage_column_names(engine: Engine) -> set[str]:
-    return {column["name"] for column in inspect(engine).get_columns("usage")}
+    return _table_column_names(engine, "usage")
+
+
+def _base_url_column_names(engine: Engine) -> set[str]:
+    return _table_column_names(engine, "base_urls")
+
+
+def _table_column_names(engine: Engine, table_name: str) -> set[str]:
+    return {column["name"] for column in inspect(engine).get_columns(table_name)}
+
+
+def _ensure_base_urls_columns_removed(engine: Engine) -> None:
+    if not _base_urls_table_exists(engine):
+        return
+
+    _drop_table_column(engine, "base_urls", "validation_status")
+    _drop_table_column(engine, "base_urls", "last_error")
+
+
+def _drop_table_column(engine: Engine, table_name: str, column_name: str) -> None:
+    if column_name not in _table_column_names(engine, table_name):
+        return
+
+    with engine.begin() as connection:
+        try:
+            if engine.dialect.name == "postgresql":
+                connection.execute(
+                    text(
+                        f"ALTER TABLE {table_name} DROP COLUMN IF EXISTS {column_name}"
+                    )
+                )
+            else:
+                connection.execute(
+                    text(f"ALTER TABLE {table_name} DROP COLUMN {column_name}")
+                )
+        except SQLAlchemyError:
+            if column_name in _table_column_names(engine, table_name):
+                raise
+
+
+def _base_url_row(base_url: str, connection: Any) -> Any:
+    return connection.execute(
+        select(base_urls_table).where(base_urls_table.c.base_url == base_url)
+    ).first()
+
+
+def _base_url_updates(
+    row: Any,
+    *,
+    provider_name: str | None,
+    source: str | None,
+) -> dict[str, Any]:
+    updates: dict[str, Any] = {}
+    if provider_name and (not row.provider_name or row.provider_name == "unknown"):
+        updates["provider_name"] = provider_name
+    if source and not row.source:
+        updates["source"] = source
+    return updates
+
+
+def get_or_create_base_url(
+    base_url: str,
+    *,
+    db_path: str | None = None,
+    provider_name: str | None = None,
+    source: str | None = None,
+) -> int:
+    engine = get_engine(db_path)
+
+    for attempt in range(2):
+        with engine.begin() as connection:
+            row = _base_url_row(base_url, connection)
+            if row is not None:
+                updates = _base_url_updates(
+                    row,
+                    provider_name=provider_name,
+                    source=source,
+                )
+                if updates:
+                    connection.execute(
+                        update(base_urls_table)
+                        .where(base_urls_table.c.id == row.id)
+                        .values(**updates)
+                    )
+                return int(row.id)
+
+            values = {
+                "base_url": base_url,
+                "provider_name": provider_name,
+                "source": source,
+            }
+
+            try:
+                result = connection.execute(insert(base_urls_table), [values])
+                inserted_id = result.inserted_primary_key[0]
+                return int(inserted_id)
+            except IntegrityError:
+                # On PostgreSQL, the transaction is aborted after an IntegrityError.
+                # Retry in a fresh transaction so we can observe the winning row.
+                if attempt == 0:
+                    continue
+                raise
+
+    raise RuntimeError(f"Failed to resolve base_url id for {base_url}")
+
+
+def resolve_base_url_id(
+    *,
+    base_url: str | None,
+    db_path: str | None = None,
+    provider_name: str | None = None,
+    source: str | None = None,
+) -> int | None:
+    if not base_url:
+        return None
+
+    return get_or_create_base_url(
+        base_url,
+        db_path=db_path,
+        provider_name=provider_name,
+        source=source,
+    )
 
 
 def log_usage(db_path: str | None = None, **fields: Any) -> None:
@@ -164,7 +326,12 @@ def fetch_recent_usage(
         until=until,
     )
     query = (
-        select(usage_table)
+        select(*usage_table.c, base_urls_table.c.base_url.label("base_url"))
+        .select_from(
+            usage_table.outerjoin(
+                base_urls_table, usage_table.c.base_url_id == base_urls_table.c.id
+            )
+        )
         .order_by(usage_table.c.ts.desc())
         .limit(limit)
         .offset(offset)

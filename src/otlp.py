@@ -8,8 +8,8 @@ from datetime import datetime, timezone
 from fastapi import FastAPI, Request
 
 from config.app import CONFIG
-from .database import init_db, log_usage
-from .provider_parser import parse_provider
+from .database import init_db, log_usage, resolve_base_url_id
+from .provider_parser import parse_provider_metadata
 
 GEMINI_EVENT = "gemini_cli.api_response"
 CLAUDE_EVENT = "claude_code.api_request"
@@ -190,15 +190,17 @@ def _parse_gemini_record(record: dict, attrs: list, session_id: str) -> None:
         _consume_hook_ttft(GEMINI_HOOK_DIR, sid) if role == "main" else (None, None)
     )
     latency_ms = _attr(attrs, "duration_ms")
+    status = _attr(attrs, "status_code")
     prompt_tokens = int(input_tokens) if input_tokens is not None else None
     prompt_length = PROMPT_LENGTH_TRACKER.consume_for_usage_event(
         "gemini-cli", attrs, sid
     )
+    metadata = parse_provider_metadata("gemini")
 
     log_usage(
         CONFIG["db"]["url"],
         ts=ts,
-        provider=parse_provider("gemini"),
+        provider=metadata.provider,
         model=model,
         endpoint="generate-otlp",
         prompt_tokens=prompt_tokens,
@@ -211,7 +213,13 @@ def _parse_gemini_record(record: dict, attrs: list, session_id: str) -> None:
         latency_ms=latency_ms if latency_ms is not None else hook_latency_ms,
         ttft_ms=ttft_ms,
         cache_creation_tokens=None,
-        status=_attr(attrs, "status_code"),
+        status=status,
+        base_url_id=resolve_base_url_id(
+            db_path=CONFIG["db"]["url"],
+            base_url=metadata.base_url,
+            provider_name=metadata.provider,
+            source=metadata.source,
+        ),
     )
 
 
@@ -229,12 +237,13 @@ def _parse_claude_record(record: dict, attrs: list, session_id: str) -> None:
     prompt_length = PROMPT_LENGTH_TRACKER.consume_for_usage_event(
         "claude-code", attrs, session_id
     )
+    metadata = parse_provider_metadata("claude")
 
     total = prompt_tokens + int(output_tokens or 0) + int(cache_create or 0)
     log_usage(
         CONFIG["db"]["url"],
         ts=ts,
-        provider=parse_provider("claude"),
+        provider=metadata.provider,
         model=_attr(attrs, "model") or "claude-unknown",
         endpoint="generate-otlp",
         prompt_tokens=prompt_tokens,
@@ -248,6 +257,12 @@ def _parse_claude_record(record: dict, attrs: list, session_id: str) -> None:
         latency_ms=_attr(attrs, "duration_ms"),
         ttft_ms=None,
         status=None,
+        base_url_id=resolve_base_url_id(
+            db_path=CONFIG["db"]["url"],
+            base_url=metadata.base_url,
+            provider_name=metadata.provider,
+            source=metadata.source,
+        ),
     )
 
 
@@ -308,11 +323,12 @@ def _parse_codex_record(record: dict, attrs: list) -> None:
     prompt_length = PROMPT_LENGTH_TRACKER.consume_for_usage_event(
         "codex_cli_rs", attrs, ""
     )
+    metadata = parse_provider_metadata("codex")
 
     log_usage(
         CONFIG["db"]["url"],
         ts=ts,
-        provider=parse_provider("codex"),
+        provider=metadata.provider,
         model=_attr(attrs, "model") or "codex-unknown",
         endpoint="generate-otlp",
         prompt_tokens=prompt_tokens,
@@ -328,6 +344,12 @@ def _parse_codex_record(record: dict, attrs: list) -> None:
         ttft_ms=int(ttft_ms) if ttft_ms is not None else None,
         cache_creation_tokens=None,
         status=None,
+        base_url_id=resolve_base_url_id(
+            db_path=CONFIG["db"]["url"],
+            base_url=metadata.base_url,
+            provider_name=metadata.provider,
+            source=metadata.source,
+        ),
     )
 
 

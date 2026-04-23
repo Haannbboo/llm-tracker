@@ -59,6 +59,57 @@ def test_parse_gemini_record_merges_hook_ttft(
     assert captured["fields"]["prompt_length"] == 4321
 
 
+def test_parse_gemini_record_resolves_base_url_id_from_local_config(
+    otlp_module, monkeypatch, isolated_home: Path
+):
+    settings = isolated_home / ".gemini" / "settings.json"
+    settings.parent.mkdir(parents=True, exist_ok=True)
+    settings.write_text(
+        json.dumps({"base_url": "https://generativelanguage.googleapis.com"}),
+        encoding="utf-8",
+    )
+
+    captured = {}
+
+    def fake_resolve_base_url_id(**kwargs):
+        captured["resolve"] = kwargs
+        return 11
+
+    monkeypatch.setattr(otlp_module, "resolve_base_url_id", fake_resolve_base_url_id)
+    monkeypatch.setattr(
+        otlp_module,
+        "log_usage",
+        lambda db_path, **fields: captured.update(
+            {"db_path": db_path, "fields": fields}
+        ),
+    )
+
+    record_ts = datetime(2026, 4, 19, 20, 5, 1, 614000, tzinfo=timezone.utc)
+    record = {"timeUnixNano": str(int(record_ts.timestamp() * 1_000_000_000))}
+    attrs = _attrs(
+        {
+            "model": "gemini-3-flash-preview",
+            "role": "main",
+            "session.id": "session-1",
+            "status_code": 429,
+            "input_token_count": 793,
+            "output_token_count": 1359,
+            "total_token_count": 2152,
+        }
+    )
+
+    otlp_module._parse_gemini_record(record, attrs, "session-1")
+
+    assert captured["resolve"] == {
+        "db_path": otlp_module.CONFIG["db"]["url"],
+        "base_url": "https://generativelanguage.googleapis.com",
+        "provider_name": "Google",
+        "source": "gemini_settings",
+    }
+    assert captured["fields"]["base_url_id"] == 11
+    assert captured["fields"]["provider"] == "Google"
+
+
 def test_prompt_length_tracker_records_and_consumes_matching_prompt_event(otlp_module):
     # This verifies the basic tracker contract: a prompt-only event stores the length,
     # and the later usage event for the same prompt/session consumes that exact value once.

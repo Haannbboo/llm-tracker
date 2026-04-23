@@ -103,3 +103,15 @@ class TestParseProvider:
     ):
         _write_codex_config(isolated_home, "https://free.codesonline.dev")
         assert provider_parser_module.parse_provider("codex") == "codesonline"
+
+
+def test_parse_provider_metadata_returns_base_url_and_source(
+    provider_parser_module, isolated_home: Path
+):
+    _write_codex_config(isolated_home, "https://unknown.example.com")
+
+    metadata = provider_parser_module.parse_provider_metadata("codex")
+
+    assert metadata.provider == "openai"
+    assert metadata.base_url == "https://unknown.example.com"
+    assert metadata.source == "codex_config"

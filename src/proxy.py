@@ -16,7 +16,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 
 from config.app import CONFIG, MODEL_MAP, PROVIDER_MAP, ProviderConfig
-from .database import init_db, log_usage
+from .database import init_db, log_usage, resolve_base_url_id
 from .utils import extract_usage, extract_stream_usage, build_usage_record
 
 REQUEST_TIMEOUT_SECONDS = 300
@@ -58,6 +58,15 @@ def parse_json_body(body: bytes) -> dict[str, Any]:
     if not body:
         return {}
     return json.loads(body)
+
+
+def resolve_provider_base_url_id(provider: ProviderConfig) -> int | None:
+    return resolve_base_url_id(
+        db_path=CONFIG["db"]["url"],
+        base_url=provider.base_url,
+        provider_name=provider.name,
+        source="proxy_config",
+    )
 
 
 async def stream_upstream_response(
@@ -110,7 +119,8 @@ async def stream_upstream_response(
                 latency_ms=latency_ms,
                 status=status,
                 usage_fields=usage_fields,
-            ),
+            )
+            | {"base_url_id": resolve_provider_base_url_id(provider)},
         )
 
 
@@ -161,7 +171,8 @@ async def forward(request: Request, path: str):
             latency_ms=latency_ms,
             status=response.status_code,
             usage_fields=extract_usage(response_json.get("usage", {})),
-        ),
+        )
+        | {"base_url_id": resolve_provider_base_url_id(provider)},
     )
 
     return JSONResponse(content=response_json, status_code=response.status_code)
