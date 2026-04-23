@@ -1,10 +1,10 @@
 :root {
-  --sidebar-bg: #f8fafc;
-  --sidebar-item-active-bg: #e0f2fe;
-  --sidebar-item-active-color: #0369a1;
-  --sidebar-header-bg: #3b82f6;
+  --sidebar-bg: #ffffff;
+  --sidebar-item-active-bg: #edfcf6;
+  --sidebar-item-active-color: #00b578;
+  --sidebar-header-bg: #00b578;
   
-  --main-bg: #f1f5f9;
+  --main-bg: #f4f9f8;
   --card-bg: #ffffff;
   --border-color: #e2e8f0;
   
@@ -14,9 +14,9 @@
 
   /* Colors for icons and charts */
   --color-blue: #3b82f6;
-  --color-green: #22c55e;
+  --color-green: #00b578;
   --color-yellow: #eab308;
-  --color-pink: #ec4899;
+  --color-pink: #f43f5e;
   --color-purple: #a855f7;
 
   --font-sans: 'Inter', ui-sans-serif, system-ui, -apple-system, sans-serif;

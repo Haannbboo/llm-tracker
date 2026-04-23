@@ -5,7 +5,7 @@
 
 /* Sidebar */
 .sidebar {
-  width: 220px;
+  width: 260px;
   background-color: var(--sidebar-bg);
   border-right: 1px solid var(--border-color);
   display: flex;
@@ -14,63 +14,65 @@
 
 .sidebar-header {
   height: 60px;
-  background-color: var(--sidebar-header-bg);
-  color: white;
+  background-color: white;
+  color: var(--text-primary);
   display: flex;
   align-items: center;
   padding: 0 20px;
   font-weight: 700;
   font-size: 18px;
   gap: 10px;
+  border-bottom: 1px solid var(--border-color);
 }
 
 .sidebar-header .icon {
-  background: white;
+  background: var(--color-green);
   width: 32px;
   height: 32px;
-  border-radius: 50%;
+  border-radius: 8px;
   display: flex;
   align-items: center;
   justify-content: center;
-  color: var(--sidebar-header-bg);
+  color: white;
 }
 
 .sidebar-menu {
-  padding: 20px 0;
+  padding: 20px 12px;
   flex: 1;
 }
 
 .menu-group {
-  margin-bottom: 20px;
+  margin-bottom: 24px;
 }
 
 .menu-title {
-  padding: 0 20px;
+  padding: 0 8px;
   font-size: 11px;
   color: var(--text-muted);
   text-transform: uppercase;
-  margin-bottom: 10px;
+  margin-bottom: 8px;
   letter-spacing: 0.05em;
 }
 
 .menu-item {
   display: flex;
   align-items: center;
-  padding: 10px 20px;
+  padding: 10px 12px;
   color: var(--text-secondary);
   font-weight: 500;
   gap: 12px;
-  border-left: 3px solid transparent;
+  border-radius: 8px;
+  margin-bottom: 4px;
 }
 
 .menu-item:hover {
-  background-color: #f1f5f9;
+  background-color: #f8fafc;
 }
 
 .menu-item.active {
   background-color: var(--sidebar-item-active-bg);
   color: var(--sidebar-item-active-color);
-  border-left-color: var(--color-blue);
+  font-weight: 600;
 }
 
 /* Main Content */
@@ -92,8 +94,9 @@
 }
 
 .navbar-title {
-  font-weight: 600;
-  font-size: 16px;
+  font-weight: 700;
+  font-size: 18px;
+  color: var(--text-primary);
 }
 
 .navbar-right {
@@ -106,13 +109,13 @@
   padding: 24px;
   display: flex;
   flex-direction: column;
-  gap: 24px;
+  gap: 20px;
 }
 
 .welcome-msg {
-  font-size: 24px;
+  font-size: 20px;
   font-weight: 700;
-  margin-bottom: 4px;
+  color: var(--text-primary);
 }
 
 /* Data Widgets */
@@ -124,12 +127,13 @@
 
 .widget {
   background: white;
-  border-radius: 16px;
+  border-radius: 12px;
   padding: 20px;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+  border: 1px solid rgba(0, 0, 0, 0.03);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.02);
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 12px;
 }
 
 .widget-header {
@@ -137,31 +141,31 @@
   align-items: center;
   gap: 8px;
   font-size: 13px;
-  color: var(--text-primary);
-  font-weight: 600;
+  color: var(--text-secondary);
+  font-weight: 500;
 }
 
 .widget-body {
   display: flex;
   align-items: center;
-  gap: 16px;
+  gap: 12px;
 }
 
 .icon-box {
-  width: 44px;
-  height: 44px;
-  border-radius: 50%;
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 20px;
+  font-size: 18px;
 }
 
-.icon-blue { background-color: #dbeafe; color: var(--color-blue); }
-.icon-green { background-color: #dcfce7; color: var(--color-green); }
-.icon-yellow { background-color: #fef9c3; color: var(--color-yellow); }
-.icon-pink { background-color: #fce7f3; color: var(--color-pink); }
-.icon-purple { background-color: #f3e8ff; color: var(--color-purple); }
+.icon-blue { background-color: #f0f7ff; color: var(--color-blue); }
+.icon-green { background-color: #f0fdf4; color: var(--color-green); }
+.icon-yellow { background-color: #fffbeb; color: var(--color-yellow); }
+.icon-pink { background-color: #fef2f2; color: var(--color-pink); }
+.icon-purple { background-color: #faf5ff; color: var(--color-purple); }
 
 .stat-group {
   display: flex;
@@ -169,14 +173,17 @@
 }
 
 .stat-label {
-  font-size: 12px;
-  color: var(--text-secondary);
-  margin-bottom: 2px;
+  font-size: 13px;
+  color: var(--text-muted);
+  margin-bottom: 4px;
+  font-weight: 600;
 }
 
 .stat-value {
-  font-size: 20px;
+  font-size: 22px;
   font-weight: 700;
+  color: var(--text-primary);
+  margin-bottom: 2px;
 }
 
 /* Lower Section */

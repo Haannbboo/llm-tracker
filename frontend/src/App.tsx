@@ -98,16 +98,16 @@ function getTimezoneOffset(): string {
 }
 
 const PALETTE = [
-  '#8b5cf6', // Violet
-  '#10b981', // Emerald
+  '#00b578', // Emerald/Teal
+  '#3b82f6', // Blue
   '#f59e0b', // Amber
   '#06b6d4', // Cyan
   '#84cc16', // Lime
   '#f43f5e', // Rose
+  '#8b5cf6', // Violet
   '#6366f1', // Indigo
   '#a855f7', // Purple
   '#ec4899', // Pink
-  '#3b82f6', // Blue
 ];
 
 const FIXED_PROVIDER_COLORS: Record<string, string> = {
@@ -694,6 +694,19 @@ function App() {
     const cachedTokens = data.reduce((sum, row) => sum + value(row.cached_tokens), 0)
     const totalTokens = data.reduce((sum, row) => sum + value(row.total_tokens), 0)
     const latencyWeight = data.reduce((sum, row) => sum + value(row.avg_latency_ms) * value(row.requests), 0)
+    
+    // Calculate Success Rate from usageRows
+    const successfulRequests = usageRows.filter(r => r.status === 200 || r.status === null).length
+    const successRate = usageRows.length > 0 ? (successfulRequests / usageRows.length) * 100 : 100
+
+    // Calculate RPM/TPM based on dateRange
+    let minutes = 1440; // Default 24h
+    if (dateRange === '5h') minutes = 300;
+    else if (dateRange === '7d') minutes = 10080;
+    else if (dateRange === '30d') minutes = 43200;
+    else if (dateRange === 'all') {
+      minutes = 1440;
+    }
 
     return {
       requests,
@@ -703,8 +716,12 @@ function App() {
       cachedTokens,
       totalTokens,
       avgLatency: requests === 0 ? 0 : latencyWeight / requests,
+      rpm: requests / minutes,
+      tpm: totalTokens / minutes,
+      avgTokensPerRequest: requests === 0 ? 0 : totalTokens / requests,
+      successRate
     }
-  }, [activeFilter, summary])
+  }, [activeFilter, summary, usageRows, dateRange])
 
   const totalPages = Math.ceil(totalLogs / limit)
 
@@ -741,16 +758,16 @@ function App() {
           <div className="menu-group">
             <div className="menu-title">Monitoring</div>
             <button className={`menu-item ${view === 'dashboard' ? 'active' : ''}`} onClick={() => setView('dashboard')}>
-              <span>📊</span> Dashboard
+              📊 Dashboard
             </button>
             <button className={`menu-item ${view === 'logs' ? 'active' : ''}`} onClick={() => setView('logs')}>
-              <span>📜</span> Request Logs
+              📜 Request Logs
             </button>
           </div>
           <div className="menu-group">
             <div className="menu-title">Management</div>
             <button className={`menu-item ${view === 'settings' ? 'active' : ''}`} onClick={() => setView('settings')}>
-              <span>⚙️</span> Settings
+              ⚙️ Settings
             </button>
           </div>
         </div>
@@ -793,79 +810,56 @@ function App() {
 
               <div className="widgets-grid">
                 <div className="widget">
-                  <div className="widget-header"><span>📊</span> Token Usage</div>
                   <div className="widget-body">
-                    <div className="icon-box icon-blue">🎟️</div>
+                    <div className="icon-box icon-yellow">🪙</div>
                     <div className="stat-group">
-                      <div className="stat-label">Total Volume</div>
+                      <div className="stat-label">Token Usage</div>
                       <div className="stat-value">{formatCompact(totals.totalTokens)}</div>
-                    </div>
-                  </div>
-                  <div style={{ marginTop: '12px', display: 'flex', gap: '16px' }}>
-                    <div className="stat-group">
-                      <div className="stat-label">Input</div>
-                      <div style={{ fontSize: '14px', fontWeight: 700 }}>{formatCompact(totals.promptTokens)}</div>
-                    </div>
-                    <div className="stat-group">
-                      <div className="stat-label">Cached</div>
-                      <div style={{ fontSize: '14px', fontWeight: 700, color: 'var(--color-green)' }}>{formatCompact(totals.cachedTokens)}</div>
-                    </div>
-                    <div className="stat-group">
-                      <div className="stat-label">Output</div>
-                      <div style={{ fontSize: '14px', fontWeight: 700, color: 'var(--color-blue)' }}>{formatCompact(totals.completionTokens)}</div>
+                      <div className="stat-label">
+                        In: {formatCompact(totals.promptTokens)} / Out: {formatCompact(totals.completionTokens)} / Cached: {formatCompact(totals.cachedTokens)}
+                        <span style={{ marginLeft: '6px', color: 'var(--color-green)', fontWeight: 600 }}>
+                          ({totals.totalTokens > 0 ? ((value(totals.cachedTokens) / totals.totalTokens) * 100).toFixed(1) : 0}% Hit)
+                        </span>
+                      </div>
                     </div>
                   </div>
                 </div>
                 
                 <div className="widget">
-                  <div className="widget-header"><span>📈</span> Requests</div>
                   <div className="widget-body">
-                    <div className="icon-box icon-green">🚀</div>
+                    <div className="icon-box icon-green">📈</div>
                     <div className="stat-group">
-                      <div className="stat-label">Total Count</div>
+                      <div className="stat-label">Requests</div>
                       <div className="stat-value">{formatNumber(totals.requests)}</div>
-                    </div>
-                  </div>
-                  <div style={{ marginTop: '12px' }}>
-                    <div className="stat-group">
-                      <div className="stat-label">Throughput</div>
-                      <div style={{ fontSize: '14px', fontWeight: 700 }}>{totals.requests > 0 ? (totals.requests / 1440).toFixed(2) : 0} req/min</div>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="widget">
-                  <div className="widget-header"><span>⚡</span> Performance</div>
-                  <div className="widget-body">
-                    <div className="icon-box icon-yellow">⏱️</div>
-                    <div className="stat-group">
-                      <div className="stat-label">Avg Latency</div>
-                      <div className="stat-value">{formatLatency(totals.avgLatency)}</div>
-                    </div>
-                  </div>
-                  <div style={{ marginTop: '12px' }}>
-                    <div className="stat-group">
-                      <div className="stat-label">Efficiency</div>
-                      <div style={{ fontSize: '14px', fontWeight: 700, color: 'var(--color-green)' }}>
-                        {totals.totalTokens > 0 ? ((value(totals.cachedTokens) / totals.totalTokens) * 100).toFixed(1) : 0}% cache rate
+                      <div className="stat-label">
+                        Avg: <span style={{ color: 'var(--color-purple)', fontWeight: 600 }}>{formatCompact(totals.avgTokensPerRequest)} tokens/req</span>
                       </div>
                     </div>
                   </div>
                 </div>
 
                 <div className="widget">
-                  <div className="widget-header"><span>⏱️</span> Velocity</div>
                   <div className="widget-body">
-                    <div className="icon-box icon-pink">🔄</div>
+                    <div className="icon-box icon-blue">⚡</div>
                     <div className="stat-group">
-                      <div className="stat-label">Avg RPM</div>
-                      <div className="stat-value">0.071</div>
+                      <div className="stat-label">Performance</div>
+                      <div className="stat-value">{totals.rpm.toFixed(3)} <span style={{ fontSize: '12px', fontWeight: 500 }}>RPM</span></div>
+                      <div className="stat-label">
+                        Avg Throughput: <span style={{ color: 'var(--color-purple)', fontWeight: 600 }}>{formatCompact(totals.tpm)} TPM</span>
+                      </div>
                     </div>
                   </div>
-                  <div style={{ marginTop: '12px' }}>
+                </div>
+
+                <div className="widget">
+                  <div className="widget-body">
+                    <div className="icon-box icon-pink">⏱️</div>
                     <div className="stat-group">
-                      <div className="stat-label">Avg TPM</div>
-                      <div style={{ fontSize: '14px', fontWeight: 700 }}>4143.06</div>
+                      <div className="stat-label">Average Response</div>
+                      <div className="stat-value">{formatLatency(totals.avgLatency)}</div>
+                      <div className="stat-label">
+                        Success Rate: <span style={{ color: 'var(--color-green)', fontWeight: 600 }}>{totals.successRate.toFixed(1)}%</span>
+                      </div>
                     </div>
                   </div>
                 </div>
