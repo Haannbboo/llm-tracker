@@ -10,7 +10,6 @@ from .database import (
     count_usage,
     fetch_recent_usage,
     init_db,
-    log_usage,
     summarize_usage,
 )
 from contextlib import asynccontextmanager
@@ -19,24 +18,6 @@ from pydantic import BaseModel
 
 class ConfigUpdate(BaseModel):
     content: str
-
-
-class UsageEntry(BaseModel):
-    ts: str
-    provider: str
-    model: str
-    endpoint: str = "generate"
-    prompt_tokens: int | None = None
-    prompt_length: int = 0
-    completion_tokens: int | None = None
-    reasoning_tokens: int | None = None
-    cached_tokens: int | None = None
-    total_tokens: int | None = None
-    latency_ms: int | None = None
-    ttft_ms: int | None = None
-    tool_tokens: int | None = None
-    cache_creation_tokens: int | None = None
-    status: int | None = None
 
 
 @asynccontextmanager
@@ -109,12 +90,6 @@ async def usage_daily(
         granularity=granularity,
         tz_offset=tz_offset,
     )
-
-
-@app.post("/usage")
-async def post_usage(entry: UsageEntry):
-    log_usage(CONFIG["db"]["url"], **entry.model_dump())
-    return {"status": "ok"}
 
 
 @app.get("/config")
