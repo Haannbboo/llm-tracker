@@ -45,7 +45,7 @@ Upstream Provider (Anthropic, OpenAI, etc.)
     - **Codex**: Correlates SSE events to calculate TTFT and tracks reasoning/tool tokens.
 - **Transparent Proxying**: Supports `/v1/chat/completions`, `/v1/responses`, and `/v1/messages`.
 - **Flexible Storage**: SQLite by default; supports PostgreSQL and MySQL via SQLAlchemy.
-- **Usage Dashboard**: Built-in Vite frontend for visualizing hourly/daily usage and cost trends.
+- **Usage Dashboard**: Built-in Vite frontend for visualizing hourly/daily usage and cost trends. See [frontend/README.md](frontend/README.md) for build instructions.
 
 ## Setup
 
@@ -98,8 +98,10 @@ uv run python scripts/migrate_usage.py --source-url sqlite:///$HOME/.llm-tracker
 
 ## Running
 
-The project is split into three managed services:
+The project is split into three managed backend services and a separate frontend dashboard:
 
+### Backend Services
+Managed via Supervisor:
 - **Proxy (Port 4000)**: Routes provider requests and logs usage.
 - **API (Port 4001)**: Serves usage stats and config editing endpoints.
 - **OTLP (Port 4002)**: Receives telemetry logs from Codex, Gemini CLI, and Claude Code.
@@ -113,6 +115,16 @@ bash scripts/status.sh   # Check status of servers
 ```
 
 Logs are stored in the `logs/` directory. Supervisor runtime files live in `~/.llm-tracker/run/`.
+
+### Frontend Dashboard
+The dashboard is a Vite/React application that must be started separately:
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+By default, the dashboard is available at [http://localhost:5173](http://localhost:5173). See [frontend/README.md](frontend/README.md) for more details.
 
 ## Pointing agents at the proxy
 

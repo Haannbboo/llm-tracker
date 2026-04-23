@@ -9,3 +9,7 @@ logs/
 # LLM related
 DESIGN.md
 AGENTS.md
+
+# Project specific
+todo.md
+docs/*
