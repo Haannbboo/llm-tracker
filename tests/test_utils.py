@@ -107,6 +107,7 @@ def test_build_usage_record_includes_provider_metadata(utils_module):
         model="alpha-1",
         endpoint="/v1/responses",
         latency_ms=42,
+        ttft_ms=11,
         status=201,
         usage_fields={
             "prompt_tokens": 10,
@@ -121,6 +122,7 @@ def test_build_usage_record_includes_provider_metadata(utils_module):
     assert record["model"] == "alpha-1"
     assert record["endpoint"] == "/v1/responses"
     assert record["latency_ms"] == 42
+    assert record["ttft_ms"] == 11
     assert record["status"] == 201
     assert record["total_tokens"] == 15
     datetime.fromisoformat(record["ts"])

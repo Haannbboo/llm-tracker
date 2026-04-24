@@ -81,6 +81,7 @@ async def stream_upstream_response(
 ):
     usage_fields = extract_usage({})
     status = 200
+    ttft_ms: int | None = None
 
     try:
         async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT_SECONDS) as client:
@@ -91,6 +92,8 @@ async def stream_upstream_response(
                 buffer = ""
 
                 async for chunk in response.aiter_bytes():
+                    if ttft_ms is None:
+                        ttft_ms = int((time.monotonic() - started_at) * 1000)
                     yield chunk
 
                     try:
@@ -117,6 +120,7 @@ async def stream_upstream_response(
                     model=model,
                     endpoint=path,
                     latency_ms=latency_ms,
+                    ttft_ms=ttft_ms,
                     status=status,
                     usage_fields=usage_fields,
                 )
@@ -178,6 +182,7 @@ async def forward(request: Request, path: str):
                 model=model,
                 endpoint=path,
                 latency_ms=latency_ms,
+                ttft_ms=None,
                 status=response.status_code,
                 usage_fields=usage_fields,
             )

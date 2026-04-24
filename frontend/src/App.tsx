@@ -1105,7 +1105,8 @@ function App() {
                             <div className="tooltip-text">
                               <b>Claude Code:</b> No TTFT<br/>
                               <b>Gemini CLI:</b> Time to first chunk<br/>
-                              <b>Codex:</b> Actual TTFT
+                              <b>Codex:</b> Actual TTFT<br/>
+                              <b>Proxy:</b> Time to first chunk
                             </div>
                           </div>
                         </th>

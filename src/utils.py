@@ -49,6 +49,7 @@ def build_usage_record(
     model: str,
     endpoint: str,
     latency_ms: int,
+    ttft_ms: int | None = None,
     status: int,
     usage_fields: dict[str, int],
 ) -> dict[str, Any]:
@@ -58,6 +59,7 @@ def build_usage_record(
         "model": model,
         "endpoint": endpoint,
         "latency_ms": latency_ms,
+        "ttft_ms": ttft_ms,
         "status": status,
         **usage_fields,
     }

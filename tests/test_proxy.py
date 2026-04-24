@@ -260,3 +260,93 @@ async def test_forward_logs_base_url_id_from_provider_config(proxy_module, monke
     assert captured["usage"].output_cost_usd == Decimal("0.00003")
     assert captured["usage"].total_cost_usd == Decimal("0.00005")
     assert captured["usage"].status == 200
+    assert captured["usage"].ttft_ms is None
+
+
+@pytest.mark.anyio
+async def test_streaming_forward_logs_first_chunk_latency(proxy_module, monkeypatch):
+    captured = {}
+
+    class FakeStreamResponse:
+        status_code = 200
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        async def aiter_bytes(self):
+            yield b'data: {"type":"response.output_text.delta"}\n\n'
+            yield (
+                b'data: {"response":{"usage":{"input_tokens":10,"output_tokens":5}}}\n\n'
+            )
+
+    class FakeAsyncClient:
+        def __init__(self, timeout):
+            self.timeout = timeout
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        def stream(self, method, url, headers, content):
+            captured["method"] = method
+            captured["url"] = url
+            return FakeStreamResponse()
+
+    async def receive():
+        return {
+            "type": "http.request",
+            "body": b'{"model":"test-model","stream":true}',
+            "more_body": False,
+        }
+
+    # The streaming response path can consult monotonic time more than once
+    # while the iterator and cleanup finish, so keep returning the last value.
+    class FakeMonotonic:
+        def __init__(self):
+            self.values = [100.0, 100.025, 100.090]
+            self.last = self.values[-1]
+
+        def __call__(self):
+            if self.values:
+                self.last = self.values.pop(0)
+            return self.last
+
+    monkeypatch.setattr(proxy_module.httpx, "AsyncClient", FakeAsyncClient)
+    monkeypatch.setattr(proxy_module.time, "monotonic", FakeMonotonic())
+    monkeypatch.setattr(
+        proxy_module, "resolve_provider_base_url_id", lambda provider: 7
+    )
+    monkeypatch.setattr(
+        proxy_module,
+        "log_usage",
+        lambda usage, db_path=None: captured.update(
+            {"db_path": db_path, "usage": usage}
+        ),
+    )
+
+    request = proxy_module.Request(
+        {
+            "type": "http",
+            "method": "POST",
+            "path": "/v1/responses",
+            "headers": [(b"content-type", b"application/json")],
+        },
+        receive,
+    )
+
+    response = await proxy_module.forward(request, "/v1/responses")
+    chunks = [chunk async for chunk in response.body_iterator]
+
+    assert response.status_code == 200
+    assert b"".join(chunks).startswith(b'data: {"type":"response.output_text.delta"}')
+    assert captured["method"] == "POST"
+    assert captured["url"] == "https://api.example.com/v1/responses"
+    assert captured["usage"].ttft_ms == 25
+    assert captured["usage"].latency_ms == 90
+    assert captured["usage"].prompt_tokens == 10
+    assert captured["usage"].completion_tokens == 5

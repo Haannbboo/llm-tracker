@@ -22,7 +22,7 @@ Configured Database (SQLite/Postgres)
 ```
 
 ### 2. Transparent Proxy Path
-For other tools that support custom base URLs (like OpenClaw), the proxy routes requests and logs usage from the response.
+For other tools that support custom base URLs (like OpenClaw), the proxy routes requests and logs usage from the response. For streamed requests, it also records `ttft_ms` as the time until the first upstream chunk arrives.
 
 ```
 Client (e.g. Claude Code)
@@ -161,6 +161,6 @@ That's it, configure and use the agent normally afterwards.
 | Tool Tokens | ✅ (OTLP) | ❌ | ✅ (OTLP) | ❌ |
 | Prompt Length (in chars) | ✅ (OTLP) | ✅ (OTLP) | ✅ (OTLP) | ❌ |
 | Latency | ✅ (Hook) | ✅ (OTLP) | ✅ (OTLP) | ✅ |
-| TTFT (Time to First Token) | ✅ (Hook) | ❌ | ✅ (OTLP) | ❌ |
+| TTFT (Time to First Token) | ✅ (Hook) | ❌ | ✅ (OTLP) | ✅ (Streaming only) |
 
-*Note: Gemini CLI captures TTFT via a shell hook because its OTLP payload lacks a first-chunk timestamp. Claude Code has no BeforeModel/AfterModel hook equivalents, so TTFT is currently unavailable. In general TTFT is **not** reliable and only only for fun.*
+*Note: Gemini CLI captures TTFT via a shell hook because its OTLP payload lacks a first-chunk timestamp. Claude Code has no BeforeModel/AfterModel hook equivalents, so TTFT is currently unavailable. Direct proxy TTFT is captured from the first streamed upstream chunk, so it is only available when `stream=true`. In general TTFT is **not** reliable and only only for fun.*
