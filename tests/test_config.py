@@ -100,3 +100,42 @@ def test_build_maps_allows_provider_without_models(config_module):
         base_url="https://empty.example/v1",
     )
     assert model_map == {}
+
+
+def test_refresh_runtime_config_updates_globals_in_place(
+    config_module, tmp_path, monkeypatch
+):
+    config_path = tmp_path / "config.yaml"
+    monkeypatch.setenv("HOME", str(tmp_path))
+    config_path.write_text(
+        """
+server:
+  host: 127.0.0.1
+providers:
+  alpha:
+    base_url: https://alpha.example/v1
+    models:
+      - alpha-1
+""",
+        encoding="utf-8",
+    )
+
+    config_id = id(config_module.CONFIG)
+    provider_map_id = id(config_module.PROVIDER_MAP)
+    model_map_id = id(config_module.MODEL_MAP)
+
+    refreshed = config_module.refresh_runtime_config(str(config_path))
+
+    assert id(config_module.CONFIG) == config_id
+    assert id(config_module.PROVIDER_MAP) == provider_map_id
+    assert id(config_module.MODEL_MAP) == model_map_id
+    assert refreshed is config_module.CONFIG
+    assert config_module.CONFIG["server"]["host"] == "127.0.0.1"
+    assert config_module.PROVIDER_MAP["alpha"] == config_module.ProviderConfig(
+        name="alpha",
+        base_url="https://alpha.example/v1",
+    )
+    assert config_module.MODEL_MAP["alpha-1"] == config_module.ProviderConfig(
+        name="alpha",
+        base_url="https://alpha.example/v1",
+    )

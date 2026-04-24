@@ -4,6 +4,7 @@ from fastapi import FastAPI, HTTPException, Request
 from config.app import (
     CONFIG,
     CONFIG_PATH,
+    refresh_runtime_config,
 )
 from .database import (
     aggregate_usage_by_period,
@@ -119,6 +120,7 @@ async def update_config(update: ConfigUpdate):
         os.makedirs(os.path.dirname(path), exist_ok=True)
         with open(path, "w", encoding="utf-8") as f:
             f.write(update.content)
+        refresh_runtime_config(path)
         return {"status": "success"}
     except yaml.YAMLError as e:
         raise HTTPException(status_code=400, detail=f"Invalid YAML: {str(e)}")

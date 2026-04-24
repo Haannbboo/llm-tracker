@@ -79,5 +79,21 @@ def build_maps(
     return provider_map, model_map
 
 
-CONFIG = load_config()
-PROVIDER_MAP, MODEL_MAP = build_maps(CONFIG)
+def refresh_runtime_config(path: str | None = None) -> dict[str, Any]:
+    updated_config = load_config(path)
+    provider_map, model_map = build_maps(updated_config)
+
+    CONFIG.clear()
+    CONFIG.update(updated_config)
+    PROVIDER_MAP.clear()
+    PROVIDER_MAP.update(provider_map)
+    MODEL_MAP.clear()
+    MODEL_MAP.update(model_map)
+
+    return CONFIG
+
+
+CONFIG: dict[str, Any] = {}
+PROVIDER_MAP: dict[str, ProviderConfig] = {}
+MODEL_MAP: dict[str, ProviderConfig] = {}
+refresh_runtime_config(CONFIG_PATH)

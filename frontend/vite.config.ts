@@ -12,6 +12,7 @@ export default defineConfig(({ mode }) => {
     server: {
       proxy: {
         '/usage': apiUrl,
+        '/config': apiUrl,
       },
     },
   }
