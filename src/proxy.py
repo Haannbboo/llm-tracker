@@ -204,6 +204,25 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="llm-tracker-proxy", lifespan=lifespan)
 
 
+def proxy_metadata() -> dict[str, Any]:
+    return {
+        "name": app.title,
+        "supported_endpoints": [
+            "/chat/completions",
+            "/v1/chat/completions",
+            "/responses",
+            "/v1/responses",
+            "/messages",
+            "/v1/messages",
+            "/models",
+            "/v1/models",
+            "/api/v1/models",
+            "/props",
+            "/v1/props",
+        ],
+    }
+
+
 @app.post("/chat/completions")
 @app.post("/v1/chat/completions")
 async def chat_completions(request: Request):
@@ -222,6 +241,7 @@ async def messages(request: Request):
     return await forward(request, "/v1/messages")
 
 
+@app.get("/api/v1/models")
 @app.get("/v1/models")
 @app.get("/models")
 async def list_models():
@@ -248,6 +268,20 @@ async def get_model(model_id: str):
         "id": model_id,
         "object": "model",
         "owned_by": provider.name,
+    }
+
+
+@app.get("/v1/props")
+@app.get("/props")
+async def props():
+    return proxy_metadata()
+
+
+@app.get("/version")
+async def version():
+    return {
+        "name": app.title,
+        "version": "dev",
     }
 
 

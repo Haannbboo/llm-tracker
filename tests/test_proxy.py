@@ -25,10 +25,14 @@ def test_proxy_registers_v1_and_compatibility_paths(proxy_module):
     }
 
     assert {
+        "/api/v1/models",
         "/v1/models",
         "/models",
         "/v1/models/{model_id}",
         "/models/{model_id}",
+        "/v1/props",
+        "/props",
+        "/version",
     }.issubset(get_paths)
 
 
@@ -147,6 +151,15 @@ async def test_list_models_returns_configured_models(proxy_module):
     }
 
 
+def test_proxy_metadata_describes_supported_endpoints(proxy_module):
+    result = proxy_module.proxy_metadata()
+
+    assert result["name"] == "llm-tracker-proxy"
+    assert "/api/v1/models" in result["supported_endpoints"]
+    assert "/v1/props" in result["supported_endpoints"]
+    assert "/version" not in result["supported_endpoints"]
+
+
 @pytest.mark.anyio
 async def test_get_model_returns_configured_model(proxy_module):
     result = await proxy_module.get_model("test-model")
@@ -165,6 +178,23 @@ async def test_get_model_rejects_unknown_model(proxy_module):
 
     assert exc_info.value.status_code == 404
     assert "missing-model" in exc_info.value.detail
+
+
+@pytest.mark.anyio
+async def test_props_returns_proxy_metadata(proxy_module):
+    result = await proxy_module.props()
+
+    assert result == proxy_module.proxy_metadata()
+
+
+@pytest.mark.anyio
+async def test_version_returns_proxy_identity(proxy_module):
+    result = await proxy_module.version()
+
+    assert result == {
+        "name": "llm-tracker-proxy",
+        "version": "dev",
+    }
 
 
 @pytest.mark.anyio
