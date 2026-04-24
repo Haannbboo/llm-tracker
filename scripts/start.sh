@@ -65,6 +65,9 @@ if [[ -d "${HOME}/.claude" ]]; then
   "${PYTHON}" "${ROOT_DIR}/scripts/configure-claude-settings.py" "${CLAUDE_SETTINGS}" "${OTLP_PORT}"
 fi
 
+echo "==> Applying schema migrations..."
+"${PYTHON}" "${ROOT_DIR}/scripts/migrate_schema.py"
+
 # Generate supervisord.conf (references project gunicorn configs)
 cat > "${SUPERVISORD_CONF}" <<EOF
 [unix_http_server]

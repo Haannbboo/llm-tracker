@@ -30,6 +30,7 @@ PROJECT_MODULES = [
     "config.app",
     "src.api",
     "src.database",
+    "src.schema_migrations",
     "src.otlp",
     "src.proxy",
     "src.utils",
@@ -78,6 +79,11 @@ def api_module(load_module: Callable[[str], ModuleType]) -> ModuleType:
 @pytest.fixture
 def database_module(load_module: Callable[[str], ModuleType]) -> ModuleType:
     return load_module("src.database")
+
+
+@pytest.fixture
+def schema_migrations_module(load_module: Callable[[str], ModuleType]) -> ModuleType:
+    return load_module("src.schema_migrations")
 
 
 @pytest.fixture

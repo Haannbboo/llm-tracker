@@ -22,7 +22,7 @@ class ConfigUpdate(BaseModel):
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    init_db(CONFIG["db"]["url"])
+    init_db()
     yield
 
 

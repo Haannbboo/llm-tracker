@@ -57,6 +57,7 @@ This bootstraps the environment using `uv`, installs dependencies, and starts th
 - Patches `~/.claude/settings.json` for OTLP telemetry.
 - Patches `~/.codex/config.toml` for OTLP telemetry.
 - Installs the Gemini CLI hook in `~/.gemini/` and enables OTLP in `~/.gemini/settings.json`.
+- Applies explicit database schema migrations before the services start.
 
 ## Configuration
 
@@ -86,14 +87,6 @@ To enable cross-device data sharing, switch to a cloud SQL database, replace `db
 ```yaml
 db:
   url: postgresql+psycopg://user:password@db-host:5432/llm_tracker?sslmode=require
-```
-
-### Migrating Existing SQLite Data (WIP)
-
-If you have local SQLite history and want to move it to a central database:
-
-```bash
-uv run python scripts/migrate_usage.py --source-url sqlite:///$HOME/.llm-tracker/usage.db
 ```
 
 ## Running
@@ -159,4 +152,3 @@ That's it, configure and use the agent normally afterwards.
 | TTFT (Time to First Token) | ✅ (Hook) | ❌ | ✅ (OTLP) | ❌ |
 
 *Note: Gemini CLI captures TTFT via a shell hook because its OTLP payload lacks a first-chunk timestamp. Claude Code has no BeforeModel/AfterModel hook equivalents, so TTFT is currently unavailable. In general TTFT is **not** reliable and only only for fun.*
-

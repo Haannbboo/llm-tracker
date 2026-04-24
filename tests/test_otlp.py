@@ -16,6 +16,12 @@ def _attrs(values: dict[str, int | str]) -> list[dict]:
     return attrs
 
 
+def _capture_usage(target: dict):
+    return lambda usage, db_path=None: target.update(
+        {"db_path": db_path, "usage": usage}
+    )
+
+
 def test_parse_gemini_record_merges_hook_ttft(
     otlp_module, monkeypatch, isolated_home: Path
 ):
@@ -33,9 +39,7 @@ def test_parse_gemini_record_merges_hook_ttft(
     monkeypatch.setattr(
         otlp_module,
         "log_usage",
-        lambda db_path, **fields: captured.update(
-            {"db_path": db_path, "fields": fields}
-        ),
+        _capture_usage(captured),
     )
 
     record_ts = datetime(2026, 4, 19, 20, 5, 1, 614000, tzinfo=timezone.utc)
@@ -54,9 +58,9 @@ def test_parse_gemini_record_merges_hook_ttft(
 
     otlp_module._parse_gemini_record(record, attrs, "session-1")
 
-    assert captured["fields"]["ttft_ms"] == 6845
-    assert captured["fields"]["latency_ms"] == 8719
-    assert captured["fields"]["prompt_length"] == 4321
+    assert captured["usage"].ttft_ms == 6845
+    assert captured["usage"].latency_ms == 8719
+    assert captured["usage"].prompt_length == 4321
 
 
 def test_parse_gemini_record_resolves_base_url_id_from_local_config(
@@ -79,9 +83,7 @@ def test_parse_gemini_record_resolves_base_url_id_from_local_config(
     monkeypatch.setattr(
         otlp_module,
         "log_usage",
-        lambda db_path, **fields: captured.update(
-            {"db_path": db_path, "fields": fields}
-        ),
+        _capture_usage(captured),
     )
 
     record_ts = datetime(2026, 4, 19, 20, 5, 1, 614000, tzinfo=timezone.utc)
@@ -101,13 +103,12 @@ def test_parse_gemini_record_resolves_base_url_id_from_local_config(
     otlp_module._parse_gemini_record(record, attrs, "session-1")
 
     assert captured["resolve"] == {
-        "db_path": otlp_module.CONFIG["db"]["url"],
         "base_url": "https://generativelanguage.googleapis.com",
         "provider_name": "Google",
         "source": "gemini_settings",
     }
-    assert captured["fields"]["base_url_id"] == 11
-    assert captured["fields"]["provider"] == "Google"
+    assert captured["usage"].base_url_id == 11
+    assert captured["usage"].provider == "Google"
 
 
 def test_prompt_length_tracker_records_and_consumes_matching_prompt_event(otlp_module):
@@ -154,9 +155,7 @@ def test_parse_claude_record_uses_prompt_length_from_prior_prompt_event(
     monkeypatch.setattr(
         otlp_module,
         "log_usage",
-        lambda db_path, **fields: captured.update(
-            {"db_path": db_path, "fields": fields}
-        ),
+        _capture_usage(captured),
     )
 
     prompt_record = {
@@ -192,7 +191,7 @@ def test_parse_claude_record_uses_prompt_length_from_prior_prompt_event(
 
     otlp_module._parse_log_record(response_record, "claude-code", "claude-session-1")
 
-    assert captured["fields"]["prompt_length"] == 2468
+    assert captured["usage"].prompt_length == 2468
 
 
 def test_parse_codex_record_uses_prompt_length_from_prior_prompt_event(
@@ -202,9 +201,7 @@ def test_parse_codex_record_uses_prompt_length_from_prior_prompt_event(
     monkeypatch.setattr(
         otlp_module,
         "log_usage",
-        lambda db_path, **fields: captured.update(
-            {"db_path": db_path, "fields": fields}
-        ),
+        _capture_usage(captured),
     )
 
     prompt_record = {
@@ -241,7 +238,7 @@ def test_parse_codex_record_uses_prompt_length_from_prior_prompt_event(
 
     otlp_module._parse_log_record(response_record, "codex_cli_rs", "")
 
-    assert captured["fields"]["prompt_length"] == 88
+    assert captured["usage"].prompt_length == 88
 
 
 def test_parse_gemini_record_uses_prompt_length_from_prior_prompt_event(
@@ -251,9 +248,7 @@ def test_parse_gemini_record_uses_prompt_length_from_prior_prompt_event(
     monkeypatch.setattr(
         otlp_module,
         "log_usage",
-        lambda db_path, **fields: captured.update(
-            {"db_path": db_path, "fields": fields}
-        ),
+        _capture_usage(captured),
     )
 
     prompt_record = {
@@ -288,7 +283,7 @@ def test_parse_gemini_record_uses_prompt_length_from_prior_prompt_event(
 
     otlp_module._parse_log_record(response_record, "gemini-cli", "gemini-session-1")
 
-    assert captured["fields"]["prompt_length"] == 3210
+    assert captured["usage"].prompt_length == 3210
 
 
 def test_inline_prompt_length_is_not_queued_for_next_request(otlp_module, monkeypatch):
@@ -296,7 +291,7 @@ def test_inline_prompt_length_is_not_queued_for_next_request(otlp_module, monkey
     monkeypatch.setattr(
         otlp_module,
         "log_usage",
-        lambda db_path, **fields: captured.append(fields),
+        lambda usage, db_path=None: captured.append(usage),
     )
 
     response_ts_1 = datetime(2026, 4, 22, 21, 15, 0, tzinfo=timezone.utc)
@@ -338,8 +333,8 @@ def test_inline_prompt_length_is_not_queued_for_next_request(otlp_module, monkey
         response_record_2, "gemini-cli", "gemini-session-inline"
     )
 
-    assert captured[0]["prompt_length"] == 999
-    assert captured[1]["prompt_length"] == 0
+    assert captured[0].prompt_length == 999
+    assert captured[1].prompt_length == 0
 
 
 def test_consume_hook_ttft_missing_session_returns_none(

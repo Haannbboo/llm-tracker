@@ -1,67 +1,83 @@
+"""Database models and query helpers for llm-tracker.
+
+The steady-state pattern in this module is:
+- ORM models for entity lifecycle operations such as inserts and base URL resolution
+- `select(...)`-style projection queries for usage reporting and aggregation
+"""
+
 from __future__ import annotations
+
 
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
 from sqlalchemy import (
-    Column,
     ForeignKey,
     Integer,
-    MetaData,
     String,
-    Table,
     and_,
     create_engine,
     func,
-    inspect,
-    insert,
     select,
     text,
-    update,
 )
 from sqlalchemy.engine import Engine
-from sqlalchemy.exc import IntegrityError, SQLAlchemyError
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, relationship
 
 from config.app import CONFIG
 
-metadata = MetaData()
 
-base_urls_table = Table(
-    "base_urls",
-    metadata,
-    Column("id", Integer, primary_key=True, autoincrement=True),
-    Column("base_url", String, nullable=False, unique=True),
-    Column("provider_name", String),
-    Column("source", String),
-)
+class Base(DeclarativeBase):
+    pass
 
-usage_table = Table(
-    "usage",
-    metadata,
-    Column("id", Integer, primary_key=True, autoincrement=True),
-    Column("ts", String, nullable=False),
-    Column("provider", String, nullable=False),
-    Column("model", String, nullable=False),
-    Column("endpoint", String, nullable=False),
-    Column("prompt_tokens", Integer),
-    Column("prompt_length", Integer, nullable=False, server_default=text("0")),
-    Column("completion_tokens", Integer),
-    Column("reasoning_tokens", Integer),
-    Column("cached_tokens", Integer),
-    Column("total_tokens", Integer),
-    Column("latency_ms", Integer),
-    Column("ttft_ms", Integer),
-    Column("tool_tokens", Integer),
-    Column("cache_creation_tokens", Integer),
-    Column("status", Integer),
-    Column("base_url_id", Integer, ForeignKey("base_urls.id"), nullable=True),
-)
+
+metadata = Base.metadata
+
+
+class BaseUrl(Base):
+    __tablename__ = "base_urls"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    base_url: Mapped[str] = mapped_column(String, nullable=False, unique=True)
+    provider_name: Mapped[str | None] = mapped_column(String, nullable=True)
+    source: Mapped[str | None] = mapped_column(String, nullable=True)
+    usages: Mapped[list["Usage"]] = relationship(back_populates="base_url")
+
+
+class Usage(Base):
+    __tablename__ = "usage"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    ts: Mapped[str] = mapped_column(String, nullable=False)
+    provider: Mapped[str] = mapped_column(String, nullable=False)
+    model: Mapped[str] = mapped_column(String, nullable=False)
+    endpoint: Mapped[str] = mapped_column(String, nullable=False)
+    prompt_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    prompt_length: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default=text("0")
+    )
+    completion_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    reasoning_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    cached_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    total_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    latency_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    ttft_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    tool_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    cache_creation_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    status: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    base_url_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("base_urls.id"), nullable=True
+    )
+    base_url: Mapped[BaseUrl | None] = relationship(back_populates="usages")
+
 
 _engine_cache: dict[str, Engine] = {}
 
 
 def get_db_url(db_path: str | None = None) -> str:
+    """Resolve an explicit DB override or fall back to the configured default."""
     if db_path and "://" in db_path:
         return db_path
     if db_path:
@@ -76,6 +92,7 @@ def _connect_args(db_url: str) -> dict[str, Any]:
 
 
 def get_engine(db_path: str | None = None) -> Engine:
+    """Return a cached engine for the requested database URL/path."""
     db_url = get_db_url(db_path)
     if db_url not in _engine_cache:
         if db_url.startswith("sqlite:///"):
@@ -91,131 +108,29 @@ def get_engine(db_path: str | None = None) -> Engine:
 
 
 def init_db(db_path: str | None = None) -> None:
+    """Create ORM-managed tables if they do not already exist."""
     engine = get_engine(db_path)
     metadata.create_all(engine)
-    _ensure_base_urls_columns_removed(engine)
-    _ensure_usage_columns(engine)
 
 
-def _ensure_usage_columns(engine: Engine) -> None:
-    if not _usage_table_exists(engine):
-        return
-
-    _ensure_usage_column(
-        engine,
-        "prompt_length",
-        sqlite_definition="INTEGER NOT NULL DEFAULT 0",
-        postgresql_definition="INTEGER NOT NULL DEFAULT 0",
-    )
-    _ensure_usage_column(
-        engine,
-        "base_url_id",
-        sqlite_definition="INTEGER REFERENCES base_urls(id)",
-        postgresql_definition="INTEGER REFERENCES base_urls(id)",
-    )
+# === Entity / Persistence Helpers ===
+# Operate on ORM objects and small entity workflows.
 
 
-def _ensure_usage_column(
-    engine: Engine,
-    column_name: str,
-    *,
-    sqlite_definition: str,
-    postgresql_definition: str,
-) -> None:
-    if column_name in _usage_column_names(engine):
-        return
-
-    definition = (
-        postgresql_definition
-        if engine.dialect.name == "postgresql"
-        else sqlite_definition
-    )
-
-    with engine.begin() as connection:
-        try:
-            if engine.dialect.name == "postgresql":
-                connection.execute(
-                    text(
-                        f"ALTER TABLE usage ADD COLUMN IF NOT EXISTS {column_name} {definition}"
-                    )
-                )
-            else:
-                connection.execute(
-                    text(f"ALTER TABLE usage ADD COLUMN {column_name} {definition}")
-                )
-        except SQLAlchemyError:
-            # Another process may have added the column after our initial schema check.
-            if column_name not in _usage_column_names(engine):
-                raise
-
-
-def _usage_table_exists(engine: Engine) -> bool:
-    return "usage" in inspect(engine).get_table_names()
-
-
-def _base_urls_table_exists(engine: Engine) -> bool:
-    return "base_urls" in inspect(engine).get_table_names()
-
-
-def _usage_column_names(engine: Engine) -> set[str]:
-    return _table_column_names(engine, "usage")
-
-
-def _base_url_column_names(engine: Engine) -> set[str]:
-    return _table_column_names(engine, "base_urls")
-
-
-def _table_column_names(engine: Engine, table_name: str) -> set[str]:
-    return {column["name"] for column in inspect(engine).get_columns(table_name)}
-
-
-def _ensure_base_urls_columns_removed(engine: Engine) -> None:
-    if not _base_urls_table_exists(engine):
-        return
-
-    _drop_table_column(engine, "base_urls", "validation_status")
-    _drop_table_column(engine, "base_urls", "last_error")
-
-
-def _drop_table_column(engine: Engine, table_name: str, column_name: str) -> None:
-    if column_name not in _table_column_names(engine, table_name):
-        return
-
-    with engine.begin() as connection:
-        try:
-            if engine.dialect.name == "postgresql":
-                connection.execute(
-                    text(
-                        f"ALTER TABLE {table_name} DROP COLUMN IF EXISTS {column_name}"
-                    )
-                )
-            else:
-                connection.execute(
-                    text(f"ALTER TABLE {table_name} DROP COLUMN {column_name}")
-                )
-        except SQLAlchemyError:
-            if column_name in _table_column_names(engine, table_name):
-                raise
-
-
-def _base_url_row(base_url: str, connection: Any) -> Any:
-    return connection.execute(
-        select(base_urls_table).where(base_urls_table.c.base_url == base_url)
-    ).first()
-
-
-def _base_url_updates(
-    row: Any,
+def _apply_base_url_updates(
+    row: BaseUrl,
     *,
     provider_name: str | None,
     source: str | None,
-) -> dict[str, Any]:
-    updates: dict[str, Any] = {}
+) -> bool:
+    updated = False
     if provider_name and (not row.provider_name or row.provider_name == "unknown"):
-        updates["provider_name"] = provider_name
+        row.provider_name = provider_name
+        updated = True
     if source and not row.source:
-        updates["source"] = source
-    return updates
+        row.source = source
+        updated = True
+    return updated
 
 
 def get_or_create_base_url(
@@ -225,38 +140,34 @@ def get_or_create_base_url(
     provider_name: str | None = None,
     source: str | None = None,
 ) -> int:
+    """Resolve a stable `base_urls.id`, updating missing metadata when possible."""
     engine = get_engine(db_path)
 
     for attempt in range(2):
-        with engine.begin() as connection:
-            row = _base_url_row(base_url, connection)
+        with Session(engine) as session:
+            row = session.scalar(select(BaseUrl).where(BaseUrl.base_url == base_url))
             if row is not None:
-                updates = _base_url_updates(
+                if _apply_base_url_updates(
                     row,
                     provider_name=provider_name,
                     source=source,
-                )
-                if updates:
-                    connection.execute(
-                        update(base_urls_table)
-                        .where(base_urls_table.c.id == row.id)
-                        .values(**updates)
-                    )
+                ):
+                    session.commit()
                 return int(row.id)
 
-            values = {
-                "base_url": base_url,
-                "provider_name": provider_name,
-                "source": source,
-            }
-
+            row = BaseUrl(
+                base_url=base_url,
+                provider_name=provider_name,
+                source=source,
+            )
+            session.add(row)
             try:
-                result = connection.execute(insert(base_urls_table), [values])
-                inserted_id = result.inserted_primary_key[0]
-                return int(inserted_id)
+                session.commit()
+                return int(row.id)
             except IntegrityError:
                 # On PostgreSQL, the transaction is aborted after an IntegrityError.
                 # Retry in a fresh transaction so we can observe the winning row.
+                session.rollback()
                 if attempt == 0:
                     continue
                 raise
@@ -282,13 +193,19 @@ def resolve_base_url_id(
     )
 
 
-def log_usage(db_path: str | None = None, **fields: Any) -> None:
-    with get_engine(db_path).begin() as connection:
-        connection.execute(insert(usage_table), [fields])
+def log_usage(usage: Usage, db_path: str | None = None) -> None:
+    """Persist a single usage row to the configured or explicitly provided DB."""
+    with Session(get_engine(db_path)) as session:
+        session.add(usage)
+        session.commit()
 
 
 def _row_to_dict(row: Any) -> dict[str, Any]:
     return dict(row._mapping)
+
+
+# === Reporting / Query Helpers ===
+# Return projected rows and aggregates for API consumers.
 
 
 def _usage_filters(
@@ -300,13 +217,13 @@ def _usage_filters(
 ) -> list[Any]:
     filters: list[Any] = []
     if provider:
-        filters.append(usage_table.c.provider == provider)
+        filters.append(Usage.provider == provider)
     if model:
-        filters.append(usage_table.c.model == model)
+        filters.append(Usage.model == model)
     if since:
-        filters.append(usage_table.c.ts >= since)
+        filters.append(Usage.ts >= since)
     if until:
-        filters.append(usage_table.c.ts <= until)
+        filters.append(Usage.ts <= until)
     return filters
 
 
@@ -319,6 +236,7 @@ def fetch_recent_usage(
     since: str | None = None,
     until: str | None = None,
 ) -> list[dict[str, Any]]:
+    """Return recent usage rows plus the resolved base URL when available."""
     filters = _usage_filters(
         provider=provider,
         model=model,
@@ -326,13 +244,29 @@ def fetch_recent_usage(
         until=until,
     )
     query = (
-        select(*usage_table.c, base_urls_table.c.base_url.label("base_url"))
-        .select_from(
-            usage_table.outerjoin(
-                base_urls_table, usage_table.c.base_url_id == base_urls_table.c.id
-            )
+        select(
+            Usage.id,
+            Usage.ts,
+            Usage.provider,
+            Usage.model,
+            Usage.endpoint,
+            Usage.prompt_tokens,
+            Usage.prompt_length,
+            Usage.completion_tokens,
+            Usage.reasoning_tokens,
+            Usage.cached_tokens,
+            Usage.total_tokens,
+            Usage.latency_ms,
+            Usage.ttft_ms,
+            Usage.tool_tokens,
+            Usage.cache_creation_tokens,
+            Usage.status,
+            Usage.base_url_id,
+            BaseUrl.base_url.label("base_url"),
         )
-        .order_by(usage_table.c.ts.desc())
+        .select_from(Usage)
+        .outerjoin(BaseUrl, Usage.base_url_id == BaseUrl.id)
+        .order_by(Usage.ts.desc())
         .limit(limit)
         .offset(offset)
     )
@@ -349,13 +283,14 @@ def count_usage(
     since: str | None = None,
     until: str | None = None,
 ) -> int:
+    """Count usage rows matching the optional provider/model/time filters."""
     filters = _usage_filters(
         provider=provider,
         model=model,
         since=since,
         until=until,
     )
-    query = select(func.count()).select_from(usage_table)
+    query = select(func.count()).select_from(Usage)
     if filters:
         query = query.where(and_(*filters))
     with get_engine().connect() as connection:
@@ -367,21 +302,22 @@ def summarize_usage(
     since: str | None = None,
     until: str | None = None,
 ) -> list[dict[str, Any]]:
+    """Aggregate usage totals by provider and model for dashboard summaries."""
     filters = _usage_filters(since=since, until=until)
     query = (
         select(
-            usage_table.c.provider,
-            usage_table.c.model,
+            Usage.provider,
+            Usage.model,
             func.count().label("requests"),
-            func.sum(usage_table.c.prompt_tokens).label("prompt_tokens"),
-            func.sum(usage_table.c.completion_tokens).label("completion_tokens"),
-            func.sum(usage_table.c.reasoning_tokens).label("reasoning_tokens"),
-            func.sum(usage_table.c.cached_tokens).label("cached_tokens"),
-            func.sum(usage_table.c.total_tokens).label("total_tokens"),
-            func.avg(usage_table.c.latency_ms).label("avg_latency_ms"),
+            func.sum(Usage.prompt_tokens).label("prompt_tokens"),
+            func.sum(Usage.completion_tokens).label("completion_tokens"),
+            func.sum(Usage.reasoning_tokens).label("reasoning_tokens"),
+            func.sum(Usage.cached_tokens).label("cached_tokens"),
+            func.sum(Usage.total_tokens).label("total_tokens"),
+            func.avg(Usage.latency_ms).label("avg_latency_ms"),
         )
-        .group_by(usage_table.c.provider, usage_table.c.model)
-        .order_by(func.sum(usage_table.c.total_tokens).desc())
+        .group_by(Usage.provider, Usage.model)
+        .order_by(func.sum(Usage.total_tokens).desc())
     )
     if filters:
         query = query.where(and_(*filters))
@@ -406,6 +342,7 @@ def aggregate_usage_by_period(
     granularity: str = "day",
     tz_offset: str = "+00:00",
 ) -> list[dict[str, Any]]:
+    """Bucket usage into local-time hourly or daily periods in Python."""
     filters = _usage_filters(
         provider=provider,
         model=model,
@@ -413,12 +350,12 @@ def aggregate_usage_by_period(
         until=until,
     )
     query = select(
-        usage_table.c.ts,
-        usage_table.c.prompt_tokens,
-        usage_table.c.completion_tokens,
-        usage_table.c.cached_tokens,
-        usage_table.c.total_tokens,
-    ).order_by(usage_table.c.ts.asc())
+        Usage.ts,
+        Usage.prompt_tokens,
+        Usage.completion_tokens,
+        Usage.cached_tokens,
+        Usage.total_tokens,
+    ).order_by(Usage.ts.asc())
     if filters:
         query = query.where(and_(*filters))
 

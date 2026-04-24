@@ -59,6 +59,9 @@ if [[ -d "${HOME}/.claude" ]]; then
   "${PYTHON}" "${ROOT_DIR}/scripts/configure-claude-settings.py" "${HOME}/.claude/settings.json" "${OTLP_PORT}"
 fi
 
+echo "==> Applying schema migrations..."
+"${PYTHON}" "${ROOT_DIR}/scripts/migrate_schema.py"
+
 for prog in llm-tracker-proxy llm-tracker-api llm-tracker-otlp; do
   status="$("${SUPERVISORCTL}" -c "${SUPERVISORD_CONF}" status "${prog}" 2>/dev/null | awk '{print $2}' || true)"
   if [[ "${status}" == "RUNNING" ]]; then

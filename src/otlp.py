@@ -7,8 +7,7 @@ from datetime import datetime, timezone
 
 from fastapi import FastAPI, Request
 
-from config.app import CONFIG
-from .database import init_db, log_usage, resolve_base_url_id
+from .database import Usage, init_db, log_usage, resolve_base_url_id
 from .provider_parser import parse_provider_metadata
 
 GEMINI_EVENT = "gemini_cli.api_response"
@@ -198,27 +197,27 @@ def _parse_gemini_record(record: dict, attrs: list, session_id: str) -> None:
     metadata = parse_provider_metadata("gemini")
 
     log_usage(
-        CONFIG["db"]["url"],
-        ts=ts,
-        provider=metadata.provider,
-        model=model,
-        endpoint="generate-otlp",
-        prompt_tokens=prompt_tokens,
-        prompt_length=prompt_length,
-        completion_tokens=completion_total,
-        cached_tokens=_attr(attrs, "cached_content_token_count"),
-        reasoning_tokens=thoughts_tokens,
-        tool_tokens=tool_tokens,
-        total_tokens=_attr(attrs, "total_token_count"),
-        latency_ms=latency_ms if latency_ms is not None else hook_latency_ms,
-        ttft_ms=ttft_ms,
-        cache_creation_tokens=None,
-        status=status,
-        base_url_id=resolve_base_url_id(
-            db_path=CONFIG["db"]["url"],
-            base_url=metadata.base_url,
-            provider_name=metadata.provider,
-            source=metadata.source,
+        Usage(
+            ts=ts,
+            provider=metadata.provider,
+            model=model,
+            endpoint="generate-otlp",
+            prompt_tokens=prompt_tokens,
+            prompt_length=prompt_length,
+            completion_tokens=completion_total,
+            cached_tokens=_attr(attrs, "cached_content_token_count"),
+            reasoning_tokens=thoughts_tokens,
+            tool_tokens=tool_tokens,
+            total_tokens=_attr(attrs, "total_token_count"),
+            latency_ms=latency_ms if latency_ms is not None else hook_latency_ms,
+            ttft_ms=ttft_ms,
+            cache_creation_tokens=None,
+            status=status,
+            base_url_id=resolve_base_url_id(
+                base_url=metadata.base_url,
+                provider_name=metadata.provider,
+                source=metadata.source,
+            ),
         ),
     )
 
@@ -241,27 +240,29 @@ def _parse_claude_record(record: dict, attrs: list, session_id: str) -> None:
 
     total = prompt_tokens + int(output_tokens or 0) + int(cache_create or 0)
     log_usage(
-        CONFIG["db"]["url"],
-        ts=ts,
-        provider=metadata.provider,
-        model=_attr(attrs, "model") or "claude-unknown",
-        endpoint="generate-otlp",
-        prompt_tokens=prompt_tokens,
-        prompt_length=prompt_length,
-        completion_tokens=int(output_tokens) if output_tokens is not None else None,
-        cached_tokens=int(cache_read) if cache_read is not None else None,
-        cache_creation_tokens=int(cache_create) if cache_create is not None else None,
-        reasoning_tokens=None,
-        tool_tokens=None,
-        total_tokens=total,
-        latency_ms=_attr(attrs, "duration_ms"),
-        ttft_ms=None,
-        status=None,
-        base_url_id=resolve_base_url_id(
-            db_path=CONFIG["db"]["url"],
-            base_url=metadata.base_url,
-            provider_name=metadata.provider,
-            source=metadata.source,
+        Usage(
+            ts=ts,
+            provider=metadata.provider,
+            model=_attr(attrs, "model") or "claude-unknown",
+            endpoint="generate-otlp",
+            prompt_tokens=prompt_tokens,
+            prompt_length=prompt_length,
+            completion_tokens=int(output_tokens) if output_tokens is not None else None,
+            cached_tokens=int(cache_read) if cache_read is not None else None,
+            cache_creation_tokens=int(cache_create)
+            if cache_create is not None
+            else None,
+            reasoning_tokens=None,
+            tool_tokens=None,
+            total_tokens=total,
+            latency_ms=_attr(attrs, "duration_ms"),
+            ttft_ms=None,
+            status=None,
+            base_url_id=resolve_base_url_id(
+                base_url=metadata.base_url,
+                provider_name=metadata.provider,
+                source=metadata.source,
+            ),
         ),
     )
 
@@ -326,29 +327,29 @@ def _parse_codex_record(record: dict, attrs: list) -> None:
     metadata = parse_provider_metadata("codex")
 
     log_usage(
-        CONFIG["db"]["url"],
-        ts=ts,
-        provider=metadata.provider,
-        model=_attr(attrs, "model") or "codex-unknown",
-        endpoint="generate-otlp",
-        prompt_tokens=prompt_tokens,
-        prompt_length=prompt_length,
-        completion_tokens=completion_tokens,
-        cached_tokens=int(cached_tokens) if cached_tokens is not None else None,
-        reasoning_tokens=int(reasoning_tokens)
-        if reasoning_tokens is not None
-        else None,
-        tool_tokens=int(tool_tokens) if tool_tokens is not None else None,
-        total_tokens=total_tokens,
-        latency_ms=int(latency_ms) if latency_ms is not None else None,
-        ttft_ms=int(ttft_ms) if ttft_ms is not None else None,
-        cache_creation_tokens=None,
-        status=None,
-        base_url_id=resolve_base_url_id(
-            db_path=CONFIG["db"]["url"],
-            base_url=metadata.base_url,
-            provider_name=metadata.provider,
-            source=metadata.source,
+        Usage(
+            ts=ts,
+            provider=metadata.provider,
+            model=_attr(attrs, "model") or "codex-unknown",
+            endpoint="generate-otlp",
+            prompt_tokens=prompt_tokens,
+            prompt_length=prompt_length,
+            completion_tokens=completion_tokens,
+            cached_tokens=int(cached_tokens) if cached_tokens is not None else None,
+            reasoning_tokens=int(reasoning_tokens)
+            if reasoning_tokens is not None
+            else None,
+            tool_tokens=int(tool_tokens) if tool_tokens is not None else None,
+            total_tokens=total_tokens,
+            latency_ms=int(latency_ms) if latency_ms is not None else None,
+            ttft_ms=int(ttft_ms) if ttft_ms is not None else None,
+            cache_creation_tokens=None,
+            status=None,
+            base_url_id=resolve_base_url_id(
+                base_url=metadata.base_url,
+                provider_name=metadata.provider,
+                source=metadata.source,
+            ),
         ),
     )
 
@@ -384,7 +385,7 @@ def _parse_log_record(record: dict, service_name: str, session_id: str) -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    init_db(CONFIG["db"]["url"])
+    init_db()
     yield
 
 

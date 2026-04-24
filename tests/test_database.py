@@ -10,22 +10,24 @@ def test_init_db_log_usage_and_fetch_rows(database_module, isolated_home):
     )
 
     database_module.log_usage(
-        db_path,
-        ts="2026-04-17T00:00:00+00:00",
-        provider="test-provider",
-        model="test-model",
-        endpoint="/v1/responses",
-        prompt_tokens=10,
-        completion_tokens=5,
-        reasoning_tokens=1,
-        cached_tokens=2,
-        total_tokens=15,
-        latency_ms=123,
-        ttft_ms=None,
-        tool_tokens=None,
-        cache_creation_tokens=None,
-        status=200,
-        base_url_id=base_url_id,
+        database_module.Usage(
+            ts="2026-04-17T00:00:00+00:00",
+            provider="test-provider",
+            model="test-model",
+            endpoint="/v1/responses",
+            prompt_tokens=10,
+            completion_tokens=5,
+            reasoning_tokens=1,
+            cached_tokens=2,
+            total_tokens=15,
+            latency_ms=123,
+            ttft_ms=None,
+            tool_tokens=None,
+            cache_creation_tokens=None,
+            status=200,
+            base_url_id=base_url_id,
+        ),
+        db_path=db_path,
     )
 
     rows = database_module.fetch_recent_usage(limit=10)
@@ -54,9 +56,57 @@ def test_init_db_log_usage_and_fetch_rows(database_module, isolated_home):
     ]
 
 
-def test_init_db_adds_prompt_length_to_existing_usage_table(
-    database_module, isolated_home
-):
+def test_fetch_recent_usage_returns_expected_row_shape(database_module, isolated_home):
+    db_path = str(isolated_home / "usage.db")
+    database_module.init_db(db_path)
+
+    database_module.log_usage(
+        database_module.Usage(
+            ts="2026-04-17T00:00:00+00:00",
+            provider="test-provider",
+            model="test-model",
+            endpoint="/v1/responses",
+            prompt_tokens=10,
+            prompt_length=123,
+            completion_tokens=5,
+            reasoning_tokens=1,
+            cached_tokens=2,
+            total_tokens=15,
+            latency_ms=123,
+            ttft_ms=45,
+            tool_tokens=3,
+            cache_creation_tokens=4,
+            status=200,
+            base_url_id=None,
+        ),
+        db_path=db_path,
+    )
+
+    row = database_module.fetch_recent_usage(limit=1)[0]
+
+    assert set(row) == {
+        "id",
+        "ts",
+        "provider",
+        "model",
+        "endpoint",
+        "prompt_tokens",
+        "prompt_length",
+        "completion_tokens",
+        "reasoning_tokens",
+        "cached_tokens",
+        "total_tokens",
+        "latency_ms",
+        "ttft_ms",
+        "tool_tokens",
+        "cache_creation_tokens",
+        "status",
+        "base_url_id",
+        "base_url",
+    }
+
+
+def test_init_db_does_not_mutate_existing_usage_table(database_module, isolated_home):
     import sqlite3
 
     db_file = isolated_home / "usage.db"
@@ -123,14 +173,18 @@ def test_init_db_adds_prompt_length_to_existing_usage_table(
 
     database_module.init_db(str(db_file))
 
-    rows = database_module.fetch_recent_usage(limit=10)
-    assert rows[0]["prompt_length"] == 0
-    assert rows[0]["base_url_id"] is None
-    assert rows[0]["base_url"] is None
+    connection = sqlite3.connect(db_file)
+    columns = {
+        row[1] for row in connection.execute("PRAGMA table_info(usage)").fetchall()
+    }
+    connection.close()
+
+    assert "prompt_length" not in columns
+    assert "base_url_id" not in columns
 
 
-def test_init_db_adds_base_url_id_to_existing_usage_table(
-    database_module, isolated_home
+def test_migrate_database_adds_usage_columns(
+    database_module, schema_migrations_module, isolated_home
 ):
     import sqlite3
 
@@ -160,12 +214,15 @@ def test_init_db_adds_base_url_id_to_existing_usage_table(
     connection.commit()
     connection.close()
 
-    database_module.init_db(str(db_file))
+    changes = schema_migrations_module.migrate_database(str(db_file))
 
-    column_names = database_module._usage_column_names(
-        database_module.get_engine(str(db_file))
+    column_names = schema_migrations_module._table_column_names(
+        database_module.get_engine(str(db_file)), "usage"
     )
+    assert "prompt_length" in column_names
     assert "base_url_id" in column_names
+    assert "usage.prompt_length" in changes
+    assert "usage.base_url_id" in changes
 
 
 def test_get_or_create_base_url_reuses_exact_url_and_updates_metadata(
@@ -188,9 +245,7 @@ def test_get_or_create_base_url_reuses_exact_url_and_updates_metadata(
     assert same_id == base_url_id
 
     with database_module.get_engine(db_path).connect() as connection:
-        rows = connection.execute(
-            database_module.select(database_module.base_urls_table)
-        ).all()
+        rows = connection.execute(database_module.select(database_module.BaseUrl)).all()
 
     assert len(rows) == 1
     row = rows[0]
@@ -207,48 +262,37 @@ def test_get_or_create_base_url_retries_in_fresh_transaction_after_duplicate_ins
         provider_name = None
         source = None
 
-    class FakeResult:
-        inserted_primary_key = [99]
+    state = {"attempt": -1, "updated": False, "rolled_back": False}
 
-    state = {"attempt": -1, "updated": False}
-
-    class FakeConnection:
-        def __init__(self, attempt: int):
-            self.attempt = attempt
-
-        def execute(self, statement, params=None):
-            sql = str(statement)
-            if sql.startswith("INSERT INTO base_urls"):
-                raise database_module.IntegrityError("INSERT", params, Exception("dup"))
-            if sql.startswith("UPDATE base_urls"):
-                state["updated"] = True
-                return FakeResult()
-            raise AssertionError(f"unexpected SQL: {sql}")
-
-    class FakeBegin:
-        def __init__(self, attempt: int):
-            self.connection = FakeConnection(attempt)
+    class FakeSession:
+        def __init__(self, engine):
+            state["attempt"] += 1
+            self.attempt = state["attempt"]
 
         def __enter__(self):
-            return self.connection
+            return self
 
         def __exit__(self, exc_type, exc, tb):
             return False
 
-    class FakeEngine:
-        def begin(self):
-            state["attempt"] += 1
-            return FakeBegin(state["attempt"])
+        def scalar(self, statement):
+            if self.attempt == 0:
+                return None
+            return FakeRow()
 
-    def fake_base_url_row(base_url, connection):
-        if connection.attempt == 0:
-            return None
-        return FakeRow()
+        def add(self, row):
+            self.row = row
 
-    monkeypatch.setattr(
-        database_module, "get_engine", lambda db_path=None: FakeEngine()
-    )
-    monkeypatch.setattr(database_module, "_base_url_row", fake_base_url_row)
+        def commit(self):
+            if self.attempt == 0:
+                raise database_module.IntegrityError("INSERT", None, Exception("dup"))
+            state["updated"] = True
+
+        def rollback(self):
+            state["rolled_back"] = True
+
+    monkeypatch.setattr(database_module, "get_engine", lambda db_path=None: object())
+    monkeypatch.setattr(database_module, "Session", FakeSession)
 
     base_url_id = database_module.get_or_create_base_url(
         "https://race.example/v1",
@@ -258,9 +302,12 @@ def test_get_or_create_base_url_retries_in_fresh_transaction_after_duplicate_ins
 
     assert base_url_id == 7
     assert state["updated"] is True
+    assert state["rolled_back"] is True
 
 
-def test_init_db_drops_removed_base_url_columns(database_module, isolated_home):
+def test_migrate_database_drops_removed_base_url_columns(
+    database_module, schema_migrations_module, isolated_home
+):
     import sqlite3
 
     db_file = isolated_home / "usage.db"
@@ -280,17 +327,19 @@ def test_init_db_drops_removed_base_url_columns(database_module, isolated_home):
     connection.commit()
     connection.close()
 
-    database_module.init_db(str(db_file))
+    changes = schema_migrations_module.migrate_database(str(db_file))
 
-    column_names = database_module._base_url_column_names(
-        database_module.get_engine(str(db_file))
+    column_names = schema_migrations_module._table_column_names(
+        database_module.get_engine(str(db_file)), "base_urls"
     )
     assert "validation_status" not in column_names
     assert "last_error" not in column_names
+    assert "base_urls.validation_status" in changes
+    assert "base_urls.last_error" in changes
 
 
-def test_ensure_usage_columns_ignores_duplicate_column_from_concurrent_migration(
-    database_module, monkeypatch
+def test_ensure_column_ignores_duplicate_column_from_concurrent_migration(
+    schema_migrations_module, monkeypatch
 ):
     state = {"column_exists": set()}
 
@@ -313,15 +362,15 @@ def test_ensure_usage_columns_ignores_duplicate_column_from_concurrent_migration
             sql = str(statement)
             if "prompt_length" in sql:
                 state["column_exists"].add("prompt_length")
-                raise database_module.SQLAlchemyError(
+                raise schema_migrations_module.SQLAlchemyError(
                     "duplicate column name: prompt_length"
                 )
             if "base_url_id" in sql:
                 state["column_exists"].add("base_url_id")
-                raise database_module.SQLAlchemyError(
+                raise schema_migrations_module.SQLAlchemyError(
                     "duplicate column name: base_url_id"
                 )
-            raise database_module.SQLAlchemyError("duplicate column")
+            raise schema_migrations_module.SQLAlchemyError("duplicate column")
 
     class FakeBegin:
         def __enter__(self):
@@ -339,6 +388,17 @@ def test_ensure_usage_columns_ignores_duplicate_column_from_concurrent_migration
         def begin(self):
             return FakeBegin()
 
-    monkeypatch.setattr(database_module, "inspect", lambda engine: FakeInspector())
+    monkeypatch.setattr(
+        schema_migrations_module, "inspect", lambda engine: FakeInspector()
+    )
 
-    database_module._ensure_usage_columns(FakeEngine())
+    assert (
+        schema_migrations_module._ensure_column(
+            FakeEngine(),
+            "usage",
+            "prompt_length",
+            sqlite_definition="INTEGER NOT NULL DEFAULT 0",
+            postgresql_definition="INTEGER NOT NULL DEFAULT 0",
+        )
+        is False
+    )

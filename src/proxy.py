@@ -16,7 +16,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 
 from config.app import CONFIG, MODEL_MAP, PROVIDER_MAP, ProviderConfig
-from .database import init_db, log_usage, resolve_base_url_id
+from .database import Usage, init_db, log_usage, resolve_base_url_id
 from .utils import extract_usage, extract_stream_usage, build_usage_record
 
 REQUEST_TIMEOUT_SECONDS = 300
@@ -62,7 +62,6 @@ def parse_json_body(body: bytes) -> dict[str, Any]:
 
 def resolve_provider_base_url_id(provider: ProviderConfig) -> int | None:
     return resolve_base_url_id(
-        db_path=CONFIG["db"]["url"],
         base_url=provider.base_url,
         provider_name=provider.name,
         source="proxy_config",
@@ -111,16 +110,17 @@ async def stream_upstream_response(
     finally:
         latency_ms = int((time.monotonic() - started_at) * 1000)
         log_usage(
-            CONFIG["db"]["url"],
-            **build_usage_record(
-                provider_name=provider.name,
-                model=model,
-                endpoint=path,
-                latency_ms=latency_ms,
-                status=status,
-                usage_fields=usage_fields,
-            )
-            | {"base_url_id": resolve_provider_base_url_id(provider)},
+            Usage(
+                **build_usage_record(
+                    provider_name=provider.name,
+                    model=model,
+                    endpoint=path,
+                    latency_ms=latency_ms,
+                    status=status,
+                    usage_fields=usage_fields,
+                )
+                | {"base_url_id": resolve_provider_base_url_id(provider)}
+            ),
         )
 
 
@@ -163,16 +163,17 @@ async def forward(request: Request, path: str):
     latency_ms = int((time.monotonic() - started_at) * 1000)
     response_json = response.json()
     log_usage(
-        CONFIG["db"]["url"],
-        **build_usage_record(
-            provider_name=provider.name,
-            model=model,
-            endpoint=path,
-            latency_ms=latency_ms,
-            status=response.status_code,
-            usage_fields=extract_usage(response_json.get("usage", {})),
-        )
-        | {"base_url_id": resolve_provider_base_url_id(provider)},
+        Usage(
+            **build_usage_record(
+                provider_name=provider.name,
+                model=model,
+                endpoint=path,
+                latency_ms=latency_ms,
+                status=response.status_code,
+                usage_fields=extract_usage(response_json.get("usage", {})),
+            )
+            | {"base_url_id": resolve_provider_base_url_id(provider)}
+        ),
     )
 
     return JSONResponse(content=response_json, status_code=response.status_code)
@@ -180,7 +181,7 @@ async def forward(request: Request, path: str):
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    init_db(CONFIG["db"]["url"])
+    init_db()
     yield
 
 

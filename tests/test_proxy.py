@@ -154,8 +154,8 @@ async def test_forward_logs_base_url_id_from_provider_config(proxy_module, monke
     monkeypatch.setattr(
         proxy_module,
         "log_usage",
-        lambda db_path, **fields: captured.update(
-            {"db_path": db_path, "fields": fields}
+        lambda usage, db_path=None: captured.update(
+            {"db_path": db_path, "usage": usage}
         ),
     )
 
@@ -173,5 +173,5 @@ async def test_forward_logs_base_url_id_from_provider_config(proxy_module, monke
 
     assert response.status_code == 200
     assert captured["url"] == "https://api.example.com/v1/responses"
-    assert captured["fields"]["base_url_id"] == 7
-    assert captured["fields"]["provider"] == "test-provider"
+    assert captured["usage"].base_url_id == 7
+    assert captured["usage"].provider == "test-provider"
