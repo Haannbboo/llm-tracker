@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from decimal import Decimal
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -20,6 +21,33 @@ def _capture_usage(target: dict):
     return lambda usage, db_path=None: target.update(
         {"db_path": db_path, "usage": usage}
     )
+
+
+def _set_global_model_cost(
+    config_module, model: str, *, input: float, output: float, cache_read: float
+):
+    previous_model_costs = dict(config_module.MODEL_COSTS)
+    previous_provider_model_costs = {
+        provider: dict(costs)
+        for provider, costs in config_module.PROVIDER_MODEL_COSTS.items()
+    }
+    config_module.MODEL_COSTS.clear()
+    config_module.MODEL_COSTS[model] = config_module.ModelCost(
+        input=input,
+        output=output,
+        cache_read=cache_read,
+    )
+    config_module.PROVIDER_MODEL_COSTS.clear()
+    return previous_model_costs, previous_provider_model_costs
+
+
+def _restore_model_costs(
+    config_module, previous_model_costs, previous_provider_model_costs
+):
+    config_module.MODEL_COSTS.clear()
+    config_module.MODEL_COSTS.update(previous_model_costs)
+    config_module.PROVIDER_MODEL_COSTS.clear()
+    config_module.PROVIDER_MODEL_COSTS.update(previous_provider_model_costs)
 
 
 def test_parse_gemini_record_merges_hook_ttft(
@@ -111,6 +139,42 @@ def test_parse_gemini_record_resolves_base_url_id_from_local_config(
     assert captured["usage"].provider == "Google"
 
 
+def test_parse_gemini_record_persists_costs(otlp_module, config_module, monkeypatch):
+    previous_model_costs, previous_provider_model_costs = _set_global_model_cost(
+        config_module,
+        "gemini-3-flash-preview",
+        input=2.0,
+        output=6.0,
+        cache_read=0.5,
+    )
+    captured = {}
+    monkeypatch.setattr(otlp_module, "log_usage", _capture_usage(captured))
+
+    try:
+        record_ts = datetime(2026, 4, 19, 20, 5, 1, 614000, tzinfo=timezone.utc)
+        record = {"timeUnixNano": str(int(record_ts.timestamp() * 1_000_000_000))}
+        attrs = _attrs(
+            {
+                "model": "gemini-3-flash-preview",
+                "role": "main",
+                "session.id": "session-1",
+                "input_token_count": 793,
+                "output_token_count": 1359,
+                "total_token_count": 2152,
+            }
+        )
+
+        otlp_module._parse_gemini_record(record, attrs, "session-1")
+
+        assert captured["usage"].input_cost_usd == Decimal("0.001586")
+        assert captured["usage"].output_cost_usd == Decimal("0.008154")
+        assert captured["usage"].total_cost_usd == Decimal("0.00974")
+    finally:
+        _restore_model_costs(
+            config_module, previous_model_costs, previous_provider_model_costs
+        )
+
+
 def test_prompt_length_tracker_records_and_consumes_matching_prompt_event(otlp_module):
     # This verifies the basic tracker contract: a prompt-only event stores the length,
     # and the later usage event for the same prompt/session consumes that exact value once.
@@ -194,6 +258,48 @@ def test_parse_claude_record_uses_prompt_length_from_prior_prompt_event(
     assert captured["usage"].prompt_length == 2468
 
 
+def test_parse_claude_record_persists_costs(otlp_module, config_module, monkeypatch):
+    previous_model_costs, previous_provider_model_costs = _set_global_model_cost(
+        config_module,
+        "claude-test",
+        input=3.0,
+        output=15.0,
+        cache_read=0.3,
+    )
+    captured = {}
+    monkeypatch.setattr(otlp_module, "log_usage", _capture_usage(captured))
+
+    try:
+        response_ts = datetime(2026, 4, 22, 21, 0, 0, tzinfo=timezone.utc)
+        response_record = {
+            "timeUnixNano": str(int(response_ts.timestamp() * 1_000_000_000)),
+            "attributes": _attrs(
+                {
+                    "event.name": "api_request",
+                    "session.id": "claude-session-1",
+                    "model": "claude-test",
+                    "input_tokens": 120,
+                    "output_tokens": 20,
+                    "cache_read_tokens": 5,
+                    "cache_creation_tokens": 0,
+                    "duration_ms": 900,
+                }
+            ),
+        }
+
+        otlp_module._parse_log_record(
+            response_record, "claude-code", "claude-session-1"
+        )
+
+        assert captured["usage"].input_cost_usd == Decimal("0.0003615")
+        assert captured["usage"].output_cost_usd == Decimal("0.0003")
+        assert captured["usage"].total_cost_usd == Decimal("0.0006615")
+    finally:
+        _restore_model_costs(
+            config_module, previous_model_costs, previous_provider_model_costs
+        )
+
+
 def test_parse_codex_record_uses_prompt_length_from_prior_prompt_event(
     otlp_module, monkeypatch
 ):
@@ -239,6 +345,48 @@ def test_parse_codex_record_uses_prompt_length_from_prior_prompt_event(
     otlp_module._parse_log_record(response_record, "codex_cli_rs", "")
 
     assert captured["usage"].prompt_length == 88
+
+
+def test_parse_codex_record_persists_costs(otlp_module, config_module, monkeypatch):
+    previous_model_costs, previous_provider_model_costs = _set_global_model_cost(
+        config_module,
+        "gpt-5.4",
+        input=1.25,
+        output=10.0,
+        cache_read=0.125,
+    )
+    captured = {}
+    monkeypatch.setattr(otlp_module, "log_usage", _capture_usage(captured))
+
+    try:
+        response_ts = datetime(2026, 4, 22, 21, 5, 0, tzinfo=timezone.utc)
+        response_record = {
+            "timeUnixNano": str(int(response_ts.timestamp() * 1_000_000_000)),
+            "attributes": _attrs(
+                {
+                    "event.name": "codex.sse_event",
+                    "event.kind": "response.completed",
+                    "conversation.id": "conv-1",
+                    "model": "gpt-5.4",
+                    "input_token_count": 500,
+                    "output_token_count": 100,
+                    "cached_token_count": 10,
+                    "reasoning_token_count": 20,
+                    "tool_token_count": 5,
+                    "duration_ms": 2000,
+                }
+            ),
+        }
+
+        otlp_module._parse_log_record(response_record, "codex_cli_rs", "")
+
+        assert captured["usage"].input_cost_usd == Decimal("0.00061375")
+        assert captured["usage"].output_cost_usd == Decimal("0.001")
+        assert captured["usage"].total_cost_usd == Decimal("0.00161375")
+    finally:
+        _restore_model_costs(
+            config_module, previous_model_costs, previous_provider_model_costs
+        )
 
 
 def test_parse_gemini_record_uses_prompt_length_from_prior_prompt_event(

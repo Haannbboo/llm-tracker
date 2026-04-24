@@ -17,8 +17,16 @@ server:
 db:
   path: {db_path}
 models:
-  test-model: {{}}
-  gpt-4.1: {{}}
+  test-model:
+    cost:
+      input: 2.0
+      output: 6.0
+      cacheRead: 0.5
+  gpt-4.1:
+    cost:
+      input: 2.0
+      output: 8.0
+      cacheRead: 0.5
 providers:
   test-provider:
     base_url: https://api.example.com/v1

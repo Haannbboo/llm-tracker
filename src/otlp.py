@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 
 from fastapi import FastAPI, Request
 
+from .costs import calculate_costs
 from .database import Usage, init_db, log_usage, resolve_base_url_id
 from .provider_parser import parse_provider_metadata
 
@@ -195,6 +196,7 @@ def _parse_gemini_record(record: dict, attrs: list, session_id: str) -> None:
         "gemini-cli", attrs, sid
     )
     metadata = parse_provider_metadata("gemini")
+    cached_tokens = _attr(attrs, "cached_content_token_count")
 
     log_usage(
         Usage(
@@ -205,13 +207,20 @@ def _parse_gemini_record(record: dict, attrs: list, session_id: str) -> None:
             prompt_tokens=prompt_tokens,
             prompt_length=prompt_length,
             completion_tokens=completion_total,
-            cached_tokens=_attr(attrs, "cached_content_token_count"),
+            cached_tokens=cached_tokens,
             reasoning_tokens=thoughts_tokens,
             tool_tokens=tool_tokens,
             total_tokens=_attr(attrs, "total_token_count"),
             latency_ms=latency_ms if latency_ms is not None else hook_latency_ms,
             ttft_ms=ttft_ms,
             cache_creation_tokens=None,
+            **calculate_costs(
+                prompt_tokens=prompt_tokens,
+                completion_tokens=completion_total,
+                cached_tokens=cached_tokens,
+                provider=metadata.provider,
+                model=model,
+            ),
             status=status,
             base_url_id=resolve_base_url_id(
                 base_url=metadata.base_url,
@@ -237,6 +246,8 @@ def _parse_claude_record(record: dict, attrs: list, session_id: str) -> None:
         "claude-code", attrs, session_id
     )
     metadata = parse_provider_metadata("claude")
+    completion_tokens = int(output_tokens) if output_tokens is not None else None
+    cached_tokens = int(cache_read) if cache_read is not None else None
 
     total = prompt_tokens + int(output_tokens or 0) + int(cache_create or 0)
     log_usage(
@@ -247,8 +258,8 @@ def _parse_claude_record(record: dict, attrs: list, session_id: str) -> None:
             endpoint="generate-otlp",
             prompt_tokens=prompt_tokens,
             prompt_length=prompt_length,
-            completion_tokens=int(output_tokens) if output_tokens is not None else None,
-            cached_tokens=int(cache_read) if cache_read is not None else None,
+            completion_tokens=completion_tokens,
+            cached_tokens=cached_tokens,
             cache_creation_tokens=int(cache_create)
             if cache_create is not None
             else None,
@@ -257,6 +268,13 @@ def _parse_claude_record(record: dict, attrs: list, session_id: str) -> None:
             total_tokens=total,
             latency_ms=_attr(attrs, "duration_ms"),
             ttft_ms=None,
+            **calculate_costs(
+                prompt_tokens=prompt_tokens,
+                completion_tokens=completion_tokens,
+                cached_tokens=cached_tokens,
+                provider=metadata.provider,
+                model=_attr(attrs, "model") or "claude-unknown",
+            ),
             status=None,
             base_url_id=resolve_base_url_id(
                 base_url=metadata.base_url,
@@ -325,12 +343,13 @@ def _parse_codex_record(record: dict, attrs: list) -> None:
         "codex_cli_rs", attrs, ""
     )
     metadata = parse_provider_metadata("codex")
+    model = _attr(attrs, "model") or "codex-unknown"
 
     log_usage(
         Usage(
             ts=ts,
             provider=metadata.provider,
-            model=_attr(attrs, "model") or "codex-unknown",
+            model=model,
             endpoint="generate-otlp",
             prompt_tokens=prompt_tokens,
             prompt_length=prompt_length,
@@ -344,6 +363,13 @@ def _parse_codex_record(record: dict, attrs: list) -> None:
             latency_ms=int(latency_ms) if latency_ms is not None else None,
             ttft_ms=int(ttft_ms) if ttft_ms is not None else None,
             cache_creation_tokens=None,
+            **calculate_costs(
+                prompt_tokens=prompt_tokens,
+                completion_tokens=completion_tokens,
+                cached_tokens=int(cached_tokens) if cached_tokens is not None else None,
+                provider=metadata.provider,
+                model=model,
+            ),
             status=None,
             base_url_id=resolve_base_url_id(
                 base_url=metadata.base_url,
