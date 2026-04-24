@@ -15,6 +15,13 @@ class ProviderConfig:
     base_url: str
 
 
+@dataclass(frozen=True)
+class ModelCost:
+    input: float
+    output: float
+    cache_read: float
+
+
 def expand_path(path: str) -> str:
     return os.path.expanduser(path)
 
@@ -72,6 +79,21 @@ def _iter_provider_models(provider: dict[str, Any]) -> list[str]:
     return []
 
 
+def _parse_model_cost(model_config: Any) -> ModelCost | None:
+    if not isinstance(model_config, dict):
+        return None
+
+    cost = model_config.get("cost")
+    if not isinstance(cost, dict):
+        return None
+
+    return ModelCost(
+        input=float(cost.get("input", 0)),
+        output=float(cost.get("output", 0)),
+        cache_read=float(cost.get("cacheRead", 0)),
+    )
+
+
 def build_maps(
     config: dict[str, Any],
 ) -> tuple[dict[str, ProviderConfig], dict[str, ProviderConfig]]:
@@ -89,9 +111,35 @@ def build_maps(
     return provider_map, model_map
 
 
+def build_cost_maps(
+    config: dict[str, Any],
+) -> tuple[dict[str, ModelCost], dict[str, dict[str, ModelCost]]]:
+    model_costs: dict[str, ModelCost] = {}
+    provider_model_costs: dict[str, dict[str, ModelCost]] = {}
+
+    for model_name, model_config in config.get("models", {}).items():
+        model_cost = _parse_model_cost(model_config)
+        if model_cost is not None:
+            model_costs[model_name] = model_cost
+
+    for provider_name, provider in config["providers"].items():
+        provider_costs: dict[str, ModelCost] = {}
+        models = provider.get("models", {})
+        if isinstance(models, dict):
+            for model_name, model_config in models.items():
+                model_cost = _parse_model_cost(model_config)
+                if model_cost is not None:
+                    provider_costs[model_name] = model_cost
+        if provider_costs:
+            provider_model_costs[provider_name] = provider_costs
+
+    return model_costs, provider_model_costs
+
+
 def refresh_runtime_config(path: str | None = None) -> dict[str, Any]:
     updated_config = load_config(path)
     provider_map, model_map = build_maps(updated_config)
+    model_costs, provider_model_costs = build_cost_maps(updated_config)
 
     CONFIG.clear()
     CONFIG.update(updated_config)
@@ -99,6 +147,10 @@ def refresh_runtime_config(path: str | None = None) -> dict[str, Any]:
     PROVIDER_MAP.update(provider_map)
     MODEL_MAP.clear()
     MODEL_MAP.update(model_map)
+    MODEL_COSTS.clear()
+    MODEL_COSTS.update(model_costs)
+    PROVIDER_MODEL_COSTS.clear()
+    PROVIDER_MODEL_COSTS.update(provider_model_costs)
 
     return CONFIG
 
@@ -106,4 +158,6 @@ def refresh_runtime_config(path: str | None = None) -> dict[str, Any]:
 CONFIG: dict[str, Any] = {}
 PROVIDER_MAP: dict[str, ProviderConfig] = {}
 MODEL_MAP: dict[str, ProviderConfig] = {}
+MODEL_COSTS: dict[str, ModelCost] = {}
+PROVIDER_MODEL_COSTS: dict[str, dict[str, ModelCost]] = {}
 refresh_runtime_config(CONFIG_PATH)

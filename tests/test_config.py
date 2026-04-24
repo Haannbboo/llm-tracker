@@ -153,6 +153,87 @@ def test_build_maps_allows_provider_without_models(config_module):
     assert model_map == {}
 
 
+def test_build_cost_maps_parses_global_and_provider_model_costs(config_module):
+    model_costs, provider_model_costs = config_module.build_cost_maps(
+        {
+            "models": {
+                "alpha-1": {"cost": {"input": 1.5, "output": 2.5, "cacheRead": 0.15}},
+                "beta-1": {},
+            },
+            "providers": {
+                "alpha": {
+                    "base_url": "https://alpha.example/v1",
+                    "models": {
+                        "alpha-1": {
+                            "cost": {"input": 3.0, "output": 4.0, "cacheRead": 0.3}
+                        },
+                        "beta-1": {},
+                    },
+                },
+            },
+        }
+    )
+
+    assert model_costs["alpha-1"] == config_module.ModelCost(
+        input=1.5,
+        output=2.5,
+        cache_read=0.15,
+    )
+    assert "beta-1" not in model_costs
+    assert provider_model_costs == {
+        "alpha": {
+            "alpha-1": config_module.ModelCost(
+                input=3.0,
+                output=4.0,
+                cache_read=0.3,
+            )
+        }
+    }
+
+
+def test_build_cost_maps_ignores_cache_write(config_module):
+    model_costs, provider_model_costs = config_module.build_cost_maps(
+        {
+            "models": {
+                "alpha-1": {
+                    "cost": {
+                        "input": 1.5,
+                        "output": 2.5,
+                        "cacheRead": 0.15,
+                        "cacheWrite": 1.875,
+                    }
+                }
+            },
+            "providers": {
+                "alpha": {
+                    "base_url": "https://alpha.example/v1",
+                    "models": {
+                        "alpha-1": {
+                            "cost": {
+                                "input": 3.0,
+                                "output": 4.0,
+                                "cacheRead": 0.3,
+                                "cacheWrite": 3.75,
+                            }
+                        }
+                    },
+                }
+            },
+        }
+    )
+
+    assert model_costs["alpha-1"] == config_module.ModelCost(
+        input=1.5,
+        output=2.5,
+        cache_read=0.15,
+    )
+    assert provider_model_costs["alpha"]["alpha-1"] == config_module.ModelCost(
+        input=3.0,
+        output=4.0,
+        cache_read=0.3,
+    )
+
+
 def test_refresh_runtime_config_updates_globals_in_place(
     config_module, tmp_path, monkeypatch
 ):
@@ -163,12 +244,20 @@ def test_refresh_runtime_config_updates_globals_in_place(
 server:
   host: 127.0.0.1
 models:
-  alpha-1: {}
+  alpha-1:
+    cost:
+      input: 1.0
+      output: 2.0
+      cacheRead: 0.1
 providers:
   alpha:
     base_url: https://alpha.example/v1
     models:
-      alpha-1: {}
+      alpha-1:
+        cost:
+          input: 3.0
+          output: 4.0
+          cacheRead: 0.3
 """,
         encoding="utf-8",
     )
@@ -191,4 +280,16 @@ providers:
     assert config_module.MODEL_MAP["alpha-1"] == config_module.ProviderConfig(
         name="alpha",
         base_url="https://alpha.example/v1",
+    )
+    assert config_module.MODEL_COSTS["alpha-1"] == config_module.ModelCost(
+        input=1.0,
+        output=2.0,
+        cache_read=0.1,
+    )
+    assert config_module.PROVIDER_MODEL_COSTS["alpha"]["alpha-1"] == (
+        config_module.ModelCost(
+            input=3.0,
+            output=4.0,
+            cache_read=0.3,
+        )
     )

@@ -65,13 +65,22 @@ Proxy service is configured in `~/.llm-tracker/config.yaml`:
 
 ```yaml
 models:
-  model-name-a: {}
+  model-name-a:
+    cost:
+      input: 2.5
+      output: 15.0
+      cacheRead: 0.25
 
 providers:
   my-provider:
     base_url: https://api.example.com/v1
     models:
       model-name-a: {}
+      # model-name-a:
+      #   cost:
+      #     input: 3.0
+      #     output: 18.0
+      #     cacheRead: 0.3
 ```
 
 `base_url` is the only required field per provider. The proxy routes by matching the `model` field in the request body to a provider, then forwards to that provider's `base_url`.

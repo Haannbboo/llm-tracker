@@ -32,6 +32,7 @@ providers:
 PROJECT_MODULES = [
     "config.app",
     "src.api",
+    "src.costs",
     "src.database",
     "src.schema_migrations",
     "src.otlp",
@@ -77,6 +78,11 @@ def config_module(load_module: Callable[[str], ModuleType]) -> ModuleType:
 @pytest.fixture
 def api_module(load_module: Callable[[str], ModuleType]) -> ModuleType:
     return load_module("src.api")
+
+
+@pytest.fixture
+def costs_module(load_module: Callable[[str], ModuleType]) -> ModuleType:
+    return load_module("src.costs")
 
 
 @pytest.fixture

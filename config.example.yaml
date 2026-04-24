@@ -1,17 +1,255 @@
 models:
-  model-name: {}
-  # another-model: {}
+  # Gemini Models
+  gemini-3.1-pro-preview:
+    cost:
+      input: 2.0
+      output: 12.0
+      cacheRead: 0.2
+  gemini-3.1-flash-lite-preview:
+    cost:
+      input: 0.25
+      output: 1.5
+      cacheRead: 0.025
+  gemini-3-flash-preview:
+    cost:
+      input: 0.5
+      output: 3.0
+      cacheRead: 0.05
+  gemini-2.5-pro:
+    cost:
+      input: 1.25
+      output: 10.0
+      cacheRead: 0.125
+  gemini-2.5-flash:
+    cost:
+      input: 0.3
+      output: 2.5
+      cacheRead: 0.03
+  gemini-2.5-flash-lite:
+    cost:
+      input: 0.1
+      output: 0.4
+      cacheRead: 0.01
+
+  # Claude Models
+  claude-opus-4-7:
+    cost:
+      input: 5.0
+      output: 25.0
+      cacheRead: 0.5
+      cacheWrite: 6.25
+  claude-opus-4-6:
+    cost:
+      input: 5.0
+      output: 25.0
+      cacheRead: 0.5
+      cacheWrite: 6.25
+  claude-opus-4-5:
+    cost:
+      input: 5.0
+      output: 25.0
+      cacheRead: 0.5
+      cacheWrite: 6.25
+  claude-opus-4-1:
+    cost:
+      input: 15.0
+      output: 75.0
+      cacheRead: 1.5
+      cacheWrite: 18.75
+  claude-opus-4:
+    cost:
+      input: 15.0
+      output: 75.0
+      cacheRead: 1.5
+      cacheWrite: 18.75
+  claude-sonnet-4-6:
+    cost:
+      input: 3.0
+      output: 15.0
+      cacheRead: 0.3
+      cacheWrite: 3.75
+  claude-sonnet-4-5:
+    cost:
+      input: 3.0
+      output: 15.0
+      cacheRead: 0.3
+      cacheWrite: 3.75
+  claude-sonnet-4:
+    cost:
+      input: 3.0
+      output: 15.0
+      cacheRead: 0.3
+      cacheWrite: 3.75
+  claude-sonnet-3-7:
+    cost:
+      input: 3.0
+      output: 15.0
+      cacheRead: 0.3
+      cacheWrite: 3.75
+  claude-haiku-4-5:
+    cost:
+      input: 1.0
+      output: 5.0
+      cacheRead: 0.1
+      cacheWrite: 1.25
+  claude-haiku-3-5:
+    cost:
+      input: 0.8
+      output: 4.0
+      cacheRead: 0.08
+      cacheWrite: 1.0
+  claude-opus-3:
+    cost:
+      input: 15.0
+      output: 75.0
+      cacheRead: 1.5
+      cacheWrite: 18.75
+  claude-haiku-3:
+    cost:
+      input: 0.25
+      output: 1.25
+      cacheRead: 0.03
+      cacheWrite: 0.3
+
+  # GPT Models
+  gpt-5.4:
+    cost:
+      input: 2.5
+      output: 15.0
+      cacheRead: 0.25
+  gpt-5.4-mini:
+    cost:
+      input: 0.75
+      output: 4.5
+      cacheRead: 0.075
+  gpt-5.4-nano:
+    cost:
+      input: 0.2
+      output: 1.25
+      cacheRead: 0.02
+  gpt-5.4-pro:
+    cost:
+      input: 30.0
+      output: 180.0
+  gpt-5.2:
+    cost:
+      input: 1.75
+      output: 14.0
+      cacheRead: 0.175
+  gpt-5.2-pro:
+    cost:
+      input: 21.0
+      output: 168.0
+  gpt-5.1:
+    cost:
+      input: 1.25
+      output: 10.0
+      cacheRead: 0.125
+  gpt-5:
+    cost:
+      input: 1.25
+      output: 10.0
+      cacheRead: 0.125
+  gpt-5-mini:
+    cost:
+      input: 0.25
+      output: 2.0
+      cacheRead: 0.025
+  gpt-5-nano:
+    cost:
+      input: 0.05
+      output: 0.4
+      cacheRead: 0.005
+  gpt-5-pro:
+    cost:
+      input: 15.0
+      output: 120.0
+  gpt-4.1:
+    cost:
+      input: 2.0
+      output: 8.0
+      cacheRead: 0.5
+  gpt-4.1-mini:
+    cost:
+      input: 0.4
+      output: 1.6
+      cacheRead: 0.1
+  gpt-4.1-nano:
+    cost:
+      input: 0.1
+      output: 0.4
+      cacheRead: 0.025
+
+  # Codex Models
+  gpt-5.3-codex:
+    cost:
+      input: 1.75
+      output: 14.0
+      cacheRead: 0.175
+  gpt-5.2-codex:
+    cost:
+      input: 1.75
+      output: 14.0
+      cacheRead: 0.175
+  gpt-5.1-codex-max:
+    cost:
+      input: 1.25
+      output: 10.0
+      cacheRead: 0.125
+  gpt-5.1-codex:
+    cost:
+      input: 1.25
+      output: 10.0
+      cacheRead: 0.125
+  gpt-5-codex:
+    cost:
+      input: 1.25
+      output: 10.0
+      cacheRead: 0.125
+  gpt-5.1-codex-mini:
+    cost:
+      input: 0.25
+      output: 2.0
+      cacheRead: 0.025
+  codex-mini-latest:
+    cost:
+      input: 1.5
+      output: 6.0
+      cacheRead: 0.375
+
+  # MiniMax
+  minimax-m2.7:
+    cost:
+      input: 0.3
+      output: 1.2
+      cacheRead: 0.06
+      cacheWrite: 0.375
+  minimax-m2.7-highspeed:
+    cost:
+      input: 0.6
+      output: 2.4
+      cacheRead: 0.06
+      cacheWrite: 0.375
+  mimimax-m2.5:
+    cost:
+      input: 0.3
+      output: 1.2
+      cacheRead: 0.03
+      cacheWrite: 0.375
+  minimax-m2.5-highspeed:
+    cost:
+      input: 0.6
+      output: 2.4
+      cacheRead: 0.03
+      cacheWrite: 0.375
 
 providers:
   my-provider:
     base_url: https://api.example.com/v1
     models:
-      model-name: {}
-
-  # another-provider:
-  #   base_url: https://api.another.com/v1
-  #   models:
-  #     another-model: {}
+      gemini-3.1-pro-preview: {}
+      claude-sonnet-4-6: {}
+      gpt-5.4: {}
 
 server:
   host: 0.0.0.0
