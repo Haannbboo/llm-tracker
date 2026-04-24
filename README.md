@@ -64,11 +64,14 @@ This bootstraps the environment using `uv`, installs dependencies, and starts th
 Proxy service is configured in `~/.llm-tracker/config.yaml`:
 
 ```yaml
+models:
+  model-name-a: {}
+
 providers:
   my-provider:
     base_url: https://api.example.com/v1
     models:
-      - model-name-a
+      model-name-a: {}
 ```
 
 `base_url` is the only required field per provider. The proxy routes by matching the `model` field in the request body to a provider, then forwards to that provider's `base_url`.

@@ -424,12 +424,10 @@ function TrendChart({
 
 function ModelTokenChart({ 
   summary, 
-  title,
-  providerColors
+  title
 }: { 
   summary: UsageSummary[], 
-  title: string,
-  providerColors: Record<string, string>
+  title: string
 }) {
   const aggregated = useMemo(() => {
     const map = new Map<string, {
@@ -876,7 +874,6 @@ function App() {
                   <ModelTokenChart 
                     summary={summary}
                     title="Usage by Model"
-                    providerColors={providerColors}
                   />
                 </div>
               </div>
@@ -1304,7 +1301,9 @@ function App() {
                     </thead>
                     <tbody>
                       {configParsed?.providers ? Object.entries(configParsed.providers).map(([name, conf]: [string, any]) => {
-                        const models = conf.models || [];
+                        const models = Array.isArray(conf.models) 
+                          ? conf.models 
+                          : (conf.models ? Object.keys(conf.models) : []);
                         const color = getProviderColor(name, providerColors);
                         return (
                           <tr key={name}>

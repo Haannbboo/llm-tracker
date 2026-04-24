@@ -41,6 +41,7 @@ def load_config(path: str | None = None) -> dict[str, Any]:
     config = config or {}
     server = config.setdefault("server", {})
     db = config.setdefault("db", {})
+    config.setdefault("models", {})
     config.setdefault("providers", {})
 
     server.setdefault("host", "0.0.0.0")
@@ -62,6 +63,15 @@ def load_config(path: str | None = None) -> dict[str, Any]:
     return config
 
 
+def _iter_provider_models(provider: dict[str, Any]) -> list[str]:
+    models = provider.get("models", {})
+    if isinstance(models, dict):
+        return list(models)
+    if isinstance(models, list):
+        return models
+    return []
+
+
 def build_maps(
     config: dict[str, Any],
 ) -> tuple[dict[str, ProviderConfig], dict[str, ProviderConfig]]:
@@ -73,7 +83,7 @@ def build_maps(
             name=provider_name, base_url=provider["base_url"]
         )
         provider_map[provider_name] = provider_config
-        for model in provider.get("models", []):
+        for model in _iter_provider_models(provider):
             model_map[model] = provider_config
 
     return provider_map, model_map

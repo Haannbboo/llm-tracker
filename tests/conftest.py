@@ -16,13 +16,16 @@ server:
   api_port: 4001
 db:
   path: {db_path}
+models:
+  test-model: {{}}
+  gpt-4.1: {{}}
 providers:
   test-provider:
     base_url: https://api.example.com/v1
     api_key: test-key
     models:
-      - test-model
-      - gpt-4.1
+      test-model: {{}}
+      gpt-4.1: {{}}
 """
 
 

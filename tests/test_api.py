@@ -35,11 +35,13 @@ server:
   port: 4000
 db:
   path: ~/.llm-tracker/usage.db
+models:
+  new-model: {}
 providers:
   new-provider:
     base_url: https://new.example/v1
     models:
-      - new-model
+      new-model: {}
 """
             )
         )

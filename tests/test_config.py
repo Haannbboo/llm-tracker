@@ -22,6 +22,22 @@ providers: {}
     assert config["db"]["url"] == f"sqlite:///{Path(tmp_path, '.llm-tracker/usage.db')}"
 
 
+def test_load_config_sets_default_models_mapping(config_module, tmp_path):
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        """
+server:
+  host: 127.0.0.1
+providers: {}
+""",
+        encoding="utf-8",
+    )
+
+    config = config_module.load_config(str(config_path))
+
+    assert config["models"] == {}
+
+
 def test_load_config_keeps_database_url(config_module, tmp_path):
     config_path = tmp_path / "config.yaml"
     config_path.write_text(
@@ -60,18 +76,23 @@ def test_get_tracker_home_prefers_env_override(config_module, tmp_path, monkeypa
 def test_build_maps_returns_provider_configs(config_module):
     provider_map, model_map = config_module.build_maps(
         {
+            "models": {
+                "alpha-1": {},
+                "alpha-2": {},
+                "beta-1": {},
+            },
             "providers": {
                 "alpha": {
                     "base_url": "https://alpha.example/v1",
                     "api_key": "alpha-key",
-                    "models": ["alpha-1", "alpha-2"],
+                    "models": {"alpha-1": {}, "alpha-2": {}},
                 },
                 "beta": {
                     "base_url": "https://beta.example/v1",
                     "api_key": "beta-key",
-                    "models": ["beta-1"],
+                    "models": {"beta-1": {}},
                 },
-            }
+            },
         }
     )
 
@@ -83,15 +104,45 @@ def test_build_maps_returns_provider_configs(config_module):
     assert provider_map["alpha"].name == "alpha"
 
 
+def test_build_maps_allows_provider_model_mapping(config_module):
+    provider_map, model_map = config_module.build_maps(
+        {
+            "models": {
+                "alpha-1": {},
+                "alpha-2": {},
+            },
+            "providers": {
+                "alpha": {
+                    "base_url": "https://alpha.example/v1",
+                    "models": {
+                        "alpha-1": {},
+                        "alpha-2": {
+                            "cost": {"input": 1.0, "output": 2.0, "cacheRead": 0.1}
+                        },
+                    },
+                },
+            },
+        }
+    )
+
+    assert provider_map["alpha"] == config_module.ProviderConfig(
+        name="alpha",
+        base_url="https://alpha.example/v1",
+    )
+    assert model_map["alpha-1"] == provider_map["alpha"]
+    assert model_map["alpha-2"] == provider_map["alpha"]
+
+
 def test_build_maps_allows_provider_without_models(config_module):
     provider_map, model_map = config_module.build_maps(
         {
+            "models": {},
             "providers": {
                 "empty": {
                     "base_url": "https://empty.example/v1",
                     "api_key": "empty-key",
                 },
-            }
+            },
         }
     )
 
@@ -111,11 +162,13 @@ def test_refresh_runtime_config_updates_globals_in_place(
         """
 server:
   host: 127.0.0.1
+models:
+  alpha-1: {}
 providers:
   alpha:
     base_url: https://alpha.example/v1
     models:
-      - alpha-1
+      alpha-1: {}
 """,
         encoding="utf-8",
     )
