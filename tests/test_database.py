@@ -24,6 +24,9 @@ def test_init_db_log_usage_and_fetch_rows(database_module, isolated_home):
             ttft_ms=None,
             tool_tokens=None,
             cache_creation_tokens=None,
+            input_cost_usd=0.00002,
+            output_cost_usd=0.00003,
+            total_cost_usd=0.00005,
             status=200,
             base_url_id=base_url_id,
         ),
@@ -49,6 +52,9 @@ def test_init_db_log_usage_and_fetch_rows(database_module, isolated_home):
             "ttft_ms": None,
             "tool_tokens": None,
             "cache_creation_tokens": None,
+            "input_cost_usd": 2e-05,
+            "output_cost_usd": 3e-05,
+            "total_cost_usd": 5e-05,
             "status": 200,
             "base_url_id": base_url_id,
             "base_url": "https://api.example.com/v1",
@@ -76,6 +82,9 @@ def test_fetch_recent_usage_returns_expected_row_shape(database_module, isolated
             ttft_ms=45,
             tool_tokens=3,
             cache_creation_tokens=4,
+            input_cost_usd=0.00002,
+            output_cost_usd=0.00003,
+            total_cost_usd=0.00005,
             status=200,
             base_url_id=None,
         ),
@@ -100,6 +109,9 @@ def test_fetch_recent_usage_returns_expected_row_shape(database_module, isolated
         "ttft_ms",
         "tool_tokens",
         "cache_creation_tokens",
+        "input_cost_usd",
+        "output_cost_usd",
+        "total_cost_usd",
         "status",
         "base_url_id",
         "base_url",
@@ -128,6 +140,9 @@ def test_init_db_does_not_mutate_existing_usage_table(database_module, isolated_
             ttft_ms INTEGER,
             tool_tokens INTEGER,
             cache_creation_tokens INTEGER,
+            input_cost_usd NUMERIC(18, 8) NOT NULL DEFAULT 0,
+            output_cost_usd NUMERIC(18, 8) NOT NULL DEFAULT 0,
+            total_cost_usd NUMERIC(18, 8) NOT NULL DEFAULT 0,
             status INTEGER
         )
         """
@@ -221,8 +236,164 @@ def test_migrate_database_adds_usage_columns(
     )
     assert "prompt_length" in column_names
     assert "base_url_id" in column_names
+    assert "input_cost_usd" in column_names
+    assert "output_cost_usd" in column_names
+    assert "total_cost_usd" in column_names
     assert "usage.prompt_length" in changes
     assert "usage.base_url_id" in changes
+    assert "usage.input_cost_usd" in changes
+    assert "usage.output_cost_usd" in changes
+    assert "usage.total_cost_usd" in changes
+
+    import sqlite3
+
+    connection = sqlite3.connect(db_file)
+    table_info = connection.execute("PRAGMA table_info(usage)").fetchall()
+    connection.close()
+
+    defaults = {row[1]: row[4] for row in table_info}
+    assert defaults["input_cost_usd"] == "0"
+    assert defaults["output_cost_usd"] == "0"
+    assert defaults["total_cost_usd"] == "0"
+
+
+def test_summarize_usage_includes_cost_totals(database_module, isolated_home):
+    db_path = str(isolated_home / "usage.db")
+    database_module.init_db(db_path)
+
+    database_module.log_usage(
+        database_module.Usage(
+            ts="2026-04-17T00:00:00+00:00",
+            provider="test-provider",
+            model="test-model",
+            endpoint="/v1/responses",
+            prompt_tokens=10,
+            completion_tokens=5,
+            reasoning_tokens=1,
+            cached_tokens=2,
+            total_tokens=15,
+            latency_ms=100,
+            ttft_ms=None,
+            tool_tokens=None,
+            cache_creation_tokens=None,
+            input_cost_usd=0.00002,
+            output_cost_usd=0.00003,
+            total_cost_usd=0.00005,
+            status=200,
+            base_url_id=None,
+        ),
+        db_path=db_path,
+    )
+    database_module.log_usage(
+        database_module.Usage(
+            ts="2026-04-17T01:00:00+00:00",
+            provider="test-provider",
+            model="test-model",
+            endpoint="/v1/responses",
+            prompt_tokens=20,
+            completion_tokens=10,
+            reasoning_tokens=2,
+            cached_tokens=4,
+            total_tokens=30,
+            latency_ms=200,
+            ttft_ms=None,
+            tool_tokens=None,
+            cache_creation_tokens=None,
+            input_cost_usd=0.00004,
+            output_cost_usd=0.00006,
+            total_cost_usd=0.0001,
+            status=200,
+            base_url_id=None,
+        ),
+        db_path=db_path,
+    )
+
+    summary = database_module.summarize_usage()
+
+    assert summary == [
+        {
+            "provider": "test-provider",
+            "model": "test-model",
+            "requests": 2,
+            "prompt_tokens": 30,
+            "completion_tokens": 15,
+            "reasoning_tokens": 3,
+            "cached_tokens": 6,
+            "total_tokens": 45,
+            "avg_latency_ms": 150.0,
+            "input_cost_usd": 6e-05,
+            "output_cost_usd": 9e-05,
+            "total_cost_usd": 0.00015,
+        }
+    ]
+
+
+def test_aggregate_usage_by_period_includes_cost_totals(database_module, isolated_home):
+    db_path = str(isolated_home / "usage.db")
+    database_module.init_db(db_path)
+
+    database_module.log_usage(
+        database_module.Usage(
+            ts="2026-04-17T00:10:00+00:00",
+            provider="test-provider",
+            model="test-model",
+            endpoint="/v1/responses",
+            prompt_tokens=10,
+            completion_tokens=5,
+            reasoning_tokens=None,
+            cached_tokens=2,
+            total_tokens=15,
+            latency_ms=100,
+            ttft_ms=None,
+            tool_tokens=None,
+            cache_creation_tokens=None,
+            input_cost_usd=0.00002,
+            output_cost_usd=0.00003,
+            total_cost_usd=0.00005,
+            status=200,
+            base_url_id=None,
+        ),
+        db_path=db_path,
+    )
+    database_module.log_usage(
+        database_module.Usage(
+            ts="2026-04-17T00:20:00+00:00",
+            provider="test-provider",
+            model="test-model",
+            endpoint="/v1/responses",
+            prompt_tokens=20,
+            completion_tokens=10,
+            reasoning_tokens=None,
+            cached_tokens=4,
+            total_tokens=30,
+            latency_ms=200,
+            ttft_ms=None,
+            tool_tokens=None,
+            cache_creation_tokens=None,
+            input_cost_usd=0.00004,
+            output_cost_usd=0.00006,
+            total_cost_usd=0.0001,
+            status=200,
+            base_url_id=None,
+        ),
+        db_path=db_path,
+    )
+
+    daily = database_module.aggregate_usage_by_period(granularity="day")
+
+    assert daily == [
+        {
+            "period": "2026-04-17",
+            "requests": 2,
+            "prompt_tokens": 30,
+            "completion_tokens": 15,
+            "cached_tokens": 6,
+            "total_tokens": 45,
+            "input_cost_usd": 6e-05,
+            "output_cost_usd": 9e-05,
+            "total_cost_usd": 0.00015,
+        }
+    ]
 
 
 def test_get_or_create_base_url_reuses_exact_url_and_updates_metadata(

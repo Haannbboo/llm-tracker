@@ -98,6 +98,30 @@ def migrate_database(db_path: str | None = None) -> list[str]:
             postgresql_definition="INTEGER REFERENCES base_urls(id)",
         ):
             applied.append("usage.base_url_id")
+        if _ensure_column(
+            engine,
+            "usage",
+            "input_cost_usd",
+            sqlite_definition="NUMERIC(18, 8) NOT NULL DEFAULT 0",
+            postgresql_definition="NUMERIC(18, 8) NOT NULL DEFAULT 0",
+        ):
+            applied.append("usage.input_cost_usd")
+        if _ensure_column(
+            engine,
+            "usage",
+            "output_cost_usd",
+            sqlite_definition="NUMERIC(18, 8) NOT NULL DEFAULT 0",
+            postgresql_definition="NUMERIC(18, 8) NOT NULL DEFAULT 0",
+        ):
+            applied.append("usage.output_cost_usd")
+        if _ensure_column(
+            engine,
+            "usage",
+            "total_cost_usd",
+            sqlite_definition="NUMERIC(18, 8) NOT NULL DEFAULT 0",
+            postgresql_definition="NUMERIC(18, 8) NOT NULL DEFAULT 0",
+        ):
+            applied.append("usage.total_cost_usd")
 
     if _table_exists(engine, "base_urls"):
         if _drop_column(engine, "base_urls", "validation_status"):

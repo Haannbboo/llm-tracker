@@ -8,6 +8,7 @@ The steady-state pattern in this module is:
 from __future__ import annotations
 
 
+from decimal import Decimal
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
@@ -15,6 +16,7 @@ from typing import Any
 from sqlalchemy import (
     ForeignKey,
     Integer,
+    Numeric,
     String,
     and_,
     create_engine,
@@ -66,6 +68,15 @@ class Usage(Base):
     ttft_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
     tool_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
     cache_creation_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    input_cost_usd: Mapped[Decimal] = mapped_column(
+        Numeric(18, 8), nullable=False, default=0, server_default=text("0")
+    )
+    output_cost_usd: Mapped[Decimal] = mapped_column(
+        Numeric(18, 8), nullable=False, default=0, server_default=text("0")
+    )
+    total_cost_usd: Mapped[Decimal] = mapped_column(
+        Numeric(18, 8), nullable=False, default=0, server_default=text("0")
+    )
     status: Mapped[int | None] = mapped_column(Integer, nullable=True)
     base_url_id: Mapped[int | None] = mapped_column(
         Integer, ForeignKey("base_urls.id"), nullable=True
@@ -200,8 +211,14 @@ def log_usage(usage: Usage, db_path: str | None = None) -> None:
         session.commit()
 
 
+def _normalize_value(value: Any) -> Any:
+    if isinstance(value, Decimal):
+        return float(value)
+    return value
+
+
 def _row_to_dict(row: Any) -> dict[str, Any]:
-    return dict(row._mapping)
+    return {key: _normalize_value(value) for key, value in row._mapping.items()}
 
 
 # === Reporting / Query Helpers ===
@@ -260,6 +277,9 @@ def fetch_recent_usage(
             Usage.ttft_ms,
             Usage.tool_tokens,
             Usage.cache_creation_tokens,
+            Usage.input_cost_usd,
+            Usage.output_cost_usd,
+            Usage.total_cost_usd,
             Usage.status,
             Usage.base_url_id,
             BaseUrl.base_url.label("base_url"),
@@ -315,6 +335,9 @@ def summarize_usage(
             func.sum(Usage.cached_tokens).label("cached_tokens"),
             func.sum(Usage.total_tokens).label("total_tokens"),
             func.avg(Usage.latency_ms).label("avg_latency_ms"),
+            func.sum(Usage.input_cost_usd).label("input_cost_usd"),
+            func.sum(Usage.output_cost_usd).label("output_cost_usd"),
+            func.sum(Usage.total_cost_usd).label("total_cost_usd"),
         )
         .group_by(Usage.provider, Usage.model)
         .order_by(func.sum(Usage.total_tokens).desc())
@@ -355,6 +378,9 @@ def aggregate_usage_by_period(
         Usage.completion_tokens,
         Usage.cached_tokens,
         Usage.total_tokens,
+        Usage.input_cost_usd,
+        Usage.output_cost_usd,
+        Usage.total_cost_usd,
     ).order_by(Usage.ts.asc())
     if filters:
         query = query.where(and_(*filters))
@@ -382,6 +408,9 @@ def aggregate_usage_by_period(
                     "completion_tokens": 0,
                     "cached_tokens": 0,
                     "total_tokens": 0,
+                    "input_cost_usd": Decimal("0"),
+                    "output_cost_usd": Decimal("0"),
+                    "total_cost_usd": Decimal("0"),
                 },
             )
             bucket["requests"] += 1
@@ -389,5 +418,11 @@ def aggregate_usage_by_period(
             bucket["completion_tokens"] += row.completion_tokens or 0
             bucket["cached_tokens"] += row.cached_tokens or 0
             bucket["total_tokens"] += row.total_tokens or 0
+            bucket["input_cost_usd"] += row.input_cost_usd or Decimal("0")
+            bucket["output_cost_usd"] += row.output_cost_usd or Decimal("0")
+            bucket["total_cost_usd"] += row.total_cost_usd or Decimal("0")
 
-    return [buckets[key] for key in sorted(buckets)]
+    return [
+        {key: _normalize_value(value) for key, value in buckets[key].items()}
+        for key in sorted(buckets)
+    ]
