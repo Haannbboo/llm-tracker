@@ -191,6 +191,8 @@ def _parse_gemini_record(record: dict, attrs: list, session_id: str) -> None:
     )
     latency_ms = _attr(attrs, "duration_ms")
     status = _attr(attrs, "status_code")
+    if status is None:
+        status = _attr(attrs, "http.status_code")
     prompt_tokens = int(input_tokens) if input_tokens is not None else None
     prompt_length = PROMPT_LENGTH_TRACKER.consume_for_usage_event(
         "gemini-cli", attrs, sid
@@ -239,6 +241,7 @@ def _parse_claude_record(record: dict, attrs: list, session_id: str) -> None:
     output_tokens = _attr(attrs, "output_tokens")
     cache_read = _attr(attrs, "cache_read_tokens")
     cache_create = _attr(attrs, "cache_creation_tokens")
+    status = _attr(attrs, "status_code")
 
     # prompt_tokens = raw input + cache reads (what the model actually processed)
     prompt_tokens = (int(input_tokens or 0)) + (int(cache_read or 0))
@@ -275,7 +278,7 @@ def _parse_claude_record(record: dict, attrs: list, session_id: str) -> None:
                 provider=metadata.provider,
                 model=_attr(attrs, "model") or "claude-unknown",
             ),
-            status=None,
+            status=status,
             base_url_id=resolve_base_url_id(
                 base_url=metadata.base_url,
                 provider_name=metadata.provider,
@@ -325,6 +328,7 @@ def _parse_codex_record(record: dict, attrs: list) -> None:
     reasoning_tokens = _attr(attrs, "reasoning_token_count")
     tool_tokens = _attr(attrs, "tool_token_count")
     latency_ms = _attr(attrs, "duration_ms")
+    status = _attr(attrs, "http.response.status_code")
     ttft_ms = None
 
     # Try to get better latency and ttft from the state cache
@@ -370,7 +374,7 @@ def _parse_codex_record(record: dict, attrs: list) -> None:
                 provider=metadata.provider,
                 model=model,
             ),
-            status=None,
+            status=status,
             base_url_id=resolve_base_url_id(
                 base_url=metadata.base_url,
                 provider_name=metadata.provider,

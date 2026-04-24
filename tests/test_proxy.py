@@ -179,3 +179,4 @@ async def test_forward_logs_base_url_id_from_provider_config(proxy_module, monke
     assert captured["usage"].input_cost_usd == Decimal("0.00002")
     assert captured["usage"].output_cost_usd == Decimal("0.00003")
     assert captured["usage"].total_cost_usd == Decimal("0.00005")
+    assert captured["usage"].status == 200

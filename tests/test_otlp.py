@@ -89,6 +89,7 @@ def test_parse_gemini_record_merges_hook_ttft(
     assert captured["usage"].ttft_ms == 6845
     assert captured["usage"].latency_ms == 8719
     assert captured["usage"].prompt_length == 4321
+    assert captured["usage"].status is None
 
 
 def test_parse_gemini_record_resolves_base_url_id_from_local_config(
@@ -137,6 +138,7 @@ def test_parse_gemini_record_resolves_base_url_id_from_local_config(
     }
     assert captured["usage"].base_url_id == 11
     assert captured["usage"].provider == "Google"
+    assert captured["usage"].status == 429
 
 
 def test_parse_gemini_record_persists_costs(otlp_module, config_module, monkeypatch):
@@ -173,6 +175,29 @@ def test_parse_gemini_record_persists_costs(otlp_module, config_module, monkeypa
         _restore_model_costs(
             config_module, previous_model_costs, previous_provider_model_costs
         )
+
+
+def test_parse_gemini_record_falls_back_to_http_status_code(otlp_module, monkeypatch):
+    captured = {}
+    monkeypatch.setattr(otlp_module, "log_usage", _capture_usage(captured))
+
+    record_ts = datetime(2026, 4, 19, 20, 5, 1, 614000, tzinfo=timezone.utc)
+    record = {"timeUnixNano": str(int(record_ts.timestamp() * 1_000_000_000))}
+    attrs = _attrs(
+        {
+            "model": "gemini-3-flash-preview",
+            "role": "main",
+            "session.id": "session-1",
+            "http.status_code": 502,
+            "input_token_count": 793,
+            "output_token_count": 1359,
+            "total_token_count": 2152,
+        }
+    )
+
+    otlp_module._parse_gemini_record(record, attrs, "session-1")
+
+    assert captured["usage"].status == 502
 
 
 def test_prompt_length_tracker_records_and_consumes_matching_prompt_event(otlp_module):
@@ -256,6 +281,7 @@ def test_parse_claude_record_uses_prompt_length_from_prior_prompt_event(
     otlp_module._parse_log_record(response_record, "claude-code", "claude-session-1")
 
     assert captured["usage"].prompt_length == 2468
+    assert captured["usage"].status is None
 
 
 def test_parse_claude_record_persists_costs(otlp_module, config_module, monkeypatch):
@@ -298,6 +324,34 @@ def test_parse_claude_record_persists_costs(otlp_module, config_module, monkeypa
         _restore_model_costs(
             config_module, previous_model_costs, previous_provider_model_costs
         )
+
+
+def test_parse_claude_record_uses_otlp_status_code(otlp_module, monkeypatch):
+    captured = {}
+    monkeypatch.setattr(otlp_module, "log_usage", _capture_usage(captured))
+
+    response_ts = datetime(2026, 4, 22, 21, 0, 0, tzinfo=timezone.utc)
+    response_record = {
+        "timeUnixNano": str(int(response_ts.timestamp() * 1_000_000_000)),
+        "attributes": _attrs(
+            {
+                "event.name": "api_request",
+                "session.id": "claude-session-1",
+                "prompt.id": "prompt-1",
+                "model": "claude-test",
+                "input_tokens": 120,
+                "output_tokens": 20,
+                "cache_read_tokens": 5,
+                "cache_creation_tokens": 0,
+                "duration_ms": 900,
+                "status_code": 400,
+            }
+        ),
+    }
+
+    otlp_module._parse_log_record(response_record, "claude-code", "claude-session-1")
+
+    assert captured["usage"].status == 400
 
 
 def test_parse_codex_record_uses_prompt_length_from_prior_prompt_event(
@@ -345,6 +399,7 @@ def test_parse_codex_record_uses_prompt_length_from_prior_prompt_event(
     otlp_module._parse_log_record(response_record, "codex_cli_rs", "")
 
     assert captured["usage"].prompt_length == 88
+    assert captured["usage"].status is None
 
 
 def test_parse_codex_record_persists_costs(otlp_module, config_module, monkeypatch):
@@ -387,6 +442,35 @@ def test_parse_codex_record_persists_costs(otlp_module, config_module, monkeypat
         _restore_model_costs(
             config_module, previous_model_costs, previous_provider_model_costs
         )
+
+
+def test_parse_codex_record_uses_http_response_status_code(otlp_module, monkeypatch):
+    captured = {}
+    monkeypatch.setattr(otlp_module, "log_usage", _capture_usage(captured))
+
+    response_ts = datetime(2026, 4, 22, 21, 5, 0, tzinfo=timezone.utc)
+    response_record = {
+        "timeUnixNano": str(int(response_ts.timestamp() * 1_000_000_000)),
+        "attributes": _attrs(
+            {
+                "event.name": "codex.sse_event",
+                "event.kind": "response.completed",
+                "conversation.id": "conv-1",
+                "model": "gpt-5.4",
+                "input_token_count": 500,
+                "output_token_count": 100,
+                "cached_token_count": 10,
+                "reasoning_token_count": 20,
+                "tool_token_count": 5,
+                "duration_ms": 2000,
+                "http.response.status_code": 429,
+            }
+        ),
+    }
+
+    otlp_module._parse_log_record(response_record, "codex_cli_rs", "")
+
+    assert captured["usage"].status == 429
 
 
 def test_parse_gemini_record_uses_prompt_length_from_prior_prompt_event(
@@ -432,6 +516,7 @@ def test_parse_gemini_record_uses_prompt_length_from_prior_prompt_event(
     otlp_module._parse_log_record(response_record, "gemini-cli", "gemini-session-1")
 
     assert captured["usage"].prompt_length == 3210
+    assert captured["usage"].status is None
 
 
 def test_inline_prompt_length_is_not_queued_for_next_request(otlp_module, monkeypatch):
