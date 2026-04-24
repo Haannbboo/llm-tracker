@@ -7,6 +7,7 @@ Supports both /v1/chat/completions and /v1/responses endpoints.
 from __future__ import annotations
 
 import json
+import os
 import time
 from contextlib import asynccontextmanager
 from typing import Any
@@ -21,6 +22,72 @@ from .database import Usage, init_db, log_usage, resolve_base_url_id
 from .utils import extract_usage, extract_stream_usage, build_usage_record
 
 REQUEST_TIMEOUT_SECONDS = 300
+PROXY_USER_AGENT_DIR = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+    "logs",
+    "proxy-user-agent",
+)
+RECORDED_PROXY_USER_AGENTS: set[str] = set()
+
+
+def parse_client_source(user_agent: str) -> str | None:
+    """Infer a normalized client source label from a proxy User-Agent string."""
+    normalized = user_agent.strip().lower()
+    if not normalized:
+        return None
+
+    # Prefer stable agent/provider markers anywhere in the UA over the leading token.
+    if "gemini" in normalized:
+        return "gemini"
+    if "codex" in normalized:
+        return "codex"
+    if "claude" in normalized:
+        return "claude"
+    if "opencode" in normalized:
+        return "opencode"
+
+    # Fall back to the leading product/version token for unknown clients.
+    first_token = normalized.split()[0]
+    if "/" in first_token:
+        product = first_token.split("/", 1)[0]
+        if product:
+            return product
+
+    return None
+
+
+def record_proxy_user_agent(path: str, user_agent: str) -> None:
+    """Append first-seen proxy user agents to the local discovery log."""
+    try:
+        os.makedirs(PROXY_USER_AGENT_DIR, exist_ok=True)
+        log_path = os.path.join(PROXY_USER_AGENT_DIR, "requests.log")
+
+        # Reload prior discoveries after worker restart so the log stays deduplicated.
+        if not RECORDED_PROXY_USER_AGENTS and os.path.exists(log_path):
+            with open(log_path, encoding="utf-8") as log_file:
+                for line in log_file:
+                    marker = " user_agent="
+                    if marker in line:
+                        RECORDED_PROXY_USER_AGENTS.add(
+                            line.rstrip("\n").split(marker, 1)[1]
+                        )
+
+        if user_agent in RECORDED_PROXY_USER_AGENTS:
+            return
+
+        with open(log_path, "a", encoding="utf-8") as log_file:
+            client_source = parse_client_source(user_agent)
+            client_source_field = (
+                f"client_source={client_source}"
+                if client_source is not None
+                else "client_source="
+            )
+            log_file.write(
+                f"path={path} {client_source_field} user_agent={user_agent}\n"
+            )
+        RECORDED_PROXY_USER_AGENTS.add(user_agent)
+    except OSError:
+        return
 
 
 def resolve_provider(model: str) -> tuple[ProviderConfig, str]:
@@ -76,6 +143,7 @@ async def stream_upstream_response(
     body: bytes,
     provider: ProviderConfig,
     model: str,
+    client_source: str | None,
     path: str,
     started_at: float,
 ):
@@ -118,6 +186,7 @@ async def stream_upstream_response(
                 **build_usage_record(
                     provider_name=provider.name,
                     model=model,
+                    client_source=client_source,
                     endpoint=path,
                     latency_ms=latency_ms,
                     ttft_ms=ttft_ms,
@@ -139,6 +208,9 @@ async def stream_upstream_response(
 async def forward(request: Request, path: str):
     body = await request.body()
     body_json = parse_json_body(body)
+    user_agent = request.headers.get("user-agent", "")
+    client_source = parse_client_source(user_agent)
+    record_proxy_user_agent(path, user_agent)
     model = body_json.get("model", "")
     provider, upstream_model = resolve_provider(model)
 
@@ -163,6 +235,7 @@ async def forward(request: Request, path: str):
                 body=body,
                 provider=provider,
                 model=model,
+                client_source=client_source,
                 path=path,
                 started_at=started_at,
             ),
@@ -180,6 +253,7 @@ async def forward(request: Request, path: str):
             **build_usage_record(
                 provider_name=provider.name,
                 model=model,
+                client_source=client_source,
                 endpoint=path,
                 latency_ms=latency_ms,
                 ttft_ms=None,

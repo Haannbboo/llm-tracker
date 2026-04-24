@@ -106,6 +106,128 @@ def test_parse_json_body_decodes_json_body(proxy_module):
     }
 
 
+@pytest.mark.parametrize(
+    ("user_agent", "expected"),
+    [
+        (
+            "opencode/1.14.24 ai-sdk/provider-utils/4.0.23 runtime/bun/1.3.13",
+            "opencode",
+        ),
+        ("my-wrapper/1.0 anthropic-sdk/0.1", "my-wrapper"),
+        (
+            "codex-tui/0.124.0 (Mac OS 15.5.0; arm64) Superset/1.0.0 (codex-tui; 0.124.0)",
+            "codex",
+        ),
+        ("curl/8.7.1", "curl"),
+        ("plain-token-without-version", None),
+        ("", None),
+    ],
+)
+def test_parse_client_source_uses_leading_product_token(
+    proxy_module, user_agent, expected
+):
+    assert proxy_module.parse_client_source(user_agent) == expected
+
+
+def test_record_proxy_user_agent_writes_client_source(
+    proxy_module, tmp_path, monkeypatch
+):
+    monkeypatch.setattr(proxy_module, "PROXY_USER_AGENT_DIR", str(tmp_path))
+    proxy_module.RECORDED_PROXY_USER_AGENTS.clear()
+
+    proxy_module.record_proxy_user_agent(
+        "/v1/chat/completions",
+        "opencode/1.14.24 ai-sdk/provider-utils/4.0.23 runtime/bun/1.3.13",
+    )
+
+    log_path = tmp_path / "requests.log"
+    assert log_path.read_text(encoding="utf-8") == (
+        "path=/v1/chat/completions client_source=opencode "
+        "user_agent=opencode/1.14.24 ai-sdk/provider-utils/4.0.23 "
+        "runtime/bun/1.3.13\n"
+    )
+
+
+def test_record_proxy_user_agent_ignores_filesystem_errors(proxy_module, monkeypatch):
+    proxy_module.RECORDED_PROXY_USER_AGENTS.clear()
+
+    def fail_makedirs(*args, **kwargs):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(proxy_module.os, "makedirs", fail_makedirs)
+
+    proxy_module.record_proxy_user_agent(
+        "/v1/chat/completions",
+        "opencode/1.14.24 ai-sdk/provider-utils/4.0.23 runtime/bun/1.3.13",
+    )
+
+
+@pytest.mark.anyio
+async def test_forward_persists_parsed_client_source(proxy_module, monkeypatch):
+    captured = {}
+
+    class FakeResponse:
+        status_code = 200
+
+        def json(self):
+            return {"usage": {"prompt_tokens": 10, "completion_tokens": 5}}
+
+    class FakeAsyncClient:
+        def __init__(self, timeout):
+            self.timeout = timeout
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        async def post(self, url, headers, content):
+            captured["url"] = url
+            return FakeResponse()
+
+    async def receive():
+        return {
+            "type": "http.request",
+            "body": b'{"model":"test-model","stream":false}',
+            "more_body": False,
+        }
+
+    monkeypatch.setattr(proxy_module.httpx, "AsyncClient", FakeAsyncClient)
+    monkeypatch.setattr(
+        proxy_module, "resolve_provider_base_url_id", lambda provider: 7
+    )
+    monkeypatch.setattr(
+        proxy_module,
+        "log_usage",
+        lambda usage, db_path=None: captured.update(
+            {"db_path": db_path, "usage": usage}
+        ),
+    )
+    monkeypatch.setattr(proxy_module, "record_proxy_user_agent", lambda path, ua: None)
+
+    request = proxy_module.Request(
+        {
+            "type": "http",
+            "method": "POST",
+            "path": "/v1/responses",
+            "headers": [
+                (b"content-type", b"application/json"),
+                (
+                    b"user-agent",
+                    b"opencode/1.14.24 ai-sdk/provider-utils/4.0.23 runtime/bun/1.3.13",
+                ),
+            ],
+        },
+        receive,
+    )
+
+    response = await proxy_module.forward(request, "/v1/responses")
+
+    assert response.status_code == 200
+    assert captured["usage"].client_source == "opencode"
+
+
 def test_resolve_provider_supports_configured_model_matches(proxy_module):
     provider, upstream_model = proxy_module.resolve_provider("test-model")
 

@@ -89,6 +89,7 @@ def test_parse_gemini_record_merges_hook_ttft(
     assert captured["usage"].ttft_ms == 6845
     assert captured["usage"].latency_ms == 8719
     assert captured["usage"].prompt_length == 4321
+    assert captured["usage"].client_source == "gemini-cli"
     assert captured["usage"].status is None
 
 
@@ -281,6 +282,7 @@ def test_parse_claude_record_uses_prompt_length_from_prior_prompt_event(
     otlp_module._parse_log_record(response_record, "claude-code", "claude-session-1")
 
     assert captured["usage"].prompt_length == 2468
+    assert captured["usage"].client_source == "claude-code"
     assert captured["usage"].status is None
 
 
@@ -399,6 +401,7 @@ def test_parse_codex_record_uses_prompt_length_from_prior_prompt_event(
     otlp_module._parse_log_record(response_record, "codex_cli_rs", "")
 
     assert captured["usage"].prompt_length == 88
+    assert captured["usage"].client_source == "codex"
     assert captured["usage"].status is None
 
 

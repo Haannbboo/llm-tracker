@@ -14,6 +14,7 @@ def test_init_db_log_usage_and_fetch_rows(database_module, isolated_home):
             ts="2026-04-17T00:00:00+00:00",
             provider="test-provider",
             model="test-model",
+            client_source="proxy-client",
             endpoint="/v1/responses",
             prompt_tokens=10,
             completion_tokens=5,
@@ -41,6 +42,7 @@ def test_init_db_log_usage_and_fetch_rows(database_module, isolated_home):
             "ts": "2026-04-17T00:00:00+00:00",
             "provider": "test-provider",
             "model": "test-model",
+            "client_source": "proxy-client",
             "endpoint": "/v1/responses",
             "prompt_tokens": 10,
             "prompt_length": 0,
@@ -71,6 +73,7 @@ def test_fetch_recent_usage_returns_expected_row_shape(database_module, isolated
             ts="2026-04-17T00:00:00+00:00",
             provider="test-provider",
             model="test-model",
+            client_source="proxy-client",
             endpoint="/v1/responses",
             prompt_tokens=10,
             prompt_length=123,
@@ -98,6 +101,7 @@ def test_fetch_recent_usage_returns_expected_row_shape(database_module, isolated
         "ts",
         "provider",
         "model",
+        "client_source",
         "endpoint",
         "prompt_tokens",
         "prompt_length",
@@ -196,6 +200,7 @@ def test_init_db_does_not_mutate_existing_usage_table(database_module, isolated_
 
     assert "prompt_length" not in columns
     assert "base_url_id" not in columns
+    assert "client_source" not in columns
 
 
 def test_migrate_database_adds_usage_columns(
@@ -239,11 +244,13 @@ def test_migrate_database_adds_usage_columns(
     assert "input_cost_usd" in column_names
     assert "output_cost_usd" in column_names
     assert "total_cost_usd" in column_names
+    assert "client_source" in column_names
     assert "usage.prompt_length" in changes
     assert "usage.base_url_id" in changes
     assert "usage.input_cost_usd" in changes
     assert "usage.output_cost_usd" in changes
     assert "usage.total_cost_usd" in changes
+    assert "usage.client_source" in changes
 
     import sqlite3
 

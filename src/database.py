@@ -57,6 +57,7 @@ class Usage(Base):
     ts: Mapped[str] = mapped_column(String, nullable=False)
     provider: Mapped[str] = mapped_column(String, nullable=False)
     model: Mapped[str] = mapped_column(String, nullable=False)
+    client_source: Mapped[str | None] = mapped_column(String, nullable=True)
     endpoint: Mapped[str] = mapped_column(String, nullable=False)
     prompt_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
     prompt_length: Mapped[int] = mapped_column(
@@ -268,6 +269,7 @@ def fetch_recent_usage(
             Usage.ts,
             Usage.provider,
             Usage.model,
+            Usage.client_source,
             Usage.endpoint,
             Usage.prompt_tokens,
             Usage.prompt_length,

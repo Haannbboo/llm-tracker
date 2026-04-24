@@ -122,6 +122,14 @@ def migrate_database(db_path: str | None = None) -> list[str]:
             postgresql_definition="NUMERIC(18, 8) NOT NULL DEFAULT 0",
         ):
             applied.append("usage.total_cost_usd")
+        if _ensure_column(
+            engine,
+            "usage",
+            "client_source",
+            sqlite_definition="TEXT",
+            postgresql_definition="TEXT",
+        ):
+            applied.append("usage.client_source")
 
     if _table_exists(engine, "base_urls"):
         if _drop_column(engine, "base_urls", "validation_status"):

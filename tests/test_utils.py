@@ -105,6 +105,7 @@ def test_build_usage_record_includes_provider_metadata(utils_module):
     record = utils_module.build_usage_record(
         provider_name="alpha",
         model="alpha-1",
+        client_source="opencode",
         endpoint="/v1/responses",
         latency_ms=42,
         ttft_ms=11,
@@ -120,6 +121,7 @@ def test_build_usage_record_includes_provider_metadata(utils_module):
 
     assert record["provider"] == "alpha"
     assert record["model"] == "alpha-1"
+    assert record["client_source"] == "opencode"
     assert record["endpoint"] == "/v1/responses"
     assert record["latency_ms"] == 42
     assert record["ttft_ms"] == 11
