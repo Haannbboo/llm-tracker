@@ -324,6 +324,104 @@ def test_summarize_usage_includes_cost_totals(database_module, isolated_home):
             "input_cost_usd": 6e-05,
             "output_cost_usd": 9e-05,
             "total_cost_usd": 0.00015,
+            "successful_requests": 2,
+            "failed_requests": 0,
+        }
+    ]
+
+
+def test_summarize_usage_counts_failed_requests(database_module, isolated_home):
+    db_path = str(isolated_home / "usage.db")
+    database_module.init_db(db_path)
+
+    database_module.log_usage(
+        database_module.Usage(
+            ts="2026-04-17T00:00:00+00:00",
+            provider="test-provider",
+            model="test-model",
+            endpoint="/v1/responses",
+            prompt_tokens=10,
+            completion_tokens=5,
+            reasoning_tokens=1,
+            cached_tokens=2,
+            total_tokens=15,
+            latency_ms=100,
+            ttft_ms=None,
+            tool_tokens=None,
+            cache_creation_tokens=None,
+            input_cost_usd=0.00002,
+            output_cost_usd=0.00003,
+            total_cost_usd=0.00005,
+            status=200,
+            base_url_id=None,
+        ),
+        db_path=db_path,
+    )
+    database_module.log_usage(
+        database_module.Usage(
+            ts="2026-04-17T01:00:00+00:00",
+            provider="test-provider",
+            model="test-model",
+            endpoint="/v1/responses",
+            prompt_tokens=20,
+            completion_tokens=10,
+            reasoning_tokens=2,
+            cached_tokens=4,
+            total_tokens=30,
+            latency_ms=200,
+            ttft_ms=None,
+            tool_tokens=None,
+            cache_creation_tokens=None,
+            input_cost_usd=0.00004,
+            output_cost_usd=0.00006,
+            total_cost_usd=0.0001,
+            status=503,
+            base_url_id=None,
+        ),
+        db_path=db_path,
+    )
+    database_module.log_usage(
+        database_module.Usage(
+            ts="2026-04-17T02:00:00+00:00",
+            provider="test-provider",
+            model="test-model",
+            endpoint="/v1/responses",
+            prompt_tokens=30,
+            completion_tokens=15,
+            reasoning_tokens=3,
+            cached_tokens=6,
+            total_tokens=45,
+            latency_ms=300,
+            ttft_ms=None,
+            tool_tokens=None,
+            cache_creation_tokens=None,
+            input_cost_usd=0.00006,
+            output_cost_usd=0.00009,
+            total_cost_usd=0.00015,
+            status=None,
+            base_url_id=None,
+        ),
+        db_path=db_path,
+    )
+
+    summary = database_module.summarize_usage()
+
+    assert summary == [
+        {
+            "provider": "test-provider",
+            "model": "test-model",
+            "requests": 3,
+            "prompt_tokens": 60,
+            "completion_tokens": 30,
+            "reasoning_tokens": 6,
+            "cached_tokens": 12,
+            "total_tokens": 90,
+            "avg_latency_ms": 200.0,
+            "input_cost_usd": 0.00012,
+            "output_cost_usd": 0.00018,
+            "total_cost_usd": 0.0003,
+            "successful_requests": 2,
+            "failed_requests": 1,
         }
     ]
 

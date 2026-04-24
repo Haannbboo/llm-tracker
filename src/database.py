@@ -19,8 +19,10 @@ from sqlalchemy import (
     Numeric,
     String,
     and_,
+    case,
     create_engine,
     func,
+    or_,
     select,
     text,
 )
@@ -338,6 +340,18 @@ def summarize_usage(
             func.sum(Usage.input_cost_usd).label("input_cost_usd"),
             func.sum(Usage.output_cost_usd).label("output_cost_usd"),
             func.sum(Usage.total_cost_usd).label("total_cost_usd"),
+            func.sum(
+                case(
+                    (or_(Usage.status.is_(None), Usage.status < 400), 1),
+                    else_=0,
+                )
+            ).label("successful_requests"),
+            func.sum(
+                case(
+                    (Usage.status >= 400, 1),
+                    else_=0,
+                )
+            ).label("failed_requests"),
         )
         .group_by(Usage.provider, Usage.model)
         .order_by(func.sum(Usage.total_tokens).desc())

@@ -15,6 +15,8 @@ type UsageSummary = {
   input_cost_usd: number | null
   output_cost_usd: number | null
   total_cost_usd: number | null
+  successful_requests: number
+  failed_requests: number
 }
 
 type UsageRow = {
@@ -767,9 +769,8 @@ function App() {
     const totalCost = data.reduce((sum, row) => sum + value(row.total_cost_usd), 0)
     const latencyWeight = data.reduce((sum, row) => sum + value(row.avg_latency_ms) * value(row.requests), 0)
     
-    // Calculate Success Rate from usageRows
-    const successfulRequests = usageRows.filter(r => r.status === 200 || r.status === null).length
-    const successRate = usageRows.length > 0 ? (successfulRequests / usageRows.length) * 100 : 100
+    const successfulRequests = data.reduce((sum, row) => sum + value(row.successful_requests), 0)
+    const successRate = requests > 0 ? (successfulRequests / requests) * 100 : 100
 
     // Calculate RPM/TPM based on dateRange
     let minutes = 1440; // Default 24h
@@ -794,7 +795,7 @@ function App() {
       avgTokensPerRequest: requests === 0 ? 0 : totalTokens / requests,
       successRate
     }
-  }, [activeFilter, summary, usageRows, dateRange])
+  }, [activeFilter, summary, dateRange])
 
   const totalPages = Math.ceil(totalLogs / limit)
 
