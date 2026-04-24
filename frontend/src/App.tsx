@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import yaml from 'js-yaml'
 import './App.css'
 
 type UsageSummary = {
@@ -11,6 +12,9 @@ type UsageSummary = {
   cached_tokens: number | null
   total_tokens: number | null
   avg_latency_ms: number | null
+  input_cost_usd: number | null
+  output_cost_usd: number | null
+  total_cost_usd: number | null
 }
 
 type UsageRow = {
@@ -28,6 +32,9 @@ type UsageRow = {
   latency_ms: number | null
   ttft_ms: number | null
   tool_tokens: number | null
+  input_cost_usd: number | null
+  output_cost_usd: number | null
+  total_cost_usd: number | null
   status: number | null
 }
 
@@ -38,6 +45,9 @@ type DailyUsage = {
   completion_tokens: number | null
   cached_tokens: number | null
   total_tokens: number | null
+  input_cost_usd: number | null
+  output_cost_usd: number | null
+  total_cost_usd: number | null
 }
 
 type ActiveFilter = { provider: string; model: string } | null
@@ -47,6 +57,12 @@ const numberFormatter = new Intl.NumberFormat()
 const compactFormatter = new Intl.NumberFormat(undefined, {
   maximumFractionDigits: 1,
   notation: 'compact',
+})
+const costFormatter = new Intl.NumberFormat(undefined, {
+  style: 'currency',
+  currency: 'USD',
+  minimumFractionDigits: 2,
+  maximumFractionDigits: 6,
 })
 
 function value(input: number | null | undefined) {
@@ -59,6 +75,17 @@ function formatNumber(input: number | null | undefined) {
 
 function formatCompact(input: number | null | undefined) {
   return compactFormatter.format(value(input))
+}
+
+function formatCost(input: number | null | undefined) {
+  const v = value(input)
+  if (v === 0) return '$0.00'
+  return costFormatter.format(v)
+}
+
+function formatRate(input: number | null | undefined) {
+  if (input === null || input === undefined) return ''
+  return `$${input.toFixed(3)}/1M`
 }
 
 function formatLatency(input: number | null | undefined) {
@@ -138,10 +165,10 @@ function getProviderColor(provider: string, providerColors: Record<string, strin
 function getModelIcon(model: string) {
   const m = model.toLowerCase()
   const style = { width: 14, height: 14, display: 'block', objectFit: 'contain' as const }
-  if (m.includes('gpt')) return <img src="/models/chatgpt.svg" alt="" style={style} />
+  if (m.includes('gpt') || m.includes('codex')) return <img src="/models/chatgpt.svg" alt="" style={style} />
   if (m.includes('claude')) return <img src="/models/claude-ai-icon.svg" alt="" style={style} />
   if (m.includes('gemini')) return <img src="/models/google-gemini-icon.svg" alt="" style={style} />
-  if (m.includes('minimax')) return <img src="/models/minimax-color.svg" alt="" style={style} />
+  if (m.includes('minimax') || m.includes('mimimax')) return <img src="/models/minimax-color.svg" alt="" style={style} />
   
   return null
 }
@@ -429,6 +456,8 @@ function ModelTokenChart({
   summary: UsageSummary[], 
   title: string
 }) {
+  const [metric, setMetric] = useState<'tokens' | 'cost'>('tokens');
+
   const aggregated = useMemo(() => {
     const map = new Map<string, {
       model: string,
@@ -436,7 +465,8 @@ function ModelTokenChart({
       total_tokens: number,
       prompt_tokens: number,
       completion_tokens: number,
-      cached_tokens: number
+      cached_tokens: number,
+      total_cost_usd: number
     }>();
 
     for (const s of summary) {
@@ -446,39 +476,68 @@ function ModelTokenChart({
         total_tokens: 0,
         prompt_tokens: 0,
         completion_tokens: 0,
-        cached_tokens: 0
+        cached_tokens: 0,
+        total_cost_usd: 0
       };
       
       existing.total_tokens += value(s.total_tokens);
       existing.prompt_tokens += value(s.prompt_tokens);
       existing.completion_tokens += value(s.completion_tokens);
       existing.cached_tokens += value(s.cached_tokens);
+      existing.total_cost_usd += value(s.total_cost_usd);
       
       map.set(s.model, existing);
     }
     
     return Array.from(map.values())
-      .sort((a, b) => b.total_tokens - a.total_tokens)
+      .sort((a, b) => metric === 'tokens' ? b.total_tokens - a.total_tokens : b.total_cost_usd - a.total_cost_usd)
       .slice(0, 6);
-  }, [summary]);
+  }, [summary, metric]);
 
-  const maxTokens = Math.max(...aggregated.map(s => s.total_tokens), 1);
+  const maxValue = Math.max(...aggregated.map(s => metric === 'tokens' ? s.total_tokens : s.total_cost_usd), 1);
   
   return (
     <div className="widget" style={{ flex: 1 }}>
-      <div className="widget-header">
+      <div className="widget-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <span>📊 {title}</span>
+        <div className="tab-group" style={{ display: 'flex', background: '#f1f5f9', padding: '2px', borderRadius: '6px' }}>
+          <button 
+            onClick={() => setMetric('tokens')}
+            style={{ 
+              padding: '2px 8px', 
+              fontSize: '10px', 
+              borderRadius: '4px',
+              fontWeight: 600,
+              border: 'none',
+              cursor: 'pointer',
+              background: metric === 'tokens' ? 'white' : 'transparent',
+              color: metric === 'tokens' ? 'var(--color-blue)' : '#64748b',
+              boxShadow: metric === 'tokens' ? '0 1px 2px rgba(0,0,0,0.05)' : 'none'
+            }}
+          >Tokens</button>
+          <button 
+            onClick={() => setMetric('cost')}
+            style={{ 
+              padding: '2px 8px', 
+              fontSize: '10px', 
+              borderRadius: '4px',
+              fontWeight: 600,
+              border: 'none',
+              cursor: 'pointer',
+              background: metric === 'cost' ? 'white' : 'transparent',
+              color: metric === 'cost' ? 'var(--color-blue)' : '#64748b',
+              boxShadow: metric === 'cost' ? '0 1px 2px rgba(0,0,0,0.05)' : 'none'
+            }}
+          >Cost</button>
+        </div>
       </div>
       <div style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
         {aggregated.length === 0 ? (
           <div style={{ padding: '40px', textAlign: 'center', color: 'var(--text-muted)' }}>No data available</div>
         ) : (
           aggregated.map(s => {
-            const total = s.total_tokens;
-            const prompt = s.prompt_tokens;
-            const completion = s.completion_tokens;
-            const cached = s.cached_tokens;
-            const activePrompt = Math.max(0, prompt - cached);
+            const currentVal = metric === 'tokens' ? s.total_tokens : s.total_cost_usd;
+            const percentage = (currentVal / maxValue) * 100;
             const mColor = getModelColor(s.model);
             
             return (
@@ -494,7 +553,9 @@ function ModelTokenChart({
                       fontSize: '11px'
                     }}>{s.model}</span>
                   </div>
-                  <div style={{ color: 'var(--text-secondary)', fontWeight: 700 }}>{formatCompact(total)}</div>
+                  <div style={{ color: 'var(--text-secondary)', fontWeight: 700 }}>
+                    {metric === 'tokens' ? formatCompact(currentVal) : formatCost(currentVal)}
+                  </div>
                 </div>
                 <div style={{ 
                   height: '8px', 
@@ -505,16 +566,7 @@ function ModelTokenChart({
                   display: 'flex'
                 }}>
                   <div 
-                    title={`Input: ${formatNumber(activePrompt)}`}
-                    style={{ width: `${(activePrompt / maxTokens) * 100}%`, height: '100%', background: '#94a3b8' }} 
-                  />
-                  <div 
-                    title={`Cached: ${formatNumber(cached)}`}
-                    style={{ width: `${(cached / maxTokens) * 100}%`, height: '100%', background: 'var(--color-green)' }} 
-                  />
-                  <div 
-                    title={`Output: ${formatNumber(completion)}`}
-                    style={{ width: `${(completion / maxTokens) * 100}%`, height: '100%', background: 'var(--color-blue)' }} 
+                    style={{ width: `${percentage}%`, height: '100%', background: mColor }} 
                   />
                 </div>
               </div>
@@ -522,17 +574,19 @@ function ModelTokenChart({
           })
         )}
       </div>
-      <div style={{ padding: '0 20px 20px', display: 'flex', gap: '12px', fontSize: '10px', color: 'var(--text-muted)' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-          <div style={{ width: '8px', height: '8px', background: '#94a3b8', borderRadius: '2px' }} /> Input
+      {metric === 'tokens' && aggregated.length > 0 && (
+        <div style={{ padding: '0 20px 20px', display: 'flex', gap: '12px', fontSize: '10px', color: 'var(--text-muted)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+            <div style={{ width: '8px', height: '8px', background: '#94a3b8', borderRadius: '2px' }} /> Input
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+            <div style={{ width: '8px', height: '8px', background: 'var(--color-green)', borderRadius: '2px' }} /> Cached
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+            <div style={{ width: '8px', height: '8px', background: 'var(--color-blue)', borderRadius: '2px' }} /> Output
+          </div>
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-          <div style={{ width: '8px', height: '8px', background: 'var(--color-green)', borderRadius: '2px' }} /> Cached
-        </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-          <div style={{ width: '8px', height: '8px', background: 'var(--color-blue)', borderRadius: '2px' }} /> Output
-        </div>
-      </div>
+      )}
     </div>
   );
 }
@@ -555,6 +609,7 @@ function App() {
   
   const [configContent, setConfigContent] = useState('')
   const [configParsed, setConfigParsed] = useState<any>(null)
+  const [selectedPricingProvider, setSelectedPricingProvider] = useState('global')
   const [configStatus, setConfigStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle')
   
   const [error, setError] = useState<string | null>(null)
@@ -582,6 +637,24 @@ function App() {
     
     return map;
   }, [summary]);
+
+  useEffect(() => {
+    const controller = new AbortController()
+    async function fetchInitialConfig() {
+      try {
+        const response = await fetch('/config', { signal: controller.signal })
+        if (response.ok) {
+          const data = await response.json()
+          setConfigContent(data.content)
+          setConfigParsed(data.parsed)
+        }
+      } catch (err) {
+        console.error('Failed to load initial config:', err)
+      }
+    }
+    void fetchInitialConfig()
+    return () => controller.abort()
+  }, [])
 
   useEffect(() => {
     const controller = new AbortController()
@@ -691,6 +764,7 @@ function App() {
     const reasoningTokens = data.reduce((sum, row) => sum + value(row.reasoning_tokens), 0)
     const cachedTokens = data.reduce((sum, row) => sum + value(row.cached_tokens), 0)
     const totalTokens = data.reduce((sum, row) => sum + value(row.total_tokens), 0)
+    const totalCost = data.reduce((sum, row) => sum + value(row.total_cost_usd), 0)
     const latencyWeight = data.reduce((sum, row) => sum + value(row.avg_latency_ms) * value(row.requests), 0)
     
     // Calculate Success Rate from usageRows
@@ -713,6 +787,7 @@ function App() {
       reasoningTokens,
       cachedTokens,
       totalTokens,
+      totalCost,
       avgLatency: requests === 0 ? 0 : latencyWeight / requests,
       rpm: requests / minutes,
       tpm: totalTokens / minutes,
@@ -743,6 +818,38 @@ function App() {
       setError('Connection error while saving config')
       setConfigStatus('error')
     }
+  }
+
+  const handleCostChange = (model: string, field: string, value: string) => {
+    const numValue = value === '' ? undefined : parseFloat(value);
+    const newParsed = { ...configParsed };
+
+    if (selectedPricingProvider === 'global') {
+      if (!newParsed.models) newParsed.models = {};
+      if (!newParsed.models[model]) newParsed.models[model] = {};
+      if (!newParsed.models[model].cost) newParsed.models[model].cost = {};
+      
+      if (numValue === undefined) {
+        delete newParsed.models[model].cost[field];
+      } else {
+        newParsed.models[model].cost[field] = numValue;
+      }
+    } else {
+      if (!newParsed.providers) newParsed.providers = {};
+      if (!newParsed.providers[selectedPricingProvider]) newParsed.providers[selectedPricingProvider] = {};
+      if (!newParsed.providers[selectedPricingProvider].models) newParsed.providers[selectedPricingProvider].models = {};
+      if (!newParsed.providers[selectedPricingProvider].models[model]) newParsed.providers[selectedPricingProvider].models[model] = {};
+      if (!newParsed.providers[selectedPricingProvider].models[model].cost) newParsed.providers[selectedPricingProvider].models[model].cost = {};
+
+      if (numValue === undefined) {
+        delete newParsed.providers[selectedPricingProvider].models[model].cost[field];
+      } else {
+        newParsed.providers[selectedPricingProvider].models[model].cost[field] = numValue;
+      }
+    }
+
+    setConfigParsed(newParsed);
+    setConfigContent(yaml.dump(newParsed, { indent: 2, noRefs: true }));
   }
 
   return (
@@ -814,7 +921,10 @@ function App() {
                       <div className="stat-label">Token Usage</div>
                       <div className="stat-value">{formatCompact(totals.totalTokens)}</div>
                       <div className="stat-label">
-                        In: {formatCompact(totals.promptTokens)} / Out: {formatCompact(totals.completionTokens)} / Cached: {formatCompact(totals.cachedTokens)}
+                        In: {formatCompact(totals.promptTokens)} / Out: {formatCompact(totals.completionTokens)}
+                      </div>
+                      <div className="stat-label" style={{ fontSize: '11px' }}>
+                        Cached: {formatCompact(totals.cachedTokens)}
                         <span style={{ marginLeft: '6px', color: 'var(--color-green)', fontWeight: 600 }}>
                           ({totals.totalTokens > 0 ? ((value(totals.cachedTokens) / totals.totalTokens) * 100).toFixed(1) : 0}% Hit)
                         </span>
@@ -831,6 +941,19 @@ function App() {
                       <div className="stat-value">{formatNumber(totals.requests)}</div>
                       <div className="stat-label">
                         Avg: <span style={{ color: 'var(--color-purple)', fontWeight: 600 }}>{formatCompact(totals.avgTokensPerRequest)} tokens/req</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="widget">
+                  <div className="widget-body">
+                    <div className="icon-box icon-green">💰</div>
+                    <div className="stat-group">
+                      <div className="stat-label">Estimated Cost</div>
+                      <div className="stat-value">{formatCost(totals.totalCost)}</div>
+                      <div className="stat-label">
+                        Avg: <span style={{ color: 'var(--color-blue)', fontWeight: 600 }}>{formatCost(totals.requests > 0 ? totals.totalCost / totals.requests : 0)} / req</span>
                       </div>
                     </div>
                   </div>
@@ -973,7 +1096,8 @@ function App() {
                         <th style={{ width: '150px', padding: '12px 8px' }}>Model</th>
                         <th style={{ width: '120px', padding: '12px 8px' }}>Provider</th>
                         <th style={{ minWidth: '140px' }}>Input (Prompt)</th>
-                        <th>Output</th>
+                        <th style={{ minWidth: '120px' }}>Output</th>
+                        <th style={{ minWidth: '100px' }}>Cost</th>
                         <th style={{ padding: '12px 8px' }}>
                           <div className="has-tooltip">
                             TTFT / Latency
@@ -1101,6 +1225,71 @@ function App() {
                                 )}
                               </div>
                             )}
+                          </td>
+                          <td style={{ verticalAlign: 'top' }}>
+                            {(() => {
+                              const total = value(row.total_cost_usd);
+                              if (total === 0) return <div style={{ color: 'var(--color-green)', fontWeight: 500 }}>$0.00</div>;
+                              
+                              const prompt = value(row.prompt_tokens);
+                              const cached = value(row.cached_tokens);
+                              const inputCost = value(row.input_cost_usd);
+                              const outputCost = value(row.output_cost_usd);
+                              
+                              const cacheRatio = prompt > 0 ? (cached / prompt) : 0;
+                              const cacheCost = inputCost * cacheRatio;
+                              const actualInputCost = inputCost - cacheCost;
+                              
+                              const uncachedTokens = Math.max(0, prompt - cached);
+                              const completionTokens = value(row.completion_tokens);
+                              
+                              const modelConfig = configParsed?.providers?.[row.provider]?.models?.[row.model]?.cost || configParsed?.models?.[row.model]?.cost;
+
+                              return (
+                                <div className="has-tooltip" style={{ borderBottom: 'none' }}>
+                                  <div style={{ color: 'var(--color-green)', fontWeight: 500, cursor: 'pointer' }}>
+                                    {formatCost(total)}
+                                  </div>
+                                  <div className="tooltip-text" style={{ width: '200px', marginLeft: '-100px' }}>
+                                    <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+                                        <span style={{ color: 'rgba(255, 255, 255, 0.6)' }}>Input:</span>
+                                        <div style={{ textAlign: 'right' }}>
+                                          <div>{formatCost(actualInputCost)}</div>
+                                          {modelConfig?.input !== undefined && (
+                                            <div style={{ fontSize: '9px', color: 'rgba(255, 255, 255, 0.4)' }}>{formatNumber(uncachedTokens)} tokens x {formatRate(modelConfig.input)}</div>
+                                          )}
+                                        </div>
+                                      </div>
+                                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+                                        <span style={{ color: 'rgba(255, 255, 255, 0.6)' }}>Output:</span>
+                                        <div style={{ textAlign: 'right' }}>
+                                          <div>{formatCost(outputCost)}</div>
+                                          {modelConfig?.output !== undefined && (
+                                            <div style={{ fontSize: '9px', color: 'rgba(255, 255, 255, 0.4)' }}>{formatNumber(completionTokens)} tokens x {formatRate(modelConfig.output)}</div>
+                                          )}
+                                        </div>
+                                      </div>
+                                      {cacheCost > 0 && (
+                                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+                                          <span style={{ color: 'rgba(255, 255, 255, 0.6)' }}>Cache:</span>
+                                          <div style={{ textAlign: 'right' }}>
+                                            <div style={{ color: 'var(--color-green)' }}>{formatCost(cacheCost)}</div>
+                                            {modelConfig?.cacheRead !== undefined && (
+                                              <div style={{ fontSize: '9px', color: 'rgba(255, 255, 255, 0.4)' }}>{formatNumber(cached)} tokens x {formatRate(modelConfig.cacheRead)}</div>
+                                            )}
+                                          </div>
+                                        </div>
+                                      )}
+                                      <div style={{ marginTop: '4px', paddingTop: '4px', borderTop: '1px solid #334155', display: 'flex', justifyContent: 'space-between', color: 'white' }}>
+                                        <span style={{ color: 'rgba(255, 255, 255, 0.6)' }}>Total:</span>
+                                        <span>{formatCost(total)}</span>
+                                      </div>
+                                    </div>
+                                  </div>
+                                </div>
+                              );
+                            })()}
                           </td>
                           <td style={{ padding: '8px' }}>
                             <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
@@ -1296,7 +1485,6 @@ function App() {
                         <th>Provider</th>
                         <th>Base URL</th>
                         <th>Models</th>
-                        <th>Color</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -1307,34 +1495,143 @@ function App() {
                         const color = getProviderColor(name, providerColors);
                         return (
                           <tr key={name}>
-                            <td style={{ fontWeight: 700 }}>{name}</td>
+                            <td style={{ padding: '8px' }}>
+                              <div style={{ 
+                                padding: '4px 10px', 
+                                borderRadius: '6px', 
+                                backgroundColor: color + '22',
+                                color: color,
+                                fontWeight: 500,
+                                border: `1px solid ${color}44`,
+                                display: 'inline-block',
+                                fontSize: '12px'
+                              }}>
+                                {name}
+                              </div>
+                            </td>
                             <td style={{ fontSize: '12px', color: '#64748b', fontFamily: 'var(--font-mono)' }}>{conf.base_url}</td>
                             <td>
                               <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
-                                {models.map((m: string) => (
-                                  <span key={m} style={{ 
-                                    fontSize: '10px', 
-                                    padding: '2px 6px', 
-                                    background: '#f1f5f9', 
-                                    borderRadius: '4px',
-                                    color: '#475569',
-                                    border: '1px solid #e2e8f0'
-                                  }}>{m}</span>
-                                ))}
-                              </div>
-                            </td>
-                            <td>
-                              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                                <div style={{ width: '12px', height: '12px', borderRadius: '3px', background: color }} />
-                                <span style={{ fontSize: '11px', color: '#64748b', fontFamily: 'var(--font-mono)' }}>{color}</span>
+                                {models.map((m: string) => {
+                                  const hasOverride = conf.models?.[m]?.cost !== undefined;
+                                  return (
+                                    <span key={m} style={{ 
+                                      fontSize: '10px', 
+                                      padding: '2px 6px', 
+                                      background: hasOverride ? '#fffbeb' : '#f1f5f9', 
+                                      borderRadius: '4px',
+                                      color: hasOverride ? '#b45309' : '#475569',
+                                      border: hasOverride ? '1px solid #fde68a' : '1px solid #e2e8f0',
+                                      display: 'inline-flex',
+                                      alignItems: 'center',
+                                      gap: '4px'
+                                    }}>
+                                      {m}
+                                      {hasOverride && <span title="Cost Override" style={{ fontSize: '10px' }}>💰</span>}
+                                    </span>
+                                  );
+                                })}
                               </div>
                             </td>
                           </tr>
                         );
                       }) : (
                         <tr>
-                          <td colSpan={4} style={{ textAlign: 'center', padding: '24px', color: 'var(--text-muted)' }}>
+                          <td colSpan={3} style={{ textAlign: 'center', padding: '24px', color: 'var(--text-muted)' }}>
                             No providers configured in config.yaml.
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              <div className="panel">
+                <div className="panel-tabs" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <div className="tab active"><span>💎</span> Model Pricing</div>
+                  <div style={{ paddingRight: '20px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span style={{ fontSize: '11px', fontWeight: 500, color: 'var(--text-muted)', textTransform: 'uppercase' }}>Scope:</span>
+                    <select 
+                      value={selectedPricingProvider}
+                      onChange={(e) => setSelectedPricingProvider(e.target.value)}
+                      style={{
+                        padding: '4px 12px',
+                        borderRadius: '6px',
+                        border: '1px solid var(--border-color)',
+                        fontSize: '13px',
+                        fontWeight: 600,
+                        background: '#f8fafc',
+                        outline: 'none'
+                      }}
+                    >
+                      <option value="global">Global Default</option>
+                      {configParsed?.providers && Object.keys(configParsed.providers).map(p => (
+                        <option key={p} value={p}>Provider: {p}</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+                <div className="panel-body" style={{ padding: '0' }}>
+                  <table className="table">
+                    <thead>
+                      <tr>
+                        <th style={{ width: '220px' }}>Model</th>
+                        <th>Input (per 1M)</th>
+                        <th>Output (per 1M)</th>
+                        <th>Cache Read (per 1M)</th>
+                        <th>Cache Write (per 1M)</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {configParsed?.models ? Object.keys(configParsed.models).map((name) => {
+                        const globalCost = configParsed.models[name]?.cost || {};
+                        const providerCost = selectedPricingProvider !== 'global' 
+                          ? (configParsed.providers?.[selectedPricingProvider]?.models?.[name]?.cost || {})
+                          : null;
+                        
+                        const isOverridden = providerCost !== null && Object.keys(providerCost).length > 0;
+                        const activeCost = providerCost !== null ? providerCost : globalCost;
+
+                        const inputProps = (field: string) => ({
+                          type: "number",
+                          step: "0.001",
+                          value: activeCost[field] !== undefined ? activeCost[field] : "",
+                          placeholder: selectedPricingProvider !== 'global' ? (globalCost[field] ?? "—") : "0.000",
+                          onChange: (e: React.ChangeEvent<HTMLInputElement>) => handleCostChange(name, field, e.target.value),
+                          style: {
+                            width: '100%',
+                            padding: '6px 8px',
+                            borderRadius: '4px',
+                            border: '1px solid transparent',
+                            background: activeCost[field] === undefined && selectedPricingProvider !== 'global' ? 'transparent' : 'white',
+                            borderBottom: '1px solid #e2e8f0',
+                            fontSize: '13px',
+                            color: activeCost[field] === undefined && selectedPricingProvider !== 'global' ? 'var(--text-muted)' : 'var(--text-primary)',
+                            outline: 'none',
+                            textAlign: 'left' as const
+                          }
+                        });
+
+                        return (
+                          <tr key={name} style={{ background: isOverridden ? '#fffbeb' : 'transparent' }}>
+                            <td style={{ fontWeight: 700 }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                {getModelIcon(name)}
+                                {name}
+                                {isOverridden && <span title="Provider Override" style={{ fontSize: '10px' }}>💰</span>}
+                              </div>
+                            </td>
+                            <td><input {...inputProps('input')} /></td>
+                            <td><input {...inputProps('output')} /></td>
+                            <td><input {...inputProps('cacheRead')} /></td>
+                            <td><input {...inputProps('cacheWrite')} /></td>
+                          </tr>
+                        );
+                      }) : (
+                        <tr>
+                          <td colSpan={5} style={{ textAlign: 'center', padding: '24px', color: 'var(--text-muted)' }}>
+                            No global models configured in config.yaml.
                           </td>
                         </tr>
                       )}
