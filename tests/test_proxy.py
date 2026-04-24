@@ -2,6 +2,36 @@ import pytest
 from decimal import Decimal
 
 
+def test_proxy_registers_v1_and_compatibility_paths(proxy_module):
+    post_paths = {
+        route.path
+        for route in proxy_module.app.routes
+        if "POST" in getattr(route, "methods", set())
+    }
+
+    assert {
+        "/v1/chat/completions",
+        "/chat/completions",
+        "/v1/responses",
+        "/responses",
+        "/v1/messages",
+        "/messages",
+    }.issubset(post_paths)
+
+    get_paths = {
+        route.path
+        for route in proxy_module.app.routes
+        if "GET" in getattr(route, "methods", set())
+    }
+
+    assert {
+        "/v1/models",
+        "/models",
+        "/v1/models/{model_id}",
+        "/models/{model_id}",
+    }.issubset(get_paths)
+
+
 @pytest.mark.parametrize(
     ("base_url", "path", "expected"),
     [
@@ -115,6 +145,26 @@ async def test_list_models_returns_configured_models(proxy_module):
             {"id": "gpt-4.1", "object": "model", "owned_by": "test-provider"},
         ],
     }
+
+
+@pytest.mark.anyio
+async def test_get_model_returns_configured_model(proxy_module):
+    result = await proxy_module.get_model("test-model")
+
+    assert result == {
+        "id": "test-model",
+        "object": "model",
+        "owned_by": "test-provider",
+    }
+
+
+@pytest.mark.anyio
+async def test_get_model_rejects_unknown_model(proxy_module):
+    with pytest.raises(proxy_module.HTTPException) as exc_info:
+        await proxy_module.get_model("missing-model")
+
+    assert exc_info.value.status_code == 404
+    assert "missing-model" in exc_info.value.detail
 
 
 @pytest.mark.anyio

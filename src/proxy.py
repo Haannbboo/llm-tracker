@@ -204,22 +204,26 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="llm-tracker-proxy", lifespan=lifespan)
 
 
+@app.post("/chat/completions")
 @app.post("/v1/chat/completions")
 async def chat_completions(request: Request):
     return await forward(request, "/v1/chat/completions")
 
 
+@app.post("/responses")
 @app.post("/v1/responses")
 async def responses(request: Request):
     return await forward(request, "/v1/responses")
 
 
+@app.post("/messages")
 @app.post("/v1/messages")
 async def messages(request: Request):
     return await forward(request, "/v1/messages")
 
 
 @app.get("/v1/models")
+@app.get("/models")
 async def list_models():
     return {
         "object": "list",
@@ -227,6 +231,23 @@ async def list_models():
             {"id": model, "object": "model", "owned_by": provider.name}
             for model, provider in MODEL_MAP.items()
         ],
+    }
+
+
+@app.get("/models/{model_id}")
+@app.get("/v1/models/{model_id}")
+async def get_model(model_id: str):
+    provider = MODEL_MAP.get(model_id)
+    if provider is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Model '{model_id}' not found",
+        )
+
+    return {
+        "id": model_id,
+        "object": "model",
+        "owned_by": provider.name,
     }
 
 

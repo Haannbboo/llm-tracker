@@ -10,7 +10,7 @@ with open(
     cfg = yaml.safe_load(config_file) or {}
 server = cfg.get("server", {})
 
-bind = f"{server.get('host', '0.0.0.0')}:{int(server.get('port', 4000))}"
+bind = f"{server.get('host', '127.0.0.1')}:{int(server.get('port', 4000))}"
 workers = 1
 worker_class = "uvicorn.workers.UvicornWorker"
 accesslog = os.path.join(ROOT, "logs/proxy.access.log")

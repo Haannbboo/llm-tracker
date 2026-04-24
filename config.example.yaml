@@ -252,7 +252,7 @@ providers:
       gpt-5.4: {}
 
 server:
-  host: 0.0.0.0
+  host: 127.0.0.1
   port: 4000
   api_port: 4001
 

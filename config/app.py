@@ -51,7 +51,7 @@ def load_config(path: str | None = None) -> dict[str, Any]:
     config.setdefault("models", {})
     config.setdefault("providers", {})
 
-    server.setdefault("host", "0.0.0.0")
+    server.setdefault("host", "127.0.0.1")
     server.setdefault("port", 4000)
     server.setdefault("api_port", server["port"] + 1)
     server.setdefault("otlp_port", server["api_port"] + 1)

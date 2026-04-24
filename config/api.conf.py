@@ -11,7 +11,9 @@ with open(
 server = cfg.get("server", {})
 proxy_port = int(server.get("port", 4000))
 
-bind = f"{server.get('host', '0.0.0.0')}:{int(server.get('api_port', proxy_port + 1))}"
+bind = (
+    f"{server.get('host', '127.0.0.1')}:{int(server.get('api_port', proxy_port + 1))}"
+)
 workers = 1
 worker_class = "uvicorn.workers.UvicornWorker"
 accesslog = os.path.join(ROOT, "logs/api.access.log")
