@@ -288,13 +288,19 @@ function TrendChart({
   data: DailyUsage[], 
   title: string
 }) {
+  const [hoveredIdx, setHoveredIdx] = useState<number | null>(null);
   const maxTokens = Math.max(...data.map(x => value(x.total_tokens)), 1);
   const maxRequests = Math.max(...data.map(x => value(x.requests)), 1);
   const paddingX = 60; // Internal horizontal padding
   const chartWidth = 1000 - (paddingX * 2);
+
+  const hoveredData = hoveredIdx !== null ? data[hoveredIdx] : null;
+  const hCached = hoveredData ? value(hoveredData.cached_tokens) : 0;
+  const hInput = hoveredData ? Math.max(0, value(hoveredData.prompt_tokens) - hCached) : 0;
+  const hOutput = hoveredData ? value(hoveredData.completion_tokens) : 0;
   
   return (
-    <div className="widget" style={{ minHeight: '400px', width: '100%' }}>
+    <div className="widget" style={{ minHeight: '400px', width: '100%', position: 'relative' }}>
       <div className="widget-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <span>📈 {title}</span>
         <div style={{ display: 'flex', gap: '16px' }}>
@@ -328,6 +334,56 @@ function TrendChart({
           <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-muted)' }}>No trend data available</div>
         ) : (
           <>
+            {hoveredIdx !== null && hoveredData && (
+              <div style={{
+                position: 'absolute',
+                top: '-10px',
+                left: `${(paddingX + (hoveredIdx / (Math.max(data.length - 1, 1))) * chartWidth) / 10}%`,
+                transform: 'translateX(-50%)',
+                backgroundColor: 'rgba(15, 23, 42, 0.95)',
+                color: 'white',
+                padding: '12px',
+                borderRadius: '8px',
+                fontSize: '12px',
+                zIndex: 100,
+                pointerEvents: 'none',
+                boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1)',
+                minWidth: '200px',
+                border: '1px solid rgba(255, 255, 255, 0.1)',
+                backdropFilter: 'blur(4px)'
+              }}>
+                <div style={{ fontWeight: 600, marginBottom: '8px', borderBottom: '1px solid rgba(255, 255, 255, 0.2)', paddingBottom: '4px', fontSize: '13px' }}>
+                  {hoveredData.period}
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', gap: '12px', marginBottom: '4px' }}>
+                  <span style={{ color: '#94a3b8' }}>Input:</span>
+                  <span style={{ fontWeight: 600 }}>{formatNumber(hInput)}</span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', gap: '12px', marginBottom: '4px' }}>
+                  <span style={{ color: 'var(--color-green)' }}>Cached:</span>
+                  <span style={{ fontWeight: 600 }}>{formatNumber(hCached)}</span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', gap: '12px', marginBottom: '4px' }}>
+                  <span style={{ color: 'var(--color-blue)' }}>Output:</span>
+                  <span style={{ fontWeight: 600 }}>{formatNumber(hOutput)}</span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', gap: '12px', marginTop: '8px', paddingTop: '8px', borderTop: '1px solid rgba(255, 255, 255, 0.2)' }}>
+                  <span style={{ fontWeight: 700 }}>Total Tokens:</span>
+                  <span style={{ fontWeight: 800 }}>{formatNumber(value(hoveredData.total_tokens))}</span>
+                </div>
+                {hoveredData.total_cost_usd !== null && value(hoveredData.total_cost_usd) > 0 && (
+                  <div style={{ display: 'flex', justifyContent: 'space-between', gap: '12px', marginTop: '4px' }}>
+                    <span style={{ color: '#f472b6' }}>Est. Cost:</span>
+                    <span style={{ fontWeight: 800, color: '#f472b6' }}>{formatCost(hoveredData.total_cost_usd)}</span>
+                  </div>
+                )}
+                <div style={{ display: 'flex', justifyContent: 'space-between', gap: '12px', marginTop: '4px' }}>
+                  <span style={{ color: 'var(--color-pink)' }}>Requests:</span>
+                  <span style={{ fontWeight: 600, color: 'var(--color-pink)' }}>{formatNumber(hoveredData.requests)}</span>
+                </div>
+              </div>
+            )}
+
             <svg 
               viewBox="0 0 1000 200" 
               preserveAspectRatio="none"
@@ -347,38 +403,57 @@ function TrendChart({
               {data.map((d, i) => {
                 const x = paddingX + (i / (Math.max(data.length - 1, 1))) * chartWidth;
                 const barWidth = Math.min(chartWidth / (data.length * 1.5), 60);
+                const slotWidth = data.length > 1 ? chartWidth / (data.length - 1) : chartWidth;
                 
                 const cached = value(d.cached_tokens);
                 const input = Math.max(0, value(d.prompt_tokens) - cached);
                 const output = value(d.completion_tokens);
                 
-                const hInput = (input / maxTokens) * 200;
-                const hCached = (cached / maxTokens) * 200;
-                const hOutput = (output / maxTokens) * 200;
+                const hInputRect = (input / maxTokens) * 200;
+                const hCachedRect = (cached / maxTokens) * 200;
+                const hOutputRect = (output / maxTokens) * 200;
+
+                const isHovered = hoveredIdx === i;
+                const isDimmed = hoveredIdx !== null && !isHovered;
 
                 return (
-                  <g key={i}>
+                  <g 
+                    key={i}
+                    onMouseEnter={() => setHoveredIdx(i)}
+                    onMouseLeave={() => setHoveredIdx(null)}
+                  >
                     {/* Input */}
                     <rect 
-                      x={x - barWidth/2} y={200 - hInput} 
-                      width={barWidth} height={hInput} 
+                      x={x - barWidth/2} y={200 - hInputRect} 
+                      width={barWidth} height={hInputRect} 
                       fill="#94a3b8" 
+                      opacity={isDimmed ? 0.3 : 1}
+                      style={{ transition: 'all 0.2s' }}
                     />
                     {/* Cached */}
                     <rect 
-                      x={x - barWidth/2} y={200 - hInput - hCached} 
-                      width={barWidth} height={hCached} 
+                      x={x - barWidth/2} y={200 - hInputRect - hCachedRect} 
+                      width={barWidth} height={hCachedRect} 
                       fill="var(--color-green)" 
+                      opacity={isDimmed ? 0.3 : 1}
+                      style={{ transition: 'all 0.2s' }}
                     />
                     {/* Output */}
                     <rect 
-                      x={x - barWidth/2} y={200 - hInput - hCached - hOutput} 
-                      width={barWidth} height={hOutput} 
+                      x={x - barWidth/2} y={200 - hInputRect - hCachedRect - hOutputRect} 
+                      width={barWidth} height={hOutputRect} 
                       fill="var(--color-blue)" 
+                      opacity={isDimmed ? 0.3 : 1}
+                      style={{ transition: 'all 0.2s' }}
                     />
-                    <title>
-                      {`${d.period}\nInput: ${formatNumber(input)}\nCached: ${formatNumber(cached)}\nOutput: ${formatNumber(output)}\nTotal: ${formatNumber(value(d.total_tokens))}`}
-                    </title>
+                    
+                    {/* Invisible overlay for easier hovering */}
+                    <rect 
+                      x={x - slotWidth/2} y={0} 
+                      width={slotWidth} height={200} 
+                      fill="transparent" 
+                      style={{ cursor: 'pointer' }}
+                    />
                   </g>
                 );
               })}
@@ -400,6 +475,7 @@ function TrendChart({
                       strokeWidth="3"
                       strokeLinecap="round"
                       strokeLinejoin="round"
+                      style={{ pointerEvents: 'none', opacity: hoveredIdx === null ? 1 : 0.4 }}
                     />
                     {data.map((d, i) => {
                       const x = paddingX + (i / (Math.max(data.length - 1, 1))) * chartWidth;
@@ -407,19 +483,19 @@ function TrendChart({
                       return (
                         <circle 
                           key={i} 
-                          cx={x} cy={y} r="3" 
+                          cx={x} cy={y} r={hoveredIdx === i ? "5" : "3"} 
                           fill="white" 
                           stroke="var(--color-pink)" 
-                          strokeWidth="2"
-                        >
-                          <title>{`${d.period} - Requests: ${formatNumber(value(d.requests))}`}</title>
-                        </circle>
+                          strokeWidth={hoveredIdx === i ? "3" : "2"}
+                          style={{ pointerEvents: 'none', transition: 'all 0.2s', opacity: hoveredIdx === null || hoveredIdx === i ? 1 : 0.4 }}
+                        />
                       );
                     })}
                   </>
                 );
               })()}
             </svg>
+
 
             <div style={{ 
               display: 'flex', 
