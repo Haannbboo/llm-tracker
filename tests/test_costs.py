@@ -56,6 +56,30 @@ def test_resolve_model_cost_falls_back_to_global(costs_module, config_module):
     )
 
 
+def test_resolve_model_cost_matches_model_names_case_insensitively(
+    costs_module, config_module
+):
+    config_module.MODEL_COSTS.clear()
+    config_module.MODEL_COSTS.update(
+        {
+            "minimax-m2.7": config_module.ModelCost(
+                input=1.5,
+                output=2.5,
+                cache_read=0.15,
+            )
+        }
+    )
+    config_module.PROVIDER_MODEL_COSTS.clear()
+
+    assert costs_module.resolve_model_cost(
+        "alpha", "MiniMax-M2.7"
+    ) == config_module.ModelCost(
+        input=1.5,
+        output=2.5,
+        cache_read=0.15,
+    )
+
+
 def test_resolve_model_cost_returns_none_for_unknown_model(costs_module, config_module):
     config_module.MODEL_COSTS.clear()
     config_module.PROVIDER_MODEL_COSTS.clear()

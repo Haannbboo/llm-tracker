@@ -234,6 +234,43 @@ def test_build_cost_maps_ignores_cache_write(config_module):
     )
 
 
+def test_build_cost_maps_normalizes_model_keys_to_lowercase(config_module):
+    model_costs, provider_model_costs = config_module.build_cost_maps(
+        {
+            "models": {
+                "MiniMax-M2.7": {
+                    "cost": {"input": 1.5, "output": 2.5, "cacheRead": 0.15}
+                }
+            },
+            "providers": {
+                "minimax": {
+                    "base_url": "https://api.minimax.example/v1",
+                    "models": {
+                        "MiniMax-M2.7": {
+                            "cost": {"input": 3.0, "output": 4.0, "cacheRead": 0.3}
+                        }
+                    },
+                }
+            },
+        }
+    )
+
+    assert "MiniMax-M2.7" not in model_costs
+    assert model_costs["minimax-m2.7"] == config_module.ModelCost(
+        input=1.5,
+        output=2.5,
+        cache_read=0.15,
+    )
+    assert "MiniMax-M2.7" not in provider_model_costs["minimax"]
+    assert provider_model_costs["minimax"]["minimax-m2.7"] == (
+        config_module.ModelCost(
+            input=3.0,
+            output=4.0,
+            cache_read=0.3,
+        )
+    )
+
+
 def test_refresh_runtime_config_updates_globals_in_place(
     config_module, tmp_path, monkeypatch
 ):

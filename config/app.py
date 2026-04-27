@@ -22,6 +22,10 @@ class ModelCost:
     cache_read: float
 
 
+def normalize_model_cost_key(model_name: str) -> str:
+    return model_name.lower()
+
+
 def expand_path(path: str) -> str:
     return os.path.expanduser(path)
 
@@ -120,7 +124,7 @@ def build_cost_maps(
     for model_name, model_config in config.get("models", {}).items():
         model_cost = _parse_model_cost(model_config)
         if model_cost is not None:
-            model_costs[model_name] = model_cost
+            model_costs[normalize_model_cost_key(model_name)] = model_cost
 
     for provider_name, provider in config["providers"].items():
         provider_costs: dict[str, ModelCost] = {}
@@ -129,7 +133,7 @@ def build_cost_maps(
             for model_name, model_config in models.items():
                 model_cost = _parse_model_cost(model_config)
                 if model_cost is not None:
-                    provider_costs[model_name] = model_cost
+                    provider_costs[normalize_model_cost_key(model_name)] = model_cost
         if provider_costs:
             provider_model_costs[provider_name] = provider_costs
 

@@ -2,14 +2,20 @@ from __future__ import annotations
 
 from decimal import Decimal
 
-from config.app import MODEL_COSTS, PROVIDER_MODEL_COSTS, ModelCost
+from config.app import (
+    MODEL_COSTS,
+    PROVIDER_MODEL_COSTS,
+    ModelCost,
+    normalize_model_cost_key,
+)
 
 
 def resolve_model_cost(provider: str, model: str) -> ModelCost | None:
-    provider_cost = PROVIDER_MODEL_COSTS.get(provider, {}).get(model)
+    normalized_model = normalize_model_cost_key(model)
+    provider_cost = PROVIDER_MODEL_COSTS.get(provider, {}).get(normalized_model)
     if provider_cost is not None:
         return provider_cost
-    return MODEL_COSTS.get(model)
+    return MODEL_COSTS.get(normalized_model)
 
 
 def calculate_costs(
