@@ -3,10 +3,14 @@ from dataclasses import dataclass
 from typing import Any
 
 import yaml
+from . import merge as merge_helpers
 
 DEFAULT_TRACKER_HOME = "~/.llm-tracker"
 CONFIG_ENV_VAR = "LLM_TRACKER_CONFIG"
 TRACKER_HOME_ENV_VAR = "LLM_TRACKER_HOME"
+
+merge_missing_config_defaults = merge_helpers.merge_missing_config_defaults
+sync_config_file_with_defaults = merge_helpers.sync_config_file_with_defaults
 
 
 @dataclass(frozen=True)

@@ -1,4 +1,9 @@
+import os
+import subprocess
+import sys
 from pathlib import Path
+
+import yaml
 
 
 def test_load_config_expands_database_path(config_module, tmp_path, monkeypatch):
@@ -330,3 +335,153 @@ providers:
             cache_read=0.3,
         )
     )
+
+
+def test_merge_missing_config_defaults_backfills_missing_fields(config_module):
+    user_config = {
+        "models": {
+            "gpt-5": {
+                "cost": {
+                    "input": 9.0,
+                }
+            }
+        },
+        "providers": {
+            "anthropic": {
+                "base_url": "https://api.anthropic.com/v1",
+                "models": {"claude-sonnet-4": {}},
+            }
+        },
+        "server": {
+            "port": 4100,
+        },
+    }
+    default_config = {
+        "models": {
+            "gpt-5": {
+                "cost": {
+                    "input": 1.25,
+                    "output": 10.0,
+                    "cacheRead": 0.125,
+                }
+            },
+            "gpt-5-mini": {
+                "cost": {
+                    "input": 0.25,
+                    "output": 2.0,
+                    "cacheRead": 0.025,
+                }
+            },
+        },
+        "providers": {
+            "my-provider": {
+                "base_url": "https://api.example.com/v1",
+                "models": {"gpt-5": {}},
+            }
+        },
+        "server": {
+            "host": "127.0.0.1",
+            "port": 4000,
+            "api_port": 4001,
+            "otlp_port": 4002,
+        },
+        "db": {
+            "path": "~/.llm-tracker/usage.db",
+        },
+    }
+
+    merged_config = config_module.merge_missing_config_defaults(
+        user_config, default_config
+    )
+
+    assert merged_config["models"]["gpt-5"]["cost"]["input"] == 9.0
+    assert merged_config["models"]["gpt-5"]["cost"]["output"] == 10.0
+    assert merged_config["models"]["gpt-5"]["cost"]["cacheRead"] == 0.125
+    assert merged_config["models"]["gpt-5-mini"]["cost"]["output"] == 2.0
+    assert merged_config["server"]["port"] == 4100
+    assert merged_config["server"]["host"] == "127.0.0.1"
+    assert merged_config["server"]["api_port"] == 4001
+    assert merged_config["db"]["path"] == "~/.llm-tracker/usage.db"
+
+
+def test_merge_missing_config_defaults_skips_example_provider_backfill(config_module):
+    user_config = {
+        "models": {},
+        "providers": {
+            "anthropic": {
+                "base_url": "https://api.anthropic.com/v1",
+                "models": {"claude-sonnet-4": {}},
+            }
+        },
+    }
+    default_config = {
+        "providers": {
+            "my-provider": {
+                "base_url": "https://api.example.com/v1",
+                "models": {"gpt-5": {}},
+            }
+        }
+    }
+
+    merged_config = config_module.merge_missing_config_defaults(
+        user_config, default_config
+    )
+
+    assert "my-provider" not in merged_config["providers"]
+
+
+def test_sync_config_script_runs_without_pythonpath(tmp_path):
+    repo_root = Path(__file__).resolve().parents[1]
+    script_path = repo_root / "scripts" / "sync-config.py"
+    user_config_path = tmp_path / "config.yaml"
+    default_config_path = tmp_path / "config.example.yaml"
+
+    user_config_path.write_text(
+        """
+models:
+  gpt-5:
+    cost:
+      input: 9.0
+""",
+        encoding="utf-8",
+    )
+    default_config_path.write_text(
+        """
+models:
+  gpt-5:
+    cost:
+      input: 1.25
+      output: 10.0
+  gpt-5.5:
+    cost:
+      input: 5.0
+      output: 30.0
+server:
+  host: 127.0.0.1
+""",
+        encoding="utf-8",
+    )
+
+    env = dict(os.environ)
+    env.pop("PYTHONPATH", None)
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(script_path),
+            str(user_config_path),
+            str(default_config_path),
+        ],
+        cwd=repo_root,
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+
+    assert result.returncode == 0, result.stderr
+
+    merged_config = yaml.safe_load(user_config_path.read_text(encoding="utf-8"))
+    assert merged_config["models"]["gpt-5"]["cost"]["input"] == 9.0
+    assert merged_config["models"]["gpt-5"]["cost"]["output"] == 10.0
+    assert merged_config["models"]["gpt-5.5"]["cost"]["input"] == 5.0
+    assert merged_config["server"]["host"] == "127.0.0.1"

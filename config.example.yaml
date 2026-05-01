@@ -112,6 +112,11 @@ models:
       cacheWrite: 0.3
 
   # GPT Models
+  gpt-5.5:
+    cost:
+      input: 5.0
+      output: 30.0
+      cacheRead: 0.5
   gpt-5.4:
     cost:
       input: 2.5
@@ -242,6 +247,18 @@ models:
       output: 2.4
       cacheRead: 0.03
       cacheWrite: 0.375
+
+  # Xiaomi Mimo
+  mimo-v2.5-pro:
+    cost:
+      input: 1.0
+      output: 3.0
+      cacheRead: 0.2
+  mimo-v2.5:
+    cost:
+      input: 0.4
+      output: 2.0
+      cacheRead: 0.08
 
 providers:
   my-provider:

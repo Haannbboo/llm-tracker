@@ -57,6 +57,7 @@ This bootstraps the environment using `uv`, installs dependencies, and starts th
 - Patches `~/.claude/settings.json` for OTLP telemetry.
 - Patches `~/.codex/config.toml` for OTLP telemetry.
 - Installs the Gemini CLI hook in `~/.gemini/` and enables OTLP in `~/.gemini/settings.json`.
+- Backfills missing `models`, `server`, and `db` keys from `config.example.yaml` into `~/.llm-tracker/config.yaml` without overwriting existing user values.
 - Applies explicit database schema migrations before the services start.
 
 ## Configuration
@@ -84,6 +85,8 @@ providers:
 ```
 
 `base_url` is the only required field per provider. The proxy routes by matching the `model` field in the request body to a provider, then forwards to that provider's `base_url`.
+
+Running `bash scripts/start.sh` or `bash scripts/restart.sh` keeps the `models`, `server`, and `db` sections of `~/.llm-tracker/config.yaml` in sync with new missing defaults from `config.example.yaml`, while preserving any values you have already set.
 
 ## Backend Database
 

@@ -13,6 +13,8 @@ if [[ ! -f "${SUPERVISORD_CONF}" ]]; then
   exit 1
 fi
 
+"${PYTHON}" "${ROOT_DIR}/scripts/sync-config.py" "${CONFIG_PATH}" "${ROOT_DIR}/config.example.yaml"
+
 OTLP_PORT=""
 while [[ $# -gt 0 ]]; do
   case $1 in

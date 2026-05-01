@@ -48,6 +48,8 @@ else
   echo "==> Config created at ${CONFIG_PATH}"
 fi
 
+"${PYTHON}" "${ROOT_DIR}/scripts/sync-config.py" "${CONFIG_PATH}" "${ROOT_DIR}/config.example.yaml"
+
 # Configure Codex OTLP telemetry if Codex is installed
 OTLP_PORT=$("${PYTHON}" -c "import yaml; from pathlib import Path; p = Path('${CONFIG_PATH}'); c = yaml.safe_load(p.read_text()) or {}; print(c.get('server', {}).get('otlp_port', 4002))" 2>/dev/null || echo "4002")
 
