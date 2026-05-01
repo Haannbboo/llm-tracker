@@ -7,6 +7,7 @@ CONFIG_PATH="${CONFIG_DIR}/config.yaml"
 SUPERVISORD_CONF="${CONFIG_DIR}/supervisord.conf"
 SUPERVISORCTL="${ROOT_DIR}/.venv/bin/supervisorctl"
 PYTHON="${ROOT_DIR}/.venv/bin/python"
+PORT_CHECKER="${ROOT_DIR}/scripts/check-service-ports.py"
 
 if [[ ! -f "${SUPERVISORD_CONF}" ]]; then
   echo "Not running. Run scripts/start.sh first." >&2
@@ -45,6 +46,14 @@ p.write_text(yaml.dump(c, sort_keys=False))
 else
   # Read current port from config
   OTLP_PORT=$("${PYTHON}" -c "import yaml; from pathlib import Path; p = Path('${CONFIG_PATH}'); c = yaml.safe_load(p.read_text()) or {}; print(c.get('server', {}).get('otlp_port', 4002))" 2>/dev/null || echo "4002")
+fi
+
+if ! "${PYTHON}" "${PORT_CHECKER}" \
+  --strict \
+  --config "${CONFIG_PATH}" \
+  --supervisorctl "${SUPERVISORCTL}" \
+  --supervisord-conf "${SUPERVISORD_CONF}"; then
+  exit 1
 fi
 
 # Update Codex OTLP telemetry if Codex is installed

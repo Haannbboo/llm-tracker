@@ -13,6 +13,7 @@ PYTHON="${VENV_DIR}/bin/python"
 SUPERVISORD="${VENV_DIR}/bin/supervisord"
 SUPERVISORCTL="${VENV_DIR}/bin/supervisorctl"
 REQS_STAMP="${VENV_DIR}/.requirements.sha256"
+PORT_CHECKER="${ROOT_DIR}/scripts/check-service-ports.py"
 
 # Bootstrap uv
 if ! command -v uv >/dev/null 2>&1; then
@@ -49,6 +50,14 @@ else
 fi
 
 "${PYTHON}" "${ROOT_DIR}/scripts/sync-config.py" "${CONFIG_PATH}" "${ROOT_DIR}/config.example.yaml"
+
+if ! "${PYTHON}" "${PORT_CHECKER}" \
+  --strict \
+  --config "${CONFIG_PATH}" \
+  --supervisorctl "${SUPERVISORCTL}" \
+  --supervisord-conf "${SUPERVISORD_CONF}"; then
+  exit 1
+fi
 
 # Configure Codex OTLP telemetry if Codex is installed
 OTLP_PORT=$("${PYTHON}" -c "import yaml; from pathlib import Path; p = Path('${CONFIG_PATH}'); c = yaml.safe_load(p.read_text()) or {}; print(c.get('server', {}).get('otlp_port', 4002))" 2>/dev/null || echo "4002")

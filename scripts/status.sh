@@ -6,17 +6,17 @@ SUPERVISORD_CONF="${HOME}/.llm-tracker/supervisord.conf"
 SUPERVISORCTL="${ROOT_DIR}/.venv/bin/supervisorctl"
 CONFIG_PATH="${HOME}/.llm-tracker/config.yaml"
 PYTHON="${ROOT_DIR}/.venv/bin/python"
+PORT_CHECKER="${ROOT_DIR}/scripts/check-service-ports.py"
 
 if [[ ! -f "${SUPERVISORD_CONF}" ]]; then
   echo "Services are not configured or not running (missing supervisord.conf)." >&2
-  exit 0
-fi
-
-echo "==> Service Status"
-if [[ $# -gt 0 ]]; then
-  "${SUPERVISORCTL}" -c "${SUPERVISORD_CONF}" status "$@"
 else
-  "${SUPERVISORCTL}" -c "${SUPERVISORD_CONF}" status
+  echo "==> Service Status"
+  if [[ $# -gt 0 ]]; then
+    "${SUPERVISORCTL}" -c "${SUPERVISORD_CONF}" status "$@"
+  else
+    "${SUPERVISORCTL}" -c "${SUPERVISORD_CONF}" status
+  fi
 fi
 
 if [[ -f "${CONFIG_PATH}" ]]; then
@@ -37,4 +37,9 @@ print(f'  Proxy: {h}:{p}')
 print(f'  API:   {h}:{a}')
 print(f'  OTLP:  {h}:{o}')
 "
+
+  "${PYTHON}" "${PORT_CHECKER}" \
+    --config "${CONFIG_PATH}" \
+    --supervisorctl "${SUPERVISORCTL}" \
+    --supervisord-conf "${SUPERVISORD_CONF}"
 fi

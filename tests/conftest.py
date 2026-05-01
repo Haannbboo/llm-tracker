@@ -39,6 +39,7 @@ providers:
 
 PROJECT_MODULES = [
     "config.app",
+    "config.runtime_ports",
     "src.api",
     "src.costs",
     "src.database",
@@ -116,3 +117,8 @@ def otlp_module(load_module: Callable[[str], ModuleType]) -> ModuleType:
 @pytest.fixture
 def utils_module(load_module: Callable[[str], ModuleType]) -> ModuleType:
     return load_module("src.utils")
+
+
+@pytest.fixture
+def runtime_ports_module(load_module: Callable[[str], ModuleType]) -> ModuleType:
+    return load_module("config.runtime_ports")

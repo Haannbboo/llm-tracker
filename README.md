@@ -132,6 +132,19 @@ cd frontend
 npm install
 npm run dev
 ```
+The frontend dev server resolves the backend API URL in this order:
+- `LLM_TRACKER_API_URL`
+- `LLM_TRACKER_BACKEND_URL`
+- `~/.llm-tracker/config.yaml` using `server.host` and `server.api_port`
+- Fallback to `http://localhost:4001`
+
+Example explicit override:
+
+```bash
+cd frontend
+LLM_TRACKER_API_URL=http://localhost:4004 npm run dev
+```
+
 By default, the dashboard is available at [http://localhost:5173](http://localhost:5173). See [frontend/README.md](frontend/README.md) for more details.
 
 ## Pointing agents at the proxy

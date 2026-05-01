@@ -16,10 +16,18 @@ The frontend for visualizing LLM usage, cost trends, and performance metrics acr
    ```
 
 2. **Configuration**:
-   Ensure the `.env` file in the `frontend` directory points to your running API service.
-   ```env
-   LLM_TRACKER_BACKEND_URL=http://localhost:4001
+   The Vite dev server resolves the backend API URL in this order on each proxied request:
+   1. `LLM_TRACKER_API_URL`
+   2. `LLM_TRACKER_BACKEND_URL`
+   3. `~/.llm-tracker/config.yaml` using `server.host` and `server.api_port`
+   4. Fallback to `http://localhost:4001`
+
+   Example override:
+   ```bash
+   LLM_TRACKER_API_URL=http://localhost:4011 npm run dev
    ```
+
+   If you change `~/.llm-tracker/config.yaml` while the dev server is running, subsequent frontend API requests will use the updated `server.api_port` automatically.
 
 ## Development
 
