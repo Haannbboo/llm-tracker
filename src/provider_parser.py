@@ -8,12 +8,12 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
+from urllib.parse import urlparse
 
 # URL-based provider mapping rules (checked in order)
 PROVIDER_RULES: list[tuple[str, str]] = [
     ("api.minimaxi", "MiniMax"),
-    ("codesonline", "codesonline"),
-    ("vectorengine", "vectorengine"),
+    ("xiaomimimo", "Xiaomi"),
     ("api.anthropic", "Anthropic"),
     ("api.openai", "OpenAI"),
     ("api.github", "GitHub"),
@@ -69,6 +69,29 @@ def _match_url_to_provider(url: str) -> str:
         if pattern in url:
             return provider
     return "unknown"
+
+
+def _derive_provider_from_base_url(url: str) -> str | None:
+    parsed = urlparse(url)
+    hostname = (parsed.hostname or "").strip(".").lower()
+    if not hostname:
+        return None
+
+    if hostname == "localhost" or "." not in hostname:
+        return hostname
+
+    parts = hostname.split(".")
+    if len(parts) < 2:
+        return None
+
+    if (
+        len(parts) >= 3
+        and len(parts[-1]) == 2
+        and parts[-2] in {"ac", "co", "com", "edu", "gov", "net", "org"}
+    ):
+        return parts[-3]
+
+    return parts[-2]
 
 
 @dataclass(frozen=True)
@@ -131,6 +154,8 @@ def parse_provider_metadata(agent: str) -> ProviderMetadata:
         )
 
     provider = _match_url_to_provider(base_url) if base_url else "unknown"
+    if provider == "unknown" and base_url:
+        provider = _derive_provider_from_base_url(base_url) or "unknown"
     if provider == "unknown":
         provider = PROVIDER_DEFAULTS.get(agent, "unknown")
 

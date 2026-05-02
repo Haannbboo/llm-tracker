@@ -1,6 +1,11 @@
 import { useEffect, useMemo, useState } from 'react'
 import yaml from 'js-yaml'
 import './App.css'
+import {
+  getModelBadgeBackgroundColor,
+  getModelColor,
+  getModelTextColor,
+} from './model-badge'
 
 type UsageSummary = {
   provider: string
@@ -145,21 +150,6 @@ const FIXED_PROVIDER_COLORS: Record<string, string> = {
   'openai': '#94a3b8', // Using the slate-ish gray for OpenAI/GPT
 };
 
-function getModelColor(model: string): string {
-  const m = model.toLowerCase()
-  if (m.includes('gpt-5') || m.includes('gpt-4')) return '#dcdcdc' // RGB 220 220 220
-  if (m.includes('claude')) return '#cc7c5e' // RGB 204 124 94
-  if (m.includes('gemini')) return '#528af2' // RGB 82 138 242
-  if (m.includes('minimax')) return '#ec6b53' // RGB 236 107 83
-  return '#f1f5f9'
-}
-
-function getModelTextColor(model: string): string {
-  const m = model.toLowerCase()
-  if (m.includes('gpt-5') || m.includes('gpt-4')) return '#475569'
-  return getModelColor(model)
-}
-
 function getProviderColor(provider: string, providerColors: Record<string, string>): string {
   return providerColors[provider] || '#94a3b8';
 }
@@ -171,7 +161,8 @@ function getModelIcon(model: string) {
   if (m.includes('claude')) return <img src="/models/claude-ai-icon.svg" alt="" style={style} />
   if (m.includes('gemini')) return <img src="/models/google-gemini-icon.svg" alt="" style={style} />
   if (m.includes('minimax') || m.includes('mimimax')) return <img src="/models/minimax-color.svg" alt="" style={style} />
-  
+  if (m.includes('mimo') || m.includes('xiaomi')) return <img src="/models/xiaomi.svg" alt="" style={style} />
+
   return null
 }
 
@@ -361,7 +352,14 @@ function TrendChart({
                 </div>
                 <div style={{ display: 'flex', justifyContent: 'space-between', gap: '12px', marginBottom: '4px' }}>
                   <span style={{ color: 'var(--color-green)' }}>Cached:</span>
-                  <span style={{ fontWeight: 600 }}>{formatNumber(hCached)}</span>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    {value(hoveredData.prompt_tokens) > 0 && (
+                      <span style={{ fontSize: '10px', color: 'var(--color-green)', opacity: 0.8 }}>
+                        ({((hCached / value(hoveredData.prompt_tokens)) * 100).toFixed(1)}%)
+                      </span>
+                    )}
+                    <span style={{ fontWeight: 600 }}>{formatNumber(hCached)}</span>
+                  </div>
                 </div>
                 <div style={{ display: 'flex', justifyContent: 'space-between', gap: '12px', marginBottom: '4px' }}>
                   <span style={{ color: 'var(--color-blue)' }}>Output:</span>
@@ -626,7 +624,7 @@ function ModelTokenChart({
                     <span style={{ 
                       padding: '1px 6px', 
                       borderRadius: '4px', 
-                      backgroundColor: mColor + (s.model.toLowerCase().includes('gpt-5') || s.model.toLowerCase().includes('gpt-4') ? '80' : '26'),
+                      backgroundColor: getModelBadgeBackgroundColor(s.model),
                       color: getModelTextColor(s.model),
                       fontSize: '11px'
                     }}>{s.model}</span>
@@ -1201,7 +1199,7 @@ function App() {
                               alignItems: 'center',
                               gap: '4px',
                               fontSize: '11px',
-                              backgroundColor: getModelColor(row.model) + (row.model.toLowerCase().includes('gpt-5') || row.model.toLowerCase().includes('gpt-4') ? '80' : '26'),
+                              backgroundColor: getModelBadgeBackgroundColor(row.model),
                               color: getModelTextColor(row.model),
                               maxWidth: '140px',
                               fontWeight: 600

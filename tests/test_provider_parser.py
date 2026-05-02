@@ -44,8 +44,7 @@ def _write_gemini_settings(home: Path, base_url: str | None) -> None:
     "url, expected",
     [
         ("https://api.minimaxi.com/v1", "MiniMax"),
-        ("https://free.codesonline.dev", "codesonline"),
-        ("https://vectorengine.com", "vectorengine"),
+        ("https://token-plan-sgp.xiaomimimo.com/anthropic", "Xiaomi"),
         ("https://api.anthropic.com", "Anthropic"),
         ("https://api.openai.com/v1", "OpenAI"),
         ("https://api.github.com", "GitHub"),
@@ -59,6 +58,20 @@ def _write_gemini_settings(home: Path, base_url: str | None) -> None:
 )
 def test_match_url_to_provider(provider_parser_module, url, expected):
     assert provider_parser_module._match_url_to_provider(url) == expected
+
+
+@pytest.mark.parametrize(
+    "url, expected",
+    [
+        ("https://free.codesonline.dev", "codesonline"),
+        ("https://vectorengine.com", "vectorengine"),
+        ("https://api.example.com/v1", "example"),
+        ("http://localhost:8080", "localhost"),
+        ("not-a-url", None),
+    ],
+)
+def test_derive_provider_from_base_url(provider_parser_module, url, expected):
+    assert provider_parser_module._derive_provider_from_base_url(url) == expected
 
 
 class TestParseProvider:
@@ -94,15 +107,22 @@ class TestParseProvider:
     def test_codex_unknown_url_fallback(
         self, provider_parser_module, isolated_home: Path
     ):
-        # This currently falls back to 'openai'
         _write_codex_config(isolated_home, "https://unknown.example.com")
-        assert provider_parser_module.parse_provider("codex") == "openai"
+        assert provider_parser_module.parse_provider("codex") == "example"
 
     def test_codex_codesonline_provider(
         self, provider_parser_module, isolated_home: Path
     ):
         _write_codex_config(isolated_home, "https://free.codesonline.dev")
         assert provider_parser_module.parse_provider("codex") == "codesonline"
+
+    def test_claude_unknown_url_uses_domain_stem(
+        self, provider_parser_module, isolated_home: Path
+    ):
+        _write_claude_settings(
+            isolated_home, "https://token-plan-sgp.xiaomimimo.com/anthropic"
+        )
+        assert provider_parser_module.parse_provider("claude") == "Xiaomi"
 
 
 def test_parse_provider_metadata_returns_base_url_and_source(
@@ -112,6 +132,6 @@ def test_parse_provider_metadata_returns_base_url_and_source(
 
     metadata = provider_parser_module.parse_provider_metadata("codex")
 
-    assert metadata.provider == "openai"
+    assert metadata.provider == "example"
     assert metadata.base_url == "https://unknown.example.com"
     assert metadata.source == "codex_config"
