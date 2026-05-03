@@ -58,6 +58,7 @@ class Usage(Base):
     provider: Mapped[str] = mapped_column(String, nullable=False)
     model: Mapped[str] = mapped_column(String, nullable=False)
     client_source: Mapped[str | None] = mapped_column(String, nullable=True)
+    session_id: Mapped[str | None] = mapped_column(String, nullable=True)
     endpoint: Mapped[str] = mapped_column(String, nullable=False)
     prompt_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
     prompt_length: Mapped[int] = mapped_column(
@@ -228,6 +229,72 @@ def _row_to_dict(row: Any) -> dict[str, Any]:
 # Return projected rows and aggregates for API consumers.
 
 
+SUMMARY_SUM_FIELDS = (
+    "prompt_tokens",
+    "completion_tokens",
+    "reasoning_tokens",
+    "cached_tokens",
+    "tool_tokens",
+    "cache_creation_tokens",
+    "total_tokens",
+    "input_cost_usd",
+    "output_cost_usd",
+    "total_cost_usd",
+)
+
+
+def _empty_usage_summary() -> dict[str, Any]:
+    return {
+        "requests": 0,
+        "successful_requests": 0,
+        "failed_requests": 0,
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "reasoning_tokens": 0,
+        "cached_tokens": 0,
+        "tool_tokens": 0,
+        "cache_creation_tokens": 0,
+        "total_tokens": 0,
+        "input_cost_usd": 0.0,
+        "output_cost_usd": 0.0,
+        "total_cost_usd": 0.0,
+        "avg_latency_ms": None,
+        "avg_ttft_ms": None,
+        "cache_hit_rate": 0.0,
+    }
+
+
+def _add_row_to_summary(summary: dict[str, Any], row: dict[str, Any]) -> None:
+    summary["requests"] += 1
+    status = row.get("status")
+    if status is not None and status >= 400:
+        summary["failed_requests"] += 1
+    else:
+        summary["successful_requests"] += 1
+
+    for field in SUMMARY_SUM_FIELDS:
+        summary[field] += row.get(field) or 0
+
+
+def _finalize_usage_summary(
+    summary: dict[str, Any],
+    *,
+    latency_values: list[int],
+    ttft_values: list[int],
+) -> dict[str, Any]:
+    if latency_values:
+        summary["avg_latency_ms"] = sum(latency_values) / len(latency_values)
+    if ttft_values:
+        summary["avg_ttft_ms"] = sum(ttft_values) / len(ttft_values)
+
+    prompt_tokens = summary["prompt_tokens"]
+    summary["cache_hit_rate"] = (
+        summary["cached_tokens"] / prompt_tokens if prompt_tokens else 0.0
+    )
+
+    return summary
+
+
 def _usage_filters(
     *,
     provider: str | None = None,
@@ -270,6 +337,7 @@ def fetch_recent_usage(
             Usage.provider,
             Usage.model,
             Usage.client_source,
+            Usage.session_id,
             Usage.endpoint,
             Usage.prompt_tokens,
             Usage.prompt_length,
@@ -319,6 +387,192 @@ def count_usage(
         query = query.where(and_(*filters))
     with get_engine().connect() as connection:
         return int(connection.execute(query).scalar_one())
+
+
+def get_usage_high_watermark(*, db_path: str | None = None) -> int:
+    query = select(func.max(Usage.id))
+    with get_engine(db_path).connect() as connection:
+        value = connection.execute(query).scalar_one()
+    return int(value or 0)
+
+
+def summarize_usage_window(
+    *,
+    after_id: int = 0,
+    until_id: int | None = None,
+    since: str | None = None,
+    until: str | None = None,
+    client_source: str | None = None,
+    session_id: str | None = None,
+    provider: str | None = None,
+    model: str | None = None,
+    include_rows: bool = False,
+    db_path: str | None = None,
+) -> dict[str, Any]:
+    filters = [Usage.id > after_id]
+    if until_id is not None:
+        filters.append(Usage.id <= until_id)
+    if since:
+        filters.append(Usage.ts >= since)
+    if until:
+        filters.append(Usage.ts <= until)
+    if client_source:
+        filters.append(Usage.client_source == client_source)
+    if session_id:
+        filters.append(Usage.session_id == session_id)
+    if provider:
+        filters.append(Usage.provider == provider)
+    if model:
+        filters.append(Usage.model == model)
+
+    query = (
+        select(
+            Usage.id,
+            Usage.ts,
+            Usage.provider,
+            Usage.model,
+            Usage.client_source,
+            Usage.session_id,
+            Usage.endpoint,
+            Usage.prompt_tokens,
+            Usage.completion_tokens,
+            Usage.reasoning_tokens,
+            Usage.cached_tokens,
+            Usage.tool_tokens,
+            Usage.cache_creation_tokens,
+            Usage.total_tokens,
+            Usage.latency_ms,
+            Usage.ttft_ms,
+            Usage.input_cost_usd,
+            Usage.output_cost_usd,
+            Usage.total_cost_usd,
+            Usage.status,
+        )
+        .where(and_(*filters))
+        .order_by(Usage.id.asc())
+    )
+
+    with get_engine(db_path).connect() as connection:
+        rows = [_row_to_dict(row) for row in connection.execute(query)]
+
+    return _build_usage_window_summary(
+        rows,
+        after_id=after_id,
+        until_id=until_id,
+        include_rows=include_rows,
+    )
+
+
+def _build_usage_window_summary(
+    rows: list[dict[str, Any]],
+    *,
+    after_id: int,
+    until_id: int | None,
+    include_rows: bool,
+) -> dict[str, Any]:
+    overall = _empty_usage_summary()
+    overall_latencies: list[int] = []
+    overall_ttfts: list[int] = []
+    grouped: dict[str, dict[tuple[Any, ...], dict[str, Any]]] = {
+        "sessions": {},
+        "client_sources": {},
+        "models": {},
+    }
+    group_latencies: dict[tuple[str, tuple[Any, ...]], list[int]] = {}
+    group_ttfts: dict[tuple[str, tuple[Any, ...]], list[int]] = {}
+
+    def ensure_group(
+        group_name: str,
+        key: tuple[Any, ...],
+        labels: dict[str, Any],
+    ) -> dict[str, Any]:
+        groups = grouped[group_name]
+        if key not in groups:
+            groups[key] = labels | _empty_usage_summary()
+            group_latencies[(group_name, key)] = []
+            group_ttfts[(group_name, key)] = []
+        return groups[key]
+
+    for row in rows:
+        _add_row_to_summary(overall, row)
+        if row.get("latency_ms") is not None:
+            overall_latencies.append(int(row["latency_ms"]))
+        if row.get("ttft_ms") is not None:
+            overall_ttfts.append(int(row["ttft_ms"]))
+
+        group_specs = [
+            (
+                "sessions",
+                (row.get("session_id"),),
+                {"session_id": row.get("session_id")},
+            ),
+            (
+                "client_sources",
+                (row.get("client_source"),),
+                {"client_source": row.get("client_source")},
+            ),
+            (
+                "models",
+                (row.get("provider"), row.get("model")),
+                {"provider": row.get("provider"), "model": row.get("model")},
+            ),
+        ]
+        for group_name, key, labels in group_specs:
+            group = ensure_group(group_name, key, labels)
+            _add_row_to_summary(group, row)
+            if row.get("latency_ms") is not None:
+                group_latencies[(group_name, key)].append(int(row["latency_ms"]))
+            if row.get("ttft_ms") is not None:
+                group_ttfts[(group_name, key)].append(int(row["ttft_ms"]))
+
+    _finalize_usage_summary(
+        overall,
+        latency_values=overall_latencies,
+        ttft_values=overall_ttfts,
+    )
+    window_until_id = until_id
+    if window_until_id is None:
+        window_until_id = rows[-1]["id"] if rows else after_id
+
+    result: dict[str, Any] = {
+        "window": {
+            "after_id": after_id,
+            "until_id": window_until_id,
+            "row_count": len(rows),
+        },
+        "summary": overall,
+        "sessions": [],
+        "client_sources": [],
+        "models": [],
+    }
+
+    for group_name in ("sessions", "client_sources", "models"):
+        values = []
+        for key, summary in grouped[group_name].items():
+            values.append(
+                _finalize_usage_summary(
+                    summary,
+                    latency_values=group_latencies[(group_name, key)],
+                    ttft_values=group_ttfts[(group_name, key)],
+                )
+            )
+        result[group_name] = sorted(
+            values,
+            key=lambda item: (
+                str(
+                    item.get("session_id")
+                    or item.get("client_source")
+                    or item.get("provider")
+                    or ""
+                ),
+                str(item.get("model") or ""),
+            ),
+        )
+
+    if include_rows:
+        result["rows"] = rows
+
+    return result
 
 
 def summarize_usage(

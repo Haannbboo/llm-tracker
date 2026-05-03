@@ -1,72 +1,104 @@
 # llm-tracker
 
-A dual-purpose usage tracker for LLM agent users. It functions as both a **transparent forwarding proxy** and a **lightweight OTLP (OpenTelemetry) collector** designed specifically for coding agents like Claude Code, Gemini CLI, and Codex.
+Local-first usage tracking for command-line LLM agents.
 
-The proxy does not inspect, modify, or manage credentials: authorization headers such as `ANTHROPIC_AUTH_TOKEN`, `Authorization`, and `x-api-key` are forwarded unchanged. It captures usage metrics (tokens, latency, TTFT) either from the proxy response stream or from telemetry logs emitted by the agents themselves.
+`llm-tracker` records token usage, cost estimates, latency, TTFT, and session IDs for tools such as Codex, Claude Code, Gemini CLI, and OpenAI/Anthropic-compatible clients. It is designed for teams and side projects that want structured per-session usage data without rebuilding agent-specific tracking logic in every repo.
 
-## How it works
+It can collect data in two ways:
 
-llm-tracker captures usage data through two primary paths:
+- An OTLP collector receives telemetry emitted by coding agents.
+- A transparent proxy forwards provider requests and records usage from responses.
 
-### 1. OTLP Collector Path
-For agents that emit OpenTelemetry logs (Gemini CLI, Claude Code, Codex), llm-tracker acts as a local OTLP backend, parsing rich telemetry to capture metrics that a proxy alone cannot see (e.g., internal tool tokens or client-side latency).
-
-```
-Agent (Gemini CLI / Codex / Claude Code)
-    │  (internal telemetry events)
-    ▼
-llm-tracker OTLP    ←── parses provider-specific schemas
-    │
-    ▼
-Configured Database (SQLite/Postgres)
-```
-
-### 2. Transparent Proxy Path
-For other tools that support custom base URLs (like OpenClaw), the proxy routes requests and logs usage from the response. For streamed requests, it also records `ttft_ms` as the time until the first upstream chunk arrives.
-
-```
-Client (e.g. Claude Code)
-    │  (API key in headers, model in body)
-    ▼
-llm-tracker proxy   ←── resolves upstream provider from `model`
-    │  (credentials unchanged, body forwarded)
-    ▼
-Upstream Provider (Anthropic, OpenAI, etc.)
-```
-
-
+Credentials are not managed by llm-tracker. API keys and authorization headers are forwarded unchanged when using the proxy.
 
 ## Features
 
-- **Multi-Service Architecture**: Separate high-performance services for Proxying, OTLP collection, and Usage API.
-- **Deep Agent Integration**:
-    - **Gemini CLI**: Captures TTFT via a custom shell hook and merges it with OTLP usage data.
-    - **Claude Code**: Tracks prompt length, cache reads/writes, and completion tokens via OTLP.
-    - **Codex**: Correlates SSE events to calculate TTFT and tracks reasoning/tool tokens.
-- **Transparent Proxying**: Supports `/v1/chat/completions`, `/v1/responses`, and `/v1/messages`.
-- **Flexible Storage**: SQLite by default; supports PostgreSQL and MySQL via SQLAlchemy.
-- **Usage Dashboard**: Built-in Vite frontend for visualizing hourly/daily usage and cost trends. See [frontend/README.md](frontend/README.md) for build instructions.
+- Tracks Codex, Claude Code, Gemini CLI, and direct proxy traffic.
+- Preserves session IDs for per-run and per-agent summaries.
+- Prints command-level summaries with `scripts/llm-tracker`.
+- Supports SQLite by default and SQL databases through SQLAlchemy URLs.
+- Estimates cost from model pricing in `~/.llm-tracker/config.yaml`.
+- Includes a React dashboard for usage, cost, latency, and model trends.
+- Keeps agent telemetry config in sync from `scripts/start.sh` and `scripts/restart.sh`.
 
-## Setup
+## Quick Start
+
+Prerequisites:
+
+- macOS or Linux shell environment
+- Python 3.13, or `uv` available so the startup script can create it
+- Node.js 18+ for the optional dashboard
+
+Start the backend services:
 
 ```bash
 bash scripts/start.sh
 ```
 
-This bootstraps the environment using `uv`, installs dependencies, and starts the services under Supervisor. It also **automatically configures your local agents**:
-- Patches `~/.claude/settings.json` for OTLP telemetry.
-- Patches `~/.codex/config.toml` for OTLP telemetry.
-- Installs the Gemini CLI hook in `~/.gemini/` and enables OTLP in `~/.gemini/settings.json`.
-- Backfills missing `models`, `server`, and `db` keys from `config.example.yaml` into `~/.llm-tracker/config.yaml` without overwriting existing user values.
-- Applies explicit database schema migrations before the services start.
+The startup script creates `.venv`, installs Python dependencies, creates `~/.llm-tracker/config.yaml` if needed, applies schema migrations, configures supported agent telemetry, and starts services with Supervisor.
+
+Check service status:
+
+```bash
+bash scripts/status.sh
+```
+
+Default backend ports:
+
+| Service | Default URL |
+| --- | --- |
+| Proxy | `http://127.0.0.1:4000` |
+| API | `http://127.0.0.1:4001` |
+| OTLP | `http://127.0.0.1:4002` |
+
+Start the dashboard:
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+The dashboard is usually available at [http://localhost:5173](http://localhost:5173).
+
+## Command Summaries
+
+Use the repo-local wrapper to run an agent or command and print usage captured while it was running:
+
+```bash
+scripts/llm-tracker -- codex
+scripts/llm-tracker -- claude
+scripts/llm-tracker -- gemini
+scripts/llm-tracker -- codex exec "say hello in one sentence"
+```
+
+Common options:
+
+```bash
+scripts/llm-tracker --json -- codex
+scripts/llm-tracker --wait-ms 5000 -- codex exec "say hello in one sentence"
+scripts/llm-tracker --summary-dest file --summary-file /tmp/llm-summary.json -- claude
+scripts/llm-tracker --proxy-env -- some-openai-compatible-cli
+scripts/llm-tracker --no-summary -- gemini -p "say hello"
+```
+
+By default, summaries are written to stderr so the child command's stdout stays usable. The wrapper records the database high watermark before launch, waits briefly after the child exits, then summarizes usage rows created during that window.
+
+For `codex exec`, llm-tracker also reads Codex's local session JSONL as a fallback if OTLP has not produced a row yet.
 
 ## Configuration
 
-Proxy service is configured in `~/.llm-tracker/config.yaml`:
+Main config lives at:
+
+```text
+~/.llm-tracker/config.yaml
+```
+
+Minimal provider config:
 
 ```yaml
 models:
-  model-name-a:
+  gpt-5.4:
     cost:
       input: 2.5
       output: 15.0
@@ -76,107 +108,163 @@ providers:
   my-provider:
     base_url: https://api.example.com/v1
     models:
-      model-name-a: {}
-      # model-name-a:
-      #   cost:
-      #     input: 3.0
-      #     output: 18.0
-      #     cacheRead: 0.3
-```
+      gpt-5.4: {}
 
-`base_url` is the only required field per provider. The proxy routes by matching the `model` field in the request body to a provider, then forwards to that provider's `base_url`.
+server:
+  host: 127.0.0.1
+  port: 4000
+  api_port: 4001
 
-Running `bash scripts/start.sh` or `bash scripts/restart.sh` keeps the `models`, `server`, and `db` sections of `~/.llm-tracker/config.yaml` in sync with new missing defaults from `config.example.yaml`, while preserving any values you have already set.
-
-## Backend Database
-
-By default, usage is stored in local SQLite:
-
-```yaml
 db:
   path: ~/.llm-tracker/usage.db
 ```
 
-To enable cross-device data sharing, switch to a cloud SQL database, replace `db.path` with `db.url` in `~/.llm-tracker/config.yaml`:
+The proxy routes requests by matching the request `model` to a configured provider model, then forwards the request to that provider's `base_url`.
+
+To use PostgreSQL or MySQL instead of SQLite, set `db.url`:
 
 ```yaml
 db:
   url: postgresql+psycopg://user:password@db-host:5432/llm_tracker?sslmode=require
 ```
 
-## Running
+Running `bash scripts/start.sh` or `bash scripts/restart.sh` merges missing defaults from `config.example.yaml` into your user config without overwriting existing values.
 
-The project is split into three managed backend services and a separate frontend dashboard:
+## How Collection Works
 
-### Backend Services
-Managed via Supervisor:
-- **Proxy (Port 4000)**: Routes provider requests and logs usage.
-- **API (Port 4001)**: Serves usage stats and config editing endpoints.
-- **OTLP (Port 4002)**: Receives telemetry logs from Codex, Gemini CLI, and Claude Code.
+### OTLP Collector
 
-**Manage services with Supervisor:**
+Codex, Claude Code, and Gemini CLI can emit OpenTelemetry logs. llm-tracker receives those logs locally and parses agent-specific fields that are not visible at the HTTP proxy layer.
+
+```text
+Agent telemetry
+      |
+      v
+llm-tracker OTLP collector
+      |
+      v
+SQLite/Postgres/MySQL
+```
+
+The startup scripts configure:
+
+- `~/.codex/config.toml` for Codex OTLP logs
+- `~/.claude/settings.json` for Claude Code OTLP logs
+- `~/.gemini/settings.json` plus a shell hook for Gemini CLI timing data
+
+### Transparent Proxy
+
+For tools that support custom base URLs, llm-tracker can sit between the client and upstream provider:
+
+```text
+LLM client
+      |
+      v
+llm-tracker proxy
+      |
+      v
+Upstream provider
+```
+
+Supported proxy paths include:
+
+- `/v1/chat/completions`
+- `/v1/responses`
+- `/v1/messages`
+
+For streamed responses, the proxy records TTFT as the time until the first upstream chunk arrives.
+
+## Pointing Clients At The Proxy
+
+For OpenAI-compatible clients:
+
 ```bash
-bash scripts/start.sh    # Start all
-bash scripts/restart.sh  # Reload config and restart
-bash scripts/stop.sh     # Stop all
-bash scripts/status.sh   # Check status of servers
+export OPENAI_BASE_URL=http://127.0.0.1:4000/v1
 ```
 
-Logs are stored in the `logs/` directory. Supervisor runtime files live in `~/.llm-tracker/run/`.
-
-### Frontend Dashboard
-The dashboard is a Vite/React application that must be started separately:
+For Anthropic-compatible clients:
 
 ```bash
-cd frontend
-npm install
-npm run dev
+export ANTHROPIC_BASE_URL=http://127.0.0.1:4000
 ```
-The frontend dev server resolves the backend API URL in this order:
-- `LLM_TRACKER_API_URL`
-- `LLM_TRACKER_BACKEND_URL`
-- `~/.llm-tracker/config.yaml` using `server.host` and `server.api_port`
-- Fallback to `http://localhost:4001`
 
-Example explicit override:
+The command wrapper can set these for a child process:
 
 ```bash
-cd frontend
-LLM_TRACKER_API_URL=http://localhost:4004 npm run dev
+scripts/llm-tracker --proxy-env -- some-openai-compatible-cli
 ```
 
-By default, the dashboard is available at [http://localhost:5173](http://localhost:5173). See [frontend/README.md](frontend/README.md) for more details.
+## Dashboard
 
-## Pointing agents at the proxy
+The dashboard lives in `frontend/` and talks to the API service. It resolves the backend API URL in this order:
 
-While OTLP captures telemetry automatically, you can still point agents at the proxy to ensure all traffic is captured.
+1. `LLM_TRACKER_API_URL`
+2. `LLM_TRACKER_BACKEND_URL`
+3. `~/.llm-tracker/config.yaml` using `server.host` and `server.api_port`
+4. `http://localhost:4001`
 
-**Claude Code:**
-```bash
-export ANTHROPIC_BASE_URL=http://localhost:4000
-```
+See [frontend/README.md](frontend/README.md) for frontend-specific setup.
 
-**Codex** (`~/.codex/config.toml`):
-```toml
-[model_providers.my-provider]
-base_url = "http://localhost:4000/v1"
-```
-
-That's it, configure and use the agent normally afterwards.
-
-
-## Tracking Status
+## Tracking Coverage
 
 | Metric | Gemini CLI | Claude Code | Codex | Direct Proxy |
-| :--- | :---: | :---: | :---: | :---: |
-| Input Tokens | ✅ (OTLP) | ✅ (OTLP) | ✅ (OTLP) | ✅ |
-| Output Tokens | ✅ (OTLP) | ✅ (OTLP) | ✅ (OTLP) | ✅ |
-| Cached Tokens (Read) | ✅ (OTLP) | ✅ (OTLP) | ✅ (OTLP) | ✅ |
-| Cached Tokens (Write) | ❌ | ✅ (OTLP) | ❌ | ❌ |
-| Reasoning Tokens | ✅ (OTLP) | ❌ | ✅ (OTLP) | ✅ |
-| Tool Tokens | ✅ (OTLP) | ❌ | ✅ (OTLP) | ❌ |
-| Prompt Length (in chars) | ✅ (OTLP) | ✅ (OTLP) | ✅ (OTLP) | ❌ |
-| Latency | ✅ (Hook) | ✅ (OTLP) | ✅ (OTLP) | ✅ |
-| TTFT (Time to First Token) | ✅ (Hook) | ❌ | ✅ (OTLP) | ✅ (Streaming only) |
+| --- | --- | --- | --- | --- |
+| Input tokens | OTLP | OTLP | OTLP/session fallback | Response usage |
+| Output tokens | OTLP | OTLP | OTLP/session fallback | Response usage |
+| Cached tokens read | OTLP | OTLP | OTLP/session fallback | Response usage |
+| Cached tokens write | Not available | OTLP | Not available | Not available |
+| Reasoning tokens | OTLP | Not available | OTLP/session fallback | Response usage |
+| Tool tokens | OTLP | Not available | OTLP | Not available |
+| Prompt length | OTLP | OTLP | OTLP | Not available |
+| Latency | Hook/OTLP | OTLP | OTLP/session fallback | Proxy timing |
+| TTFT | Hook | Not available | OTLP/session fallback | Streaming only |
+| Session ID | OTLP | OTLP | OTLP/session fallback | Not available |
 
-*Note: Gemini CLI captures TTFT via a shell hook because its OTLP payload lacks a first-chunk timestamp. Claude Code has no BeforeModel/AfterModel hook equivalents, so TTFT is currently unavailable. Direct proxy TTFT is captured from the first streamed upstream chunk, so it is only available when `stream=true`. In general TTFT is **not** reliable and only only for fun.*
+TTFT should be treated as an operational hint, not a billing-grade metric. Each agent exposes different timing data.
+
+## API
+
+Useful local endpoints:
+
+```bash
+curl http://127.0.0.1:4001/usage?limit=20
+curl http://127.0.0.1:4001/usage/summary
+curl http://127.0.0.1:4001/usage/daily
+curl http://127.0.0.1:4001/usage/high-watermark
+```
+
+The dashboard uses the same API.
+
+## Development
+
+Install and start backend services:
+
+```bash
+bash scripts/start.sh
+```
+
+Run tests:
+
+```bash
+./.venv/bin/python -m pytest -q
+```
+
+Manage services:
+
+```bash
+bash scripts/restart.sh
+bash scripts/stop.sh
+bash scripts/status.sh
+```
+
+Logs are written to `logs/`. Supervisor runtime files live under `~/.llm-tracker/run/`.
+
+## Privacy Notes
+
+llm-tracker is intended to run locally. By default, usage is stored in `~/.llm-tracker/usage.db`. If you configure `db.url`, usage data is written to that database instead.
+
+The proxy forwards auth headers unchanged. OTLP payloads are emitted by the agents themselves; review your agent telemetry settings if you need strict control over what metadata is collected.
+
+## License
+
+MIT. See [LICENSE](LICENSE).

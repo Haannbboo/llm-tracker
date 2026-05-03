@@ -201,6 +201,71 @@ def test_parse_gemini_record_falls_back_to_http_status_code(otlp_module, monkeyp
     assert captured["usage"].status == 502
 
 
+def test_parse_gemini_record_prefers_log_session_id_over_resource(
+    otlp_module, monkeypatch
+):
+    captured = {}
+    monkeypatch.setattr(
+        otlp_module,
+        "log_usage",
+        lambda usage: captured.setdefault("usage", usage),
+    )
+    monkeypatch.setattr(
+        otlp_module,
+        "_consume_hook_ttft",
+        lambda hook_dir, session_id: (None, None),
+    )
+
+    record = {
+        "timeUnixNano": "1710000000000000000",
+        "attributes": [
+            {"key": "event.name", "value": {"stringValue": "gemini_cli.api_response"}},
+            {"key": "model", "value": {"stringValue": "gemini-test"}},
+            {"key": "session.id", "value": {"stringValue": "gemini-log-session"}},
+            {"key": "input_token_count", "value": {"intValue": "10"}},
+            {"key": "output_token_count", "value": {"intValue": "5"}},
+            {"key": "total_token_count", "value": {"intValue": "15"}},
+            {"key": "role", "value": {"stringValue": "main"}},
+        ],
+    }
+
+    otlp_module._parse_log_record(record, "gemini-cli", "gemini-resource-session")
+
+    assert captured["usage"].session_id == "gemini-log-session"
+
+
+def test_parse_gemini_record_falls_back_to_resource_session_id(
+    otlp_module, monkeypatch
+):
+    captured = {}
+    monkeypatch.setattr(
+        otlp_module,
+        "log_usage",
+        lambda usage: captured.setdefault("usage", usage),
+    )
+    monkeypatch.setattr(
+        otlp_module,
+        "_consume_hook_ttft",
+        lambda hook_dir, session_id: (None, None),
+    )
+
+    record = {
+        "timeUnixNano": "1710000000000000000",
+        "attributes": [
+            {"key": "event.name", "value": {"stringValue": "gemini_cli.api_response"}},
+            {"key": "model", "value": {"stringValue": "gemini-test"}},
+            {"key": "input_token_count", "value": {"intValue": "10"}},
+            {"key": "output_token_count", "value": {"intValue": "5"}},
+            {"key": "total_token_count", "value": {"intValue": "15"}},
+            {"key": "role", "value": {"stringValue": "main"}},
+        ],
+    }
+
+    otlp_module._parse_log_record(record, "gemini-cli", "gemini-resource-session")
+
+    assert captured["usage"].session_id == "gemini-resource-session"
+
+
 def test_prompt_length_tracker_records_and_consumes_matching_prompt_event(otlp_module):
     # This verifies the basic tracker contract: a prompt-only event stores the length,
     # and the later usage event for the same prompt/session consumes that exact value once.
@@ -283,6 +348,7 @@ def test_parse_claude_record_uses_prompt_length_from_prior_prompt_event(
 
     assert captured["usage"].prompt_length == 2468
     assert captured["usage"].client_source == "claude-code"
+    assert captured["usage"].session_id == "claude-session-1"
     assert captured["usage"].status is None
 
 
@@ -402,7 +468,97 @@ def test_parse_codex_record_uses_prompt_length_from_prior_prompt_event(
 
     assert captured["usage"].prompt_length == 88
     assert captured["usage"].client_source == "codex"
+    assert captured["usage"].session_id == "conv-1"
     assert captured["usage"].status is None
+
+
+def test_parse_codex_exec_record_uses_same_usage_parser(otlp_module, monkeypatch):
+    captured = {}
+    monkeypatch.setattr(
+        otlp_module,
+        "log_usage",
+        _capture_usage(captured),
+    )
+
+    prompt_record = {
+        "timeUnixNano": "0",
+        "attributes": _attrs(
+            {
+                "event.name": "codex.user_prompt",
+                "conversation.id": "exec-conv-1",
+                "model": "gpt-5.5",
+                "prompt_length": 42,
+            }
+        ),
+    }
+    otlp_module._parse_log_record(prompt_record, "codex_exec", "")
+
+    response_ts = datetime(2026, 5, 3, 17, 0, 0, tzinfo=timezone.utc)
+    response_record = {
+        "timeUnixNano": str(int(response_ts.timestamp() * 1_000_000_000)),
+        "attributes": _attrs(
+            {
+                "event.name": "codex.sse_event",
+                "event.kind": "response.completed",
+                "conversation.id": "exec-conv-1",
+                "model": "gpt-5.5",
+                "input_token_count": 21742,
+                "output_token_count": 6,
+                "cached_token_count": 6528,
+                "reasoning_token_count": 0,
+                "duration_ms": 12338,
+            }
+        ),
+    }
+
+    otlp_module._parse_log_record(response_record, "codex_exec", "")
+
+    assert captured["usage"].client_source == "codex"
+    assert captured["usage"].session_id == "exec-conv-1"
+    assert captured["usage"].prompt_length == 42
+    assert captured["usage"].prompt_tokens == 21742
+    assert captured["usage"].completion_tokens == 6
+    assert captured["usage"].cached_tokens == 6528
+
+
+def test_usage_session_id_casts_codex_conversation_id_to_string(otlp_module):
+    attrs = [{"key": "conversation.id", "value": {"intValue": "123"}}]
+
+    assert (
+        otlp_module._usage_session_id(
+            service_name="codex_cli_rs",
+            attrs=attrs,
+            resource_session_id="ignored",
+        )
+        == "123"
+    )
+
+
+def test_parse_codex_record_persists_integer_conversation_id_as_string(
+    otlp_module,
+    monkeypatch,
+):
+    captured = {}
+    monkeypatch.setattr(otlp_module, "log_usage", _capture_usage(captured))
+
+    response_ts = datetime(2026, 4, 22, 21, 5, 0, tzinfo=timezone.utc)
+    response_record = {
+        "timeUnixNano": str(int(response_ts.timestamp() * 1_000_000_000)),
+        "attributes": _attrs(
+            {
+                "event.name": "codex.sse_event",
+                "event.kind": "response.completed",
+                "conversation.id": 123,
+                "model": "gpt-5.4",
+                "input_token_count": 500,
+                "output_token_count": 100,
+            }
+        ),
+    }
+
+    otlp_module._parse_log_record(response_record, "codex_cli_rs", "")
+
+    assert captured["usage"].session_id == "123"
 
 
 def test_parse_codex_record_persists_costs(otlp_module, config_module, monkeypatch):

@@ -17,8 +17,10 @@ CODEX_EVENT = "codex.sse_event"
 CODEX_API_REQUEST_EVENT = "codex.api_request"
 CODEX_DEBUG_FILE = "/tmp/codex-otlp-debug.json"
 GEMINI_HOOK_DIR = os.path.join(os.environ.get("TMPDIR", "/tmp"), "llm-tracker-gemini")
+CODEX_SERVICE_NAMES = {"codex_cli_rs", "codex_exec"}
+KNOWN_SERVICE_NAMES = {"claude-code", "gemini-cli"} | CODEX_SERVICE_NAMES
 
-# State cache for merging Codex events: conversation_id -> {duration_ms, ttft_ms, timestamp}
+# State cache for merging Codex events: run/conversation key -> {duration_ms, ttft_ms, timestamp}
 codex_state = {}
 
 
@@ -42,6 +44,33 @@ def _resource_attr(resource: dict, key: str):
     return _attr(resource.get("attributes", []), key)
 
 
+def _usage_session_id(
+    *,
+    service_name: str,
+    attrs: list,
+    resource_session_id: str,
+) -> str | None:
+    if service_name in CODEX_SERVICE_NAMES:
+        conversation_id = _attr(attrs, "conversation.id")
+        return str(conversation_id) if conversation_id else None
+
+    attr_session_id = _attr(attrs, "session.id")
+    if attr_session_id:
+        return str(attr_session_id)
+
+    if resource_session_id:
+        return str(resource_session_id)
+
+    return None
+
+
+def _state_key(identifier) -> str | None:
+    if not identifier:
+        return None
+
+    return str(identifier)
+
+
 @dataclass
 class _PromptLengthState:
     """Queued prompt-length values waiting for the matching usage event."""
@@ -58,7 +87,10 @@ class PromptLengthTracker:
         self._state: dict[str, _PromptLengthState] = {}
 
     def record_prompt_event(
-        self, service_name: str, attrs: list, session_id: str
+        self,
+        service_name: str,
+        attrs: list,
+        session_id: str,
     ) -> None:
         """Store prompt_length from prompt-only events for later usage rows."""
         prompt_length = _attr(attrs, "prompt_length")
@@ -78,7 +110,10 @@ class PromptLengthTracker:
         state.values.append(int(prompt_length))
 
     def consume_for_usage_event(
-        self, service_name: str, attrs: list, session_id: str
+        self,
+        service_name: str,
+        attrs: list,
+        session_id: str,
     ) -> int:
         """Return the prompt length for a usage row, preferring an inline value when present."""
         prompt_length = _attr(attrs, "prompt_length")
@@ -111,7 +146,12 @@ class PromptLengthTracker:
         for key in stale_keys:
             del self._state[key]
 
-    def _key_for(self, service_name: str, attrs: list, session_id: str) -> str | None:
+    def _key_for(
+        self,
+        service_name: str,
+        attrs: list,
+        session_id: str,
+    ) -> str | None:
         """Build a stable correlation key from the strongest ID the client exposes."""
         prompt_id = _attr(attrs, "prompt.id") or _attr(attrs, "prompt_id")
         if prompt_id:
@@ -171,7 +211,11 @@ def _consume_hook_ttft(hook_dir: str, session_id: str) -> tuple[int | None, int 
     )
 
 
-def _parse_gemini_record(record: dict, attrs: list, session_id: str) -> None:
+def _parse_gemini_record(
+    record: dict,
+    attrs: list,
+    session_id: str,
+) -> None:
     time_ns = record.get("timeUnixNano", "0")
     ts = datetime.fromtimestamp(int(time_ns) / 1e9, tz=timezone.utc).isoformat()
 
@@ -206,6 +250,7 @@ def _parse_gemini_record(record: dict, attrs: list, session_id: str) -> None:
             provider=metadata.provider,
             model=model,
             client_source="gemini-cli",
+            session_id=sid,
             endpoint="generate-otlp",
             prompt_tokens=prompt_tokens,
             prompt_length=prompt_length,
@@ -234,7 +279,11 @@ def _parse_gemini_record(record: dict, attrs: list, session_id: str) -> None:
     )
 
 
-def _parse_claude_record(record: dict, attrs: list, session_id: str) -> None:
+def _parse_claude_record(
+    record: dict,
+    attrs: list,
+    session_id: str,
+) -> None:
     time_ns = record.get("timeUnixNano", "0")
     ts = datetime.fromtimestamp(int(time_ns) / 1e9, tz=timezone.utc).isoformat()
 
@@ -252,6 +301,7 @@ def _parse_claude_record(record: dict, attrs: list, session_id: str) -> None:
     metadata = parse_provider_metadata("claude")
     completion_tokens = int(output_tokens) if output_tokens is not None else None
     cached_tokens = int(cache_read) if cache_read is not None else None
+    usage_session_id = _attr(attrs, "session.id") or session_id or None
 
     total = prompt_tokens + int(output_tokens or 0) + int(cache_create or 0)
     log_usage(
@@ -260,6 +310,7 @@ def _parse_claude_record(record: dict, attrs: list, session_id: str) -> None:
             provider=metadata.provider,
             model=_attr(attrs, "model") or "claude-unknown",
             client_source="claude-code",
+            session_id=usage_session_id,
             endpoint="generate-otlp",
             prompt_tokens=prompt_tokens,
             prompt_length=prompt_length,
@@ -293,22 +344,25 @@ def _parse_claude_record(record: dict, attrs: list, session_id: str) -> None:
 def _parse_codex_api_request(record: dict, attrs: list) -> None:
     conv_id = _attr(attrs, "conversation.id")
     duration = _attr(attrs, "duration_ms")
-    if conv_id and duration is not None:
-        if conv_id not in codex_state:
-            codex_state[conv_id] = {"ts": time.time()}
-        codex_state[conv_id]["duration_ms"] = int(duration)
+    state_key = _state_key(conv_id)
+    if state_key and duration is not None:
+        if state_key not in codex_state:
+            codex_state[state_key] = {"ts": time.time()}
+        codex_state[state_key]["duration_ms"] = int(duration)
 
 
-def _parse_codex_record(record: dict, attrs: list) -> None:
+def _parse_codex_record(record: dict, attrs: list, service_name: str) -> None:
     event_kind = _attr(attrs, "event.kind")
     conv_id = _attr(attrs, "conversation.id")
+    usage_session_id = str(conv_id) if conv_id is not None else None
 
     if event_kind == "response.created":
         duration = _attr(attrs, "duration_ms")
-        if conv_id and duration is not None:
-            if conv_id not in codex_state:
-                codex_state[conv_id] = {"ts": time.time()}
-            codex_state[conv_id]["ttft_ms"] = int(duration)
+        state_key = _state_key(conv_id)
+        if state_key and duration is not None:
+            if state_key not in codex_state:
+                codex_state[state_key] = {"ts": time.time()}
+            codex_state[state_key]["ttft_ms"] = int(duration)
         return
 
     if event_kind != "response.completed":
@@ -334,19 +388,20 @@ def _parse_codex_record(record: dict, attrs: list) -> None:
     ttft_ms = None
 
     # Try to get better latency and ttft from the state cache
-    if conv_id in codex_state:
-        state = codex_state[conv_id]
+    state_key = _state_key(conv_id)
+    if state_key in codex_state:
+        state = codex_state[state_key]
         if "duration_ms" in state:
             latency_ms = state["duration_ms"]
         if "ttft_ms" in state:
             ttft_ms = state["ttft_ms"]
-        del codex_state[conv_id]
+        del codex_state[state_key]
 
     prompt_tokens = int(input_tokens or 0)
     completion_tokens = int(output_tokens or 0)
     total_tokens = prompt_tokens + completion_tokens
     prompt_length = PROMPT_LENGTH_TRACKER.consume_for_usage_event(
-        "codex_cli_rs", attrs, ""
+        service_name, attrs, ""
     )
     metadata = parse_provider_metadata("codex")
     model = _attr(attrs, "model") or "codex-unknown"
@@ -357,6 +412,7 @@ def _parse_codex_record(record: dict, attrs: list) -> None:
             provider=metadata.provider,
             model=model,
             client_source="codex",
+            session_id=usage_session_id,
             endpoint="generate-otlp",
             prompt_tokens=prompt_tokens,
             prompt_length=prompt_length,
@@ -387,23 +443,36 @@ def _parse_codex_record(record: dict, attrs: list) -> None:
     )
 
 
-def _parse_log_record(record: dict, service_name: str, session_id: str) -> None:
+def _parse_log_record(
+    record: dict,
+    service_name: str,
+    resource_session_id: str,
+) -> None:
     attrs = record.get("attributes", [])
-    PROMPT_LENGTH_TRACKER.record_prompt_event(service_name, attrs, session_id)
+    usage_session_id = _usage_session_id(
+        service_name=service_name,
+        attrs=attrs,
+        resource_session_id=resource_session_id,
+    )
+    PROMPT_LENGTH_TRACKER.record_prompt_event(
+        service_name,
+        attrs,
+        usage_session_id or "",
+    )
     event_name = _attr(attrs, "event.name") or ""
 
     if event_name == GEMINI_EVENT:
-        _parse_gemini_record(record, attrs, session_id)
+        _parse_gemini_record(record, attrs, usage_session_id or "")
     elif (
         event_name == CLAUDE_EVENT or event_name == "api_request"
     ) and service_name == "claude-code":
-        _parse_claude_record(record, attrs, session_id)
-    elif event_name == CODEX_EVENT and service_name == "codex_cli_rs":
-        _parse_codex_record(record, attrs)
-    elif event_name == CODEX_API_REQUEST_EVENT and service_name == "codex_cli_rs":
+        _parse_claude_record(record, attrs, usage_session_id or "")
+    elif event_name == CODEX_EVENT and service_name in CODEX_SERVICE_NAMES:
+        _parse_codex_record(record, attrs, service_name)
+    elif event_name == CODEX_API_REQUEST_EVENT and service_name in CODEX_SERVICE_NAMES:
         _parse_codex_api_request(record, attrs)
     elif (
-        service_name not in ("claude-code", "gemini-cli", "codex_cli_rs")
+        service_name not in KNOWN_SERVICE_NAMES
         and attrs
         and not os.path.exists(CODEX_DEBUG_FILE)
     ):
@@ -440,11 +509,9 @@ async def receive_logs(request: Request):
         service_name = _resource_attr(resource, "service.name") or ""
         session_id = _resource_attr(resource, "session.id") or ""
         # Dump first unrecognised resource block to discover service name
-        if service_name not in (
-            "claude-code",
-            "gemini-cli",
-            "codex_cli_rs",
-        ) and not os.path.exists(CODEX_DEBUG_FILE + ".resource"):
+        if service_name not in KNOWN_SERVICE_NAMES and not os.path.exists(
+            CODEX_DEBUG_FILE + ".resource"
+        ):
             with open(CODEX_DEBUG_FILE + ".resource", "w") as f:
                 json.dump(
                     {"service_name": service_name, "resource": resource}, f, indent=2

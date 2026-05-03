@@ -130,6 +130,14 @@ def migrate_database(db_path: str | None = None) -> list[str]:
             postgresql_definition="TEXT",
         ):
             applied.append("usage.client_source")
+        if _ensure_column(
+            engine,
+            "usage",
+            "session_id",
+            sqlite_definition="TEXT",
+            postgresql_definition="TEXT",
+        ):
+            applied.append("usage.session_id")
 
     if _table_exists(engine, "base_urls"):
         if _drop_column(engine, "base_urls", "validation_status"):

@@ -15,6 +15,7 @@ def test_init_db_log_usage_and_fetch_rows(database_module, isolated_home):
             provider="test-provider",
             model="test-model",
             client_source="proxy-client",
+            session_id="session-1",
             endpoint="/v1/responses",
             prompt_tokens=10,
             completion_tokens=5,
@@ -43,6 +44,7 @@ def test_init_db_log_usage_and_fetch_rows(database_module, isolated_home):
             "provider": "test-provider",
             "model": "test-model",
             "client_source": "proxy-client",
+            "session_id": "session-1",
             "endpoint": "/v1/responses",
             "prompt_tokens": 10,
             "prompt_length": 0,
@@ -74,6 +76,7 @@ def test_fetch_recent_usage_returns_expected_row_shape(database_module, isolated
             provider="test-provider",
             model="test-model",
             client_source="proxy-client",
+            session_id="session-shape",
             endpoint="/v1/responses",
             prompt_tokens=10,
             prompt_length=123,
@@ -102,6 +105,7 @@ def test_fetch_recent_usage_returns_expected_row_shape(database_module, isolated
         "provider",
         "model",
         "client_source",
+        "session_id",
         "endpoint",
         "prompt_tokens",
         "prompt_length",
@@ -201,6 +205,7 @@ def test_init_db_does_not_mutate_existing_usage_table(database_module, isolated_
     assert "prompt_length" not in columns
     assert "base_url_id" not in columns
     assert "client_source" not in columns
+    assert "session_id" not in columns
 
 
 def test_migrate_database_adds_usage_columns(
@@ -245,12 +250,14 @@ def test_migrate_database_adds_usage_columns(
     assert "output_cost_usd" in column_names
     assert "total_cost_usd" in column_names
     assert "client_source" in column_names
+    assert "session_id" in column_names
     assert "usage.prompt_length" in changes
     assert "usage.base_url_id" in changes
     assert "usage.input_cost_usd" in changes
     assert "usage.output_cost_usd" in changes
     assert "usage.total_cost_usd" in changes
     assert "usage.client_source" in changes
+    assert "usage.session_id" in changes
 
     import sqlite3
 
@@ -262,6 +269,294 @@ def test_migrate_database_adds_usage_columns(
     assert defaults["input_cost_usd"] == "0"
     assert defaults["output_cost_usd"] == "0"
     assert defaults["total_cost_usd"] == "0"
+
+
+def test_get_usage_high_watermark_returns_latest_id(database_module, isolated_home):
+    db_path = str(isolated_home / "usage.db")
+    database_module.init_db(db_path)
+
+    assert database_module.get_usage_high_watermark(db_path=db_path) == 0
+
+    database_module.log_usage(
+        database_module.Usage(
+            ts="2026-04-17T00:00:00+00:00",
+            provider="test-provider",
+            model="test-model",
+            client_source="codex",
+            session_id="session-1",
+            endpoint="generate-otlp",
+            prompt_tokens=10,
+            prompt_length=0,
+            completion_tokens=5,
+            reasoning_tokens=1,
+            cached_tokens=2,
+            total_tokens=15,
+            latency_ms=100,
+            ttft_ms=20,
+            tool_tokens=3,
+            cache_creation_tokens=4,
+            input_cost_usd=0.1,
+            output_cost_usd=0.2,
+            total_cost_usd=0.3,
+            status=200,
+            base_url_id=None,
+        ),
+        db_path=db_path,
+    )
+
+    assert database_module.get_usage_high_watermark(db_path=db_path) == 1
+
+
+def test_summarize_usage_window_groups_by_session_source_and_model(
+    database_module, isolated_home
+):
+    db_path = str(isolated_home / "usage.db")
+    database_module.init_db(db_path)
+
+    rows = [
+        database_module.Usage(
+            ts="2026-04-17T00:00:00+00:00",
+            provider="openai",
+            model="gpt-test",
+            client_source="codex",
+            session_id="conv-1",
+            endpoint="generate-otlp",
+            prompt_tokens=100,
+            prompt_length=0,
+            completion_tokens=20,
+            reasoning_tokens=5,
+            cached_tokens=40,
+            total_tokens=120,
+            latency_ms=1000,
+            ttft_ms=100,
+            tool_tokens=3,
+            cache_creation_tokens=0,
+            input_cost_usd=0.10,
+            output_cost_usd=0.20,
+            total_cost_usd=0.30,
+            status=200,
+            base_url_id=None,
+        ),
+        database_module.Usage(
+            ts="2026-04-17T00:01:00+00:00",
+            provider="openai",
+            model="gpt-test",
+            client_source="codex",
+            session_id="conv-1",
+            endpoint="generate-otlp",
+            prompt_tokens=50,
+            prompt_length=0,
+            completion_tokens=10,
+            reasoning_tokens=2,
+            cached_tokens=10,
+            total_tokens=60,
+            latency_ms=3000,
+            ttft_ms=None,
+            tool_tokens=1,
+            cache_creation_tokens=0,
+            input_cost_usd=0.05,
+            output_cost_usd=0.10,
+            total_cost_usd=0.15,
+            status=500,
+            base_url_id=None,
+        ),
+        database_module.Usage(
+            ts="2026-04-17T00:02:00+00:00",
+            provider="anthropic",
+            model="claude-test",
+            client_source="claude-code",
+            session_id="claude-session",
+            endpoint="generate-otlp",
+            prompt_tokens=200,
+            prompt_length=0,
+            completion_tokens=50,
+            reasoning_tokens=None,
+            cached_tokens=100,
+            total_tokens=250,
+            latency_ms=None,
+            ttft_ms=None,
+            tool_tokens=None,
+            cache_creation_tokens=30,
+            input_cost_usd=0.20,
+            output_cost_usd=0.50,
+            total_cost_usd=0.70,
+            status=None,
+            base_url_id=None,
+        ),
+    ]
+
+    for row in rows:
+        database_module.log_usage(row, db_path=db_path)
+
+    summary = database_module.summarize_usage_window(after_id=0, db_path=db_path)
+
+    assert summary["window"] == {
+        "after_id": 0,
+        "until_id": 3,
+        "row_count": 3,
+    }
+    assert summary["summary"]["requests"] == 3
+    assert summary["summary"]["successful_requests"] == 2
+    assert summary["summary"]["failed_requests"] == 1
+    assert summary["summary"]["prompt_tokens"] == 350
+    assert summary["summary"]["completion_tokens"] == 80
+    assert summary["summary"]["reasoning_tokens"] == 7
+    assert summary["summary"]["cached_tokens"] == 150
+    assert summary["summary"]["tool_tokens"] == 4
+    assert summary["summary"]["cache_creation_tokens"] == 30
+    assert summary["summary"]["total_tokens"] == 430
+    assert summary["summary"]["cache_hit_rate"] == 150 / 350
+    assert summary["summary"]["avg_latency_ms"] == 2000
+    assert summary["summary"]["avg_ttft_ms"] == 100
+    assert summary["summary"]["total_cost_usd"] == 1.15
+
+    assert summary["sessions"][0]["session_id"] == "claude-session"
+    assert summary["sessions"][1]["session_id"] == "conv-1"
+    assert summary["client_sources"][0]["client_source"] == "claude-code"
+    assert summary["client_sources"][1]["client_source"] == "codex"
+    assert summary["models"][0]["provider"] == "anthropic"
+    assert summary["models"][0]["model"] == "claude-test"
+    assert summary["models"][1]["provider"] == "openai"
+    assert summary["models"][1]["model"] == "gpt-test"
+
+
+def test_summarize_usage_window_filters_after_and_until_ids(
+    database_module, isolated_home
+):
+    db_path = str(isolated_home / "usage.db")
+    database_module.init_db(db_path)
+
+    for index in range(3):
+        database_module.log_usage(
+            database_module.Usage(
+                ts=f"2026-04-17T00:0{index}:00+00:00",
+                provider="test-provider",
+                model="test-model",
+                client_source="codex",
+                session_id=f"session-{index}",
+                endpoint="generate-otlp",
+                prompt_tokens=10,
+                prompt_length=0,
+                completion_tokens=5,
+                reasoning_tokens=0,
+                cached_tokens=1,
+                total_tokens=15,
+                latency_ms=100,
+                ttft_ms=10,
+                tool_tokens=0,
+                cache_creation_tokens=0,
+                input_cost_usd=0,
+                output_cost_usd=0,
+                total_cost_usd=0,
+                status=200,
+                base_url_id=None,
+            ),
+            db_path=db_path,
+        )
+
+    summary = database_module.summarize_usage_window(
+        after_id=1,
+        until_id=2,
+        db_path=db_path,
+    )
+
+    assert summary["window"]["row_count"] == 1
+    assert summary["summary"]["requests"] == 1
+    assert summary["sessions"][0]["session_id"] == "session-1"
+
+
+def test_summarize_usage_window_filters_metadata_and_includes_rows(
+    database_module, isolated_home
+):
+    db_path = str(isolated_home / "usage.db")
+    database_module.init_db(db_path)
+
+    rows = [
+        database_module.Usage(
+            ts="2026-04-17T00:00:00+00:00",
+            provider="openai",
+            model="gpt-test",
+            client_source="codex",
+            session_id="conv-1",
+            endpoint="generate-otlp",
+            prompt_tokens=10,
+            prompt_length=0,
+            completion_tokens=5,
+            reasoning_tokens=0,
+            cached_tokens=1,
+            total_tokens=15,
+            latency_ms=100,
+            ttft_ms=10,
+            tool_tokens=0,
+            cache_creation_tokens=0,
+            input_cost_usd=0,
+            output_cost_usd=0,
+            total_cost_usd=0,
+            status=200,
+            base_url_id=None,
+        ),
+        database_module.Usage(
+            ts="2026-04-18T00:00:00+00:00",
+            provider="openai",
+            model="gpt-other",
+            client_source="codex",
+            session_id="conv-2",
+            endpoint="generate-otlp",
+            prompt_tokens=20,
+            prompt_length=0,
+            completion_tokens=10,
+            reasoning_tokens=0,
+            cached_tokens=2,
+            total_tokens=30,
+            latency_ms=200,
+            ttft_ms=20,
+            tool_tokens=0,
+            cache_creation_tokens=0,
+            input_cost_usd=0,
+            output_cost_usd=0,
+            total_cost_usd=0,
+            status=200,
+            base_url_id=None,
+        ),
+    ]
+
+    for row in rows:
+        database_module.log_usage(row, db_path=db_path)
+
+    summary = database_module.summarize_usage_window(
+        after_id=0,
+        since="2026-04-17T00:00:00+00:00",
+        until="2026-04-17T23:59:59+00:00",
+        client_source="codex",
+        session_id="conv-1",
+        provider="openai",
+        model="gpt-test",
+        include_rows=True,
+        db_path=db_path,
+    )
+
+    assert summary["window"]["row_count"] == 1
+    assert summary["summary"]["total_tokens"] == 15
+    assert summary["rows"][0]["session_id"] == "conv-1"
+    assert summary["rows"][0]["model"] == "gpt-test"
+
+
+def test_summarize_usage_window_empty_window(database_module, isolated_home):
+    db_path = str(isolated_home / "usage.db")
+    database_module.init_db(db_path)
+
+    summary = database_module.summarize_usage_window(after_id=12, db_path=db_path)
+
+    assert summary["window"] == {
+        "after_id": 12,
+        "until_id": 12,
+        "row_count": 0,
+    }
+    assert summary["summary"]["requests"] == 0
+    assert summary["summary"]["cache_hit_rate"] == 0.0
+    assert summary["sessions"] == []
+    assert summary["client_sources"] == []
+    assert summary["models"] == []
 
 
 def test_summarize_usage_includes_cost_totals(database_module, isolated_home):

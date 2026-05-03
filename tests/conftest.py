@@ -41,6 +41,7 @@ PROJECT_MODULES = [
     "config.app",
     "config.runtime_ports",
     "src.api",
+    "src.cli",
     "src.costs",
     "src.database",
     "src.schema_migrations",
@@ -87,6 +88,11 @@ def config_module(load_module: Callable[[str], ModuleType]) -> ModuleType:
 @pytest.fixture
 def api_module(load_module: Callable[[str], ModuleType]) -> ModuleType:
     return load_module("src.api")
+
+
+@pytest.fixture
+def cli_module(load_module: Callable[[str], ModuleType]) -> ModuleType:
+    return load_module("src.cli")
 
 
 @pytest.fixture

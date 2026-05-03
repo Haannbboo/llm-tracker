@@ -1,17 +1,24 @@
 import os
 import yaml
-from fastapi import FastAPI, HTTPException, Request
+from decimal import Decimal
+from fastapi import FastAPI, HTTPException
 from config.app import (
     CONFIG,
     CONFIG_PATH,
     refresh_runtime_config,
 )
+from .costs import calculate_costs
 from .database import (
+    Usage,
     aggregate_usage_by_period,
     count_usage,
     fetch_recent_usage,
+    get_usage_high_watermark,
     init_db,
+    log_usage,
+    resolve_base_url_id,
     summarize_usage,
+    summarize_usage_window,
 )
 from contextlib import asynccontextmanager
 from pydantic import BaseModel
@@ -19,6 +26,32 @@ from pydantic import BaseModel
 
 class ConfigUpdate(BaseModel):
     content: str
+
+
+class UsageIngest(BaseModel):
+    ts: str
+    provider: str
+    model: str
+    client_source: str | None = None
+    session_id: str | None = None
+    endpoint: str
+    prompt_tokens: int | None = None
+    prompt_length: int = 0
+    completion_tokens: int | None = None
+    reasoning_tokens: int | None = None
+    cached_tokens: int | None = None
+    total_tokens: int | None = None
+    latency_ms: int | None = None
+    ttft_ms: int | None = None
+    tool_tokens: int | None = None
+    cache_creation_tokens: int | None = None
+    status: int | None = None
+    input_cost_usd: Decimal | None = None
+    output_cost_usd: Decimal | None = None
+    total_cost_usd: Decimal | None = None
+    base_url: str | None = None
+    base_url_provider_name: str | None = None
+    base_url_source: str | None = None
 
 
 @asynccontextmanager
@@ -49,6 +82,55 @@ async def get_usage(
     )
 
 
+@app.post("/usage", status_code=201)
+async def ingest_usage(usage: UsageIngest):
+    calculated_costs = calculate_costs(
+        prompt_tokens=usage.prompt_tokens,
+        completion_tokens=usage.completion_tokens,
+        cached_tokens=usage.cached_tokens,
+        provider=usage.provider,
+        model=usage.model,
+    )
+    base_url_id = resolve_base_url_id(
+        base_url=usage.base_url,
+        provider_name=usage.base_url_provider_name or usage.provider,
+        source=usage.base_url_source,
+    )
+
+    log_usage(
+        Usage(
+            ts=usage.ts,
+            provider=usage.provider,
+            model=usage.model,
+            client_source=usage.client_source,
+            session_id=usage.session_id,
+            endpoint=usage.endpoint,
+            prompt_tokens=usage.prompt_tokens,
+            prompt_length=usage.prompt_length,
+            completion_tokens=usage.completion_tokens,
+            reasoning_tokens=usage.reasoning_tokens,
+            cached_tokens=usage.cached_tokens,
+            total_tokens=usage.total_tokens,
+            latency_ms=usage.latency_ms,
+            ttft_ms=usage.ttft_ms,
+            tool_tokens=usage.tool_tokens,
+            cache_creation_tokens=usage.cache_creation_tokens,
+            input_cost_usd=usage.input_cost_usd
+            if usage.input_cost_usd is not None
+            else calculated_costs["input_cost_usd"],
+            output_cost_usd=usage.output_cost_usd
+            if usage.output_cost_usd is not None
+            else calculated_costs["output_cost_usd"],
+            total_cost_usd=usage.total_cost_usd
+            if usage.total_cost_usd is not None
+            else calculated_costs["total_cost_usd"],
+            status=usage.status,
+            base_url_id=base_url_id,
+        )
+    )
+    return {"status": "success"}
+
+
 @app.get("/usage/count")
 async def get_usage_count(
     provider: str | None = None,
@@ -64,6 +146,36 @@ async def get_usage_count(
             until=until,
         )
     }
+
+
+@app.get("/usage/high-watermark")
+async def usage_high_watermark():
+    return {"id": get_usage_high_watermark()}
+
+
+@app.get("/usage/run-summary")
+async def usage_run_summary(
+    after_id: int = 0,
+    until_id: int | None = None,
+    since: str | None = None,
+    until: str | None = None,
+    client_source: str | None = None,
+    session_id: str | None = None,
+    provider: str | None = None,
+    model: str | None = None,
+    include_rows: bool = False,
+):
+    return summarize_usage_window(
+        after_id=after_id,
+        until_id=until_id,
+        since=since,
+        until=until,
+        client_source=client_source,
+        session_id=session_id,
+        provider=provider,
+        model=model,
+        include_rows=include_rows,
+    )
 
 
 @app.get("/usage/summary")

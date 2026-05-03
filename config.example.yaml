@@ -259,6 +259,11 @@ models:
       input: 0.4
       output: 2.0
       cacheRead: 0.08
+  mimo-v2-omni:
+    cost:
+      input: 0.4
+      output: 2.0
+      cacheRead: 0.08
 
 providers:
   my-provider:

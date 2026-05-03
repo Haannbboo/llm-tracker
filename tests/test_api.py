@@ -1,10 +1,186 @@
 import asyncio
+from decimal import Decimal
+
+from fastapi.testclient import TestClient
 
 
 def test_usage_daily_endpoint_exists(api_module):
     # This just verifies the endpoint function is defined
     assert hasattr(api_module, "usage_daily")
     assert callable(api_module.usage_daily)
+
+
+def test_usage_high_watermark_endpoint(api_module, monkeypatch):
+    monkeypatch.setattr(api_module, "get_usage_high_watermark", lambda: 42)
+
+    result = asyncio.run(api_module.usage_high_watermark())
+
+    assert result == {"id": 42}
+
+
+def test_usage_run_summary_endpoint_passes_filters(api_module, monkeypatch):
+    captured = {}
+
+    def fake_summary(**kwargs):
+        captured.update(kwargs)
+        return {
+            "window": {"after_id": 5, "until_id": 9, "row_count": 1},
+            "summary": {"requests": 1},
+            "sessions": [],
+            "client_sources": [],
+            "models": [],
+        }
+
+    monkeypatch.setattr(api_module, "summarize_usage_window", fake_summary)
+
+    result = asyncio.run(
+        api_module.usage_run_summary(
+            after_id=5,
+            until_id=9,
+            since="2026-04-17T00:00:00+00:00",
+            until="2026-04-18T00:00:00+00:00",
+            client_source="codex",
+            session_id="conv-1",
+            provider="openai",
+            model="gpt-test",
+            include_rows=True,
+        )
+    )
+
+    assert captured == {
+        "after_id": 5,
+        "until_id": 9,
+        "since": "2026-04-17T00:00:00+00:00",
+        "until": "2026-04-18T00:00:00+00:00",
+        "client_source": "codex",
+        "session_id": "conv-1",
+        "provider": "openai",
+        "model": "gpt-test",
+        "include_rows": True,
+    }
+    assert result["summary"]["requests"] == 1
+
+
+def test_usage_high_watermark_route(api_module, monkeypatch):
+    monkeypatch.setattr(api_module, "get_usage_high_watermark", lambda: 42)
+
+    response = TestClient(api_module.app).get("/usage/high-watermark")
+
+    assert response.status_code == 200
+    assert response.json() == {"id": 42}
+
+
+def test_usage_run_summary_route_parses_query_filters(api_module, monkeypatch):
+    captured = {}
+
+    def fake_summary(**kwargs):
+        captured.update(kwargs)
+        return {
+            "window": {"after_id": 5, "until_id": 9, "row_count": 1},
+            "summary": {"requests": 1},
+            "sessions": [],
+            "client_sources": [],
+            "models": [],
+        }
+
+    monkeypatch.setattr(api_module, "summarize_usage_window", fake_summary)
+
+    response = TestClient(api_module.app).get(
+        "/usage/run-summary",
+        params={
+            "after_id": "5",
+            "until_id": "9",
+            "since": "2026-04-17T00:00:00+00:00",
+            "until": "2026-04-18T00:00:00+00:00",
+            "client_source": "codex",
+            "session_id": "conv-1",
+            "provider": "openai",
+            "model": "gpt-test",
+            "include_rows": "true",
+        },
+    )
+
+    assert response.status_code == 200
+    assert captured == {
+        "after_id": 5,
+        "until_id": 9,
+        "since": "2026-04-17T00:00:00+00:00",
+        "until": "2026-04-18T00:00:00+00:00",
+        "client_source": "codex",
+        "session_id": "conv-1",
+        "provider": "openai",
+        "model": "gpt-test",
+        "include_rows": True,
+    }
+    assert response.json()["summary"]["requests"] == 1
+
+
+def test_usage_ingest_route_persists_usage(api_module, monkeypatch):
+    captured = {}
+
+    def fake_log_usage(usage):
+        captured["usage"] = usage
+
+    def fake_resolve_base_url_id(**kwargs):
+        captured["base_url"] = kwargs
+        return 7
+
+    monkeypatch.setattr(api_module, "log_usage", fake_log_usage, raising=False)
+    monkeypatch.setattr(
+        api_module, "resolve_base_url_id", fake_resolve_base_url_id, raising=False
+    )
+    monkeypatch.setattr(
+        api_module,
+        "calculate_costs",
+        lambda **kwargs: {
+            "input_cost_usd": Decimal("0.01000000"),
+            "output_cost_usd": Decimal("0.02000000"),
+            "total_cost_usd": Decimal("0.03000000"),
+        },
+        raising=False,
+    )
+
+    response = TestClient(api_module.app).post(
+        "/usage",
+        json={
+            "ts": "2026-05-03T17:00:00+00:00",
+            "provider": "codesonline",
+            "model": "gpt-5.5",
+            "client_source": "codex",
+            "session_id": "exec-session-1",
+            "endpoint": "generate-codex-session",
+            "prompt_tokens": 21742,
+            "completion_tokens": 6,
+            "cached_tokens": 6528,
+            "reasoning_tokens": 0,
+            "total_tokens": 21748,
+            "latency_ms": 12338,
+            "ttft_ms": 8263,
+            "base_url": "https://free.codesonline.dev",
+            "base_url_source": "codex_config",
+        },
+    )
+
+    assert response.status_code == 201
+    assert response.json() == {"status": "success"}
+    usage = captured["usage"]
+    assert usage.provider == "codesonline"
+    assert usage.model == "gpt-5.5"
+    assert usage.client_source == "codex"
+    assert usage.session_id == "exec-session-1"
+    assert usage.prompt_tokens == 21742
+    assert usage.completion_tokens == 6
+    assert usage.cached_tokens == 6528
+    assert usage.total_tokens == 21748
+    assert usage.input_cost_usd == Decimal("0.01000000")
+    assert usage.output_cost_usd == Decimal("0.02000000")
+    assert usage.total_cost_usd == Decimal("0.03000000")
+    assert usage.base_url_id == 7
+    assert captured["base_url"] == {
+        "base_url": "https://free.codesonline.dev",
+        "provider_name": "codesonline",
+        "source": "codex_config",
+    }
 
 
 def test_get_config_returns_raw_content_for_malformed_yaml(
