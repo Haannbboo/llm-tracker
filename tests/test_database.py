@@ -307,6 +307,97 @@ def test_get_usage_high_watermark_returns_latest_id(database_module, isolated_ho
     assert database_module.get_usage_high_watermark(db_path=db_path) == 1
 
 
+def test_get_db_url_prefers_env_override_without_explicit_db(
+    database_module, isolated_home, monkeypatch
+):
+    override = f"sqlite:///{isolated_home / 'run.db'}"
+    monkeypatch.setenv("LLM_TRACKER_DB_URL", override)
+
+    assert database_module.get_db_url() == override
+
+
+def test_get_db_url_explicit_path_wins_over_env_override(
+    database_module, isolated_home, monkeypatch
+):
+    override = f"sqlite:///{isolated_home / 'run.db'}"
+    explicit = isolated_home / "main.db"
+    monkeypatch.setenv("LLM_TRACKER_DB_URL", override)
+
+    assert database_module.get_db_url(str(explicit)) == f"sqlite:///{explicit}"
+
+
+def test_get_db_url_explicit_url_wins_over_env_override(
+    database_module, isolated_home, monkeypatch
+):
+    override = f"sqlite:///{isolated_home / 'run.db'}"
+    explicit = f"sqlite:///{isolated_home / 'main.db'}"
+    monkeypatch.setenv("LLM_TRACKER_DB_URL", override)
+
+    assert database_module.get_db_url(explicit) == explicit
+
+
+def test_merge_usage_database_copies_usage_and_base_url_metadata(
+    database_module, isolated_home
+):
+    run_db = str(isolated_home / "run.db")
+    main_db = str(isolated_home / "main.db")
+    database_module.init_db(run_db)
+    database_module.init_db(main_db)
+
+    run_base_url_id = database_module.get_or_create_base_url(
+        "https://api.example.com/v1",
+        db_path=run_db,
+        provider_name="test-provider",
+        source="proxy_config",
+    )
+    database_module.log_usage(
+        database_module.Usage(
+            ts="2026-05-03T18:00:00+00:00",
+            provider="test-provider",
+            model="test-model",
+            client_source="codex",
+            session_id="session-run-1",
+            endpoint="generate-otlp",
+            prompt_tokens=10,
+            prompt_length=123,
+            completion_tokens=5,
+            reasoning_tokens=1,
+            cached_tokens=2,
+            total_tokens=15,
+            latency_ms=100,
+            ttft_ms=20,
+            tool_tokens=3,
+            cache_creation_tokens=4,
+            input_cost_usd=0.1,
+            output_cost_usd=0.2,
+            total_cost_usd=0.3,
+            status=200,
+            base_url_id=run_base_url_id,
+        ),
+        db_path=run_db,
+    )
+
+    inserted = database_module.merge_usage_database(
+        source_db_path=run_db,
+        target_db_path=main_db,
+    )
+
+    assert inserted == 1
+    rows = database_module.fetch_recent_usage(limit=10, db_path=main_db)
+    assert len(rows) == 1
+    assert rows[0]["session_id"] == "session-run-1"
+    assert rows[0]["prompt_length"] == 123
+    assert rows[0]["base_url"] == "https://api.example.com/v1"
+
+    with database_module.get_engine(main_db).connect() as connection:
+        base_urls = connection.execute(
+            database_module.select(database_module.BaseUrl)
+        ).all()
+    assert len(base_urls) == 1
+    assert base_urls[0].provider_name == "test-provider"
+    assert base_urls[0].source == "proxy_config"
+
+
 def test_summarize_usage_window_groups_by_session_source_and_model(
     database_module, isolated_home
 ):

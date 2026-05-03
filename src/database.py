@@ -7,9 +7,9 @@ The steady-state pattern in this module is:
 
 from __future__ import annotations
 
-
-from decimal import Decimal
+import os
 from datetime import datetime, timedelta, timezone
+from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
@@ -88,15 +88,22 @@ class Usage(Base):
     base_url: Mapped[BaseUrl | None] = relationship(back_populates="usages")
 
 
+DB_URL_ENV_VAR = "LLM_TRACKER_DB_URL"
+
 _engine_cache: dict[str, Engine] = {}
 
 
 def get_db_url(db_path: str | None = None) -> str:
-    """Resolve an explicit DB override or fall back to the configured default."""
+    """Resolve an explicit DB target, env override, or configured default."""
     if db_path and "://" in db_path:
         return db_path
     if db_path:
         return f"sqlite:///{db_path}"
+
+    env_url = os.environ.get(DB_URL_ENV_VAR)
+    if env_url:
+        return env_url
+
     return str(CONFIG["db"]["url"])
 
 
@@ -215,6 +222,73 @@ def log_usage(usage: Usage, db_path: str | None = None) -> None:
         session.commit()
 
 
+USAGE_COPY_FIELDS = (
+    "ts",
+    "provider",
+    "model",
+    "client_source",
+    "session_id",
+    "endpoint",
+    "prompt_tokens",
+    "prompt_length",
+    "completion_tokens",
+    "reasoning_tokens",
+    "cached_tokens",
+    "total_tokens",
+    "latency_ms",
+    "ttft_ms",
+    "tool_tokens",
+    "cache_creation_tokens",
+    "input_cost_usd",
+    "output_cost_usd",
+    "total_cost_usd",
+    "status",
+)
+
+
+def _usage_copy_kwargs(row: Usage) -> dict[str, Any]:
+    return {field: getattr(row, field) for field in USAGE_COPY_FIELDS}
+
+
+def merge_usage_database(
+    *,
+    source_db_path: str,
+    target_db_path: str | None = None,
+) -> int:
+    """Copy usage rows from an isolated run DB into the configured/main DB."""
+    source_engine = get_engine(source_db_path)
+    target_engine = get_engine(target_db_path)
+    inserted = 0
+
+    with Session(source_engine) as source:
+        rows = source.execute(
+            select(Usage, BaseUrl)
+            .outerjoin(BaseUrl, Usage.base_url_id == BaseUrl.id)
+            .order_by(Usage.id.asc())
+        ).all()
+
+    with Session(target_engine) as target:
+        for row, base_url in rows:
+            base_url_id = None
+            if base_url is not None:
+                base_url_id = get_or_create_base_url(
+                    base_url.base_url,
+                    db_path=target_db_path,
+                    provider_name=base_url.provider_name,
+                    source=base_url.source,
+                )
+            target.add(
+                Usage(
+                    **_usage_copy_kwargs(row),
+                    base_url_id=base_url_id,
+                )
+            )
+            inserted += 1
+        target.commit()
+
+    return inserted
+
+
 def _normalize_value(value: Any) -> Any:
     if isinstance(value, Decimal):
         return float(value)
@@ -322,6 +396,7 @@ def fetch_recent_usage(
     model: str | None = None,
     since: str | None = None,
     until: str | None = None,
+    db_path: str | None = None,
 ) -> list[dict[str, Any]]:
     """Return recent usage rows plus the resolved base URL when available."""
     filters = _usage_filters(
@@ -364,7 +439,7 @@ def fetch_recent_usage(
     )
     if filters:
         query = query.where(and_(*filters))
-    with get_engine().connect() as connection:
+    with get_engine(db_path).connect() as connection:
         return [_row_to_dict(row) for row in connection.execute(query)]
 
 

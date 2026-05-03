@@ -1,8 +1,13 @@
 from __future__ import annotations
 
+import os
 import re
 from dataclasses import dataclass
 from typing import Any
+from urllib.parse import urlparse
+
+
+OTEL_EXPORTER_OTLP_LOGS_ENDPOINT_ENV = "OTEL_EXPORTER_OTLP_LOGS_ENDPOINT"
 
 
 @dataclass(frozen=True)
@@ -46,18 +51,46 @@ class PortIssue:
 
 
 def get_configured_service_ports(config: dict[str, Any]) -> list[ServicePort]:
-    """Expand the configured proxy/API/OTLP ports with the app's defaults."""
+    """Expand effective service ports, including OTLP endpoint env override."""
     server = config.get("server", {})
     host = str(server.get("host", "127.0.0.1"))
     proxy_port = int(server.get("port", 4000))
     api_port = int(server.get("api_port", proxy_port + 1))
-    otlp_port = int(server.get("otlp_port", api_port + 1))
 
     return [
         ServicePort("Proxy", "llm-tracker-proxy", host, proxy_port),
         ServicePort("API", "llm-tracker-api", host, api_port),
-        ServicePort("OTLP", "llm-tracker-otlp", host, otlp_port),
+        resolve_otlp_service_port(config),
     ]
+
+
+def resolve_otlp_service_port(config: dict[str, Any]) -> ServicePort:
+    """Return OTLP listener target, preferring a parseable OTEL logs endpoint."""
+    server = config.get("server", {})
+    endpoint = os.environ.get(OTEL_EXPORTER_OTLP_LOGS_ENDPOINT_ENV)
+    if endpoint:
+        parsed_endpoint = _parse_otlp_endpoint(endpoint)
+        if parsed_endpoint is not None:
+            host, port = parsed_endpoint
+            return ServicePort("OTLP", "llm-tracker-otlp", host, port)
+
+    host = str(server.get("host", "127.0.0.1"))
+    proxy_port = int(server.get("port", 4000))
+    api_port = int(server.get("api_port", proxy_port + 1))
+    otlp_port = int(server.get("otlp_port", api_port + 1))
+    return ServicePort("OTLP", "llm-tracker-otlp", host, otlp_port)
+
+
+def _parse_otlp_endpoint(endpoint: str) -> tuple[str, int] | None:
+    try:
+        parsed = urlparse(endpoint)
+        port = parsed.port
+    except ValueError:
+        return None
+
+    if parsed.hostname is None or port is None:
+        return None
+    return parsed.hostname, port
 
 
 def parse_supervisor_status(text: str) -> dict[str, SupervisorProgramState]:

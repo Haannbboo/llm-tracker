@@ -1,4 +1,5 @@
 import os
+import runpy
 import subprocess
 import sys
 from pathlib import Path
@@ -485,3 +486,180 @@ server:
     assert merged_config["models"]["gpt-5"]["cost"]["output"] == 10.0
     assert merged_config["models"]["gpt-5.5"]["cost"]["input"] == 5.0
     assert merged_config["server"]["host"] == "127.0.0.1"
+
+
+def test_configure_codex_settings_prefers_otlp_endpoint_env(tmp_path):
+    repo_root = Path(__file__).resolve().parents[1]
+    script_path = repo_root / "scripts" / "configure-codex-settings.py"
+    config_path = tmp_path / "config.toml"
+    env = os.environ.copy()
+    env["OTEL_EXPORTER_OTLP_LOGS_ENDPOINT"] = "http://127.0.0.1:49153/v1/logs"
+
+    result = subprocess.run(
+        [sys.executable, str(script_path), str(config_path), "4005"],
+        env=env,
+        text=True,
+        capture_output=True,
+    )
+
+    assert result.returncode == 0
+    content = config_path.read_text(encoding="utf-8")
+    assert 'endpoint = "http://127.0.0.1:49153/v1/logs"' in content
+    assert "localhost:4005" not in content
+
+
+def test_configure_codex_settings_uses_configured_port_without_env(tmp_path):
+    repo_root = Path(__file__).resolve().parents[1]
+    script_path = repo_root / "scripts" / "configure-codex-settings.py"
+    config_path = tmp_path / "config.toml"
+    env = os.environ.copy()
+    env.pop("OTEL_EXPORTER_OTLP_LOGS_ENDPOINT", None)
+
+    result = subprocess.run(
+        [sys.executable, str(script_path), str(config_path), "4005"],
+        env=env,
+        text=True,
+        capture_output=True,
+    )
+
+    assert result.returncode == 0
+    content = config_path.read_text(encoding="utf-8")
+    assert 'endpoint = "http://localhost:4005/v1/logs"' in content
+
+
+def test_configure_codex_settings_updates_existing_otel_with_endpoint_env(tmp_path):
+    repo_root = Path(__file__).resolve().parents[1]
+    script_path = repo_root / "scripts" / "configure-codex-settings.py"
+    config_path = tmp_path / "config.toml"
+    config_path.write_text(
+        """
+[otel]
+environment = "dev"
+exporter = { otlp-http = { endpoint = "http://localhost:4005/v1/logs", protocol = "json" } }
+""",
+        encoding="utf-8",
+    )
+    env = os.environ.copy()
+    env["OTEL_EXPORTER_OTLP_LOGS_ENDPOINT"] = "http://127.0.0.1:49153/v1/logs"
+
+    result = subprocess.run(
+        [sys.executable, str(script_path), str(config_path), "4005"],
+        env=env,
+        text=True,
+        capture_output=True,
+    )
+
+    assert result.returncode == 0
+    content = config_path.read_text(encoding="utf-8")
+    assert 'endpoint = "http://127.0.0.1:49153/v1/logs"' in content
+    assert "localhost:4005" not in content
+
+
+def test_configure_codex_settings_updates_nested_otel_endpoint(tmp_path):
+    repo_root = Path(__file__).resolve().parents[1]
+    script_path = repo_root / "scripts" / "configure-codex-settings.py"
+    config_path = tmp_path / "config.toml"
+    config_path.write_text(
+        """
+[otel]
+environment = "dev"
+
+[otel.exporter]
+[otel.exporter.otlp-http]
+endpoint = "http://localhost:4005/v1/logs"
+protocol = "json"
+""",
+        encoding="utf-8",
+    )
+    env = os.environ.copy()
+    env["OTEL_EXPORTER_OTLP_LOGS_ENDPOINT"] = "http://127.0.0.1:49153/v1/logs"
+
+    result = subprocess.run(
+        [sys.executable, str(script_path), str(config_path), "4005"],
+        env=env,
+        text=True,
+        capture_output=True,
+    )
+
+    assert result.returncode == 0
+    content = config_path.read_text(encoding="utf-8")
+    assert 'endpoint = "http://127.0.0.1:49153/v1/logs"' in content
+    assert "localhost:4005" not in content
+    assert 'protocol = "json"' in content
+
+
+def test_configure_claude_settings_prefers_otlp_endpoint_env(tmp_path):
+    repo_root = Path(__file__).resolve().parents[1]
+    script_path = repo_root / "scripts" / "configure-claude-settings.py"
+    settings_path = tmp_path / "settings.json"
+    env = os.environ.copy()
+    env["OTEL_EXPORTER_OTLP_LOGS_ENDPOINT"] = "http://127.0.0.1:49153/v1/logs"
+
+    result = subprocess.run(
+        [sys.executable, str(script_path), str(settings_path), "4005"],
+        env=env,
+        text=True,
+        capture_output=True,
+    )
+
+    assert result.returncode == 0
+    settings = yaml.safe_load(settings_path.read_text(encoding="utf-8"))
+    assert (
+        settings["env"]["OTEL_EXPORTER_OTLP_LOGS_ENDPOINT"]
+        == "http://127.0.0.1:49153/v1/logs"
+    )
+
+
+def test_otlp_gunicorn_config_prefers_otlp_endpoint_env(tmp_path, monkeypatch):
+    repo_root = Path(__file__).resolve().parents[1]
+    config_dir = tmp_path / ".llm-tracker"
+    config_dir.mkdir()
+    (config_dir / "config.yaml").write_text(
+        """
+server:
+  host: 127.0.0.1
+  port: 4000
+  api_port: 4001
+  otlp_port: 4005
+db:
+  path: usage.db
+providers: {}
+models: {}
+""",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv(
+        "OTEL_EXPORTER_OTLP_LOGS_ENDPOINT",
+        "http://127.0.0.1:49153/v1/logs",
+    )
+
+    namespace = runpy.run_path(str(repo_root / "config" / "otlp.conf.py"))
+
+    assert namespace["bind"] == "127.0.0.1:49153"
+
+
+def test_otlp_gunicorn_config_uses_configured_port_without_env(tmp_path, monkeypatch):
+    repo_root = Path(__file__).resolve().parents[1]
+    config_dir = tmp_path / ".llm-tracker"
+    config_dir.mkdir()
+    (config_dir / "config.yaml").write_text(
+        """
+server:
+  host: 127.0.0.1
+  port: 4000
+  api_port: 4001
+  otlp_port: 4005
+db:
+  path: usage.db
+providers: {}
+models: {}
+""",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.delenv("OTEL_EXPORTER_OTLP_LOGS_ENDPOINT", raising=False)
+
+    namespace = runpy.run_path(str(repo_root / "config" / "otlp.conf.py"))
+
+    assert namespace["bind"] == "127.0.0.1:4005"

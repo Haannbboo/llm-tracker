@@ -1,13 +1,10 @@
 from __future__ import annotations
 
-import http.server
 import json
 import os
 import subprocess
 import sys
-import threading
 from pathlib import Path
-from urllib.parse import parse_qs, urlparse
 
 import pytest
 
@@ -31,6 +28,53 @@ def test_parse_default_wait_time_is_three_seconds(cli_module):
 
     assert args.wait_ms == 3000
     assert options.wait_ms == 3000
+
+
+def test_parse_usage_only_forces_stdout_and_quiet_child_without_json(cli_module):
+    args = cli_module.parse_args(["--usage-only", "--", "codex", "exec", "hello"])
+    options = cli_module.options_from_args(args)
+
+    assert options.json_output is False
+    assert options.summary_dest == "stdout"
+    assert options.quiet_child_output is True
+    assert args.command == ["codex", "exec", "hello"]
+
+
+def test_parse_usage_only_with_json_outputs_json(cli_module):
+    args = cli_module.parse_args(
+        ["--usage-only", "--json", "--", "codex", "exec", "hello"]
+    )
+    options = cli_module.options_from_args(args)
+
+    assert options.json_output is True
+    assert options.summary_dest == "stdout"
+    assert options.quiet_child_output is True
+    assert args.command == ["codex", "exec", "hello"]
+
+
+def test_main_rejects_usage_only_with_no_summary(cli_module, monkeypatch, capsys):
+    launched = False
+
+    def fake_run_with_tracking(**kwargs):
+        nonlocal launched
+        launched = True
+        return 0
+
+    monkeypatch.setattr(cli_module, "run_with_tracking", fake_run_with_tracking)
+
+    code = cli_module.main(["--usage-only", "--no-summary", "--", "fake-command"])
+
+    captured = capsys.readouterr()
+    assert code == 2
+    assert launched is False
+    assert "--usage-only cannot be combined with --no-summary" in captured.err
+
+
+def test_parse_json_only_is_not_supported_after_rename(cli_module):
+    with pytest.raises(SystemExit) as exc:
+        cli_module.parse_args(["--json-only", "--", "codex", "exec", "hello"])
+
+    assert exc.value.code == 2
 
 
 def test_parse_requires_command(cli_module):
@@ -74,6 +118,20 @@ class FakeClient:
         }
 
 
+class FakeTempProcess:
+    def poll(self):
+        return None
+
+    def terminate(self):
+        return None
+
+    def wait(self, timeout=None):
+        return 0
+
+    def kill(self):
+        return None
+
+
 def test_run_command_preserves_child_exit_code(cli_module, monkeypatch, capsys):
     fake_client = FakeClient()
     calls = {}
@@ -99,6 +157,249 @@ def test_run_command_preserves_child_exit_code(cli_module, monkeypatch, capsys):
     assert fake_client.before_calls == 1
     assert fake_client.summary_calls == [{"after_id": 10, "until_id": None}]
     assert "requests: 1" in captured.err
+
+
+def test_run_with_isolated_tracking_summarizes_and_merges_run_db(
+    cli_module, database_module, isolated_home, monkeypatch, capsys
+):
+    main_db = str(isolated_home / "main.db")
+    database_module.init_db(main_db)
+    monkeypatch.setitem(cli_module.CONFIG["db"], "url", f"sqlite:///{main_db}")
+
+    started_services = []
+    stopped_services = []
+    run_db_urls = []
+    child_envs = []
+
+    def fake_start_temp_service(*, name, module, db_url):
+        run_db_urls.append(db_url)
+        port = 49153 if name == "otlp" else 49154
+        service = cli_module.TempService(
+            name=name, port=port, process=FakeTempProcess()
+        )
+        started_services.append((name, module, db_url))
+        return service
+
+    def fake_stop_temp_service(service):
+        stopped_services.append(service.name)
+
+    def fake_run(command, env=None):
+        child_envs.append(env)
+        run_db_url = run_db_urls[0]
+        database_module.log_usage(
+            database_module.Usage(
+                ts="2026-05-03T18:00:00+00:00",
+                provider="test-provider",
+                model="test-model",
+                client_source="claude-code",
+                session_id="claude-session-1",
+                endpoint="generate-otlp",
+                prompt_tokens=10,
+                prompt_length=100,
+                completion_tokens=5,
+                reasoning_tokens=0,
+                cached_tokens=2,
+                total_tokens=15,
+                latency_ms=100,
+                ttft_ms=20,
+                tool_tokens=0,
+                cache_creation_tokens=0,
+                input_cost_usd=0.1,
+                output_cost_usd=0.2,
+                total_cost_usd=0.3,
+                status=200,
+                base_url_id=None,
+            ),
+            db_path=run_db_url,
+        )
+        return subprocess.CompletedProcess(command, 0)
+
+    monkeypatch.setattr(cli_module, "start_temp_service", fake_start_temp_service)
+    monkeypatch.setattr(cli_module, "stop_temp_service", fake_stop_temp_service)
+    monkeypatch.setattr(cli_module.subprocess, "run", fake_run)
+    monkeypatch.setattr(cli_module.time, "sleep", lambda seconds: None)
+
+    code = cli_module.run_with_tracking(
+        command=["fake-command"],
+        options=cli_module.RunOptions(json_output=True, wait_ms=0),
+    )
+
+    captured = capsys.readouterr()
+    summary = json.loads(captured.err)
+    main_summary = database_module.summarize_usage_window(after_id=0, db_path=main_db)
+
+    assert code == 0
+    assert summary["summary"]["requests"] == 1
+    assert main_summary["summary"]["requests"] == 1
+    assert child_envs[0]["OTEL_EXPORTER_OTLP_LOGS_ENDPOINT"] == (
+        "http://127.0.0.1:49153/v1/logs"
+    )
+    assert "LLM_TRACKER_DB_URL" not in child_envs[0]
+    assert started_services == [("otlp", "src.otlp", run_db_urls[0])]
+    assert stopped_services == ["otlp"]
+
+
+def test_isolated_tracking_starts_proxy_when_proxy_env_enabled(
+    cli_module, database_module, isolated_home, monkeypatch, capsys
+):
+    main_db = str(isolated_home / "main.db")
+    database_module.init_db(main_db)
+    monkeypatch.setitem(cli_module.CONFIG["db"], "url", f"sqlite:///{main_db}")
+    started = []
+    child_envs = []
+
+    def fake_start_temp_service(*, name, module, db_url):
+        port = 49153 if name == "otlp" else 49154
+        started.append((name, module, db_url))
+        return cli_module.TempService(name=name, port=port, process=FakeTempProcess())
+
+    def fake_run(command, env=None):
+        child_envs.append(env)
+        return subprocess.CompletedProcess(command, 0)
+
+    monkeypatch.setattr(cli_module, "start_temp_service", fake_start_temp_service)
+    monkeypatch.setattr(cli_module, "stop_temp_service", lambda service: None)
+    monkeypatch.setattr(cli_module.subprocess, "run", fake_run)
+    monkeypatch.setattr(cli_module.time, "sleep", lambda seconds: None)
+
+    code = cli_module.run_with_tracking(
+        command=["fake-command"],
+        options=cli_module.RunOptions(json_output=True, wait_ms=0, proxy_env=True),
+    )
+
+    captured = capsys.readouterr()
+    summary = json.loads(captured.err)
+
+    assert code == 0
+    assert summary["summary"]["requests"] == 0
+    assert [item[0] for item in started] == ["otlp", "proxy"]
+    assert child_envs[0]["OPENAI_BASE_URL"] == "http://127.0.0.1:49154/v1"
+    assert child_envs[0]["ANTHROPIC_BASE_URL"] == "http://127.0.0.1:49154"
+    assert "LLM_TRACKER_DB_URL" not in child_envs[0]
+
+
+def test_isolated_tracking_merges_usage_when_child_exits_nonzero(
+    cli_module, database_module, isolated_home, monkeypatch, capsys
+):
+    main_db = str(isolated_home / "main.db")
+    database_module.init_db(main_db)
+    monkeypatch.setitem(cli_module.CONFIG["db"], "url", f"sqlite:///{main_db}")
+    run_db_urls = []
+
+    def fake_start_temp_service(*, name, module, db_url):
+        run_db_urls.append(db_url)
+        return cli_module.TempService(name=name, port=49153, process=FakeTempProcess())
+
+    def fake_run(command, env=None):
+        database_module.log_usage(
+            database_module.Usage(
+                ts="2026-05-03T18:01:00+00:00",
+                provider="test-provider",
+                model="test-model",
+                client_source="claude-code",
+                session_id="failed-child-session",
+                endpoint="generate-otlp",
+                prompt_tokens=20,
+                prompt_length=200,
+                completion_tokens=10,
+                reasoning_tokens=0,
+                cached_tokens=4,
+                total_tokens=30,
+                latency_ms=300,
+                ttft_ms=40,
+                tool_tokens=0,
+                cache_creation_tokens=0,
+                input_cost_usd=0.2,
+                output_cost_usd=0.4,
+                total_cost_usd=0.6,
+                status=200,
+                base_url_id=None,
+            ),
+            db_path=run_db_urls[0],
+        )
+        return subprocess.CompletedProcess(command, 7)
+
+    monkeypatch.setattr(cli_module, "start_temp_service", fake_start_temp_service)
+    monkeypatch.setattr(cli_module, "stop_temp_service", lambda service: None)
+    monkeypatch.setattr(cli_module.subprocess, "run", fake_run)
+    monkeypatch.setattr(cli_module.time, "sleep", lambda seconds: None)
+
+    code = cli_module.run_with_tracking(
+        command=["fake-command"],
+        options=cli_module.RunOptions(json_output=True, wait_ms=0),
+    )
+
+    captured = capsys.readouterr()
+    summary = json.loads(captured.err)
+    main_summary = database_module.summarize_usage_window(after_id=0, db_path=main_db)
+
+    assert code == 7
+    assert summary["summary"]["requests"] == 1
+    assert main_summary["summary"]["requests"] == 1
+
+
+def test_isolated_tracking_merges_usage_written_during_service_shutdown(
+    cli_module, database_module, isolated_home, monkeypatch, capsys
+):
+    main_db = str(isolated_home / "main.db")
+    database_module.init_db(main_db)
+    monkeypatch.setitem(cli_module.CONFIG["db"], "url", f"sqlite:///{main_db}")
+    run_db_urls = []
+
+    def fake_start_temp_service(*, name, module, db_url):
+        run_db_urls.append(db_url)
+        return cli_module.TempService(name=name, port=49153, process=FakeTempProcess())
+
+    def fake_stop_temp_service(service):
+        database_module.log_usage(
+            database_module.Usage(
+                ts="2026-05-03T18:02:00+00:00",
+                provider="test-provider",
+                model="test-model",
+                client_source="claude-code",
+                session_id="shutdown-flush-session",
+                endpoint="generate-otlp",
+                prompt_tokens=30,
+                prompt_length=300,
+                completion_tokens=15,
+                reasoning_tokens=0,
+                cached_tokens=6,
+                total_tokens=45,
+                latency_ms=400,
+                ttft_ms=50,
+                tool_tokens=0,
+                cache_creation_tokens=0,
+                input_cost_usd=0.3,
+                output_cost_usd=0.6,
+                total_cost_usd=0.9,
+                status=200,
+                base_url_id=None,
+            ),
+            db_path=run_db_urls[0],
+        )
+
+    def fake_run(command, env=None):
+        return subprocess.CompletedProcess(command, 0)
+
+    monkeypatch.setattr(cli_module, "start_temp_service", fake_start_temp_service)
+    monkeypatch.setattr(cli_module, "stop_temp_service", fake_stop_temp_service)
+    monkeypatch.setattr(cli_module.subprocess, "run", fake_run)
+    monkeypatch.setattr(cli_module.time, "sleep", lambda seconds: None)
+
+    code = cli_module.run_with_tracking(
+        command=["fake-command"],
+        options=cli_module.RunOptions(json_output=True, wait_ms=0),
+    )
+
+    captured = capsys.readouterr()
+    summary = json.loads(captured.err)
+    main_summary = database_module.summarize_usage_window(after_id=0, db_path=main_db)
+
+    assert code == 0
+    assert summary["summary"]["requests"] == 1
+    assert summary["sessions"][0]["session_id"] == "shutdown-flush-session"
+    assert main_summary["summary"]["requests"] == 1
+    assert main_summary["sessions"][0]["session_id"] == "shutdown-flush-session"
 
 
 def test_run_command_handles_unavailable_api_before_child(
@@ -160,6 +461,46 @@ def test_json_summary_defaults_to_stderr(cli_module, monkeypatch, capsys):
     assert parsed["summary"]["requests"] == 1
 
 
+def test_usage_only_writes_json_to_stdout_and_suppresses_child_output(
+    cli_module, monkeypatch, capsys
+):
+    fake_client = FakeClient()
+    run_kwargs = {}
+
+    def fake_run(command, env=None, stdout=None, stderr=None):
+        run_kwargs["stdout"] = stdout
+        run_kwargs["stderr"] = stderr
+        if stdout is not subprocess.DEVNULL:
+            print("child stdout")
+        if stderr is not subprocess.DEVNULL:
+            print("child stderr", file=sys.stderr)
+        return subprocess.CompletedProcess(command, 0)
+
+    monkeypatch.setattr(cli_module.subprocess, "run", fake_run)
+    monkeypatch.setattr(cli_module.time, "sleep", lambda seconds: None)
+
+    code = cli_module.run_with_tracking(
+        command=["fake-command"],
+        client=fake_client,
+        options=cli_module.RunOptions(
+            json_output=True,
+            summary_dest="stdout",
+            quiet_child_output=True,
+            wait_ms=0,
+        ),
+    )
+
+    captured = capsys.readouterr()
+    assert code == 0
+    assert run_kwargs == {
+        "stdout": subprocess.DEVNULL,
+        "stderr": subprocess.DEVNULL,
+    }
+    parsed = json.loads(captured.out)
+    assert parsed["summary"]["requests"] == 1
+    assert captured.err == ""
+
+
 def test_no_summary_skips_summary_call(cli_module, monkeypatch, capsys):
     fake_client = FakeClient()
 
@@ -203,273 +544,95 @@ def test_build_child_env_returns_none_without_proxy_env(cli_module, monkeypatch)
     assert env is None
 
 
-def _write_codex_exec_session(
-    path: Path,
-    *,
-    session_id: str = "exec-session-1",
-    turn_id: str = "exec-turn-1",
-    cwd: str,
-    model: str = "gpt-5.5",
-) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    lines = [
-        {
-            "timestamp": "2026-05-03T17:00:00.000Z",
-            "type": "session_meta",
-            "payload": {
-                "id": session_id,
-                "timestamp": "2026-05-03T17:00:00.000Z",
-                "cwd": cwd,
-                "originator": "codex_exec",
-                "source": "exec",
-            },
-        },
-        {
-            "timestamp": "2026-05-03T17:00:01.000Z",
-            "type": "turn_context",
-            "payload": {
-                "turn_id": turn_id,
-                "cwd": cwd,
-                "model": model,
-            },
-        },
-        {
-            "timestamp": "2026-05-03T17:00:12.000Z",
-            "type": "event_msg",
-            "payload": {
-                "type": "token_count",
-                "info": {
-                    "last_token_usage": {
-                        "input_tokens": 21742,
-                        "cached_input_tokens": 6528,
-                        "output_tokens": 6,
-                        "reasoning_output_tokens": 0,
-                        "total_tokens": 21748,
-                    },
-                    "total_token_usage": {
-                        "input_tokens": 41898,
-                        "cached_input_tokens": 24320,
-                        "output_tokens": 254,
-                        "reasoning_output_tokens": 169,
-                        "total_tokens": 42152,
-                    },
-                },
-            },
-        },
-        {
-            "timestamp": "2026-05-03T17:00:12.100Z",
-            "type": "event_msg",
-            "payload": {
-                "type": "task_complete",
-                "turn_id": turn_id,
-                "duration_ms": 12338,
-                "time_to_first_token_ms": 8263,
-            },
-        },
+def test_build_child_command_overrides_codex_exec_otlp_endpoint(cli_module):
+    command = ["codex", "exec", "say hello"]
+
+    tracked = cli_module.build_child_command(
+        command,
+        otlp_logs_endpoint="http://127.0.0.1:49153/v1/logs",
+    )
+
+    assert tracked == [
+        "codex",
+        "-c",
+        'otel.exporter.otlp-http.endpoint="http://127.0.0.1:49153/v1/logs"',
+        "-c",
+        'otel.exporter.otlp-http.protocol="json"',
+        "exec",
+        "say hello",
     ]
-    path.write_text(
-        "\n".join(json.dumps(line, separators=(",", ":")) for line in lines) + "\n",
-        encoding="utf-8",
+
+
+def test_build_child_command_leaves_non_codex_commands_unchanged(cli_module):
+    command = ["fake-command", "--flag"]
+
+    tracked = cli_module.build_child_command(
+        command,
+        otlp_logs_endpoint="http://127.0.0.1:49153/v1/logs",
     )
 
+    assert tracked == command
 
-def test_extract_codex_exec_usage_from_session_jsonl(
-    cli_module,
-    isolated_home,
-    tmp_path,
+
+def test_build_service_env_sets_db_override_without_mutating_child_env(
+    cli_module, monkeypatch
 ):
-    codex_config = isolated_home / ".codex" / "config.toml"
-    codex_config.parent.mkdir(parents=True, exist_ok=True)
-    codex_config.write_text(
-        'base_url = "https://free.codesonline.dev"\n',
-        encoding="utf-8",
-    )
-    session_file = (
-        isolated_home
-        / ".codex"
-        / "sessions"
-        / "2026"
-        / "05"
-        / "03"
-        / "rollout-2026-05-03T12-00-00-exec-session-1.jsonl"
-    )
-    _write_codex_exec_session(session_file, cwd=str(tmp_path))
-
-    usage = cli_module.extract_codex_exec_usage_from_session(
-        session_file,
-        command_cwd=str(tmp_path),
+    monkeypatch.setenv("LLM_TRACKER_DB_URL", "sqlite:///main-should-not-leak.db")
+    service_env = cli_module.build_service_env("sqlite:///run.db")
+    child_env = cli_module.build_child_env(
+        cli_module.RunOptions(proxy_env=True),
+        proxy_base_urls=("http://127.0.0.1:49152/v1", "http://127.0.0.1:49152"),
+        otlp_logs_endpoint="http://127.0.0.1:49153/v1/logs",
     )
 
-    assert usage == {
-        "ts": "2026-05-03T17:00:12.100000+00:00",
-        "provider": "codesonline",
-        "model": "gpt-5.5",
-        "client_source": "codex",
-        "session_id": "exec-session-1",
-        "endpoint": "generate-codex-session",
-        "prompt_tokens": 21742,
-        "prompt_length": 0,
-        "completion_tokens": 6,
-        "cached_tokens": 6528,
-        "reasoning_tokens": 0,
-        "tool_tokens": None,
-        "cache_creation_tokens": None,
-        "total_tokens": 21748,
-        "latency_ms": 12338,
-        "ttft_ms": 8263,
-        "status": None,
-        "base_url": "https://free.codesonline.dev",
-        "base_url_source": "codex_config",
-    }
+    assert service_env["LLM_TRACKER_DB_URL"] == "sqlite:///run.db"
+    assert "LLM_TRACKER_DB_URL" not in child_env
+    assert child_env["OPENAI_BASE_URL"] == "http://127.0.0.1:49152/v1"
+    assert child_env["ANTHROPIC_BASE_URL"] == "http://127.0.0.1:49152"
+    assert child_env["OTEL_EXPORTER_OTLP_LOGS_ENDPOINT"] == (
+        "http://127.0.0.1:49153/v1/logs"
+    )
 
 
-def test_extract_codex_exec_usage_ignores_non_exec_session(
-    cli_module,
-    tmp_path,
+def test_database_usage_client_summarizes_usage(
+    cli_module, database_module, isolated_home
 ):
-    session_file = tmp_path / "session.jsonl"
-    _write_codex_exec_session(session_file, cwd=str(tmp_path))
-    lines = session_file.read_text(encoding="utf-8").splitlines()
-    first = json.loads(lines[0])
-    first["payload"]["originator"] = "codex-tui"
-    lines[0] = json.dumps(first)
-    session_file.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    db_url = f"sqlite:///{isolated_home / 'run.db'}"
+    database_module.init_db(db_url)
+    client = cli_module.DatabaseUsageClient(db_url)
 
-    usage = cli_module.extract_codex_exec_usage_from_session(
-        session_file,
-        command_cwd=str(tmp_path),
+    database_module.log_usage(
+        database_module.Usage(
+            ts="2026-05-03T18:00:00+00:00",
+            provider="test-provider",
+            model="test-model",
+            client_source="codex",
+            session_id="codex-session-1",
+            endpoint="generate-otlp",
+            prompt_tokens=10,
+            prompt_length=0,
+            completion_tokens=5,
+            reasoning_tokens=1,
+            cached_tokens=2,
+            total_tokens=15,
+            latency_ms=100,
+            ttft_ms=20,
+            tool_tokens=None,
+            cache_creation_tokens=None,
+            input_cost_usd=0.1,
+            output_cost_usd=0.2,
+            total_cost_usd=0.3,
+            status=200,
+            base_url_id=None,
+        ),
+        db_path=db_url,
     )
 
-    assert usage is None
+    summary = client.get_run_summary(after_id=0)
 
-
-def test_run_command_records_codex_exec_session_fallback(
-    cli_module,
-    isolated_home,
-    monkeypatch,
-    tmp_path,
-):
-    class CodexExecClient:
-        def __init__(self):
-            self.recorded_usage = []
-            self.summary_calls = []
-
-        def get_high_watermark(self):
-            return 10
-
-        def get_run_summary(self, *, after_id, until_id=None, **filters):
-            self.summary_calls.append(
-                {"after_id": after_id, "until_id": until_id, **filters}
-            )
-            if filters.get("session_id") == "exec-session-1":
-                return {
-                    "window": {"after_id": after_id, "until_id": 10, "row_count": 0},
-                    "summary": {"requests": 0},
-                    "sessions": [],
-                    "client_sources": [],
-                    "models": [],
-                }
-            requests = len(self.recorded_usage)
-            return {
-                "window": {
-                    "after_id": after_id,
-                    "until_id": 10 + requests,
-                    "row_count": requests,
-                },
-                "summary": {"requests": requests},
-                "sessions": [],
-                "client_sources": [],
-                "models": [],
-            }
-
-        def record_usage(self, usage):
-            self.recorded_usage.append(usage)
-
-    def fake_run(command, env=None):
-        _write_codex_exec_session(
-            isolated_home
-            / ".codex"
-            / "sessions"
-            / "2026"
-            / "05"
-            / "03"
-            / "rollout-2026-05-03T12-00-00-exec-session-1.jsonl",
-            cwd=os.getcwd(),
-        )
-        return subprocess.CompletedProcess(command, 0)
-
-    client = CodexExecClient()
-    monkeypatch.setattr(cli_module.subprocess, "run", fake_run)
-    monkeypatch.setattr(cli_module.time, "sleep", lambda seconds: None)
-
-    code = cli_module.run_with_tracking(
-        command=["codex", "exec", "say hello"],
-        client=client,
-        options=cli_module.RunOptions(json_output=True, wait_ms=0),
-    )
-
-    assert code == 0
-    assert len(client.recorded_usage) == 1
-    assert client.recorded_usage[0]["session_id"] == "exec-session-1"
-    assert client.recorded_usage[0]["prompt_tokens"] == 21742
-    assert client.recorded_usage[0]["completion_tokens"] == 6
-    assert {
-        "after_id": 10,
-        "until_id": None,
-        "client_source": "codex",
-        "session_id": "exec-session-1",
-    } in client.summary_calls
-
-
-def test_run_command_skips_codex_exec_fallback_when_otlp_record_exists(
-    cli_module,
-    isolated_home,
-    monkeypatch,
-):
-    class CodexExecClient:
-        def __init__(self):
-            self.recorded_usage = []
-
-        def get_high_watermark(self):
-            return 10
-
-        def get_run_summary(self, *, after_id, until_id=None, **filters):
-            return {
-                "window": {"after_id": after_id, "until_id": 11, "row_count": 1},
-                "summary": {"requests": 1},
-                "sessions": [],
-                "client_sources": [],
-                "models": [],
-            }
-
-        def record_usage(self, usage):
-            self.recorded_usage.append(usage)
-
-    def fake_run(command, env=None):
-        _write_codex_exec_session(
-            isolated_home
-            / ".codex"
-            / "sessions"
-            / "2026"
-            / "05"
-            / "03"
-            / "rollout-2026-05-03T12-00-00-exec-session-1.jsonl",
-            cwd=os.getcwd(),
-        )
-        return subprocess.CompletedProcess(command, 0)
-
-    client = CodexExecClient()
-    monkeypatch.setattr(cli_module.subprocess, "run", fake_run)
-    monkeypatch.setattr(cli_module.time, "sleep", lambda seconds: None)
-
-    code = cli_module.run_with_tracking(
-        command=["codex", "exec", "say hello"],
-        client=client,
-        options=cli_module.RunOptions(wait_ms=0),
-    )
-
-    assert code == 0
-    assert client.recorded_usage == []
+    assert client.get_high_watermark() == 1
+    assert summary["summary"]["requests"] == 1
+    assert summary["sessions"][0]["session_id"] == "codex-session-1"
 
 
 def test_api_client_passes_until_id_query_param(cli_module, monkeypatch):
@@ -491,7 +654,7 @@ def test_api_client_passes_until_id_query_param(cli_module, monkeypatch):
     }
 
 
-def test_run_command_bounds_watermark_fallback_after_wait(
+def test_run_command_bounds_summary_after_wait(
     cli_module,
     monkeypatch,
 ):
@@ -754,69 +917,10 @@ def test_llm_tracker_script_invokes_cli_outside_repo_root(tmp_path):
     assert "usage: llm-tracker [options] -- <command> [args...]" in result.stderr
 
 
-def test_llm_tracker_script_tracks_child_with_http_api(isolated_home, tmp_path):
+def test_llm_tracker_script_injects_isolated_otlp_env_without_db_leak(
+    isolated_home, tmp_path
+):
     from pathlib import Path
-
-    class UsageApiHandler(http.server.BaseHTTPRequestHandler):
-        def do_GET(self):
-            parsed = urlparse(self.path)
-            self.server.requests.append((parsed.path, parse_qs(parsed.query)))
-            if parsed.path == "/usage/high-watermark":
-                payload = {"id": 10}
-            elif parsed.path == "/usage/run-summary":
-                payload = {
-                    "window": {"after_id": 10, "until_id": 11, "row_count": 1},
-                    "summary": {
-                        "requests": 1,
-                        "successful_requests": 1,
-                        "failed_requests": 0,
-                        "prompt_tokens": 100,
-                        "completion_tokens": 25,
-                        "reasoning_tokens": 5,
-                        "cached_tokens": 50,
-                        "tool_tokens": 0,
-                        "cache_creation_tokens": 0,
-                        "total_tokens": 125,
-                        "cache_hit_rate": 0.5,
-                        "avg_latency_ms": 1000,
-                        "avg_ttft_ms": 200,
-                        "total_cost_usd": 0.12,
-                    },
-                    "sessions": [
-                        {
-                            "session_id": "conv-1",
-                            "requests": 1,
-                            "total_tokens": 125,
-                            "cache_hit_rate": 0.5,
-                            "total_cost_usd": 0.12,
-                        }
-                    ],
-                    "client_sources": [],
-                    "models": [],
-                }
-            else:
-                self.send_response(404)
-                self.end_headers()
-                return
-
-            body = json.dumps(payload).encode("utf-8")
-            self.send_response(200)
-            self.send_header("Content-Type", "application/json")
-            self.send_header("Content-Length", str(len(body)))
-            self.end_headers()
-            self.wfile.write(body)
-
-        def log_message(self, format, *args):
-            return
-
-    try:
-        server = http.server.HTTPServer(("127.0.0.1", 0), UsageApiHandler)
-    except PermissionError:
-        pytest.skip("local HTTP server binding is not permitted in this sandbox")
-    server.requests = []
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
-    thread.start()
-    api_port = server.server_address[1]
 
     config_path = isolated_home / ".llm-tracker" / "config.yaml"
     config_path.write_text(
@@ -824,7 +928,7 @@ def test_llm_tracker_script_tracks_child_with_http_api(isolated_home, tmp_path):
 server:
   host: 127.0.0.1
   port: 4999
-  api_port: {api_port}
+  api_port: 4998
 db:
   path: {isolated_home / "usage.db"}
 models: {{}}
@@ -837,18 +941,15 @@ providers: {{}}
     env = os.environ.copy()
     env["HOME"] = str(isolated_home)
     env["LLM_TRACKER_CONFIG"] = str(config_path)
+    env["LLM_TRACKER_DB_URL"] = "sqlite:///should-not-leak.db"
     env["NO_PROXY"] = "127.0.0.1,localhost"
     env["PYTHONDONTWRITEBYTECODE"] = "1"
-    env.pop("OPENAI_BASE_URL", None)
-    env.pop("ANTHROPIC_BASE_URL", None)
-    env.pop("OTEL_RESOURCE_ATTRIBUTES", None)
 
     try:
         result = subprocess.run(
             [
                 str(script),
                 "--json",
-                "--proxy-env",
                 "--wait-ms",
                 "0",
                 "--",
@@ -856,36 +957,23 @@ providers: {{}}
                 "-c",
                 (
                     "import os; "
-                    "print('child stdout'); "
-                    "print(os.environ['OPENAI_BASE_URL']); "
-                    "print(os.environ['ANTHROPIC_BASE_URL']); "
-                    "print(os.environ.get('OTEL_RESOURCE_ATTRIBUTES', ''))"
+                    "print(os.environ.get('LLM_TRACKER_DB_URL', '')); "
+                    "print(os.environ.get('OTEL_EXPORTER_OTLP_LOGS_ENDPOINT', ''))"
                 ),
             ],
             cwd=tmp_path,
             env=env,
             text=True,
             capture_output=True,
-            timeout=10,
+            timeout=15,
         )
-    finally:
-        server.shutdown()
-        thread.join(timeout=5)
-        server.server_close()
+    except PermissionError:
+        pytest.skip("local process or HTTP binding is not permitted in this sandbox")
 
     assert result.returncode == 0
     stdout_lines = result.stdout.splitlines()
-    assert len(stdout_lines) == 4
-    assert stdout_lines == [
-        "child stdout",
-        "http://127.0.0.1:4999/v1",
-        "http://127.0.0.1:4999",
-        "",
-    ]
+    assert stdout_lines[0] == ""
+    assert stdout_lines[1].startswith("http://127.0.0.1:")
+    assert stdout_lines[1].endswith("/v1/logs")
     summary = json.loads(result.stderr)
-    assert summary["summary"]["requests"] == 1
-    assert summary["sessions"][0]["session_id"] == "conv-1"
-    assert server.requests == [
-        ("/usage/high-watermark", {}),
-        ("/usage/run-summary", {"after_id": ["10"]}),
-    ]
+    assert summary["summary"]["requests"] == 0

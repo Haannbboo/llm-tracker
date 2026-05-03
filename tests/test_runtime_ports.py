@@ -117,6 +117,57 @@ def test_get_blocking_port_issues_ignores_not_listening(runtime_ports_module):
     assert runtime_ports_module.get_blocking_port_issues(issues) == []
 
 
+def test_get_configured_service_ports_prefers_otlp_endpoint_env(
+    runtime_ports_module, monkeypatch
+):
+    monkeypatch.setenv(
+        "OTEL_EXPORTER_OTLP_LOGS_ENDPOINT",
+        "http://127.0.0.1:49153/v1/logs",
+    )
+
+    service_ports = runtime_ports_module.get_configured_service_ports(
+        {
+            "server": {
+                "host": "127.0.0.1",
+                "port": 4000,
+                "api_port": 4001,
+                "otlp_port": 4005,
+            }
+        }
+    )
+
+    assert service_ports[-1] == runtime_ports_module.ServicePort(
+        "OTLP",
+        "llm-tracker-otlp",
+        "127.0.0.1",
+        49153,
+    )
+
+
+def test_get_configured_service_ports_uses_configured_otlp_port_without_env(
+    runtime_ports_module, monkeypatch
+):
+    monkeypatch.delenv("OTEL_EXPORTER_OTLP_LOGS_ENDPOINT", raising=False)
+
+    service_ports = runtime_ports_module.get_configured_service_ports(
+        {
+            "server": {
+                "host": "127.0.0.1",
+                "port": 4000,
+                "api_port": 4001,
+                "otlp_port": 4005,
+            }
+        }
+    )
+
+    assert service_ports[-1] == runtime_ports_module.ServicePort(
+        "OTLP",
+        "llm-tracker-otlp",
+        "127.0.0.1",
+        4005,
+    )
+
+
 def test_strict_checker_output_is_empty_when_only_non_blocking_issues():
     checker_path = (
         __import__("pathlib").Path(__file__).resolve().parents[1]

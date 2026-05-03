@@ -147,8 +147,8 @@ def test_usage_ingest_route_persists_usage(api_module, monkeypatch):
             "provider": "codesonline",
             "model": "gpt-5.5",
             "client_source": "codex",
-            "session_id": "exec-session-1",
-            "endpoint": "generate-codex-session",
+            "session_id": "codex-session-1",
+            "endpoint": "generate-otlp",
             "prompt_tokens": 21742,
             "completion_tokens": 6,
             "cached_tokens": 6528,
@@ -167,7 +167,7 @@ def test_usage_ingest_route_persists_usage(api_module, monkeypatch):
     assert usage.provider == "codesonline"
     assert usage.model == "gpt-5.5"
     assert usage.client_source == "codex"
-    assert usage.session_id == "exec-session-1"
+    assert usage.session_id == "codex-session-1"
     assert usage.prompt_tokens == 21742
     assert usage.completion_tokens == 6
     assert usage.cached_tokens == 6528

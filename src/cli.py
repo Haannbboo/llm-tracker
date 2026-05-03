@@ -3,18 +3,25 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import shutil
+import socket
 import subprocess
 import sys
+import tempfile
 import time
 from dataclasses import dataclass
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 import httpx
 
 from config.app import CONFIG
-from .provider_parser import parse_provider_metadata
+from .database import (
+    get_usage_high_watermark,
+    init_db,
+    merge_usage_database,
+    summarize_usage_window,
+)
 
 
 class ApiError(RuntimeError):
@@ -30,15 +37,14 @@ class RunOptions:
     poll_ms: int = 250
     proxy_env: bool = False
     no_summary: bool = False
+    quiet_child_output: bool = False
 
 
 @dataclass(frozen=True)
-class SessionFileState:
-    mtime_ns: int
-    size: int
-
-
-CODEX_EXEC_ENDPOINT = "generate-codex-session"
+class TempService:
+    name: str
+    port: int
+    process: subprocess.Popen[bytes]
 
 
 class UsageApiClient:
@@ -75,9 +81,6 @@ class UsageApiClient:
             params["model"] = model
         return self._get_json("/usage/run-summary", params=params)
 
-    def record_usage(self, usage: dict[str, Any]) -> dict[str, Any]:
-        return self._post_json("/usage", json_body=usage)
-
     def _get_json(
         self,
         path: str,
@@ -95,22 +98,33 @@ class UsageApiClient:
         except Exception as exc:
             raise ApiError(str(exc)) from exc
 
-    def _post_json(
+
+class DatabaseUsageClient:
+    def __init__(self, db_url: str):
+        self.db_url = db_url
+
+    def get_high_watermark(self) -> int:
+        return get_usage_high_watermark(db_path=self.db_url)
+
+    def get_run_summary(
         self,
-        path: str,
         *,
-        json_body: dict[str, Any],
+        after_id: int,
+        until_id: int | None = None,
+        client_source: str | None = None,
+        session_id: str | None = None,
+        provider: str | None = None,
+        model: str | None = None,
     ) -> dict[str, Any]:
-        try:
-            response = httpx.post(
-                f"{self.base_url.rstrip('/')}{path}",
-                json=json_body,
-                timeout=5,
-            )
-            response.raise_for_status()
-            return response.json()
-        except Exception as exc:
-            raise ApiError(str(exc)) from exc
+        return summarize_usage_window(
+            after_id=after_id,
+            until_id=until_id,
+            client_source=client_source,
+            session_id=session_id,
+            provider=provider,
+            model=model,
+            db_path=self.db_url,
+        )
 
 
 def build_api_base_url() -> str:
@@ -135,6 +149,11 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(prog="llm-tracker")
     parser.add_argument("--json", action="store_true")
     parser.add_argument(
+        "--usage-only",
+        action="store_true",
+        help="write only the usage summary to stdout and suppress child output",
+    )
+    parser.add_argument(
         "--summary-dest",
         choices=("stdout", "stderr", "file"),
         default="stderr",
@@ -152,245 +171,165 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
 
 
 def options_from_args(args: argparse.Namespace) -> RunOptions:
+    usage_only = bool(args.usage_only)
     return RunOptions(
         json_output=args.json,
-        summary_dest=args.summary_dest,
+        summary_dest="stdout" if usage_only else args.summary_dest,
         summary_file=args.summary_file,
         wait_ms=args.wait_ms,
         poll_ms=args.poll_ms,
         proxy_env=args.proxy_env,
         no_summary=args.no_summary,
+        quiet_child_output=usage_only,
     )
 
 
-def build_child_env(options: RunOptions) -> dict[str, str] | None:
-    if not options.proxy_env:
-        return None
-
-    env = os.environ.copy()
-    openai_base_url, anthropic_base_url = build_proxy_base_urls()
-    env.setdefault("OPENAI_BASE_URL", openai_base_url)
-    env.setdefault("ANTHROPIC_BASE_URL", anthropic_base_url)
-    return env
-
-
-def _is_codex_exec_command(command: list[str]) -> bool:
-    if not command:
-        return False
-    if Path(command[0]).name != "codex":
-        return False
-    return "exec" in command[1:]
-
-
-def _codex_sessions_root() -> Path:
-    return Path.home() / ".codex" / "sessions"
-
-
-def _snapshot_codex_session_files(
-    sessions_root: Path | None = None,
-) -> dict[Path, SessionFileState]:
-    root = sessions_root or _codex_sessions_root()
-    if not root.exists():
+def child_output_kwargs(options: RunOptions) -> dict[str, Any]:
+    if not options.quiet_child_output:
         return {}
-
-    snapshot: dict[Path, SessionFileState] = {}
-    for path in root.glob("**/*.jsonl"):
-        try:
-            stat = path.stat()
-        except OSError:
-            continue
-        snapshot[path] = SessionFileState(mtime_ns=stat.st_mtime_ns, size=stat.st_size)
-    return snapshot
-
-
-def _changed_codex_session_files(
-    snapshot: dict[Path, SessionFileState],
-    sessions_root: Path | None = None,
-) -> list[Path]:
-    root = sessions_root or _codex_sessions_root()
-    if not root.exists():
-        return []
-
-    changed: list[tuple[int, Path]] = []
-    for path in root.glob("**/*.jsonl"):
-        try:
-            stat = path.stat()
-        except OSError:
-            continue
-        previous = snapshot.get(path)
-        if previous is None or (
-            previous.mtime_ns != stat.st_mtime_ns or previous.size != stat.st_size
-        ):
-            changed.append((stat.st_mtime_ns, path))
-    return [path for _, path in sorted(changed, reverse=True)]
-
-
-def _to_int(value: Any) -> int | None:
-    if value is None:
-        return None
-    try:
-        return int(value)
-    except (TypeError, ValueError):
-        return None
-
-
-def _codex_timestamp_to_iso(value: str | None) -> str:
-    if not value:
-        return datetime.now(timezone.utc).isoformat()
-
-    normalized = value.replace("Z", "+00:00")
-    try:
-        parsed = datetime.fromisoformat(normalized)
-    except ValueError:
-        return datetime.now(timezone.utc).isoformat()
-    if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=timezone.utc)
-    return parsed.astimezone(timezone.utc).isoformat()
-
-
-def _same_cwd(left: str, right: str) -> bool:
-    return os.path.abspath(left) == os.path.abspath(right)
-
-
-def extract_codex_exec_usage_from_session(
-    path: Path,
-    *,
-    command_cwd: str | None = None,
-) -> dict[str, Any] | None:
-    session_meta: dict[str, Any] = {}
-    turn_context: dict[str, Any] = {}
-    last_token_usage: dict[str, Any] | None = None
-    task_complete: dict[str, Any] | None = None
-    task_complete_ts: str | None = None
-
-    try:
-        lines = path.read_text(encoding="utf-8").splitlines()
-    except OSError:
-        return None
-
-    for line in lines:
-        if not line.strip():
-            continue
-        try:
-            entry = json.loads(line)
-        except json.JSONDecodeError:
-            continue
-
-        entry_type = entry.get("type")
-        payload = entry.get("payload") or {}
-        if entry_type == "session_meta":
-            session_meta = payload
-        elif entry_type == "turn_context":
-            turn_context = payload
-        elif entry_type == "event_msg" and payload.get("type") == "token_count":
-            info = payload.get("info") or {}
-            usage = info.get("last_token_usage")
-            if isinstance(usage, dict):
-                last_token_usage = usage
-        elif entry_type == "event_msg" and payload.get("type") == "task_complete":
-            task_complete = payload
-            task_complete_ts = entry.get("timestamp")
-
-    if session_meta.get("originator") != "codex_exec":
-        return None
-    if session_meta.get("source") != "exec":
-        return None
-
-    cwd = session_meta.get("cwd") or turn_context.get("cwd")
-    if command_cwd and cwd and not _same_cwd(str(cwd), command_cwd):
-        return None
-
-    session_id = session_meta.get("id")
-    if not session_id or not last_token_usage:
-        return None
-
-    prompt_tokens = _to_int(last_token_usage.get("input_tokens")) or 0
-    completion_tokens = _to_int(last_token_usage.get("output_tokens")) or 0
-    cached_tokens = _to_int(last_token_usage.get("cached_input_tokens"))
-    reasoning_tokens = _to_int(last_token_usage.get("reasoning_output_tokens"))
-    total_tokens = _to_int(last_token_usage.get("total_tokens"))
-    if total_tokens is None:
-        total_tokens = prompt_tokens + completion_tokens
-
-    task_complete = task_complete or {}
-    metadata = parse_provider_metadata("codex")
-
     return {
-        "ts": _codex_timestamp_to_iso(
-            task_complete_ts or session_meta.get("timestamp")
-        ),
-        "provider": metadata.provider,
-        "model": turn_context.get("model")
-        or session_meta.get("model")
-        or "codex-unknown",
-        "client_source": "codex",
-        "session_id": str(session_id),
-        "endpoint": CODEX_EXEC_ENDPOINT,
-        "prompt_tokens": prompt_tokens,
-        "prompt_length": 0,
-        "completion_tokens": completion_tokens,
-        "cached_tokens": cached_tokens,
-        "reasoning_tokens": reasoning_tokens,
-        "tool_tokens": None,
-        "cache_creation_tokens": None,
-        "total_tokens": total_tokens,
-        "latency_ms": _to_int(task_complete.get("duration_ms")),
-        "ttft_ms": _to_int(task_complete.get("time_to_first_token_ms")),
-        "status": None,
-        "base_url": metadata.base_url,
-        "base_url_source": metadata.source,
+        "stdout": subprocess.DEVNULL,
+        "stderr": subprocess.DEVNULL,
     }
 
 
-def record_codex_exec_usage_fallback(
+def build_child_env(
+    options: RunOptions,
     *,
-    command: list[str],
-    client: UsageApiClient,
-    after_id: int,
-    session_snapshot: dict[Path, SessionFileState],
-    command_cwd: str,
-) -> dict[str, Any] | None:
-    if not _is_codex_exec_command(command):
+    proxy_base_urls: tuple[str, str] | None = None,
+    otlp_logs_endpoint: str | None = None,
+) -> dict[str, str] | None:
+    if not options.proxy_env and otlp_logs_endpoint is None:
         return None
 
-    for session_file in _changed_codex_session_files(session_snapshot):
-        usage = extract_codex_exec_usage_from_session(
-            session_file,
-            command_cwd=command_cwd,
-        )
-        if usage is None:
-            continue
+    env = os.environ.copy()
+    env.pop("LLM_TRACKER_DB_URL", None)
 
+    if options.proxy_env:
+        openai_base_url, anthropic_base_url = proxy_base_urls or build_proxy_base_urls()
+        if proxy_base_urls is None:
+            env.setdefault("OPENAI_BASE_URL", openai_base_url)
+            env.setdefault("ANTHROPIC_BASE_URL", anthropic_base_url)
+        else:
+            env["OPENAI_BASE_URL"] = openai_base_url
+            env["ANTHROPIC_BASE_URL"] = anthropic_base_url
+
+    if otlp_logs_endpoint is not None:
+        env["CLAUDE_CODE_ENABLE_TELEMETRY"] = "1"
+        env["OTEL_LOGS_EXPORTER"] = "otlp"
+        env["OTEL_EXPORTER_OTLP_LOGS_PROTOCOL"] = "http/json"
+        env["OTEL_EXPORTER_OTLP_LOGS_ENDPOINT"] = otlp_logs_endpoint
+
+    return env
+
+
+def project_root() -> Path:
+    return Path(__file__).resolve().parents[1]
+
+
+def build_service_env(db_url: str) -> dict[str, str]:
+    env = os.environ.copy()
+    env["LLM_TRACKER_DB_URL"] = db_url
+    root = str(project_root())
+    existing_pythonpath = env.get("PYTHONPATH")
+    env["PYTHONPATH"] = (
+        root if not existing_pythonpath else f"{root}{os.pathsep}{existing_pythonpath}"
+    )
+    return env
+
+
+def find_free_loopback_port() -> int:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.bind(("127.0.0.1", 0))
+        return int(sock.getsockname()[1])
+
+
+def wait_for_port(port: int, *, timeout_seconds: float = 5.0) -> None:
+    deadline = time.monotonic() + timeout_seconds
+    last_error: OSError | None = None
+    while time.monotonic() < deadline:
         try:
-            existing = client.get_run_summary(
-                after_id=after_id,
-                client_source="codex",
-                session_id=usage["session_id"],
-            )
-        except ApiError as exc:
-            print(
-                f"Codex exec usage fallback skipped: {exc}",
-                file=sys.stderr,
-            )
-            return None
+            with socket.create_connection(("127.0.0.1", port), timeout=0.2):
+                return
+        except OSError as exc:
+            last_error = exc
+            time.sleep(0.05)
+    raise RuntimeError(f"temporary service did not listen on port {port}: {last_error}")
 
-        if int(existing.get("summary", {}).get("requests", 0) or 0) > 0:
-            return None
 
-        try:
-            client.record_usage(usage)
-        except ApiError as exc:
-            print(
-                f"Codex exec usage fallback failed: {exc}",
-                file=sys.stderr,
-            )
-            return None
-        return usage
+def start_temp_service(*, name: str, module: str, db_url: str) -> TempService:
+    port = find_free_loopback_port()
+    process = subprocess.Popen(
+        [
+            sys.executable,
+            "-m",
+            "uvicorn",
+            f"{module}:app",
+            "--host",
+            "127.0.0.1",
+            "--port",
+            str(port),
+            "--log-level",
+            "warning",
+        ],
+        cwd=project_root(),
+        env=build_service_env(db_url),
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    try:
+        wait_for_port(port)
+    except Exception:
+        stop_temp_service(TempService(name=name, port=port, process=process))
+        raise
+    return TempService(name=name, port=port, process=process)
 
+
+def stop_temp_service(service: TempService) -> None:
+    if service.process.poll() is not None:
+        return
+    service.process.terminate()
+    try:
+        service.process.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        service.process.kill()
+        service.process.wait(timeout=5)
+
+
+def _codex_exec_subcommand_index(command: list[str]) -> int | None:
+    if not command:
+        return None
+    if Path(command[0]).name != "codex":
+        return None
+    for index, part in enumerate(command[1:], start=1):
+        if part in {"exec", "e"}:
+            return index
     return None
 
 
-def run_with_tracking(
+def build_child_command(
+    command: list[str],
+    *,
+    otlp_logs_endpoint: str | None = None,
+) -> list[str]:
+    if otlp_logs_endpoint is None:
+        return command
+
+    exec_index = _codex_exec_subcommand_index(command)
+    if exec_index is None:
+        return command
+
+    return [
+        command[0],
+        "-c",
+        f'otel.exporter.otlp-http.endpoint="{otlp_logs_endpoint}"',
+        "-c",
+        'otel.exporter.otlp-http.protocol="json"',
+        *command[1:],
+    ]
+
+
+def run_with_watermark_tracking(
     *,
     command: list[str],
     client: UsageApiClient,
@@ -405,21 +344,12 @@ def run_with_tracking(
         )
         before_id = None
 
-    codex_session_snapshot = (
-        _snapshot_codex_session_files() if _is_codex_exec_command(command) else None
+    completed = subprocess.run(
+        command,
+        env=build_child_env(options),
+        **child_output_kwargs(options),
     )
-    command_cwd = os.getcwd()
-    completed = subprocess.run(command, env=build_child_env(options))
     child_code = _normalize_return_code(int(completed.returncode))
-
-    if before_id is not None and codex_session_snapshot is not None:
-        record_codex_exec_usage_fallback(
-            command=command,
-            client=client,
-            after_id=before_id,
-            session_snapshot=codex_session_snapshot,
-            command_cwd=command_cwd,
-        )
 
     if options.no_summary:
         return child_code
@@ -445,6 +375,120 @@ def run_with_tracking(
     except Exception as exc:
         print(f"llm-tracker summary output failed: {exc}", file=sys.stderr)
     return child_code
+
+
+def configured_main_db_url() -> str:
+    return str(CONFIG["db"]["url"])
+
+
+def temp_proxy_base_urls(proxy_port: int) -> tuple[str, str]:
+    return f"http://127.0.0.1:{proxy_port}/v1", f"http://127.0.0.1:{proxy_port}"
+
+
+def run_with_isolated_tracking(
+    *,
+    command: list[str],
+    options: RunOptions,
+) -> int:
+    main_db_url = configured_main_db_url()
+    run_dir = Path(tempfile.mkdtemp(prefix="llm-tracker-run-"))
+    run_db_path = run_dir / "usage.db"
+    run_db_url = f"sqlite:///{run_db_path}"
+    init_db(run_db_url)
+    run_client = DatabaseUsageClient(run_db_url)
+    services: list[TempService] = []
+    cleanup_run_dir = True
+
+    try:
+        try:
+            otlp_service = start_temp_service(
+                name="otlp",
+                module="src.otlp",
+                db_url=run_db_url,
+            )
+            services.append(otlp_service)
+
+            proxy_base_urls = None
+            if options.proxy_env:
+                proxy_service = start_temp_service(
+                    name="proxy",
+                    module="src.proxy",
+                    db_url=run_db_url,
+                )
+                services.append(proxy_service)
+                proxy_base_urls = temp_proxy_base_urls(proxy_service.port)
+        except Exception as exc:
+            cleanup_run_dir = False
+            print(
+                "llm-tracker isolated services failed; "
+                f"run DB retained at {run_db_path}: {exc}",
+                file=sys.stderr,
+            )
+            return 1
+
+        otlp_logs_endpoint = f"http://127.0.0.1:{otlp_service.port}/v1/logs"
+        completed = subprocess.run(
+            build_child_command(
+                command,
+                otlp_logs_endpoint=otlp_logs_endpoint,
+            ),
+            env=build_child_env(
+                options,
+                proxy_base_urls=proxy_base_urls,
+                otlp_logs_endpoint=otlp_logs_endpoint,
+            ),
+            **child_output_kwargs(options),
+        )
+        child_code = _normalize_return_code(int(completed.returncode))
+
+        wait_for_usage_flush(run_client, options)
+        for service in reversed(services):
+            stop_temp_service(service)
+        services.clear()
+        summary = summarize_usage_window(after_id=0, db_path=run_db_url)
+
+        try:
+            init_db(main_db_url)
+            merge_usage_database(
+                source_db_path=run_db_url,
+                target_db_path=main_db_url,
+            )
+        except Exception as exc:
+            cleanup_run_dir = False
+            print(
+                f"llm-tracker merge failed; run DB retained at {run_db_path}: {exc}",
+                file=sys.stderr,
+            )
+
+        if not options.no_summary:
+            try:
+                write_summary(summary, options)
+            except Exception as exc:
+                print(f"llm-tracker summary output failed: {exc}", file=sys.stderr)
+        return child_code
+    finally:
+        for service in reversed(services):
+            stop_temp_service(service)
+        if cleanup_run_dir:
+            shutil.rmtree(run_dir, ignore_errors=True)
+
+
+def run_with_tracking(
+    *,
+    command: list[str],
+    options: RunOptions,
+    client: UsageApiClient | None = None,
+) -> int:
+    if client is not None:
+        return run_with_watermark_tracking(
+            command=command,
+            client=client,
+            options=options,
+        )
+    return run_with_isolated_tracking(
+        command=command,
+        options=options,
+    )
 
 
 def _normalize_return_code(returncode: int) -> int:
@@ -488,6 +532,11 @@ def poll_summary(
         )
     except ApiError:
         return None
+
+
+def wait_for_usage_flush(client: UsageApiClient, options: RunOptions) -> None:
+    """Give OTLP exporters a bounded window to write final usage rows."""
+    poll_summary(client, after_id=0, options=options)
 
 
 def write_summary(summary: dict[str, Any], options: RunOptions) -> None:
@@ -567,11 +616,13 @@ def main(argv: list[str] | None = None) -> int:
     if options.summary_dest == "file" and not options.summary_file:
         print("--summary-file is required when --summary-dest=file", file=sys.stderr)
         return 2
+    if args.usage_only and options.no_summary:
+        print("--usage-only cannot be combined with --no-summary", file=sys.stderr)
+        return 2
 
     try:
         return run_with_tracking(
             command=args.command,
-            client=UsageApiClient(),
             options=options,
         )
     except FileNotFoundError as exc:

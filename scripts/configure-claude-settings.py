@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 from pathlib import Path
 from typing import Any
@@ -19,6 +20,13 @@ def load_settings(path: Path) -> dict[str, Any]:
 def save_settings(path: Path, settings: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(settings, indent=2) + "\n", encoding="utf-8")
+
+
+def resolve_otlp_logs_endpoint(otlp_port: str) -> str:
+    env_endpoint = os.environ.get("OTEL_EXPORTER_OTLP_LOGS_ENDPOINT")
+    if env_endpoint:
+        return env_endpoint
+    return f"http://localhost:{otlp_port}/v1/logs"
 
 
 def main() -> int:
@@ -39,7 +47,7 @@ def main() -> int:
         "CLAUDE_CODE_ENABLE_TELEMETRY": "1",
         "OTEL_LOGS_EXPORTER": "otlp",
         "OTEL_EXPORTER_OTLP_LOGS_PROTOCOL": "http/json",
-        "OTEL_EXPORTER_OTLP_LOGS_ENDPOINT": f"http://localhost:{otlp_port}/v1/logs",
+        "OTEL_EXPORTER_OTLP_LOGS_ENDPOINT": resolve_otlp_logs_endpoint(otlp_port),
     }
 
     changed = False

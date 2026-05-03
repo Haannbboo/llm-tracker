@@ -63,6 +63,8 @@ The dashboard is usually available at [http://localhost:5173](http://localhost:5
 
 ## Command Summaries
 
+See [docs/cli-reference.md](docs/cli-reference.md) for the full CLI reference, including all flags, exit codes, tracking modes, and service management commands.
+
 Use the repo-local wrapper to run an agent or command and print usage captured while it was running:
 
 ```bash
@@ -76,15 +78,16 @@ Common options:
 
 ```bash
 scripts/llm-tracker --json -- codex
+scripts/llm-tracker --usage-only -- codex exec "say hello in one sentence"
 scripts/llm-tracker --wait-ms 5000 -- codex exec "say hello in one sentence"
 scripts/llm-tracker --summary-dest file --summary-file /tmp/llm-summary.json -- claude
 scripts/llm-tracker --proxy-env -- some-openai-compatible-cli
 scripts/llm-tracker --no-summary -- gemini -p "say hello"
 ```
 
-By default, summaries are written to stderr so the child command's stdout stays usable. The wrapper records the database high watermark before launch, waits briefly after the child exits, then summarizes usage rows created during that window.
+With `--proxy-env`, the command is pointed at a temporary local proxy for the run, so proxy-recorded usage is isolated before it is merged into the main database.
 
-For `codex exec`, llm-tracker also reads Codex's local session JSONL as a fallback if OTLP has not produced a row yet.
+By default, summaries are written to stderr so the child command's stdout stays usable. Use `--usage-only` when another program needs stdout to contain only the llm-tracker summary, and combine it with `--json` when that summary should be machine-readable JSON. The wrapper starts a temporary local OTLP collector for each command, records usage in a per-run SQLite database, then merges those rows back into the main configured database after the command exits.
 
 ## Configuration
 
@@ -209,16 +212,16 @@ See [frontend/README.md](frontend/README.md) for frontend-specific setup.
 
 | Metric | Gemini CLI | Claude Code | Codex | Direct Proxy |
 | --- | --- | --- | --- | --- |
-| Input tokens | OTLP | OTLP | OTLP/session fallback | Response usage |
-| Output tokens | OTLP | OTLP | OTLP/session fallback | Response usage |
-| Cached tokens read | OTLP | OTLP | OTLP/session fallback | Response usage |
+| Input tokens | OTLP | OTLP | OTLP | Response usage |
+| Output tokens | OTLP | OTLP | OTLP | Response usage |
+| Cached tokens read | OTLP | OTLP | OTLP | Response usage |
 | Cached tokens write | Not available | OTLP | Not available | Not available |
-| Reasoning tokens | OTLP | Not available | OTLP/session fallback | Response usage |
+| Reasoning tokens | OTLP | Not available | OTLP | Response usage |
 | Tool tokens | OTLP | Not available | OTLP | Not available |
 | Prompt length | OTLP | OTLP | OTLP | Not available |
-| Latency | Hook/OTLP | OTLP | OTLP/session fallback | Proxy timing |
-| TTFT | Hook | Not available | OTLP/session fallback | Streaming only |
-| Session ID | OTLP | OTLP | OTLP/session fallback | Not available |
+| Latency | Hook/OTLP | OTLP | OTLP | Proxy timing |
+| TTFT | Hook | Not available | OTLP | Streaming only |
+| Session ID | OTLP | OTLP | OTLP | Not available |
 
 TTFT should be treated as an operational hint, not a billing-grade metric. Each agent exposes different timing data.
 
