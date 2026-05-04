@@ -29,6 +29,7 @@ type UsageRow = {
   ts: string
   provider: string
   model: string
+  client_source: string | null
   endpoint: string
   prompt_tokens: number | null
   prompt_length: number | null
@@ -741,6 +742,8 @@ function App() {
   const [jumpPage, setJumpPage] = useState('')
   
   const [activeFilter, setActiveFilter] = useState<ActiveFilter>(null)
+  const [activeSource, setActiveSource] = useState<string | null>(null)
+  const [sources, setSources] = useState<string[]>([])
   const [dateRange, setDateRange] = useState<DateRangeOption>('24h')
   const [customSince, setCustomSince] = useState('')
   const [customUntil, setCustomUntil] = useState('')
@@ -827,18 +830,21 @@ function App() {
           usageUrl.searchParams.set('provider', activeFilter.provider)
           if (activeFilter.model) usageUrl.searchParams.set('model', activeFilter.model)
         }
+        if (activeSource) usageUrl.searchParams.set('client_source', activeSource)
         if (since) usageUrl.searchParams.set('since', since)
         if (until) usageUrl.searchParams.set('until', until)
 
         const summaryUrl = new URL('/usage/summary', window.location.origin)
         if (since) summaryUrl.searchParams.set('since', since)
         if (until) summaryUrl.searchParams.set('until', until)
+        if (activeSource) summaryUrl.searchParams.set('client_source', activeSource)
 
         const countUrl = new URL('/usage/count', window.location.origin)
         if (activeFilter) {
           countUrl.searchParams.set('provider', activeFilter.provider)
           if (activeFilter.model) countUrl.searchParams.set('model', activeFilter.model)
         }
+        if (activeSource) countUrl.searchParams.set('client_source', activeSource)
         if (since) countUrl.searchParams.set('since', since)
         if (until) countUrl.searchParams.set('until', until)
 
@@ -847,6 +853,7 @@ function App() {
           dailyUrl.searchParams.set('provider', activeFilter.provider)
           if (activeFilter.model) dailyUrl.searchParams.set('model', activeFilter.model)
         }
+        if (activeSource) dailyUrl.searchParams.set('client_source', activeSource)
         if (since) dailyUrl.searchParams.set('since', since)
         if (until) dailyUrl.searchParams.set('until', until)
         dailyUrl.searchParams.set('tz_offset', getTimezoneOffset())
@@ -884,12 +891,28 @@ function App() {
 
     void loadData()
     return () => controller.abort()
-  }, [view, activeFilter, limit, page, dateRange, customSince, customUntil, refreshTrigger])
+  }, [view, activeFilter, activeSource, limit, page, dateRange, customSince, customUntil, refreshTrigger])
+
+  // Fetch available sources for the time window (independent of activeSource)
+  useEffect(() => {
+    if (view === 'settings') return
+    const controller = new AbortController()
+    const since = dateRange === 'custom' ? customSince : getSinceDate(dateRange)
+    const until = dateRange === 'custom' ? customUntil : null
+    const url = new URL('/usage/sources', window.location.origin)
+    if (since) url.searchParams.set('since', since)
+    if (until) url.searchParams.set('until', until)
+    fetch(url.toString(), { signal: controller.signal })
+      .then(r => r.ok ? r.json() : Promise.reject(r))
+      .then((data: string[]) => setSources(data))
+      .catch(() => {})
+    return () => controller.abort()
+  }, [view, dateRange, customSince, customUntil, refreshTrigger])
 
   // Reset page when filters change
   useEffect(() => {
     setPage(1)
-  }, [activeFilter, dateRange, customSince, customUntil, limit])
+  }, [activeFilter, activeSource, dateRange, customSince, customUntil, limit])
 
   const totals = useMemo(() => {
     const data = activeFilter
@@ -1048,6 +1071,16 @@ function App() {
                     providerColors={providerColors}
                     onChange={setActiveFilter}
                   />
+                  <select
+                    className="input-plain"
+                    value={activeSource || ''}
+                    onChange={(e) => setActiveSource(e.target.value || null)}
+                  >
+                    <option value="">All Sources</option>
+                    {sources.map(source => (
+                      <option key={source} value={source}>{source}</option>
+                    ))}
+                  </select>
                 </div>
               </div>
 
@@ -1159,6 +1192,20 @@ function App() {
                 </div>
 
                 <div className="filter-group">
+                  <div className="filter-label">Source</div>
+                  <select
+                    className="input-plain"
+                    value={activeSource || ''}
+                    onChange={(e) => setActiveSource(e.target.value || null)}
+                  >
+                    <option value="">All Sources</option>
+                    {sources.map(source => (
+                      <option key={source} value={source}>{source}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="filter-group">
                   <div className="filter-label">Date Range</div>
                   <select 
                     className="input-plain"
@@ -1234,6 +1281,7 @@ function App() {
                         <th style={{ width: '120px' }}>Time</th>
                         <th style={{ width: '150px', padding: '12px 8px' }}>Model</th>
                         <th style={{ width: '120px', padding: '12px 8px' }}>Provider</th>
+                        <th style={{ width: '110px', padding: '12px 8px' }}>Source</th>
                         <th style={{ minWidth: '140px' }}>Input (Prompt)</th>
                         <th style={{ minWidth: '120px' }}>Output</th>
                         <th style={{ minWidth: '100px' }}>Cost</th>
@@ -1291,6 +1339,21 @@ function App() {
                               fontWeight: 600
                             }}>
                               {row.provider}
+                            </div>
+                          </td>
+                          <td style={{ padding: '8px' }}>
+                            <div style={{
+                              padding: '2px 8px',
+                              borderRadius: '4px',
+                              display: 'inline-flex',
+                              fontSize: '10px',
+                              backgroundColor: '#f1f5f9',
+                              color: '#475569',
+                              width: 'fit-content',
+                              border: '1px solid #e2e8f0',
+                              fontWeight: 600
+                            }}>
+                              {row.client_source || '—'}
                             </div>
                           </td>
                           <td style={{ verticalAlign: 'top' }}>

@@ -233,3 +233,67 @@ providers:
         name="new-provider",
         base_url="https://new.example/v1",
     )
+
+
+def test_usage_endpoint_passes_client_source(api_module, monkeypatch):
+    captured = {}
+
+    def fake_fetch(**kwargs):
+        captured.update(kwargs)
+        return []
+
+    monkeypatch.setattr(api_module, "fetch_recent_usage", fake_fetch)
+
+    response = TestClient(api_module.app).get(
+        "/usage", params={"client_source": "claude-code", "limit": "10"}
+    )
+    assert response.status_code == 200
+    assert captured["client_source"] == "claude-code"
+
+
+def test_usage_count_endpoint_passes_client_source(api_module, monkeypatch):
+    captured = {}
+
+    def fake_count(**kwargs):
+        captured.update(kwargs)
+        return 5
+
+    monkeypatch.setattr(api_module, "count_usage", fake_count)
+
+    response = TestClient(api_module.app).get(
+        "/usage/count", params={"client_source": "codex"}
+    )
+    assert response.status_code == 200
+    assert captured["client_source"] == "codex"
+
+
+def test_usage_summary_endpoint_passes_client_source(api_module, monkeypatch):
+    captured = {}
+
+    def fake_summary(**kwargs):
+        captured.update(kwargs)
+        return []
+
+    monkeypatch.setattr(api_module, "summarize_usage", fake_summary)
+
+    response = TestClient(api_module.app).get(
+        "/usage/summary", params={"client_source": "gemini-cli"}
+    )
+    assert response.status_code == 200
+    assert captured["client_source"] == "gemini-cli"
+
+
+def test_usage_daily_endpoint_passes_client_source(api_module, monkeypatch):
+    captured = {}
+
+    def fake_daily(**kwargs):
+        captured.update(kwargs)
+        return []
+
+    monkeypatch.setattr(api_module, "aggregate_usage_by_period", fake_daily)
+
+    response = TestClient(api_module.app).get(
+        "/usage/daily", params={"client_source": "claude-code"}
+    )
+    assert response.status_code == 200
+    assert captured["client_source"] == "claude-code"

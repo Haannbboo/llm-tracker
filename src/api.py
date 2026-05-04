@@ -12,6 +12,7 @@ from .database import (
     Usage,
     aggregate_usage_by_period,
     count_usage,
+    distinct_client_sources,
     fetch_recent_usage,
     get_usage_high_watermark,
     init_db,
@@ -69,6 +70,7 @@ async def get_usage(
     offset: int = 0,
     provider: str | None = None,
     model: str | None = None,
+    client_source: str | None = None,
     since: str | None = None,
     until: str | None = None,
 ):
@@ -77,6 +79,7 @@ async def get_usage(
         offset=offset,
         provider=provider,
         model=model,
+        client_source=client_source,
         since=since,
         until=until,
     )
@@ -135,6 +138,7 @@ async def ingest_usage(usage: UsageIngest):
 async def get_usage_count(
     provider: str | None = None,
     model: str | None = None,
+    client_source: str | None = None,
     since: str | None = None,
     until: str | None = None,
 ):
@@ -142,6 +146,7 @@ async def get_usage_count(
         "total": count_usage(
             provider=provider,
             model=model,
+            client_source=client_source,
             since=since,
             until=until,
         )
@@ -151,6 +156,14 @@ async def get_usage_count(
 @app.get("/usage/high-watermark")
 async def usage_high_watermark():
     return {"id": get_usage_high_watermark()}
+
+
+@app.get("/usage/sources")
+async def usage_sources(
+    since: str | None = None,
+    until: str | None = None,
+):
+    return distinct_client_sources(since=since, until=until)
 
 
 @app.get("/usage/run-summary")
@@ -182,8 +195,9 @@ async def usage_run_summary(
 async def usage_summary(
     since: str | None = None,
     until: str | None = None,
+    client_source: str | None = None,
 ):
-    return summarize_usage(since=since, until=until)
+    return summarize_usage(since=since, until=until, client_source=client_source)
 
 
 @app.get("/usage/daily")
@@ -192,6 +206,7 @@ async def usage_daily(
     until: str | None = None,
     provider: str | None = None,
     model: str | None = None,
+    client_source: str | None = None,
     granularity: str = "day",
     tz_offset: str = "+00:00",
 ):
@@ -200,6 +215,7 @@ async def usage_daily(
         until=until,
         provider=provider,
         model=model,
+        client_source=client_source,
         granularity=granularity,
         tz_offset=tz_offset,
     )

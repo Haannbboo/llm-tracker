@@ -126,6 +126,133 @@ def test_fetch_recent_usage_returns_expected_row_shape(database_module, isolated
     }
 
 
+def test_usage_filters_includes_client_source(database_module, isolated_home):
+    db_path = str(isolated_home / "usage.db")
+    database_module.init_db(db_path)
+
+    for source in ["claude-code", "codex"]:
+        database_module.log_usage(
+            database_module.Usage(
+                ts="2026-04-17T00:00:00+00:00",
+                provider="anthropic",
+                model="claude-sonnet-4-20250514",
+                client_source=source,
+                session_id=None,
+                endpoint="/v1/messages",
+                prompt_tokens=10,
+                completion_tokens=5,
+                reasoning_tokens=None,
+                cached_tokens=None,
+                total_tokens=15,
+                latency_ms=100,
+                ttft_ms=None,
+                tool_tokens=None,
+                cache_creation_tokens=None,
+                input_cost_usd=0.00002,
+                output_cost_usd=0.00003,
+                total_cost_usd=0.00005,
+                status=200,
+                base_url_id=None,
+            ),
+            db_path=db_path,
+        )
+
+    rows = database_module.fetch_recent_usage(
+        limit=10, client_source="claude-code", db_path=db_path
+    )
+    assert len(rows) == 1
+    assert rows[0]["client_source"] == "claude-code"
+
+    rows = database_module.fetch_recent_usage(
+        limit=10, client_source="codex", db_path=db_path
+    )
+    assert len(rows) == 1
+    assert rows[0]["client_source"] == "codex"
+
+    rows = database_module.fetch_recent_usage(limit=10, db_path=db_path)
+    assert len(rows) == 2
+
+
+def test_count_usage_filters_by_client_source(database_module, isolated_home):
+    db_path = str(isolated_home / "usage.db")
+    database_module.init_db(db_path)
+
+    for source in ["claude-code", "claude-code", "codex"]:
+        database_module.log_usage(
+            database_module.Usage(
+                ts="2026-04-17T00:00:00+00:00",
+                provider="anthropic",
+                model="claude-sonnet-4-20250514",
+                client_source=source,
+                session_id=None,
+                endpoint="/v1/messages",
+                prompt_tokens=10,
+                completion_tokens=5,
+                reasoning_tokens=None,
+                cached_tokens=None,
+                total_tokens=15,
+                latency_ms=100,
+                ttft_ms=None,
+                tool_tokens=None,
+                cache_creation_tokens=None,
+                input_cost_usd=0.00002,
+                output_cost_usd=0.00003,
+                total_cost_usd=0.00005,
+                status=200,
+                base_url_id=None,
+            ),
+            db_path=db_path,
+        )
+
+    assert database_module.count_usage(client_source="claude-code") == 2
+    assert database_module.count_usage(client_source="codex") == 1
+    assert database_module.count_usage() == 3
+
+
+def test_aggregate_usage_by_period_filters_by_client_source(
+    database_module, isolated_home
+):
+    db_path = str(isolated_home / "usage.db")
+    database_module.init_db(db_path)
+
+    for ts, source, tokens in [
+        ("2026-04-17T00:00:00+00:00", "claude-code", 150),
+        ("2026-04-18T00:00:00+00:00", "codex", 300),
+    ]:
+        database_module.log_usage(
+            database_module.Usage(
+                ts=ts,
+                provider="anthropic",
+                model="claude-sonnet-4-20250514",
+                client_source=source,
+                session_id=None,
+                endpoint="/v1/messages",
+                prompt_tokens=100,
+                completion_tokens=50,
+                reasoning_tokens=None,
+                cached_tokens=None,
+                total_tokens=tokens,
+                latency_ms=100,
+                ttft_ms=None,
+                tool_tokens=None,
+                cache_creation_tokens=None,
+                input_cost_usd=0.002,
+                output_cost_usd=0.003,
+                total_cost_usd=0.005,
+                status=200,
+                base_url_id=None,
+            ),
+            db_path=db_path,
+        )
+
+    result = database_module.aggregate_usage_by_period(client_source="claude-code")
+    assert len(result) == 1
+    assert result[0]["total_tokens"] == 150
+
+    result = database_module.aggregate_usage_by_period()
+    assert len(result) == 2
+
+
 def test_init_db_does_not_mutate_existing_usage_table(database_module, isolated_home):
     import sqlite3
 

@@ -373,6 +373,7 @@ def _usage_filters(
     *,
     provider: str | None = None,
     model: str | None = None,
+    client_source: str | None = None,
     since: str | None = None,
     until: str | None = None,
 ) -> list[Any]:
@@ -381,6 +382,8 @@ def _usage_filters(
         filters.append(Usage.provider == provider)
     if model:
         filters.append(Usage.model == model)
+    if client_source:
+        filters.append(Usage.client_source == client_source)
     if since:
         filters.append(Usage.ts >= since)
     if until:
@@ -394,6 +397,7 @@ def fetch_recent_usage(
     offset: int = 0,
     provider: str | None = None,
     model: str | None = None,
+    client_source: str | None = None,
     since: str | None = None,
     until: str | None = None,
     db_path: str | None = None,
@@ -402,6 +406,7 @@ def fetch_recent_usage(
     filters = _usage_filters(
         provider=provider,
         model=model,
+        client_source=client_source,
         since=since,
         until=until,
     )
@@ -443,10 +448,30 @@ def fetch_recent_usage(
         return [_row_to_dict(row) for row in connection.execute(query)]
 
 
+def distinct_client_sources(
+    *,
+    since: str | None = None,
+    until: str | None = None,
+    db_path: str | None = None,
+) -> list[str]:
+    """Return distinct client_source values in the given time window."""
+    filters = _usage_filters(since=since, until=until)
+    filters.append(Usage.client_source.isnot(None))
+    query = (
+        select(Usage.client_source)
+        .distinct()
+        .where(and_(*filters))
+        .order_by(Usage.client_source)
+    )
+    with get_engine(db_path).connect() as connection:
+        return [row[0] for row in connection.execute(query)]
+
+
 def count_usage(
     *,
     provider: str | None = None,
     model: str | None = None,
+    client_source: str | None = None,
     since: str | None = None,
     until: str | None = None,
 ) -> int:
@@ -454,6 +479,7 @@ def count_usage(
     filters = _usage_filters(
         provider=provider,
         model=model,
+        client_source=client_source,
         since=since,
         until=until,
     )
@@ -654,9 +680,10 @@ def summarize_usage(
     *,
     since: str | None = None,
     until: str | None = None,
+    client_source: str | None = None,
 ) -> list[dict[str, Any]]:
     """Aggregate usage totals by provider and model for dashboard summaries."""
-    filters = _usage_filters(since=since, until=until)
+    filters = _usage_filters(since=since, until=until, client_source=client_source)
     query = (
         select(
             Usage.provider,
@@ -707,6 +734,7 @@ def aggregate_usage_by_period(
     until: str | None = None,
     provider: str | None = None,
     model: str | None = None,
+    client_source: str | None = None,
     granularity: str = "day",
     tz_offset: str = "+00:00",
 ) -> list[dict[str, Any]]:
@@ -714,6 +742,7 @@ def aggregate_usage_by_period(
     filters = _usage_filters(
         provider=provider,
         model=model,
+        client_source=client_source,
         since=since,
         until=until,
     )
