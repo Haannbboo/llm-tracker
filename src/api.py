@@ -195,9 +195,17 @@ async def usage_run_summary(
 async def usage_summary(
     since: str | None = None,
     until: str | None = None,
+    provider: str | None = None,
+    model: str | None = None,
     client_source: str | None = None,
 ):
-    return summarize_usage(since=since, until=until, client_source=client_source)
+    return summarize_usage(
+        since=since,
+        until=until,
+        provider=provider,
+        model=model,
+        client_source=client_source,
+    )
 
 
 @app.get("/usage/daily")

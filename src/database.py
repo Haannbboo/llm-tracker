@@ -680,10 +680,18 @@ def summarize_usage(
     *,
     since: str | None = None,
     until: str | None = None,
+    provider: str | None = None,
+    model: str | None = None,
     client_source: str | None = None,
 ) -> list[dict[str, Any]]:
     """Aggregate usage totals by provider and model for dashboard summaries."""
-    filters = _usage_filters(since=since, until=until, client_source=client_source)
+    filters = _usage_filters(
+        since=since,
+        until=until,
+        provider=provider,
+        model=model,
+        client_source=client_source,
+    )
     query = (
         select(
             Usage.provider,
