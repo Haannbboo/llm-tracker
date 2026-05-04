@@ -125,6 +125,79 @@ class TestParseProvider:
         assert provider_parser_module.parse_provider("claude") == "Xiaomi"
 
 
+class TestCodexHomeOverride:
+    def test_codex_home_overrides_global(
+        self,
+        provider_parser_module,
+        isolated_home: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ):
+        _write_codex_config(isolated_home, "https://api.openai.com/v1")
+        codex_home = isolated_home / "project-codex"
+        codex_home.mkdir()
+        (codex_home / "config.toml").write_text(
+            'base_url = "https://proxy.company.com/v1"', encoding="utf-8"
+        )
+        monkeypatch.setenv("CODEX_HOME", str(codex_home))
+        assert provider_parser_module.parse_provider("codex") == "company"
+
+    def test_codex_home_without_global(
+        self,
+        provider_parser_module,
+        isolated_home: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ):
+        _write_codex_config(isolated_home, None)
+        codex_home = isolated_home / "project-codex"
+        codex_home.mkdir()
+        (codex_home / "config.toml").write_text(
+            'base_url = "https://proxy.company.com/v1"', encoding="utf-8"
+        )
+        monkeypatch.setenv("CODEX_HOME", str(codex_home))
+        assert provider_parser_module.parse_provider("codex") == "company"
+
+    def test_codex_home_not_set_uses_global(
+        self, provider_parser_module, isolated_home: Path
+    ):
+        _write_codex_config(isolated_home, "https://api.anthropic.com")
+        assert provider_parser_module.parse_provider("codex") == "Anthropic"
+
+    def test_codex_home_metadata_source(
+        self,
+        provider_parser_module,
+        isolated_home: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ):
+        _write_codex_config(isolated_home, "https://api.openai.com/v1")
+        codex_home = isolated_home / "project-codex"
+        codex_home.mkdir()
+        (codex_home / "config.toml").write_text(
+            'base_url = "https://proxy.company.com/v1"', encoding="utf-8"
+        )
+        monkeypatch.setenv("CODEX_HOME", str(codex_home))
+        metadata = provider_parser_module.parse_provider_metadata("codex")
+        assert metadata.base_url == "https://proxy.company.com/v1"
+        assert metadata.source == "codex_config"
+
+    def test_codex_home_nested_model_providers(
+        self,
+        provider_parser_module,
+        isolated_home: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ):
+        _write_codex_config(isolated_home, None)
+        codex_home = isolated_home / "project-codex"
+        codex_home.mkdir()
+        (codex_home / "config.toml").write_text(
+            'model = "gpt-4.1"\n\n[model_providers.bench_target]\n'
+            'name = "Benchmark Target"\nwire_api = "responses"\n'
+            'base_url = "https://router.example.com/v1"\n',
+            encoding="utf-8",
+        )
+        monkeypatch.setenv("CODEX_HOME", str(codex_home))
+        assert provider_parser_module.parse_provider("codex") == "example"
+
+
 def test_parse_provider_metadata_returns_base_url_and_source(
     provider_parser_module, isolated_home: Path
 ):
