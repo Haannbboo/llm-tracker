@@ -57,7 +57,7 @@ type DailyUsage = {
   total_cost_usd: number | null
 }
 
-type ActiveFilter = { provider: string; model: string } | null
+type ActiveFilter = { provider: string; model: string | null } | null
 type DateRangeOption = '5h' | '24h' | '7d' | '30d' | 'all' | 'custom'
 
 const numberFormatter = new Intl.NumberFormat()
@@ -166,26 +166,39 @@ function getModelIcon(model: string) {
   return null
 }
 
-function ModelSelector({ 
-  activeFilter, 
-  summary, 
-  onChange 
-}: { 
-  activeFilter: ActiveFilter, 
-  summary: UsageSummary[], 
-  onChange: (filter: ActiveFilter) => void 
+function ModelSelector({
+  activeFilter,
+  summary,
+  providerColors,
+  onChange
+}: {
+  activeFilter: ActiveFilter,
+  summary: UsageSummary[],
+  providerColors: Record<string, string>,
+  onChange: (filter: ActiveFilter) => void
 }) {
   const [isOpen, setIsOpen] = useState(false);
-  
+
+  // Group summary entries by provider
+  const grouped = useMemo(() => {
+    const map = new Map<string, UsageSummary[]>();
+    for (const s of summary) {
+      const arr = map.get(s.provider) ?? [];
+      arr.push(s);
+      map.set(s.provider, arr);
+    }
+    return Array.from(map.entries()).sort(([a], [b]) => a.localeCompare(b));
+  }, [summary]);
+
   return (
     <div style={{ position: 'relative' }}>
-      <button 
+      <button
         onClick={() => setIsOpen(!isOpen)}
         className="input-plain"
-        style={{ 
-          display: 'flex', 
-          alignItems: 'center', 
-          gap: '8px', 
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: '8px',
           minWidth: '180px',
           background: '#fff',
           justifyContent: 'space-between'
@@ -193,10 +206,25 @@ function ModelSelector({
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
           {activeFilter ? (
-            <>
-              {getModelIcon(activeFilter.model)}
-              <span style={{ fontSize: '13px' }}>{activeFilter.model}</span>
-            </>
+            activeFilter.model ? (
+              <>
+                {getModelIcon(activeFilter.model)}
+                <span style={{ fontSize: '13px' }}>{activeFilter.model}</span>
+              </>
+            ) : (
+              <span style={{
+                padding: '2px 8px',
+                borderRadius: '4px',
+                display: 'inline-flex',
+                fontSize: '10px',
+                backgroundColor: getProviderColor(activeFilter.provider, providerColors) + '22',
+                color: getProviderColor(activeFilter.provider, providerColors),
+                fontWeight: 600,
+                border: `1px solid ${getProviderColor(activeFilter.provider, providerColors)}44`
+              }}>
+                {activeFilter.provider}
+              </span>
+            )
           ) : (
             <>
               <span>🌐</span>
@@ -206,36 +234,36 @@ function ModelSelector({
         </div>
         <span style={{ fontSize: '10px' }}>▼</span>
       </button>
-      
+
       {isOpen && (
         <>
-          <div 
-            style={{ position: 'fixed', inset: 0, zIndex: 40 }} 
-            onClick={() => setIsOpen(false)} 
+          <div
+            style={{ position: 'fixed', inset: 0, zIndex: 40 }}
+            onClick={() => setIsOpen(false)}
           />
-          <div style={{ 
-            position: 'absolute', 
-            top: '100%', 
-            right: 0, 
-            marginTop: '4px', 
-            background: '#fff', 
-            border: '1px solid var(--border-color)', 
-            borderRadius: '8px', 
+          <div style={{
+            position: 'absolute',
+            top: '100%',
+            right: 0,
+            marginTop: '4px',
+            background: '#fff',
+            border: '1px solid var(--border-color)',
+            borderRadius: '8px',
             boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
             zIndex: 50,
-            minWidth: '220px',
-            maxHeight: '300px',
+            minWidth: '240px',
+            maxHeight: '360px',
             overflowY: 'auto',
             padding: '4px'
           }}>
-            <button 
+            <button
               onClick={() => { onChange(null); setIsOpen(false); }}
-              style={{ 
-                width: '100%', 
-                padding: '8px 12px', 
-                display: 'flex', 
-                alignItems: 'center', 
-                gap: '8px', 
+              style={{
+                width: '100%',
+                padding: '8px 12px',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px',
                 borderRadius: '6px',
                 background: !activeFilter ? '#f1f5f9' : 'transparent',
                 textAlign: 'left'
@@ -243,27 +271,61 @@ function ModelSelector({
             >
               <span>🌐</span> All Models
             </button>
-            {summary.map(s => (
-              <button 
-                key={`${s.provider}:${s.model}`}
-                onClick={() => { onChange({ provider: s.provider, model: s.model }); setIsOpen(false); }}
-                style={{ 
-                  width: '100%', 
-                  padding: '8px 12px', 
-                  display: 'flex', 
-                  alignItems: 'center', 
-                  gap: '8px', 
-                  borderRadius: '6px',
-                  background: activeFilter?.model === s.model ? '#f1f5f9' : 'transparent',
-                  textAlign: 'left'
-                }}
-              >
-                {getModelIcon(s.model)}
-                <div style={{ display: 'flex', flexDirection: 'column' }}>
-                  <span style={{ fontSize: '13px' }}>{s.model}</span>
-                  <span style={{ fontSize: '10px', color: 'var(--text-muted)' }}>{s.provider}</span>
-                </div>
-              </button>
+            {grouped.map(([provider, models]) => (
+              <div key={provider}>
+                <button
+                  onClick={() => { onChange({ provider, model: null }); setIsOpen(false); }}
+                  style={{
+                    width: '100%',
+                    padding: '8px 12px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '8px',
+                    borderRadius: '6px',
+                    background: activeFilter?.provider === provider && activeFilter.model === null ? '#f1f5f9' : 'transparent',
+                    textAlign: 'left',
+                    borderTop: '1px solid var(--border-color)',
+                    marginTop: '4px',
+                    paddingTop: '10px'
+                  }}
+                >
+                  <span style={{
+                    padding: '2px 8px',
+                    borderRadius: '4px',
+                    display: 'inline-flex',
+                    fontSize: '10px',
+                    backgroundColor: (getProviderColor(provider, providerColors)) + '22',
+                    color: getProviderColor(provider, providerColors),
+                    fontWeight: 600,
+                    border: `1px solid ${getProviderColor(provider, providerColors)}44`
+                  }}>
+                    {provider}
+                  </span>
+                  <span style={{ fontWeight: 400, color: 'var(--text-muted)', marginLeft: 'auto', fontSize: '11px' }}>
+                    {models.length} model{models.length > 1 ? 's' : ''}
+                  </span>
+                </button>
+                {models.map(s => (
+                  <button
+                    key={`${s.provider}:${s.model}`}
+                    onClick={() => { onChange({ provider: s.provider, model: s.model }); setIsOpen(false); }}
+                    style={{
+                      width: '100%',
+                      padding: '6px 12px 6px 32px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '8px',
+                      borderRadius: '6px',
+                      background: activeFilter?.model === s.model ? '#f1f5f9' : 'transparent',
+                      textAlign: 'left',
+                      fontSize: '13px'
+                    }}
+                  >
+                    {getModelIcon(s.model)}
+                    <span>{s.model}</span>
+                  </button>
+                ))}
+              </div>
             ))}
           </div>
         </>
@@ -763,7 +825,7 @@ function App() {
         
         if (activeFilter) {
           usageUrl.searchParams.set('provider', activeFilter.provider)
-          usageUrl.searchParams.set('model', activeFilter.model)
+          if (activeFilter.model) usageUrl.searchParams.set('model', activeFilter.model)
         }
         if (since) usageUrl.searchParams.set('since', since)
         if (until) usageUrl.searchParams.set('until', until)
@@ -775,7 +837,7 @@ function App() {
         const countUrl = new URL('/usage/count', window.location.origin)
         if (activeFilter) {
           countUrl.searchParams.set('provider', activeFilter.provider)
-          countUrl.searchParams.set('model', activeFilter.model)
+          if (activeFilter.model) countUrl.searchParams.set('model', activeFilter.model)
         }
         if (since) countUrl.searchParams.set('since', since)
         if (until) countUrl.searchParams.set('until', until)
@@ -783,7 +845,7 @@ function App() {
         const dailyUrl = new URL('/usage/daily', window.location.origin)
         if (activeFilter) {
           dailyUrl.searchParams.set('provider', activeFilter.provider)
-          dailyUrl.searchParams.set('model', activeFilter.model)
+          if (activeFilter.model) dailyUrl.searchParams.set('model', activeFilter.model)
         }
         if (since) dailyUrl.searchParams.set('since', since)
         if (until) dailyUrl.searchParams.set('until', until)
@@ -830,8 +892,8 @@ function App() {
   }, [activeFilter, dateRange, customSince, customUntil, limit])
 
   const totals = useMemo(() => {
-    const data = activeFilter 
-      ? summary.filter(s => s.provider === activeFilter.provider && s.model === activeFilter.model)
+    const data = activeFilter
+      ? summary.filter(s => s.provider === activeFilter.provider && (activeFilter.model === null || s.model === activeFilter.model))
       : summary
 
     const requests = data.reduce((sum, row) => sum + value(row.requests), 0)
@@ -980,9 +1042,10 @@ function App() {
                     <option value="all">All Time</option>
                     <option value="custom">Custom Range</option>
                   </select>
-                  <ModelSelector 
+                  <ModelSelector
                     activeFilter={activeFilter}
                     summary={summary}
+                    providerColors={providerColors}
                     onChange={setActiveFilter}
                   />
                 </div>
@@ -1087,9 +1150,10 @@ function App() {
               <div className="filter-bar">
                 <div className="filter-group">
                   <div className="filter-label">Model</div>
-                  <ModelSelector 
+                  <ModelSelector
                     activeFilter={activeFilter}
                     summary={summary}
+                    providerColors={providerColors}
                     onChange={setActiveFilter}
                   />
                 </div>
