@@ -113,7 +113,7 @@ export function DailyHeatmap({
   function getColor(metric: number): string {
     if (metric < 0) return 'transparent'
     if (mode === 'activity') {
-      if (metric === 0) return '#ebedf0'
+      if (metric === 0) return 'var(--heatmap-empty)'
       const ratio = Math.min(metric / (allWeeks.maxVal || 1), 1)
       if (ratio < 0.25) return '#9be9a8'
       if (ratio < 0.5) return '#40c463'
@@ -134,7 +134,7 @@ export function DailyHeatmap({
 
   const title = mode === 'activity' ? '🗓 Daily Activity' : '✅ Success Rate'
   const legendColors = mode === 'activity'
-    ? ['#ebedf0', '#9be9a8', '#40c463', '#30a14e', '#00b578']
+    ? ['var(--heatmap-empty)', '#9be9a8', '#40c463', '#30a14e', '#00b578']
     : ['#10b981', '#34d399', '#a7f3d0', '#fcd34d', '#f97316', '#ef4444']
   const legendStart = mode === 'activity' ? 'Less' : '100%'
   const legendEnd = mode === 'activity' ? 'More' : 'Fail'
@@ -146,7 +146,7 @@ export function DailyHeatmap({
         <div style={{ display: 'flex', alignItems: 'center', gap: '4px', marginLeft: 'auto', fontSize: '10px', color: 'var(--text-muted)' }}>
           <span>{legendStart}</span>
           {legendColors.map(c => (
-            <div key={c} style={{ width: '11px', height: '11px', borderRadius: '2px', background: c, border: '1px solid rgba(0,0,0,0.06)' }} />
+            <div key={c} style={{ width: '11px', height: '11px', borderRadius: '2px', background: c, border: '1px solid var(--heatmap-cell-border)' }} />
           ))}
           <span>{legendEnd}</span>
         </div>
@@ -154,12 +154,12 @@ export function DailyHeatmap({
       <div style={{ padding: '8px 0 12px', flex: 1, minHeight: 0, overflow: 'hidden' }}>
         <svg viewBox={`0 0 ${leftPad + gridWidth + 8} ${topPad + gridHeight + 4}`} style={{ display: 'block', width: '100%', height: '100%' }} preserveAspectRatio="none">
           {monthLabels.map((m, i) => (
-            <text key={i} x={leftPad + m.col * step} y={14} fontSize={10} fill="#94a3b8" fontWeight={500}>
+            <text key={i} x={leftPad + m.col * step} y={14} fontSize={10} fill="var(--heatmap-label)" fontWeight={500}>
               {m.label}
             </text>
           ))}
           {[1, 3, 5].map(d => (
-            <text key={d} x={0} y={topPad + d * step + cellSize - 2} fontSize={10} fill="#94a3b8" fontWeight={500}>
+            <text key={d} x={0} y={topPad + d * step + cellSize - 2} fontSize={10} fill="var(--heatmap-label)" fontWeight={500}>
               {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][d]}
             </text>
           ))}
@@ -177,8 +177,8 @@ export function DailyHeatmap({
                   height={cellSize}
                   rx={2}
                   ry={2}
-                  fill={isNoData ? '#ebedf0' : getColor(day.metric)}
-                  stroke={hoveredCell?.date === day.date.toISOString().split('T')[0] ? '#1e293b' : 'rgba(0,0,0,0.06)'}
+                  fill={isNoData ? 'var(--heatmap-empty)' : getColor(day.metric)}
+                  stroke={hoveredCell?.date === day.date.toISOString().split('T')[0] ? '#1e293b' : 'var(--heatmap-cell-border)'}
                   strokeWidth={hoveredCell?.date === day.date.toISOString().split('T')[0] ? 2 : 1}
                   style={{ cursor: 'pointer', transition: 'stroke 0.1s' }}
                   onMouseEnter={(e) => {
@@ -207,7 +207,7 @@ export function DailyHeatmap({
         if (mode === 'activity') {
           const total = d ? value(d.total_tokens) : 0
           if (total === 0) {
-            content = <div style={{ color: '#94a3b8' }}>No activity</div>
+            content = <div style={{ color: 'var(--text-muted)' }}>No activity</div>
           } else {
             const hCached = d ? value(d.cached_tokens) : 0
             const hInput = d ? Math.max(0, value(d.prompt_tokens) - hCached) : 0
@@ -217,7 +217,7 @@ export function DailyHeatmap({
             content = (
               <>
                 <div style={{ display: 'flex', justifyContent: 'space-between', gap: '16px', marginBottom: '3px' }}>
-                  <span style={{ color: '#94a3b8' }}>Input:</span>
+                  <span style={{ color: 'var(--text-muted)' }}>Input:</span>
                   <span style={{ fontWeight: 600 }}>{formatNumber(hInput)}</span>
                 </div>
                 <div style={{ display: 'flex', justifyContent: 'space-between', gap: '16px', marginBottom: '3px' }}>
@@ -248,7 +248,7 @@ export function DailyHeatmap({
         } else {
           const total = d ? value(d.requests) : 0
           if (total === 0) {
-            content = <div style={{ color: '#94a3b8' }}>No requests</div>
+            content = <div style={{ color: 'var(--text-muted)' }}>No requests</div>
           } else {
             const failed = d ? value(d.failed_requests) : 0
             const successful = d ? value(d.successful_requests) : 0
@@ -256,7 +256,7 @@ export function DailyHeatmap({
             content = (
               <>
                 <div style={{ display: 'flex', justifyContent: 'space-between', gap: '16px', marginBottom: '3px' }}>
-                  <span style={{ color: '#94a3b8' }}>Success Rate:</span>
+                  <span style={{ color: 'var(--text-muted)' }}>Success Rate:</span>
                   <span style={{ fontWeight: 700, color: rate >= 99 ? '#10b981' : rate >= 90 ? '#fcd34d' : '#ef4444' }}>{rate.toFixed(1)}%</span>
                 </div>
                 <div style={{ display: 'flex', justifyContent: 'space-between', gap: '16px', marginBottom: '3px' }}>

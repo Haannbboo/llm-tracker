@@ -35,7 +35,7 @@ export function ModelSelector({
           alignItems: 'center',
           gap: '8px',
           minWidth: '180px',
-          background: '#fff',
+          background: 'var(--input-bg)',
           justifyContent: 'space-between'
         }}
       >
@@ -81,7 +81,7 @@ export function ModelSelector({
             top: '100%',
             right: 0,
             marginTop: '4px',
-            background: '#fff',
+            background: 'var(--card-bg)',
             border: '1px solid var(--border-color)',
             borderRadius: '8px',
             boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
@@ -100,7 +100,7 @@ export function ModelSelector({
                 alignItems: 'center',
                 gap: '8px',
                 borderRadius: '6px',
-                background: !activeFilter ? '#f1f5f9' : 'transparent',
+                background: !activeFilter ? 'var(--surface-hover)' : 'transparent',
                 textAlign: 'left'
               }}
             >
@@ -117,7 +117,7 @@ export function ModelSelector({
                     alignItems: 'center',
                     gap: '8px',
                     borderRadius: '6px',
-                    background: activeFilter?.provider === provider && activeFilter.model === null ? '#f1f5f9' : 'transparent',
+                    background: activeFilter?.provider === provider && activeFilter.model === null ? 'var(--surface-hover)' : 'transparent',
                     textAlign: 'left',
                     borderTop: '1px solid var(--border-color)',
                     marginTop: '4px',
@@ -151,7 +151,7 @@ export function ModelSelector({
                       alignItems: 'center',
                       gap: '8px',
                       borderRadius: '6px',
-                      background: activeFilter?.model === s.model ? '#f1f5f9' : 'transparent',
+                      background: activeFilter?.model === s.model ? 'var(--surface-hover)' : 'transparent',
                       textAlign: 'left',
                       fontSize: '13px'
                     }}

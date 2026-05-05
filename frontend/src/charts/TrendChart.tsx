@@ -60,34 +60,14 @@ export function TrendChart({
               <span style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)' }}>Requests</span>
             </div>
           </div>
-          <div className="tab-group" style={{ display: 'flex', background: '#f1f5f9', padding: '2px', borderRadius: '6px' }}>
+          <div className="tab-toggle">
             <button
+              className={`tab-toggle-btn ${metric === 'tokens' ? 'active' : ''}`}
               onClick={() => setMetric('tokens')}
-              style={{
-                padding: '2px 8px',
-                fontSize: '10px',
-                borderRadius: '4px',
-                fontWeight: 600,
-                border: 'none',
-                cursor: 'pointer',
-                background: metric === 'tokens' ? 'white' : 'transparent',
-                color: metric === 'tokens' ? 'var(--color-blue)' : '#64748b',
-                boxShadow: metric === 'tokens' ? '0 1px 2px rgba(0,0,0,0.05)' : 'none'
-              }}
             >Tokens</button>
             <button
+              className={`tab-toggle-btn ${metric === 'cost' ? 'active' : ''}`}
               onClick={() => setMetric('cost')}
-              style={{
-                padding: '2px 8px',
-                fontSize: '10px',
-                borderRadius: '4px',
-                fontWeight: 600,
-                border: 'none',
-                cursor: 'pointer',
-                background: metric === 'cost' ? 'white' : 'transparent',
-                color: metric === 'cost' ? 'var(--color-blue)' : '#64748b',
-                boxShadow: metric === 'cost' ? '0 1px 2px rgba(0,0,0,0.05)' : 'none'
-              }}
             >Cost</button>
           </div>
         </div>
@@ -194,7 +174,7 @@ export function TrendChart({
                   key={tick}
                   x1="0" y1={200 - tick * 200}
                   x2="1000" y2={200 - tick * 200}
-                  stroke="#f1f5f9"
+                  stroke="var(--chart-grid)"
                   strokeWidth="1"
                 />
               ))}
@@ -282,7 +262,7 @@ export function TrendChart({
                         <circle
                           key={i}
                           cx={x} cy={y} r={hoveredIdx === i ? "5" : "3"}
-                          fill="white"
+                          fill="var(--chart-dot-fill)"
                           stroke="var(--color-pink)"
                           strokeWidth={hoveredIdx === i ? "3" : "2"}
                           style={{ pointerEvents: 'none', transition: 'all 0.2s', opacity: hoveredIdx === null || hoveredIdx === i ? 1 : 0.4 }}
@@ -298,7 +278,7 @@ export function TrendChart({
               display: 'flex',
               justifyContent: 'space-between',
               marginTop: '20px',
-              borderTop: '1px solid #f1f5f9',
+              borderTop: '1px solid var(--chart-footer-border)',
               paddingTop: '10px',
               paddingLeft: `${(paddingX / 1000) * 100}%`,
               paddingRight: `${(paddingX / 1000) * 100}%`

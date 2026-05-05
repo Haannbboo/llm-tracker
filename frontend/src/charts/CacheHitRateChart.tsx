@@ -140,7 +140,7 @@ export function CacheHitRateChart({
                         <circle
                           key={i}
                           cx={x} cy={y} r={hoveredIdx === i ? "5" : "3"}
-                          fill="white"
+                          fill="var(--chart-dot-fill)"
                           stroke="var(--color-green)"
                           strokeWidth={hoveredIdx === i ? "3" : "2"}
                           style={{ pointerEvents: 'none', transition: 'all 0.2s', opacity: hoveredIdx === null || hoveredIdx === i ? 1 : 0.4 }}
@@ -172,7 +172,7 @@ export function CacheHitRateChart({
               display: 'flex',
               justifyContent: 'space-between',
               marginTop: '4px',
-              borderTop: '1px solid #f1f5f9',
+              borderTop: '1px solid var(--chart-footer-border)',
               paddingTop: '4px',
               paddingLeft: `${(paddingX / 1000) * 100}%`,
               paddingRight: `${(paddingX / 1000) * 100}%`

@@ -1,4 +1,5 @@
 import type { DateRangeOption } from './types'
+import { getTheme } from './theme'
 
 export const numberFormatter = new Intl.NumberFormat()
 export const compactFormatter = new Intl.NumberFormat(undefined, {
@@ -117,18 +118,20 @@ export function getProviderBadgeColor(provider: string): string {
 
 export function getProviderBadgeBg(provider: string): string {
   const base = getProviderBadgeColor(provider)
+  const dark = getTheme() === 'dark'
   const p = provider.toLowerCase()
-  if (p.includes('openai') || p.includes('xiaomi')) return `${base}80`
-  if (p.includes('anthropic') || p.includes('google') || p.includes('minimax')) return `${base}26`
-  return '#f1f5f9'
+  if (p.includes('openai') || p.includes('xiaomi')) return dark ? `${base}90` : `${base}80`
+  if (p.includes('anthropic') || p.includes('google') || p.includes('minimax')) return dark ? `${base}40` : `${base}26`
+  return dark ? '#334155' : '#f1f5f9'
 }
 
 export function getProviderBadgeText(provider: string): string {
+  const dark = getTheme() === 'dark'
   const p = provider.toLowerCase()
-  if (p.includes('openai')) return '#475569'
-  if (p.includes('xiaomi')) return '#6b4f2a'
+  if (p.includes('openai')) return dark ? '#94a3b8' : '#475569'
+  if (p.includes('xiaomi')) return dark ? '#dcc496' : '#6b4f2a'
   if (p.includes('anthropic') || p.includes('google') || p.includes('minimax')) return getProviderBadgeColor(provider)
-  return '#475569'
+  return dark ? '#94a3b8' : '#475569'
 }
 
 export function getProviderIcon(provider: string) {
@@ -143,17 +146,19 @@ export function getProviderIcon(provider: string) {
 }
 
 export function getSourceBadgeBg(name: string): string {
-  if (name === 'codex') return '#dcdcdc80'
-  if (name === 'claude-code') return '#cc7c5e26'
-  if (name === 'gemini-cli') return '#528af226'
-  if (name === 'proxy') return '#8b5cf626'
-  return '#f1f5f9'
+  const dark = getTheme() === 'dark'
+  if (name === 'codex') return dark ? '#dcdcdc90' : '#dcdcdc80'
+  if (name === 'claude-code') return dark ? '#cc7c5e40' : '#cc7c5e26'
+  if (name === 'gemini-cli') return dark ? '#528af240' : '#528af226'
+  if (name === 'proxy') return dark ? '#8b5cf640' : '#8b5cf626'
+  return dark ? '#334155' : '#f1f5f9'
 }
 
 export function getSourceBadgeText(name: string): string {
-  if (name === 'codex') return '#475569'
+  const dark = getTheme() === 'dark'
+  if (name === 'codex') return dark ? '#94a3b8' : '#475569'
   if (name === 'claude-code') return '#cc7c5e'
   if (name === 'gemini-cli') return '#528af2'
   if (name === 'proxy') return '#8b5cf6'
-  return '#475569'
+  return dark ? '#94a3b8' : '#475569'
 }

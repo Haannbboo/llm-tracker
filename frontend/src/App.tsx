@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import yaml from 'js-yaml'
 import './App.css'
+import { toggleTheme, getTheme } from './theme'
 import { getModelBadgeBackgroundColor, getModelTextColor } from './model-badge'
 import type { ActiveFilter, DailyUsage, DateRangeOption, ProviderUsage, SourceUsage, UsageRow, UsageSummary } from './types'
 import { formatCompact, formatCost, formatLatency, formatNumber, formatRate, formatTime, FIXED_PROVIDER_COLORS, getProviderColor, getSinceDate, getTimezoneOffset, getModelIcon, PALETTE, value } from './utils'
@@ -39,6 +40,7 @@ function App() {
   const [configStatus, setConfigStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle')
 
   const [error, setError] = useState<string | null>(null)
+  const [theme, setTheme] = useState<'light' | 'dark'>(getTheme)
 
   const providerColors = useMemo(() => {
     const allProviders = Array.from(new Set(summary.map(s => s.provider))).sort();
@@ -343,6 +345,14 @@ function App() {
             ⚙️ Settings
           </button>
         </nav>
+        <button
+          className="nav-item"
+          style={{ marginLeft: 'auto', fontSize: '18px' }}
+          onClick={() => setTheme(toggleTheme())}
+          title={`Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`}
+        >
+          {theme === 'dark' ? '☀️' : '🌙'}
+        </button>
       </header>
 
       <main className="main">
@@ -386,7 +396,7 @@ function App() {
                   <div className="widget-body" style={{ flexDirection: 'column', alignItems: 'stretch', justifyContent: 'center' }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                        <div className="icon-box icon-yellow">🪙</div>
+                        <div className="icon-box icon-yellow">#</div>
                         <div>
                           <div className="stat-label">Token Usage</div>
                           <div className="stat-value">{formatCompact(totals.totalTokens)}</div>
@@ -412,7 +422,7 @@ function App() {
                   <div className="widget-body" style={{ flexDirection: 'column', alignItems: 'stretch', justifyContent: 'center' }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                        <div className="icon-box icon-green">📈</div>
+                        <div className="icon-box icon-green">↑</div>
                         <div>
                           <div className="stat-label">Requests</div>
                           <div className="stat-value">{formatNumber(totals.requests)}</div>
@@ -432,7 +442,7 @@ function App() {
                   <div className="widget-body" style={{ flexDirection: 'column', alignItems: 'stretch', justifyContent: 'center' }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                        <div className="icon-box icon-green">💰</div>
+                        <div className="icon-box icon-green">$</div>
                         <div>
                           <div className="stat-label">Estimated Cost</div>
                           <div className="stat-value">{formatCost(totals.totalCost)}</div>
@@ -472,7 +482,7 @@ function App() {
                   <div className="widget-body" style={{ flexDirection: 'column', alignItems: 'stretch', justifyContent: 'center' }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                        <div className="icon-box icon-pink">⏱️</div>
+                        <div className="icon-box icon-pink">~</div>
                         <div>
                           <div className="stat-label">Average Response</div>
                           <div className="stat-value">{formatLatency(totals.avgLatency)}</div>
@@ -606,17 +616,7 @@ function App() {
 
                 <div style={{ marginLeft: 'auto', display: 'flex', gap: '8px', alignItems: 'center', alignSelf: 'flex-end' }}>
                    <button
-                    style={{
-                      padding: '8px 12px',
-                      background: '#fff',
-                      border: '1px solid var(--border-color)',
-                      borderRadius: '8px',
-                      fontSize: '12px',
-                      fontWeight: 700,
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '6px'
-                    }}
+                    className="btn-ghost"
                     onClick={() => setRefreshTrigger(t => t + 1)}
                    >
                      <span>🔄</span> Refresh
@@ -662,7 +662,7 @@ function App() {
                     <tbody>
                       {usageRows.map(row => (
                         <tr key={row.id}>
-                          <td style={{ color: '#64748b' }}>{formatTime(row.ts)}</td>
+                          <td style={{ color: 'var(--text-secondary)' }}>{formatTime(row.ts)}</td>
                           <td style={{ padding: '8px' }}>
                             <div style={{
                               padding: '4px 6px',
@@ -707,10 +707,10 @@ function App() {
                               borderRadius: '4px',
                               display: 'inline-flex',
                               fontSize: '10px',
-                              backgroundColor: '#f1f5f9',
-                              color: '#475569',
+                              backgroundColor: 'var(--tab-toggle-bg)',
+                              color: 'var(--text-secondary)',
                               width: 'fit-content',
-                              border: '1px solid #e2e8f0',
+                              border: '1px solid var(--border-color)',
                               fontWeight: 600
                             }}>
                               {row.client_source || '—'}
@@ -720,9 +720,9 @@ function App() {
                             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
                               <div style={{ color: 'var(--text-secondary)', fontWeight: 600 }}>
                                 {formatNumber(row.prompt_tokens)}
-                                <span style={{ fontSize: '10px', fontWeight: 400, marginLeft: '4px', color: '#64748b' }}>tokens</span>
+                                <span style={{ fontSize: '10px', fontWeight: 400, marginLeft: '4px', color: 'var(--text-secondary)' }}>tokens</span>
                                 {value(row.prompt_length) > 0 && (
-                                  <span style={{ fontSize: '10px', fontWeight: 400, marginLeft: '6px', color: '#94a3b8' }}>
+                                  <span style={{ fontSize: '10px', fontWeight: 400, marginLeft: '6px', color: 'var(--text-muted)' }}>
                                     (Prompt: {formatNumber(row.prompt_length)} chars)
                                   </span>
                                 )}
@@ -739,11 +739,11 @@ function App() {
                                 style={{
                                   width: '100%',
                                   height: '3px',
-                                  background: '#f1f5f9',
+                                  background: 'var(--progress-bg)',
                                   borderRadius: '2px',
                                   marginTop: '4px',
                                   overflow: 'hidden',
-                                  border: '1px solid #e2e8f0'
+                                  border: '1px solid var(--border-color)'
                                 }}
                               >
                                 <div style={{
@@ -758,7 +758,7 @@ function App() {
                             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
                               <div>{formatNumber(row.completion_tokens)}</div>
                               {value(row.reasoning_tokens) > 0 && (
-                                <div style={{ fontSize: '9px', color: '#64748b', fontWeight: 700 }}>
+                                <div style={{ fontSize: '9px', color: 'var(--text-secondary)', fontWeight: 700 }}>
                                   Reasoning {formatNumber(row.reasoning_tokens)} ({Math.round((value(row.reasoning_tokens) / (value(row.completion_tokens) || 1)) * 100)}%)
                                 </div>
                               )}
@@ -768,11 +768,11 @@ function App() {
                                 style={{
                                   width: '100%',
                                   height: '3px',
-                                  background: '#f1f5f9',
+                                  background: 'var(--progress-bg)',
                                   borderRadius: '2px',
                                   marginTop: '4px',
                                   overflow: 'hidden',
-                                  border: '1px solid #e2e8f0',
+                                  border: '1px solid var(--border-color)',
                                   display: 'flex'
                                 }}
                               >
@@ -858,8 +858,8 @@ function App() {
                             <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
                               {value(row.ttft_ms) > 0 && (
                                 <div style={{
-                                  backgroundColor: '#dcfce780',
-                                  color: '#15803d',
+                                  backgroundColor: 'var(--badge-success-bg)',
+                                  color: 'var(--badge-success-text)',
                                   padding: '2px 12px',
                                   borderRadius: '999px',
                                   fontSize: '12px',
@@ -869,8 +869,8 @@ function App() {
                                 </div>
                               )}
                               <div style={{
-                                backgroundColor: '#ffedd580',
-                                color: '#9a3412',
+                                backgroundColor: 'var(--badge-error-bg)',
+                                color: 'var(--badge-error-text)',
                                 padding: '2px 12px',
                                 borderRadius: '999px',
                                 fontSize: '12px',
@@ -904,7 +904,7 @@ function App() {
                   display: 'flex',
                   justifyContent: 'space-between',
                   alignItems: 'center',
-                  background: '#f8fafc'
+                  background: 'var(--surface-hover)'
                 }}>
                   <div style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>
                     Showing <span style={{ fontWeight: 700, color: 'var(--text-primary)' }}>{Math.min(totalLogs, (page - 1) * limit + 1)}-{Math.min(totalLogs, page * limit)}</span> of <span style={{ fontWeight: 700, color: 'var(--text-primary)' }}>{totalLogs}</span> logs
@@ -914,12 +914,8 @@ function App() {
                     <button
                       disabled={page === 1}
                       onClick={() => setPage(p => Math.max(1, p - 1))}
+                      className="pagination-btn"
                       style={{
-                        padding: '6px 12px',
-                        background: '#fff',
-                        border: '1px solid var(--border-color)',
-                        borderRadius: '6px',
-                        fontSize: '12px',
                         cursor: page === 1 ? 'not-allowed' : 'pointer',
                         opacity: page === 1 ? 0.5 : 1
                       }}
@@ -947,7 +943,7 @@ function App() {
                               borderRadius: '6px',
                               fontSize: '12px',
                               fontWeight: 700,
-                              background: page === pageNum ? 'var(--color-blue)' : '#fff',
+                              background: page === pageNum ? 'var(--color-blue)' : 'var(--input-bg)',
                               color: page === pageNum ? '#fff' : 'var(--text-primary)',
                               border: '1px solid var(--border-color)',
                               cursor: 'pointer'
@@ -962,12 +958,8 @@ function App() {
                     <button
                       disabled={page === totalPages || totalPages === 0}
                       onClick={() => setPage(p => Math.min(totalPages, p + 1))}
+                      className="pagination-btn"
                       style={{
-                        padding: '6px 12px',
-                        background: '#fff',
-                        border: '1px solid var(--border-color)',
-                        borderRadius: '6px',
-                        fontSize: '12px',
                         cursor: (page === totalPages || totalPages === 0) ? 'not-allowed' : 'pointer',
                         opacity: (page === totalPages || totalPages === 0) ? 0.5 : 1
                       }}
@@ -1072,7 +1064,7 @@ function App() {
                                 {name}
                               </div>
                             </td>
-                            <td style={{ fontSize: '12px', color: '#64748b', fontFamily: 'var(--font-mono)' }}>{conf.base_url}</td>
+                            <td style={{ fontSize: '12px', color: 'var(--text-secondary)', fontFamily: 'var(--font-mono)' }}>{conf.base_url}</td>
                             <td>
                               <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
                                 {models.map((m: string) => {
@@ -1081,10 +1073,10 @@ function App() {
                                     <span key={m} style={{
                                       fontSize: '10px',
                                       padding: '2px 6px',
-                                      background: hasOverride ? '#fffbeb' : '#f1f5f9',
+                                      background: hasOverride ? 'var(--icon-yellow-bg)' : 'var(--tab-toggle-bg)',
                                       borderRadius: '4px',
-                                      color: hasOverride ? '#b45309' : '#475569',
-                                      border: hasOverride ? '1px solid #fde68a' : '1px solid #e2e8f0',
+                                      color: hasOverride ? 'var(--color-yellow)' : 'var(--text-secondary)',
+                                      border: hasOverride ? `1px solid var(--color-yellow)` : '1px solid var(--border-color)',
                                       display: 'inline-flex',
                                       alignItems: 'center',
                                       gap: '4px'
@@ -1124,7 +1116,7 @@ function App() {
                         border: '1px solid var(--border-color)',
                         fontSize: '13px',
                         fontWeight: 600,
-                        background: '#f8fafc',
+                        background: 'var(--surface-hover)',
                         outline: 'none'
                       }}
                     >
@@ -1167,8 +1159,8 @@ function App() {
                             padding: '6px 8px',
                             borderRadius: '4px',
                             border: '1px solid transparent',
-                            background: activeCost[field] === undefined && selectedPricingProvider !== 'global' ? 'transparent' : 'white',
-                            borderBottom: '1px solid #e2e8f0',
+                            background: activeCost[field] === undefined && selectedPricingProvider !== 'global' ? 'transparent' : 'var(--input-bg)',
+                            borderBottom: '1px solid var(--border-color)',
                             fontSize: '13px',
                             color: activeCost[field] === undefined && selectedPricingProvider !== 'global' ? 'var(--text-muted)' : 'var(--text-primary)',
                             outline: 'none',
@@ -1177,7 +1169,7 @@ function App() {
                         });
 
                         return (
-                          <tr key={name} style={{ background: isOverridden ? '#fffbeb' : 'transparent' }}>
+                          <tr key={name} style={{ background: isOverridden ? 'var(--icon-yellow-bg)' : 'transparent' }}>
                             <td style={{ fontWeight: 700 }}>
                               <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                                 {getModelIcon(name)}
@@ -1258,8 +1250,8 @@ function App() {
                     <div style={{
                       marginTop: '16px',
                       padding: '12px',
-                      background: '#fee2e2',
-                      color: '#b91c1c',
+                      background: 'var(--badge-error-bg)',
+                      color: 'var(--badge-error-text)',
                       borderRadius: '8px',
                       fontSize: '13px',
                       fontWeight: 500

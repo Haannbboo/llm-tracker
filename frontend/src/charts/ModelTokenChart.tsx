@@ -54,34 +54,14 @@ export function ModelTokenChart({
     <div className="widget" style={{ flex: 1 }}>
       <div className="widget-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <span>📊 {title}</span>
-        <div className="tab-group" style={{ display: 'flex', background: '#f1f5f9', padding: '2px', borderRadius: '6px' }}>
+        <div className="tab-toggle">
           <button
+            className={`tab-toggle-btn ${metric === 'tokens' ? 'active' : ''}`}
             onClick={() => setMetric('tokens')}
-            style={{
-              padding: '2px 8px',
-              fontSize: '10px',
-              borderRadius: '4px',
-              fontWeight: 600,
-              border: 'none',
-              cursor: 'pointer',
-              background: metric === 'tokens' ? 'white' : 'transparent',
-              color: metric === 'tokens' ? 'var(--color-blue)' : '#64748b',
-              boxShadow: metric === 'tokens' ? '0 1px 2px rgba(0,0,0,0.05)' : 'none'
-            }}
           >Tokens</button>
           <button
+            className={`tab-toggle-btn ${metric === 'cost' ? 'active' : ''}`}
             onClick={() => setMetric('cost')}
-            style={{
-              padding: '2px 8px',
-              fontSize: '10px',
-              borderRadius: '4px',
-              fontWeight: 600,
-              border: 'none',
-              cursor: 'pointer',
-              background: metric === 'cost' ? 'white' : 'transparent',
-              color: metric === 'cost' ? 'var(--color-blue)' : '#64748b',
-              boxShadow: metric === 'cost' ? '0 1px 2px rgba(0,0,0,0.05)' : 'none'
-            }}
           >Cost</button>
         </div>
       </div>
@@ -111,14 +91,7 @@ export function ModelTokenChart({
                     {metric === 'tokens' ? formatCompact(currentVal) : formatCost(currentVal)}
                   </div>
                 </div>
-                <div style={{
-                  height: '8px',
-                  width: '100%',
-                  background: '#f1f5f9',
-                  borderRadius: '4px',
-                  overflow: 'hidden',
-                  display: 'flex'
-                }}>
+                <div className="progress-track" style={{ width: '100%', display: 'flex' }}>
                   <div
                     style={{ width: `${percentage}%`, height: '100%', background: mColor }}
                   />
