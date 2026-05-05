@@ -324,8 +324,9 @@ function App() {
 
   return (
     <div className="app">
-      <header className="top-navbar">
-        <pre className="navbar-ascii" style={{ fontFamily: 'monospace', fontSize: 'clamp(2px, 0.275vw, 5px)', lineHeight: '1.1', margin: 0, whiteSpace: 'pre', letterSpacing: '0.5px' }}>
+      <main className="main">
+        <header className="top-navbar">
+          <pre className="navbar-ascii" style={{ fontFamily: 'monospace', fontSize: 'clamp(2px, 0.275vw, 5px)', lineHeight: '1.1', margin: 0, whiteSpace: 'pre', letterSpacing: '0.5px' }}>
 {" ___       ___       _____ ______           _________  ________  ________  ________  ___  __    _______   ________     \n"}
 {"|\\  \\     |\\  \\     |\\   _ \\  _   \\        |\\___   ___\\\\   __  \\|\\   __  \\|\\   ____\\|\\  \\|\\  \\ |\\  ___ \\ |\\   __  \\    \n"}
 {"\\ \\  \\    \\ \\  \\    \\ \\  \\\\\\__\\ \\  \\       |\\___ \\  \\_\\ \\  \\|\\  \\ \\  \\|\\  \\ \\  \\___|\\ \\  \\/  /|\\ \\   __/|\\ \\  \\|\\  \\   \n"}
@@ -334,28 +335,26 @@ function App() {
 {"   \\ \\_______\\ \\_______\\ \\__\\    \\ \\__\\           \\ \\__\\ \\ \\__\\\\ _\\\\ \\__\\ \\__\\ \\_______\\ \\__\\\\ \\__\\ \\_______\\ \\__\\\\ _\\ \n"}
 {"    \\|_______|\\|_______|\\|__|     \\|__|            \\|__|  \\|__|\\|__|\\|__|\\|__|\\|_______|\\|__| \\|__|\\|_______|\\|__|\\|__|"}
 </pre>
-        <nav className="navbar-nav">
-          <button className={`nav-item ${view === 'dashboard' ? 'active' : ''}`} onClick={() => setView('dashboard')}>
-            📊 Dashboard
+          <nav className="navbar-nav">
+            <button className={`nav-item ${view === 'dashboard' ? 'active' : ''}`} onClick={() => setView('dashboard')}>
+              📊 Dashboard
+            </button>
+            <button className={`nav-item ${view === 'logs' ? 'active' : ''}`} onClick={() => setView('logs')}>
+              📜 Request Logs
+            </button>
+            <button className={`nav-item ${view === 'settings' ? 'active' : ''}`} onClick={() => setView('settings')}>
+              ⚙️ Settings
+            </button>
+          </nav>
+          <button
+            className="nav-item"
+            style={{ marginLeft: 'auto', fontSize: '18px' }}
+            onClick={() => setTheme(toggleTheme())}
+            title={`Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`}
+          >
+            {theme === 'dark' ? '☀️' : '🌙'}
           </button>
-          <button className={`nav-item ${view === 'logs' ? 'active' : ''}`} onClick={() => setView('logs')}>
-            📜 Request Logs
-          </button>
-          <button className={`nav-item ${view === 'settings' ? 'active' : ''}`} onClick={() => setView('settings')}>
-            ⚙️ Settings
-          </button>
-        </nav>
-        <button
-          className="nav-item"
-          style={{ marginLeft: 'auto', fontSize: '18px' }}
-          onClick={() => setTheme(toggleTheme())}
-          title={`Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`}
-        >
-          {theme === 'dark' ? '☀️' : '🌙'}
-        </button>
-      </header>
-
-      <main className="main">
+        </header>
 
         <div className="content-body">
           {view === 'dashboard' && (

@@ -88,21 +88,22 @@ export function TrendChart({
               <div style={{
                 position: 'absolute',
                 top: '-10px',
-                left: `${(paddingX + (hoveredIdx / (Math.max(data.length - 1, 1))) * chartWidth) / 10}%`,
+                left: `${(paddingX + ((hoveredIdx + 0.5) / data.length) * chartWidth) / 10}%`,
                 transform: 'translateX(-50%)',
-                backgroundColor: 'rgba(15, 23, 42, 0.95)',
-                color: 'white',
+                backgroundColor: 'var(--glass-bg)',
+                color: 'var(--text-primary)',
                 padding: '12px',
-                borderRadius: '8px',
+                borderRadius: 'var(--radius-md)',
                 fontSize: '12px',
                 zIndex: 100,
                 pointerEvents: 'none',
-                boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1)',
+                boxShadow: 'var(--shadow-floating)',
                 minWidth: '200px',
-                border: '1px solid rgba(255, 255, 255, 0.1)',
-                backdropFilter: 'blur(4px)'
+                border: '1px solid var(--glass-border)',
+                backdropFilter: 'var(--glass-blur)',
+                WebkitBackdropFilter: 'var(--glass-blur)'
               }}>
-                <div style={{ fontWeight: 600, marginBottom: '8px', borderBottom: '1px solid rgba(255, 255, 255, 0.2)', paddingBottom: '4px', fontSize: '13px' }}>
+                <div style={{ fontWeight: 600, marginBottom: '8px', borderBottom: '1px solid var(--border-color)', paddingBottom: '4px', fontSize: '13px' }}>
                   {hoveredData.period}
                 </div>
                 {metric === 'tokens' ? (
@@ -169,6 +170,28 @@ export function TrendChart({
               preserveAspectRatio="none"
               style={{ width: '100%', height: '220px', overflow: 'visible' }}
             >
+              <defs>
+                <linearGradient id="grad-tokens-input" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stopColor="#94a3b8" stopOpacity="0.85" />
+                  <stop offset="100%" stopColor="#94a3b8" stopOpacity="0.3" />
+                </linearGradient>
+                <linearGradient id="grad-tokens-cached" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stopColor="var(--color-green)" stopOpacity="0.85" />
+                  <stop offset="100%" stopColor="var(--color-green)" stopOpacity="0.3" />
+                </linearGradient>
+                <linearGradient id="grad-tokens-output" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stopColor="var(--color-blue)" stopOpacity="0.85" />
+                  <stop offset="100%" stopColor="var(--color-blue)" stopOpacity="0.3" />
+                </linearGradient>
+                <linearGradient id="grad-cost-input" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stopColor="#d97706" stopOpacity="0.85" />
+                  <stop offset="100%" stopColor="#d97706" stopOpacity="0.3" />
+                </linearGradient>
+                <linearGradient id="grad-cost-output" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stopColor="#a855f7" stopOpacity="0.85" />
+                  <stop offset="100%" stopColor="#a855f7" stopOpacity="0.3" />
+                </linearGradient>
+              </defs>
               {[0, 0.25, 0.5, 0.75, 1].map(tick => (
                 <line
                   key={tick}
@@ -179,67 +202,106 @@ export function TrendChart({
                 />
               ))}
 
-              {data.map((d, i) => {
-                const x = paddingX + (i / (Math.max(data.length - 1, 1))) * chartWidth;
-                const barWidth = Math.min(chartWidth / (data.length * 1.5), 60);
-                const slotWidth = data.length > 1 ? chartWidth / (data.length - 1) : chartWidth;
+              {/* Stacked Bars */}
+              {(() => {
+                const barSlot = chartWidth / data.length;
+                const barW = barSlot * 0.65;
+                const radius = Math.min(3, barW / 4);
 
-                const isHovered = hoveredIdx === i;
-                const isDimmed = hoveredIdx !== null && !isHovered;
+                const roundedRect = (x: number, y: number, w: number, h: number, rTop: number, rBot: number) => {
+                  if (h <= 0) return '';
+                  const t = Math.min(rTop, h / 2);
+                  const b = Math.min(rBot, h / 2);
+                  return `M ${x + t},${y} L ${x + w - t},${y} Q ${x + w},${y} ${x + w},${y + t} L ${x + w},${y + h - b} Q ${x + w},${y + h} ${x + w - b},${y + h} L ${x + b},${y + h} Q ${x},${y + h} ${x},${y + h - b} L ${x},${y + t} Q ${x},${y} ${x + t},${y} Z`;
+                };
 
-                let bars: { y: number; h: number; fill: string }[];
-                if (metric === 'tokens') {
-                  const cached = value(d.cached_tokens);
-                  const input = Math.max(0, value(d.prompt_tokens) - cached);
-                  const output = value(d.completion_tokens);
-                  const hInputRect = (input / maxTokens) * 200;
-                  const hCachedRect = (cached / maxTokens) * 200;
-                  const hOutputRect = (output / maxTokens) * 200;
-                  bars = [
-                    { y: 200 - hInputRect, h: hInputRect, fill: '#94a3b8' },
-                    { y: 200 - hInputRect - hCachedRect, h: hCachedRect, fill: 'var(--color-green)' },
-                    { y: 200 - hInputRect - hCachedRect - hOutputRect, h: hOutputRect, fill: 'var(--color-blue)' },
-                  ];
-                } else {
-                  const inputCost = value(d.input_cost_usd);
-                  const outputCost = value(d.output_cost_usd);
-                  const hInputCost = (inputCost / maxCost) * 200;
-                  const hOutputCost = (outputCost / maxCost) * 200;
-                  bars = [
-                    { y: 200 - hInputCost, h: hInputCost, fill: '#d97706' },
-                    { y: 200 - hInputCost - hOutputCost, h: hOutputCost, fill: '#a855f7' },
-                  ];
-                }
+                return data.map((d, i) => {
+                  const cx = paddingX + (i + 0.5) / data.length * chartWidth;
+                  const x = cx - barW / 2;
+                  const dimmed = hoveredIdx !== null && hoveredIdx !== i;
 
+                  if (metric === 'tokens') {
+                    const cached = value(d.cached_tokens);
+                    const input = Math.max(0, value(d.prompt_tokens) - cached);
+                    const output = value(d.completion_tokens);
+                    const total = input + cached + output;
+                    if (total === 0) return null;
+
+                    const hOutput = (output / maxTokens) * 200;
+                    const hCached = (cached / maxTokens) * 200;
+                    const hInput = (input / maxTokens) * 200;
+
+                    const yOutput = 200 - hOutput;
+                    const yCached = yOutput - hCached;
+                    const yInput = yCached - hInput;
+
+                    const isTop = hInput > 0;
+                    const hasMiddle = hCached > 0;
+                    const hasBottom = hOutput > 0;
+
+                    return (
+                      <g key={i} style={{ opacity: dimmed ? 0.3 : 1, transition: 'opacity 0.2s' }}>
+                        {hasBottom && (
+                          <path d={roundedRect(x, yOutput, barW, hOutput, hasMiddle ? 0 : isTop ? 0 : radius, radius)} fill="url(#grad-tokens-output)" />
+                        )}
+                        {hasMiddle && (
+                          <path d={roundedRect(x, yCached, barW, hCached, isTop ? 0 : radius, 0)} fill="url(#grad-tokens-cached)" />
+                        )}
+                        {isTop && (
+                          <path d={roundedRect(x, yInput, barW, hInput, radius, 0)} fill="url(#grad-tokens-input)" />
+                        )}
+                      </g>
+                    );
+                  } else {
+                    const inputCost = value(d.input_cost_usd);
+                    const outputCost = value(d.output_cost_usd);
+                    const total = inputCost + outputCost;
+                    if (total === 0) return null;
+
+                    const hOutput = (outputCost / maxCost) * 200;
+                    const hInput = (inputCost / maxCost) * 200;
+
+                    const yOutput = 200 - hOutput;
+                    const yInput = yOutput - hInput;
+
+                    const isTop = hInput > 0;
+                    const hasBottom = hOutput > 0;
+
+                    return (
+                      <g key={i} style={{ opacity: dimmed ? 0.3 : 1, transition: 'opacity 0.2s' }}>
+                        {hasBottom && (
+                          <path d={roundedRect(x, yOutput, barW, hOutput, isTop ? 0 : radius, radius)} fill="url(#grad-cost-output)" />
+                        )}
+                        {isTop && (
+                          <path d={roundedRect(x, yInput, barW, hInput, radius, 0)} fill="url(#grad-cost-input)" />
+                        )}
+                      </g>
+                    );
+                  }
+                });
+              })()}
+
+              {/* Hover hitboxes */}
+              {data.map((_, i) => {
+                const barSlot = chartWidth / data.length;
+                const cx = paddingX + (i + 0.5) / data.length * chartWidth;
                 return (
-                  <g
+                  <rect
                     key={i}
+                    x={cx - barSlot / 2} y={0}
+                    width={barSlot} height={200}
+                    fill="transparent"
+                    style={{ cursor: 'pointer' }}
                     onMouseEnter={() => setHoveredIdx(i)}
                     onMouseLeave={() => setHoveredIdx(null)}
-                  >
-                    {bars.map((bar, bi) => (
-                      <rect
-                        key={bi}
-                        x={x - barWidth/2} y={bar.y}
-                        width={barWidth} height={bar.h}
-                        fill={bar.fill}
-                        opacity={isDimmed ? 0.3 : 1}
-                        style={{ transition: 'all 0.2s' }}
-                      />
-                    ))}
-                    <rect
-                      x={x - slotWidth/2} y={0}
-                      width={slotWidth} height={200}
-                      fill="transparent"
-                      style={{ cursor: 'pointer' }}
-                    />
-                  </g>
+                  />
                 );
               })}
 
+              {/* Requests line */}
               {(() => {
                 const points = data.map((d, i) => {
-                  const x = paddingX + (i / (Math.max(data.length - 1, 1))) * chartWidth;
+                  const x = paddingX + (i + 0.5) / data.length * chartWidth;
                   const y = 200 - (value(d.requests) / maxRequests) * 200;
                   return `${x},${y}`;
                 }).join(' ');
@@ -250,13 +312,13 @@ export function TrendChart({
                       points={points}
                       fill="none"
                       stroke="var(--color-pink)"
-                      strokeWidth="3"
+                      strokeWidth="2.5"
                       strokeLinecap="round"
                       strokeLinejoin="round"
                       style={{ pointerEvents: 'none', opacity: hoveredIdx === null ? 1 : 0.4 }}
                     />
                     {data.map((d, i) => {
-                      const x = paddingX + (i / (Math.max(data.length - 1, 1))) * chartWidth;
+                      const x = paddingX + (i + 0.5) / data.length * chartWidth;
                       const y = 200 - (value(d.requests) / maxRequests) * 200;
                       return (
                         <circle

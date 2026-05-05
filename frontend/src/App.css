@@ -7,15 +7,19 @@
 /* Top Navbar */
 .top-navbar {
   position: sticky;
-  top: 0;
+  top: 12px;
   z-index: 100;
-  background-color: var(--navbar-bg);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-  border-bottom: 1px solid var(--border-color);
+  margin: 0 clamp(16px, 4vw, 80px);
+  background-color: var(--glass-bg);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-premium);
   display: flex;
   align-items: center;
-  padding: 8px clamp(16px, 4vw, 80px);
+  height: 56px;
+  padding: 8px 24px;
 }
 
 .navbar-ascii {
@@ -60,13 +64,14 @@
   display: flex;
   flex-direction: column;
   background-color: var(--main-bg);
+  position: relative;
 }
 
 .content-body {
-  padding: 24px clamp(16px, 4vw, 80px);
+  padding: clamp(24px, 4vw, 40px) clamp(16px, 4vw, 80px);
   display: flex;
   flex-direction: column;
-  gap: 20px;
+  gap: clamp(24px, 3vw, 32px);
 }
 
 .welcome-msg {
@@ -79,7 +84,7 @@
 .widgets-grid {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
-  gap: 20px;
+  gap: clamp(16px, 2vw, 24px);
 }
 
 .widget {
@@ -112,17 +117,40 @@
 .icon-box {
   width: 40px;
   height: 40px;
-  border-radius: 10px;
+  border-radius: 12px;
   display: flex;
   align-items: center;
   justify-content: center;
   font-size: 18px;
   font-weight: 700;
-  transition: box-shadow 0.2s;
+  transition: all 0.2s ease;
+  position: relative;
+  box-shadow: 0 4px 12px -2px rgba(0, 0, 0, 0.1);
+}
+
+/* Spark-Icons glow effect */
+.icon-box::before {
+  content: '';
+  position: absolute;
+  inset: -2px;
+  border-radius: 14px;
+  background: currentColor;
+  opacity: 0.15;
+  filter: blur(8px);
+  z-index: -1;
+  transition: opacity 0.2s;
+}
+
+.icon-box:hover {
+  transform: translateY(-1px);
+}
+
+.icon-box:hover::before {
+  opacity: 0.25;
 }
 
 [data-theme="dark"] .icon-box {
-  box-shadow: 0 0 12px -2px currentColor;
+  box-shadow: 0 0 16px -4px currentColor;
 }
 
 .icon-blue { background-color: var(--icon-blue-bg); color: var(--color-blue); }
@@ -159,7 +187,7 @@
 .content-grid {
   display: grid;
   grid-template-columns: 2fr 1fr;
-  gap: 24px;
+  gap: clamp(24px, 3vw, 32px);
 }
 
 .panel {

@@ -9,6 +9,9 @@ logs/
 # LLM related
 DESIGN.md
 AGENTS.md
+CLAUDE.md
+.superpowers/
+.claude/
 
 # Project specific
 todo.md

@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import type { SourceUsage } from '../types'
-import { formatCompact, formatCost, getSourceBadgeBg, getSourceBadgeText } from '../utils'
+import { formatCompact, formatCost, getSourceBadgeBg, getSourceBadgeText, getProviderIcon } from '../utils'
 
 export function SourceTokenChart({
   data,
@@ -59,14 +59,17 @@ export function SourceTokenChart({
             return (
               <div key={`${name}-${index}`} style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '12px' }}>
-                  <span style={{
-                    padding: '1px 6px',
-                    borderRadius: '4px',
-                    backgroundColor: getSourceBadgeBg(name),
-                    color: getSourceBadgeText(name),
-                    fontSize: '11px',
-                    fontWeight: 600,
-                  }}>{name}</span>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontWeight: 600 }}>
+                    {getProviderIcon(name)}
+                    <span style={{
+                      padding: '1px 6px',
+                      borderRadius: '4px',
+                      backgroundColor: getSourceBadgeBg(name),
+                      color: getSourceBadgeText(name),
+                      fontSize: '11px',
+                      fontWeight: 600,
+                    }}>{name}</span>
+                  </div>
                   <div style={{ color: 'var(--text-secondary)', fontWeight: 700 }}>
                     {metric === 'tokens' ? formatCompact(currentVal) : formatCost(currentVal)}
                   </div>
