@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import yaml from 'js-yaml'
 import './App.css'
 import {
@@ -867,16 +867,17 @@ function UsageHeatmap({
   const [hoveredCell, setHoveredCell] = useState<{ date: string; data: DailyUsage | null; x: number; y: number } | null>(null)
   const [heatmapData, setHeatmapData] = useState<DailyUsage[]>([])
   const [containerWidth, setContainerWidth] = useState(0)
+  const containerRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
-    const measure = () => {
-      const sidebarWidth = 260
-      const padding = 48
-      setContainerWidth(window.innerWidth - sidebarWidth - padding)
-    }
-    measure()
-    window.addEventListener('resize', measure)
-    return () => window.removeEventListener('resize', measure)
+    if (!containerRef.current) return
+    const observer = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        setContainerWidth(entry.contentRect.width)
+      }
+    })
+    observer.observe(containerRef.current)
+    return () => observer.disconnect()
   }, [])
 
   useEffect(() => {
@@ -969,7 +970,7 @@ function UsageHeatmap({
   const gridHeight = 7 * step
 
   return (
-    <div className="widget" style={{ width: '100%', position: 'relative', overflow: 'visible' }}>
+    <div ref={containerRef} className="widget" style={{ width: '100%', position: 'relative', overflow: 'visible' }}>
       <div className="widget-header">
         <span>🗓 Daily Activity</span>
         <div style={{ display: 'flex', alignItems: 'center', gap: '4px', marginLeft: 'auto', fontSize: '10px', color: 'var(--text-muted)' }}>
@@ -1399,44 +1400,8 @@ function App() {
 
   return (
     <div className="app">
-      <aside className="sidebar">
-        <div className="sidebar-header">
-          <div className="icon">☁️</div>
-          <span>llm-tracker</span>
-        </div>
-        <div className="sidebar-menu">
-          <div className="menu-group">
-            <div className="menu-title">Monitoring</div>
-            <button className={`menu-item ${view === 'dashboard' ? 'active' : ''}`} onClick={() => setView('dashboard')}>
-              📊 Dashboard
-            </button>
-            <button className={`menu-item ${view === 'logs' ? 'active' : ''}`} onClick={() => setView('logs')}>
-              📜 Request Logs
-            </button>
-          </div>
-          <div className="menu-group">
-            <div className="menu-title">Management</div>
-            <button className={`menu-item ${view === 'settings' ? 'active' : ''}`} onClick={() => setView('settings')}>
-              ⚙️ Settings
-            </button>
-          </div>
-        </div>
-      </aside>
-
-      <main className="main">
-        <header className="top-navbar">
-          <div className="navbar-title">
-            {view === 'dashboard' ? 'Dashboard' : view === 'logs' ? 'Request Logs' : 'Settings'}
-          </div>
-          <div className="navbar-right">
-          </div>
-        </header>
-
-        <div className="content-body">
-          {view === 'dashboard' && (
-            <>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <pre className="welcome-msg" style={{ fontFamily: 'monospace', fontSize: '10px', lineHeight: '1.15', margin: 0, transform: 'scale(0.75)', transformOrigin: 'top left', whiteSpace: 'pre' }}>
+      <header className="top-navbar">
+        <pre className="navbar-ascii" style={{ fontFamily: 'monospace', fontSize: 'clamp(2px, 0.275vw, 5px)', lineHeight: '1.1', margin: 0, whiteSpace: 'pre', letterSpacing: '0.5px' }}>
 {" ___       ___       _____ ______           _________  ________  ________  ________  ___  __    _______   ________     \n"}
 {"|\\  \\     |\\  \\     |\\   _ \\  _   \\        |\\___   ___\\\\   __  \\|\\   __  \\|\\   ____\\|\\  \\|\\  \\ |\\  ___ \\ |\\   __  \\    \n"}
 {"\\ \\  \\    \\ \\  \\    \\ \\  \\\\\\__\\ \\  \\       |\\___ \\  \\_\\ \\  \\|\\  \\ \\  \\|\\  \\ \\  \\___|\\ \\  \\/  /|\\ \\   __/|\\ \\  \\|\\  \\   \n"}
@@ -1445,7 +1410,25 @@ function App() {
 {"   \\ \\_______\\ \\_______\\ \\__\\    \\ \\__\\           \\ \\__\\ \\ \\__\\\\ _\\\\ \\__\\ \\__\\ \\_______\\ \\__\\\\ \\__\\ \\_______\\ \\__\\\\ _\\ \n"}
 {"    \\|_______|\\|_______|\\|__|     \\|__|            \\|__|  \\|__|\\|__|\\|__|\\|__|\\|_______|\\|__| \\|__|\\|_______|\\|__|\\|__|"}
 </pre>
-                <div style={{ display: 'flex', gap: '8px' }}>
+        <nav className="navbar-nav">
+          <button className={`nav-item ${view === 'dashboard' ? 'active' : ''}`} onClick={() => setView('dashboard')}>
+            📊 Dashboard
+          </button>
+          <button className={`nav-item ${view === 'logs' ? 'active' : ''}`} onClick={() => setView('logs')}>
+            📜 Request Logs
+          </button>
+          <button className={`nav-item ${view === 'settings' ? 'active' : ''}`} onClick={() => setView('settings')}>
+            ⚙️ Settings
+          </button>
+        </nav>
+      </header>
+
+      <main className="main">
+
+        <div className="content-body">
+          {view === 'dashboard' && (
+            <>
+              <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: '8px' }}>
                   <select 
                     className="input-plain"
                     value={dateRange}
@@ -1475,7 +1458,6 @@ function App() {
                     ))}
                   </select>
                 </div>
-              </div>
 
               <div className="widgets-grid">
                 <div className="widget">
