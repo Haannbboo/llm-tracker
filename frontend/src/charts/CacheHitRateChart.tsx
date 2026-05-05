@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
 import type { DailyUsage } from '../types'
 import { formatNumber, value } from '../utils'
+import { ChartTooltip, TooltipRow } from './ChartTooltip'
 
 export function CacheHitRateChart({
   data,
@@ -68,40 +69,20 @@ export function CacheHitRateChart({
         ) : (
           <>
             {hoveredIdx !== null && hoveredData && (
-              <div style={{
-                position: 'absolute',
-                top: '-10px',
-                left: `${(paddingX + (hoveredIdx / (Math.max(data.length - 1, 1))) * chartWidth) / 10}%`,
-                transform: 'translateX(-50%)',
-                backgroundColor: 'var(--glass-bg)',
-                color: 'var(--text-primary)',
-                padding: '12px',
-                borderRadius: 'var(--radius-md)',
-                fontSize: '12px',
-                zIndex: 100,
-                pointerEvents: 'none',
-                boxShadow: 'var(--shadow-floating)',
-                minWidth: '180px',
-                border: '1px solid var(--glass-border)',
-                backdropFilter: 'var(--glass-blur)',
-                WebkitBackdropFilter: 'var(--glass-blur)'
-              }}>
+              <ChartTooltip left={`${(paddingX + (hoveredIdx / (Math.max(data.length - 1, 1))) * chartWidth) / 10}%`}>
                 <div style={{ fontWeight: 600, marginBottom: '8px', borderBottom: '1px solid var(--border-color)', paddingBottom: '4px', fontSize: '13px' }}>
                   {hoveredData.period}
                 </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', gap: '12px', marginBottom: '4px' }}>
-                  <span style={{ color: 'var(--color-green)' }}>Hit Rate:</span>
+                <TooltipRow label="Hit Rate:" labelColor="var(--color-green)">
                   <span style={{ fontWeight: 700, color: 'var(--color-green)' }}>{hoveredRate.toFixed(1)}%</span>
-                </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', gap: '12px', marginBottom: '4px' }}>
-                  <span style={{ color: 'var(--text-muted)' }}>Cached:</span>
+                </TooltipRow>
+                <TooltipRow label="Cached:">
                   <span style={{ fontWeight: 600 }}>{formatNumber(hoveredData.cached_tokens)}</span>
-                </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', gap: '12px' }}>
-                  <span style={{ color: 'var(--text-muted)' }}>Prompt:</span>
+                </TooltipRow>
+                <TooltipRow label="Prompt:">
                   <span style={{ fontWeight: 600 }}>{formatNumber(hoveredData.prompt_tokens)}</span>
-                </div>
-              </div>
+                </TooltipRow>
+              </ChartTooltip>
             )}
 
             <svg

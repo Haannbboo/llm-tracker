@@ -93,91 +93,38 @@ function App() {
     return () => controller.abort()
   }, [])
 
+  // Shared helper: apply filter/source/date params to a URL
+  function applyFilterParams(url: URL, opts: { withPagination?: boolean } = {}) {
+    const since = dateRange === 'custom' ? customSince : getSinceDate(dateRange)
+    const until = dateRange === 'custom' ? customUntil : null
+
+    if (opts.withPagination) {
+      url.searchParams.set('limit', String(limit))
+      url.searchParams.set('offset', String((page - 1) * limit))
+    }
+    if (activeFilter) {
+      url.searchParams.set('provider', activeFilter.provider)
+      if (activeFilter.model) url.searchParams.set('model', activeFilter.model)
+    }
+    if (activeSource) url.searchParams.set('client_source', activeSource)
+    if (since) url.searchParams.set('since', since)
+    if (until) url.searchParams.set('until', until)
+    return url
+  }
+
+  // Dashboard: summary, daily, heatmap, by-source, by-provider (no paginated logs)
   useEffect(() => {
+    if (view !== 'dashboard') return
     const controller = new AbortController()
+    const sig = { signal: controller.signal }
 
-    async function loadData() {
-      if (view === 'settings') {
-        try {
-          const response = await fetch('/config', { signal: controller.signal })
-          if (response.ok) {
-            const data = await response.json()
-            setConfigContent(data.content)
-            setConfigParsed(data.parsed)
-          }
-        } catch (err) {
-          console.error('Failed to load config:', err)
-        }
-        return
-      }
-
+    async function fetchDashboard() {
       setError(null)
-
       try {
-        const since = dateRange === 'custom' ? customSince : getSinceDate(dateRange)
-        const until = dateRange === 'custom' ? customUntil : null
-
-        const offset = (page - 1) * limit
-        const usageUrl = new URL('/usage', window.location.origin)
-        usageUrl.searchParams.set('limit', String(limit))
-        usageUrl.searchParams.set('offset', String(offset))
-
-        if (activeFilter) {
-          usageUrl.searchParams.set('provider', activeFilter.provider)
-          if (activeFilter.model) usageUrl.searchParams.set('model', activeFilter.model)
-        }
-        if (activeSource) usageUrl.searchParams.set('client_source', activeSource)
-        if (since) usageUrl.searchParams.set('since', since)
-        if (until) usageUrl.searchParams.set('until', until)
-
-        const summaryUrl = new URL('/usage/summary', window.location.origin)
-        if (activeFilter) {
-          summaryUrl.searchParams.set('provider', activeFilter.provider)
-          if (activeFilter.model) summaryUrl.searchParams.set('model', activeFilter.model)
-        }
-        if (since) summaryUrl.searchParams.set('since', since)
-        if (until) summaryUrl.searchParams.set('until', until)
-        if (activeSource) summaryUrl.searchParams.set('client_source', activeSource)
-
-        const bySourceUrl = new URL('/usage/by-source', window.location.origin)
-        if (activeFilter) {
-          bySourceUrl.searchParams.set('provider', activeFilter.provider)
-          if (activeFilter.model) bySourceUrl.searchParams.set('model', activeFilter.model)
-        }
-        if (since) bySourceUrl.searchParams.set('since', since)
-        if (until) bySourceUrl.searchParams.set('until', until)
-        if (activeSource) bySourceUrl.searchParams.set('client_source', activeSource)
-
-        const byProviderUrl = new URL('/usage/by-provider', window.location.origin)
-        if (activeFilter) {
-          byProviderUrl.searchParams.set('provider', activeFilter.provider)
-          if (activeFilter.model) byProviderUrl.searchParams.set('model', activeFilter.model)
-        }
-        if (since) byProviderUrl.searchParams.set('since', since)
-        if (until) byProviderUrl.searchParams.set('until', until)
-        if (activeSource) byProviderUrl.searchParams.set('client_source', activeSource)
-
-        const countUrl = new URL('/usage/count', window.location.origin)
-        if (activeFilter) {
-          countUrl.searchParams.set('provider', activeFilter.provider)
-          if (activeFilter.model) countUrl.searchParams.set('model', activeFilter.model)
-        }
-        if (activeSource) countUrl.searchParams.set('client_source', activeSource)
-        if (since) countUrl.searchParams.set('since', since)
-        if (until) countUrl.searchParams.set('until', until)
-
-        const dailyUrl = new URL('/usage/daily', window.location.origin)
-        if (activeFilter) {
-          dailyUrl.searchParams.set('provider', activeFilter.provider)
-          if (activeFilter.model) dailyUrl.searchParams.set('model', activeFilter.model)
-        }
-        if (activeSource) dailyUrl.searchParams.set('client_source', activeSource)
-        if (since) dailyUrl.searchParams.set('since', since)
-        if (until) dailyUrl.searchParams.set('until', until)
+        const summaryUrl = applyFilterParams(new URL('/usage/summary', window.location.origin))
+        const dailyUrl = applyFilterParams(new URL('/usage/daily', window.location.origin))
         dailyUrl.searchParams.set('tz_offset', getTimezoneOffset())
-        if (dateRange === '5h' || dateRange === '24h') {
-          dailyUrl.searchParams.set('granularity', 'hour')
-        }
+        if (dateRange === '24h') dailyUrl.searchParams.set('granularity', 'hour')
 
         const heatmapUrl = new URL('/usage/daily', window.location.origin)
         heatmapUrl.searchParams.set('since', new Date(Date.now() - 730 * 24 * 60 * 60 * 1000).toISOString())
@@ -190,49 +137,71 @@ function App() {
         }
         if (activeSource) heatmapUrl.searchParams.set('client_source', activeSource)
 
-        const [summaryResponse, usageResponse, countResponse, dailyResponse, bySourceResponse, byProviderResponse, heatmapResponse] = await Promise.all([
-          fetch(summaryUrl.toString(), { signal: controller.signal }),
-          fetch(usageUrl.toString(), { signal: controller.signal }),
-          fetch(countUrl.toString(), { signal: controller.signal }),
-          fetch(dailyUrl.toString(), { signal: controller.signal }),
-          fetch(bySourceUrl.toString(), { signal: controller.signal }),
-          fetch(byProviderUrl.toString(), { signal: controller.signal }),
-          fetch(heatmapUrl.toString(), { signal: controller.signal }),
+        const bySourceUrl = applyFilterParams(new URL('/usage/by-source', window.location.origin))
+        const byProviderUrl = applyFilterParams(new URL('/usage/by-provider', window.location.origin))
+
+        const responses = await Promise.all([
+          fetch(summaryUrl.toString(), sig),
+          fetch(dailyUrl.toString(), sig),
+          fetch(heatmapUrl.toString(), sig),
+          fetch(bySourceUrl.toString(), sig),
+          fetch(byProviderUrl.toString(), sig),
         ])
 
-        if (!summaryResponse.ok || !usageResponse.ok || !countResponse.ok || !dailyResponse.ok || !bySourceResponse.ok || !byProviderResponse.ok || !heatmapResponse.ok) {
-          throw new Error('Failed to fetch usage data')
-        }
-
-        const [summaryData, usageData, countData, dailyData, bySourceData, byProviderData, heatmapRaw] = (await Promise.all([
-          summaryResponse.json(),
-          usageResponse.json(),
-          countResponse.json(),
-          dailyResponse.json(),
-          bySourceResponse.json(),
-          byProviderResponse.json(),
-          heatmapResponse.json(),
-        ])) as [UsageSummary[], UsageRow[], { total: number }, DailyUsage[], SourceUsage[], ProviderUsage[], DailyUsage[]]
+        if (responses.some(r => !r.ok)) throw new Error('Failed to fetch dashboard data')
+        const [summaryData, dailyData, heatmapRaw, bySourceData, byProviderData] =
+          await Promise.all(responses.map(r => r.json())) as [UsageSummary[], DailyUsage[], DailyUsage[], SourceUsage[], ProviderUsage[]]
 
         setSummary(summaryData)
-        setUsageRows(usageData)
-        setTotalLogs(countData.total)
         setDailyUsage(dailyData)
+        setHeatmapData(heatmapRaw)
         setSourceUsage(bySourceData)
         setProviderUsage(byProviderData)
-        setHeatmapData(heatmapRaw)
       } catch (err) {
         if (controller.signal.aborted) return
         setError(err instanceof Error ? err.message : 'Unknown error')
       }
     }
 
-    void loadData()
+    void fetchDashboard()
+    return () => controller.abort()
+  }, [view, activeFilter, activeSource, dateRange, customSince, customUntil, refreshTrigger])
+
+  // Logs: paginated rows, count
+  useEffect(() => {
+    if (view !== 'logs') return
+    const controller = new AbortController()
+    const sig = { signal: controller.signal }
+
+    async function fetchLogs() {
+      setError(null)
+      try {
+        const usageUrl = applyFilterParams(new URL('/usage', window.location.origin), { withPagination: true })
+        const countUrl = applyFilterParams(new URL('/usage/count', window.location.origin))
+
+        const responses = await Promise.all([
+          fetch(usageUrl.toString(), sig),
+          fetch(countUrl.toString(), sig),
+        ])
+
+        if (responses.some(r => !r.ok)) throw new Error('Failed to fetch log data')
+        const [usageData, countData] =
+          await Promise.all(responses.map(r => r.json())) as [UsageRow[], { total: number }]
+
+        setUsageRows(usageData)
+        setTotalLogs(countData.total)
+      } catch (err) {
+        if (controller.signal.aborted) return
+        setError(err instanceof Error ? err.message : 'Unknown error')
+      }
+    }
+
+    void fetchLogs()
     return () => controller.abort()
   }, [view, activeFilter, activeSource, limit, page, dateRange, customSince, customUntil, refreshTrigger])
 
   useEffect(() => {
-    if (view === 'settings') return
+    if (view !== 'dashboard' && view !== 'logs') return
     const controller = new AbortController()
     const since = dateRange === 'custom' ? customSince : getSinceDate(dateRange)
     const until = dateRange === 'custom' ? customUntil : null
@@ -268,8 +237,7 @@ function App() {
     const successRate = requests > 0 ? (successfulRequests / requests) * 100 : 100
 
     let minutes = 1440;
-    if (dateRange === '5h') minutes = 300;
-    else if (dateRange === '7d') minutes = 10080;
+    if (dateRange === '7d') minutes = 10080;
     else if (dateRange === '30d') minutes = 43200;
     else if (dateRange === 'all') {
       minutes = 1440;
@@ -421,7 +389,6 @@ function App() {
                     value={dateRange}
                     onChange={(e) => setDateRange(e.target.value as DateRangeOption)}
                   >
-                    <option value="5h">Last 5 Hours</option>
                     <option value="24h">Last 24 Hours</option>
                     <option value="7d">Last 7 Days</option>
                     <option value="30d">Last 30 Days</option>
@@ -559,7 +526,7 @@ function App() {
                 <div style={{ flex: '1 1 0', minWidth: 0 }}>
                   <TrendChart
                     data={dailyUsage}
-                    title={`${(dateRange === '5h' || dateRange === '24h') ? 'Hourly' : 'Daily'} Usage Trend`}
+                    title={`${dateRange === '24h' ? 'Hourly' : 'Daily'} Usage Trend`}
                   />
                 </div>
                 <div style={{ flex: '1 1 0', minWidth: 0, display: 'flex', gap: '24px' }}>
@@ -580,19 +547,19 @@ function App() {
                 <div style={{ flex: 1 }}>
                   <ModelTokenChart
                     summary={summary}
-                    title="Usage by Model"
+                    title="Top Models"
                   />
                 </div>
                 <div style={{ flex: 1 }}>
                   <ProviderTokenChart
                     data={providerUsage}
-                    title="Usage by Provider"
+                    title="Top Providers"
                   />
                 </div>
                 <div style={{ flex: 1 }}>
                   <SourceTokenChart
                     data={sourceUsage}
-                    title="Usage by Source"
+                    title="Top Sources"
                   />
                 </div>
               </div>

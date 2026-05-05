@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import type { DailyUsage } from '../types'
 import { formatCost, formatNumber, value } from '../utils'
+import { ChartTooltip, TooltipRow, TooltipDivider } from './ChartTooltip'
 
 export function TrendChart({
   data,
@@ -85,35 +86,16 @@ export function TrendChart({
         ) : (
           <>
             {hoveredIdx !== null && hoveredData && (
-              <div style={{
-                position: 'absolute',
-                top: '-10px',
-                left: `${(paddingX + ((hoveredIdx + 0.5) / data.length) * chartWidth) / 10}%`,
-                transform: 'translateX(-50%)',
-                backgroundColor: 'var(--glass-bg)',
-                color: 'var(--text-primary)',
-                padding: '12px',
-                borderRadius: 'var(--radius-md)',
-                fontSize: '12px',
-                zIndex: 100,
-                pointerEvents: 'none',
-                boxShadow: 'var(--shadow-floating)',
-                minWidth: '200px',
-                border: '1px solid var(--glass-border)',
-                backdropFilter: 'var(--glass-blur)',
-                WebkitBackdropFilter: 'var(--glass-blur)'
-              }}>
+              <ChartTooltip left={`${(paddingX + ((hoveredIdx + 0.5) / data.length) * chartWidth) / 10}%`}>
                 <div style={{ fontWeight: 600, marginBottom: '8px', borderBottom: '1px solid var(--border-color)', paddingBottom: '4px', fontSize: '13px' }}>
                   {hoveredData.period}
                 </div>
                 {metric === 'tokens' ? (
                   <>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: '12px', marginBottom: '4px' }}>
-                      <span style={{ color: '#94a3b8' }}>Input:</span>
+                    <TooltipRow label="Input:" labelColor="#94a3b8">
                       <span style={{ fontWeight: 600 }}>{formatNumber(hInput)}</span>
-                    </div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: '12px', marginBottom: '4px' }}>
-                      <span style={{ color: 'var(--color-green)' }}>Cached:</span>
+                    </TooltipRow>
+                    <TooltipRow label="Cached:" labelColor="var(--color-green)">
                       <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                         {value(hoveredData.prompt_tokens) > 0 && (
                           <span style={{ fontSize: '10px', color: 'var(--color-green)', opacity: 0.8 }}>
@@ -122,47 +104,41 @@ export function TrendChart({
                         )}
                         <span style={{ fontWeight: 600 }}>{formatNumber(hCached)}</span>
                       </div>
-                    </div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: '12px', marginBottom: '4px' }}>
-                      <span style={{ color: 'var(--color-blue)' }}>Output:</span>
+                    </TooltipRow>
+                    <TooltipRow label="Output:" labelColor="var(--color-blue)">
                       <span style={{ fontWeight: 600 }}>{formatNumber(hOutput)}</span>
-                    </div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: '12px', marginTop: '8px', paddingTop: '8px', borderTop: '1px solid rgba(255, 255, 255, 0.2)' }}>
-                      <span style={{ fontWeight: 700 }}>Total Tokens:</span>
+                    </TooltipRow>
+                    <TooltipDivider />
+                    <TooltipRow label="Total Tokens:">
                       <span style={{ fontWeight: 800 }}>{formatNumber(value(hoveredData.total_tokens))}</span>
-                    </div>
+                    </TooltipRow>
                     {hoveredData.total_cost_usd !== null && value(hoveredData.total_cost_usd) > 0 && (
-                      <div style={{ display: 'flex', justifyContent: 'space-between', gap: '12px', marginTop: '4px' }}>
-                        <span style={{ color: '#f472b6' }}>Est. Cost:</span>
+                      <TooltipRow label="Est. Cost:" labelColor="#f472b6">
                         <span style={{ fontWeight: 800, color: '#f472b6' }}>{formatCost(hoveredData.total_cost_usd)}</span>
-                      </div>
+                      </TooltipRow>
                     )}
                   </>
                 ) : (
                   <>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: '12px', marginBottom: '4px' }}>
-                      <span style={{ color: '#d97706' }}>Input Cost:</span>
+                    <TooltipRow label="Input Cost:" labelColor="#d97706">
                       <span style={{ fontWeight: 600 }}>{formatCost(hoveredData.input_cost_usd)}</span>
-                    </div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: '12px', marginBottom: '4px' }}>
-                      <span style={{ color: '#a855f7' }}>Output Cost:</span>
+                    </TooltipRow>
+                    <TooltipRow label="Output Cost:" labelColor="#a855f7">
                       <span style={{ fontWeight: 600 }}>{formatCost(hoveredData.output_cost_usd)}</span>
-                    </div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: '12px', marginTop: '8px', paddingTop: '8px', borderTop: '1px solid rgba(255, 255, 255, 0.2)' }}>
-                      <span style={{ fontWeight: 700 }}>Total Cost:</span>
+                    </TooltipRow>
+                    <TooltipDivider />
+                    <TooltipRow label="Total Cost:">
                       <span style={{ fontWeight: 800 }}>{formatCost(hoveredData.total_cost_usd)}</span>
-                    </div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: '12px', marginTop: '4px' }}>
-                      <span style={{ color: 'var(--text-muted)' }}>Tokens:</span>
+                    </TooltipRow>
+                    <TooltipRow label="Tokens:">
                       <span style={{ fontWeight: 600 }}>{formatNumber(value(hoveredData.total_tokens))}</span>
-                    </div>
+                    </TooltipRow>
                   </>
                 )}
-                <div style={{ display: 'flex', justifyContent: 'space-between', gap: '12px', marginTop: '4px' }}>
-                  <span style={{ color: 'var(--color-pink)' }}>Requests:</span>
+                <TooltipRow label="Requests:" labelColor="var(--color-pink)">
                   <span style={{ fontWeight: 600, color: 'var(--color-pink)' }}>{formatNumber(hoveredData.requests)}</span>
-                </div>
-              </div>
+                </TooltipRow>
+              </ChartTooltip>
             )}
 
             <svg

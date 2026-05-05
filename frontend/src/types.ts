@@ -85,4 +85,4 @@ export type DailyUsage = {
 }
 
 export type ActiveFilter = { provider: string; model: string | null } | null
-export type DateRangeOption = '5h' | '24h' | '7d' | '30d' | 'all' | 'custom'
+export type DateRangeOption = '24h' | '7d' | '30d' | 'all' | 'custom'

@@ -56,8 +56,7 @@ export function formatTime(input: string) {
 export function getSinceDate(option: DateRangeOption): string | null {
   if (option === 'custom' || option === 'all') return null
   const now = new Date()
-  if (option === '5h') now.setHours(now.getHours() - 5)
-  else if (option === '24h') now.setHours(now.getHours() - 24)
+  if (option === '24h') now.setHours(now.getHours() - 24)
   else if (option === '7d') now.setDate(now.getDate() - 7)
   else if (option === '30d') now.setDate(now.getDate() - 30)
   return now.toISOString()
