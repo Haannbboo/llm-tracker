@@ -40,6 +40,7 @@ function App() {
   const [sources, setSources] = useState<string[]>([])
   const [sourceUsage, setSourceUsage] = useState<SourceUsage[]>([])
   const [providerUsage, setProviderUsage] = useState<ProviderUsage[]>([])
+  const [heatmapData, setHeatmapData] = useState<DailyUsage[]>([])
   const [dateRange, setDateRange] = useState<DateRangeOption>('24h')
   const [customSince, setCustomSince] = useState('')
   const [customUntil, setCustomUntil] = useState('')
@@ -178,27 +179,40 @@ function App() {
           dailyUrl.searchParams.set('granularity', 'hour')
         }
 
-        const [summaryResponse, usageResponse, countResponse, dailyResponse, bySourceResponse, byProviderResponse] = await Promise.all([
+        const heatmapUrl = new URL('/usage/daily', window.location.origin)
+        heatmapUrl.searchParams.set('since', new Date(Date.now() - 730 * 24 * 60 * 60 * 1000).toISOString())
+        heatmapUrl.searchParams.set('until', new Date().toISOString())
+        heatmapUrl.searchParams.set('granularity', 'day')
+        heatmapUrl.searchParams.set('tz_offset', getTimezoneOffset())
+        if (activeFilter) {
+          heatmapUrl.searchParams.set('provider', activeFilter.provider)
+          if (activeFilter.model) heatmapUrl.searchParams.set('model', activeFilter.model)
+        }
+        if (activeSource) heatmapUrl.searchParams.set('client_source', activeSource)
+
+        const [summaryResponse, usageResponse, countResponse, dailyResponse, bySourceResponse, byProviderResponse, heatmapResponse] = await Promise.all([
           fetch(summaryUrl.toString(), { signal: controller.signal }),
           fetch(usageUrl.toString(), { signal: controller.signal }),
           fetch(countUrl.toString(), { signal: controller.signal }),
           fetch(dailyUrl.toString(), { signal: controller.signal }),
           fetch(bySourceUrl.toString(), { signal: controller.signal }),
           fetch(byProviderUrl.toString(), { signal: controller.signal }),
+          fetch(heatmapUrl.toString(), { signal: controller.signal }),
         ])
 
-        if (!summaryResponse.ok || !usageResponse.ok || !countResponse.ok || !dailyResponse.ok || !bySourceResponse.ok || !byProviderResponse.ok) {
+        if (!summaryResponse.ok || !usageResponse.ok || !countResponse.ok || !dailyResponse.ok || !bySourceResponse.ok || !byProviderResponse.ok || !heatmapResponse.ok) {
           throw new Error('Failed to fetch usage data')
         }
 
-        const [summaryData, usageData, countData, dailyData, bySourceData, byProviderData] = (await Promise.all([
+        const [summaryData, usageData, countData, dailyData, bySourceData, byProviderData, heatmapRaw] = (await Promise.all([
           summaryResponse.json(),
           usageResponse.json(),
           countResponse.json(),
           dailyResponse.json(),
           bySourceResponse.json(),
           byProviderResponse.json(),
-        ])) as [UsageSummary[], UsageRow[], { total: number }, DailyUsage[], SourceUsage[], ProviderUsage[]]
+          heatmapResponse.json(),
+        ])) as [UsageSummary[], UsageRow[], { total: number }, DailyUsage[], SourceUsage[], ProviderUsage[], DailyUsage[]]
 
         setSummary(summaryData)
         setUsageRows(usageData)
@@ -206,6 +220,7 @@ function App() {
         setDailyUsage(dailyData)
         setSourceUsage(bySourceData)
         setProviderUsage(byProviderData)
+        setHeatmapData(heatmapRaw)
       } catch (err) {
         if (controller.signal.aborted) return
         setError(err instanceof Error ? err.message : 'Unknown error')
@@ -555,8 +570,8 @@ function App() {
                     />
                   </div>
                   <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: '16px' }}>
-                    <DailyHeatmap mode="activity" activeFilter={activeFilter} activeSource={activeSource} />
-                    <DailyHeatmap mode="success-rate" activeFilter={activeFilter} activeSource={activeSource} />
+                    <DailyHeatmap mode="activity" data={heatmapData} />
+                    <DailyHeatmap mode="success-rate" data={heatmapData} />
                   </div>
                 </div>
               </div>
@@ -622,7 +637,6 @@ function App() {
                     value={dateRange}
                     onChange={(e) => setDateRange(e.target.value as DateRangeOption)}
                   >
-                    <option value="5h">Last 5 Hours</option>
                     <option value="24h">Last 24 Hours</option>
                     <option value="7d">Last 7 Days</option>
                     <option value="30d">Last 30 Days</option>

@@ -584,14 +584,18 @@ def distinct_client_sources(
     until: str | None = None,
     db_path: str | None = None,
 ) -> list[str]:
-    """Return distinct client_source values in the given time window."""
-    filters = _usage_filters(since=since, until=until)
-    filters.append(Usage.client_source.isnot(None))
+    """Return distinct client_source values from usage_daily."""
+    filters: list[Any] = []
+    filters.append(UsageDaily.client_source != "")
+    if since:
+        filters.append(UsageDaily.date >= since[:10])
+    if until:
+        filters.append(UsageDaily.date <= until[:10])
     query = (
-        select(Usage.client_source)
+        select(UsageDaily.client_source)
         .distinct()
         .where(and_(*filters))
-        .order_by(Usage.client_source)
+        .order_by(UsageDaily.client_source)
     )
     with get_engine(db_path).connect() as connection:
         return [row[0] for row in connection.execute(query)]
@@ -605,19 +609,24 @@ def count_usage(
     since: str | None = None,
     until: str | None = None,
 ) -> int:
-    """Count usage rows matching the optional provider/model/time filters."""
-    filters = _usage_filters(
-        provider=provider,
-        model=model,
-        client_source=client_source,
-        since=since,
-        until=until,
-    )
-    query = select(func.count()).select_from(Usage)
+    """Sum request_count from usage_daily matching the optional filters."""
+    filters: list[Any] = []
+    if since:
+        filters.append(UsageDaily.date >= since[:10])
+    if until:
+        filters.append(UsageDaily.date <= until[:10])
+    if provider:
+        filters.append(UsageDaily.provider == provider)
+    if model:
+        filters.append(UsageDaily.model == model)
+    if client_source:
+        filters.append(UsageDaily.client_source == client_source)
+    query = select(func.sum(UsageDaily.request_count))
     if filters:
         query = query.where(and_(*filters))
     with get_engine().connect() as connection:
-        return int(connection.execute(query).scalar_one())
+        result = connection.execute(query).scalar_one()
+        return int(result or 0)
 
 
 def get_usage_high_watermark(*, db_path: str | None = None) -> int:
@@ -866,42 +875,39 @@ def summarize_usage_by_source(
     model: str | None = None,
     client_source: str | None = None,
 ) -> list[dict[str, Any]]:
-    """Aggregate usage totals by client_source for dashboard source chart."""
-    filters = _usage_filters(
-        since=since,
-        until=until,
-        provider=provider,
-        model=model,
-        client_source=client_source,
-    )
+    """Aggregate usage_daily totals by client_source for dashboard source chart."""
+    filters: list[Any] = []
+    if since:
+        filters.append(UsageDaily.date >= since[:10])
+    if until:
+        filters.append(UsageDaily.date <= until[:10])
+    if provider:
+        filters.append(UsageDaily.provider == provider)
+    if model:
+        filters.append(UsageDaily.model == model)
+    if client_source:
+        filters.append(UsageDaily.client_source == client_source)
+
     query = (
         select(
-            Usage.client_source,
-            func.count().label("requests"),
-            func.sum(Usage.prompt_tokens).label("prompt_tokens"),
-            func.sum(Usage.completion_tokens).label("completion_tokens"),
-            func.sum(Usage.reasoning_tokens).label("reasoning_tokens"),
-            func.sum(Usage.cached_tokens).label("cached_tokens"),
-            func.sum(Usage.total_tokens).label("total_tokens"),
-            func.avg(Usage.latency_ms).label("avg_latency_ms"),
-            func.sum(Usage.input_cost_usd).label("input_cost_usd"),
-            func.sum(Usage.output_cost_usd).label("output_cost_usd"),
-            func.sum(Usage.total_cost_usd).label("total_cost_usd"),
-            func.sum(
-                case(
-                    (or_(Usage.status.is_(None), Usage.status < 400), 1),
-                    else_=0,
-                )
-            ).label("successful_requests"),
-            func.sum(
-                case(
-                    (Usage.status >= 400, 1),
-                    else_=0,
-                )
-            ).label("failed_requests"),
+            UsageDaily.client_source,
+            func.sum(UsageDaily.request_count).label("requests"),
+            func.sum(UsageDaily.prompt_tokens).label("prompt_tokens"),
+            func.sum(UsageDaily.completion_tokens).label("completion_tokens"),
+            func.sum(UsageDaily.reasoning_tokens).label("reasoning_tokens"),
+            func.sum(UsageDaily.cached_tokens).label("cached_tokens"),
+            func.sum(UsageDaily.total_tokens).label("total_tokens"),
+            (
+                func.sum(UsageDaily.latency_sum_ms) / func.sum(UsageDaily.request_count)
+            ).label("avg_latency_ms"),
+            func.sum(UsageDaily.input_cost_usd).label("input_cost_usd"),
+            func.sum(UsageDaily.output_cost_usd).label("output_cost_usd"),
+            func.sum(UsageDaily.total_cost_usd).label("total_cost_usd"),
+            func.sum(UsageDaily.successful_requests).label("successful_requests"),
+            func.sum(UsageDaily.failed_requests).label("failed_requests"),
         )
-        .group_by(Usage.client_source)
-        .order_by(func.sum(Usage.total_tokens).desc())
+        .group_by(UsageDaily.client_source)
+        .order_by(func.sum(UsageDaily.total_tokens).desc())
     )
     if filters:
         query = query.where(and_(*filters))
@@ -917,42 +923,39 @@ def summarize_usage_by_provider(
     model: str | None = None,
     client_source: str | None = None,
 ) -> list[dict[str, Any]]:
-    """Aggregate usage totals by provider for dashboard provider chart."""
-    filters = _usage_filters(
-        since=since,
-        until=until,
-        provider=provider,
-        model=model,
-        client_source=client_source,
-    )
+    """Aggregate usage_daily totals by provider for dashboard provider chart."""
+    filters: list[Any] = []
+    if since:
+        filters.append(UsageDaily.date >= since[:10])
+    if until:
+        filters.append(UsageDaily.date <= until[:10])
+    if provider:
+        filters.append(UsageDaily.provider == provider)
+    if model:
+        filters.append(UsageDaily.model == model)
+    if client_source:
+        filters.append(UsageDaily.client_source == client_source)
+
     query = (
         select(
-            Usage.provider,
-            func.count().label("requests"),
-            func.sum(Usage.prompt_tokens).label("prompt_tokens"),
-            func.sum(Usage.completion_tokens).label("completion_tokens"),
-            func.sum(Usage.reasoning_tokens).label("reasoning_tokens"),
-            func.sum(Usage.cached_tokens).label("cached_tokens"),
-            func.sum(Usage.total_tokens).label("total_tokens"),
-            func.avg(Usage.latency_ms).label("avg_latency_ms"),
-            func.sum(Usage.input_cost_usd).label("input_cost_usd"),
-            func.sum(Usage.output_cost_usd).label("output_cost_usd"),
-            func.sum(Usage.total_cost_usd).label("total_cost_usd"),
-            func.sum(
-                case(
-                    (or_(Usage.status.is_(None), Usage.status < 400), 1),
-                    else_=0,
-                )
-            ).label("successful_requests"),
-            func.sum(
-                case(
-                    (Usage.status >= 400, 1),
-                    else_=0,
-                )
-            ).label("failed_requests"),
+            UsageDaily.provider,
+            func.sum(UsageDaily.request_count).label("requests"),
+            func.sum(UsageDaily.prompt_tokens).label("prompt_tokens"),
+            func.sum(UsageDaily.completion_tokens).label("completion_tokens"),
+            func.sum(UsageDaily.reasoning_tokens).label("reasoning_tokens"),
+            func.sum(UsageDaily.cached_tokens).label("cached_tokens"),
+            func.sum(UsageDaily.total_tokens).label("total_tokens"),
+            (
+                func.sum(UsageDaily.latency_sum_ms) / func.sum(UsageDaily.request_count)
+            ).label("avg_latency_ms"),
+            func.sum(UsageDaily.input_cost_usd).label("input_cost_usd"),
+            func.sum(UsageDaily.output_cost_usd).label("output_cost_usd"),
+            func.sum(UsageDaily.total_cost_usd).label("total_cost_usd"),
+            func.sum(UsageDaily.successful_requests).label("successful_requests"),
+            func.sum(UsageDaily.failed_requests).label("failed_requests"),
         )
-        .group_by(Usage.provider)
-        .order_by(func.sum(Usage.total_tokens).desc())
+        .group_by(UsageDaily.provider)
+        .order_by(func.sum(UsageDaily.total_tokens).desc())
     )
     if filters:
         query = query.where(and_(*filters))
@@ -1142,6 +1145,11 @@ def aggregate_daily_by_period(
             func.sum(UsageDaily.input_cost_usd).label("input_cost_usd"),
             func.sum(UsageDaily.output_cost_usd).label("output_cost_usd"),
             func.sum(UsageDaily.total_cost_usd).label("total_cost_usd"),
+            func.sum(UsageDaily.successful_requests).label("successful_requests"),
+            func.sum(UsageDaily.failed_requests).label("failed_requests"),
+            (
+                func.sum(UsageDaily.latency_sum_ms) / func.sum(UsageDaily.request_count)
+            ).label("avg_latency_ms"),
         )
         .group_by(UsageDaily.date)
         .order_by(UsageDaily.date)

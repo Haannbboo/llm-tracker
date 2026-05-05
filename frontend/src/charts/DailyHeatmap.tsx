@@ -1,18 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import type { ActiveFilter, DailyUsage } from '../types'
-import { formatCost, formatNumber, getTimezoneOffset, value } from '../utils'
+import type { DailyUsage } from '../types'
+import { formatCost, formatNumber, value } from '../utils'
 
 export function DailyHeatmap({
   mode,
-  activeFilter,
-  activeSource,
+  data,
 }: {
   mode: 'activity' | 'success-rate'
-  activeFilter: ActiveFilter
-  activeSource: string | null
+  data: DailyUsage[]
 }) {
   const [hoveredCell, setHoveredCell] = useState<{ date: string; data: DailyUsage | null; x: number; y: number } | null>(null)
-  const [heatmapData, setHeatmapData] = useState<DailyUsage[]>([])
   const [containerWidth, setContainerWidth] = useState(0)
   const containerRef = useRef<HTMLDivElement>(null)
 
@@ -25,30 +22,9 @@ export function DailyHeatmap({
     return () => observer.disconnect()
   }, [])
 
-  useEffect(() => {
-    const controller = new AbortController()
-    const until = new Date().toISOString()
-    const since = new Date(Date.now() - 730 * 24 * 60 * 60 * 1000).toISOString()
-    const url = new URL('/usage/daily', window.location.origin)
-    url.searchParams.set('since', since)
-    url.searchParams.set('until', until)
-    url.searchParams.set('granularity', 'day')
-    url.searchParams.set('tz_offset', getTimezoneOffset())
-    if (activeFilter) {
-      url.searchParams.set('provider', activeFilter.provider)
-      if (activeFilter.model) url.searchParams.set('model', activeFilter.model)
-    }
-    if (activeSource) url.searchParams.set('client_source', activeSource)
-    fetch(url.toString(), { signal: controller.signal })
-      .then(r => r.ok ? r.json() : Promise.reject(r))
-      .then((data: DailyUsage[]) => setHeatmapData(data))
-      .catch(() => {})
-    return () => controller.abort()
-  }, [activeFilter, activeSource])
-
   const allWeeks = useMemo(() => {
     const dataMap = new Map<string, DailyUsage>()
-    for (const d of heatmapData) dataMap.set(d.period, d)
+    for (const d of data) dataMap.set(d.period, d)
 
     const today = new Date()
     const endDate = new Date(today.getFullYear(), today.getMonth(), today.getDate())
@@ -86,7 +62,7 @@ export function DailyHeatmap({
       weeks.push(week)
     }
     return { weeks, maxVal: max }
-  }, [heatmapData, mode])
+  }, [data, mode])
 
   const cellSize = 13
   const gap = 3
