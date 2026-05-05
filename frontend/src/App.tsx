@@ -88,6 +88,7 @@ type DailyUsage = {
   input_cost_usd: number | null
   output_cost_usd: number | null
   total_cost_usd: number | null
+  avg_latency_ms: number | null
 }
 
 type ActiveFilter = { provider: string; model: string | null } | null
@@ -143,6 +144,24 @@ function formatTime(input: string) {
     minute: '2-digit',
     hour12: false
   }).format(date)
+}
+
+function Sparkline({ data, color, height = 32 }: { data: number[]; color: string; height?: number }) {
+  if (data.length < 2) return null;
+  const max = Math.max(...data, 0.001);
+  const min = Math.min(...data, 0);
+  const range = max - min || 1;
+  const w = 100;
+  const points = data.map((v, i) => {
+    const x = (i / (data.length - 1)) * w;
+    const y = height - ((v - min) / range) * (height - 4) - 2;
+    return `${x},${y}`;
+  }).join(' ');
+  return (
+    <svg viewBox={`0 0 ${w} ${height}`} style={{ width: '100%', height, display: 'block' }} preserveAspectRatio="none">
+      <polyline points={points} fill="none" stroke={color} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
 }
 
 function getSinceDate(option: DateRangeOption): string | null {
@@ -605,220 +624,6 @@ function TrendChart({
                 }
                 const label = d.period.includes(':') 
                   ? d.period.split(' ')[1] 
-                  : d.period.split('-').slice(1).join('/');
-                return (
-                  <div key={d.period} style={{ fontSize: '10px', color: 'var(--text-muted)' }}>
-                    {label}
-                  </div>
-                );
-              })}
-            </div>
-          </>
-        )}
-      </div>
-    </div>
-  );
-}
-
-function CostTrendChart({
-  data,
-  title
-}: {
-  data: DailyUsage[],
-  title: string
-}) {
-  const [hoveredIdx, setHoveredIdx] = useState<number | null>(null);
-  const maxCost = Math.max(...data.map(x => value(x.total_cost_usd)), 0.001);
-  const maxRequests = Math.max(...data.map(x => value(x.requests)), 1);
-  const paddingX = 60;
-  const chartWidth = 1000 - (paddingX * 2);
-
-  const hoveredData = hoveredIdx !== null ? data[hoveredIdx] : null;
-
-  return (
-    <div className="widget" style={{ minHeight: '400px', width: '100%', position: 'relative' }}>
-      <div className="widget-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <span>💵 {title}</span>
-        <div style={{ display: 'flex', gap: '16px' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-            <div style={{ width: '12px', height: '12px', background: '#f59e0b', borderRadius: '2px' }} />
-            <span style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)' }}>Input Cost</span>
-          </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-            <div style={{ width: '12px', height: '12px', background: '#8b5cf6', borderRadius: '2px' }} />
-            <span style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)' }}>Output Cost</span>
-          </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-            <div style={{ width: '12px', height: '3px', background: 'var(--color-pink)', borderRadius: '2px' }} />
-            <span style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)' }}>Requests</span>
-          </div>
-        </div>
-      </div>
-      <div style={{
-        flex: 1,
-        padding: '20px 0',
-        height: '280px',
-        position: 'relative',
-        display: 'flex',
-        flexDirection: 'column'
-      }}>
-        {data.length === 0 ? (
-          <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-muted)' }}>No cost data available</div>
-        ) : (
-          <>
-            {hoveredIdx !== null && hoveredData && (
-              <div style={{
-                position: 'absolute',
-                top: '-10px',
-                left: `${(paddingX + (hoveredIdx / (Math.max(data.length - 1, 1))) * chartWidth) / 10}%`,
-                transform: 'translateX(-50%)',
-                backgroundColor: 'rgba(15, 23, 42, 0.95)',
-                color: 'white',
-                padding: '12px',
-                borderRadius: '8px',
-                fontSize: '12px',
-                zIndex: 100,
-                pointerEvents: 'none',
-                boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1)',
-                minWidth: '180px',
-                border: '1px solid rgba(255, 255, 255, 0.1)',
-                backdropFilter: 'blur(4px)'
-              }}>
-                <div style={{ fontWeight: 600, marginBottom: '8px', borderBottom: '1px solid rgba(255, 255, 255, 0.2)', paddingBottom: '4px', fontSize: '13px' }}>
-                  {hoveredData.period}
-                </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', gap: '12px', marginBottom: '4px' }}>
-                  <span style={{ color: '#f59e0b' }}>Input:</span>
-                  <span style={{ fontWeight: 600 }}>{formatCost(hoveredData.input_cost_usd)}</span>
-                </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', gap: '12px', marginBottom: '4px' }}>
-                  <span style={{ color: '#8b5cf6' }}>Output:</span>
-                  <span style={{ fontWeight: 600 }}>{formatCost(hoveredData.output_cost_usd)}</span>
-                </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', gap: '12px', marginTop: '8px', paddingTop: '8px', borderTop: '1px solid rgba(255, 255, 255, 0.2)' }}>
-                  <span style={{ fontWeight: 700 }}>Total Cost:</span>
-                  <span style={{ fontWeight: 800 }}>{formatCost(hoveredData.total_cost_usd)}</span>
-                </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', gap: '12px', marginTop: '4px' }}>
-                  <span style={{ color: 'var(--color-pink)' }}>Requests:</span>
-                  <span style={{ fontWeight: 600, color: 'var(--color-pink)' }}>{formatNumber(hoveredData.requests)}</span>
-                </div>
-              </div>
-            )}
-
-            <svg
-              viewBox="0 0 1000 200"
-              preserveAspectRatio="none"
-              style={{ width: '100%', height: '220px', overflow: 'visible' }}
-            >
-              {[0, 0.25, 0.5, 0.75, 1].map(tick => (
-                <line
-                  key={tick}
-                  x1="0" y1={200 - tick * 200}
-                  x2="1000" y2={200 - tick * 200}
-                  stroke="#f1f5f9"
-                  strokeWidth="1"
-                />
-              ))}
-
-              {/* Stacked Bars for Cost */}
-              {data.map((d, i) => {
-                const x = paddingX + (i / (Math.max(data.length - 1, 1))) * chartWidth;
-                const barWidth = Math.min(chartWidth / (data.length * 1.5), 60);
-                const slotWidth = data.length > 1 ? chartWidth / (data.length - 1) : chartWidth;
-
-                const inputCost = value(d.input_cost_usd);
-                const outputCost = value(d.output_cost_usd);
-
-                const hInput = (inputCost / maxCost) * 200;
-                const hOutput = (outputCost / maxCost) * 200;
-
-                const isHovered = hoveredIdx === i;
-                const isDimmed = hoveredIdx !== null && !isHovered;
-
-                return (
-                  <g
-                    key={i}
-                    onMouseEnter={() => setHoveredIdx(i)}
-                    onMouseLeave={() => setHoveredIdx(null)}
-                  >
-                    <rect
-                      x={x - barWidth/2} y={200 - hInput}
-                      width={barWidth} height={hInput}
-                      fill="#f59e0b"
-                      opacity={isDimmed ? 0.3 : 1}
-                      style={{ transition: 'all 0.2s' }}
-                    />
-                    <rect
-                      x={x - barWidth/2} y={200 - hInput - hOutput}
-                      width={barWidth} height={hOutput}
-                      fill="#8b5cf6"
-                      opacity={isDimmed ? 0.3 : 1}
-                      style={{ transition: 'all 0.2s' }}
-                    />
-                    <rect
-                      x={x - slotWidth/2} y={0}
-                      width={slotWidth} height={200}
-                      fill="transparent"
-                      style={{ cursor: 'pointer' }}
-                    />
-                  </g>
-                );
-              })}
-
-              {/* Line for Requests */}
-              {(() => {
-                const points = data.map((d, i) => {
-                  const x = paddingX + (i / (Math.max(data.length - 1, 1))) * chartWidth;
-                  const y = 200 - (value(d.requests) / maxRequests) * 200;
-                  return `${x},${y}`;
-                }).join(' ');
-
-                return (
-                  <>
-                    <polyline
-                      points={points}
-                      fill="none"
-                      stroke="var(--color-pink)"
-                      strokeWidth="3"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      style={{ pointerEvents: 'none', opacity: hoveredIdx === null ? 1 : 0.4 }}
-                    />
-                    {data.map((d, i) => {
-                      const x = paddingX + (i / (Math.max(data.length - 1, 1))) * chartWidth;
-                      const y = 200 - (value(d.requests) / maxRequests) * 200;
-                      return (
-                        <circle
-                          key={i}
-                          cx={x} cy={y} r={hoveredIdx === i ? "5" : "3"}
-                          fill="white"
-                          stroke="var(--color-pink)"
-                          strokeWidth={hoveredIdx === i ? "3" : "2"}
-                          style={{ pointerEvents: 'none', transition: 'all 0.2s', opacity: hoveredIdx === null || hoveredIdx === i ? 1 : 0.4 }}
-                        />
-                      );
-                    })}
-                  </>
-                );
-              })()}
-            </svg>
-
-            <div style={{
-              display: 'flex',
-              justifyContent: 'space-between',
-              marginTop: '20px',
-              borderTop: '1px solid #f1f5f9',
-              paddingTop: '10px',
-              paddingLeft: `${(paddingX / 1000) * 100}%`,
-              paddingRight: `${(paddingX / 1000) * 100}%`
-            }}>
-              {data.map((d, i) => {
-                if (data.length > 12 && i % Math.ceil(data.length / 12) !== 0 && i !== data.length - 1) {
-                  return null;
-                }
-                const label = d.period.includes(':')
-                  ? d.period.split(' ')[1]
                   : d.period.split('-').slice(1).join('/');
                 return (
                   <div key={d.period} style={{ fontSize: '10px', color: 'var(--text-muted)' }}>
@@ -1869,90 +1674,120 @@ function App() {
 
               <div className="widgets-grid">
                 <div className="widget">
-                  <div className="widget-body">
-                    <div className="icon-box icon-yellow">🪙</div>
-                    <div className="stat-group">
-                      <div className="stat-label">Token Usage</div>
-                      <div className="stat-value">{formatCompact(totals.totalTokens)}</div>
-                      <div className="stat-label">
-                        In: {formatCompact(totals.promptTokens)} / Out: {formatCompact(totals.completionTokens)}
+                  <div className="widget-body" style={{ flexDirection: 'column', alignItems: 'stretch', justifyContent: 'center' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                        <div className="icon-box icon-yellow">🪙</div>
+                        <div>
+                          <div className="stat-label">Token Usage</div>
+                          <div className="stat-value">{formatCompact(totals.totalTokens)}</div>
+                        </div>
                       </div>
-                      <div className="stat-label" style={{ fontSize: '11px' }}>
-                        Cached: {formatCompact(totals.cachedTokens)}
-                        <span style={{ marginLeft: '6px', color: 'var(--color-green)', fontWeight: 600 }}>
-                          ({totals.totalTokens > 0 ? ((value(totals.cachedTokens) / totals.totalTokens) * 100).toFixed(1) : 0}% Hit)
-                        </span>
+                      <div style={{ width: '100px' }}>
+                        <Sparkline data={dailyUsage.map(d => value(d.prompt_tokens) > 0 ? (value(d.cached_tokens) / value(d.prompt_tokens)) * 100 : 0)} color="var(--color-green)" />
                       </div>
                     </div>
-                  </div>
-                </div>
-                
-                <div className="widget">
-                  <div className="widget-body">
-                    <div className="icon-box icon-green">📈</div>
-                    <div className="stat-group">
-                      <div className="stat-label">Requests</div>
-                      <div className="stat-value">{formatNumber(totals.requests)}</div>
-                      <div className="stat-label">
-                        Avg: <span style={{ color: 'var(--color-purple)', fontWeight: 600 }}>{formatCompact(totals.avgTokensPerRequest)} tokens/req</span>
-                      </div>
+                    <div className="stat-label" style={{ marginBottom: 0 }}>
+                      In: {formatCompact(totals.promptTokens)} / Out: {formatCompact(totals.completionTokens)}
+                    </div>
+                    <div className="stat-label" style={{ fontSize: '11px', marginBottom: 0 }}>
+                      Cached: {formatCompact(totals.cachedTokens)}
+                      <span style={{ marginLeft: '6px', color: 'var(--color-green)', fontWeight: 600 }}>
+                        ({totals.totalTokens > 0 ? ((value(totals.cachedTokens) / totals.totalTokens) * 100).toFixed(1) : 0}% Hit)
+                      </span>
                     </div>
                   </div>
                 </div>
 
                 <div className="widget">
-                  <div className="widget-body">
-                    <div className="icon-box icon-green">💰</div>
-                    <div className="stat-group">
-                      <div className="stat-label">Estimated Cost</div>
-                      <div className="stat-value">{formatCost(totals.totalCost)}</div>
-                      <div className="stat-label">
-                        Avg: <span style={{ color: 'var(--color-blue)', fontWeight: 600 }}>{formatCost(totals.requests > 0 ? totals.totalCost / totals.requests : 0)} / req</span>
+                  <div className="widget-body" style={{ flexDirection: 'column', alignItems: 'stretch', justifyContent: 'center' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                        <div className="icon-box icon-green">📈</div>
+                        <div>
+                          <div className="stat-label">Requests</div>
+                          <div className="stat-value">{formatNumber(totals.requests)}</div>
+                        </div>
                       </div>
+                      <div style={{ width: '100px' }}>
+                        <Sparkline data={dailyUsage.map(d => d.requests)} color="var(--color-pink)" />
+                      </div>
+                    </div>
+                    <div className="stat-label" style={{ marginTop: '-2px' }}>
+                      Avg: <span style={{ color: 'var(--color-purple)', fontWeight: 600 }}>{formatCompact(totals.avgTokensPerRequest)} tokens/req</span>
                     </div>
                   </div>
                 </div>
 
                 <div className="widget">
-                  <div className="widget-body">
-                    <div className="icon-box icon-blue">⚡</div>
-                    <div className="stat-group">
-                      <div className="stat-label">Performance</div>
-                      <div className="stat-value">{totals.rpm.toFixed(3)} <span style={{ fontSize: '12px', fontWeight: 500 }}>RPM</span></div>
-                      <div className="stat-label">
-                        Avg Throughput: <span style={{ color: 'var(--color-purple)', fontWeight: 600 }}>{formatCompact(totals.tpm)} TPM</span>
+                  <div className="widget-body" style={{ flexDirection: 'column', alignItems: 'stretch', justifyContent: 'center' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                        <div className="icon-box icon-green">💰</div>
+                        <div>
+                          <div className="stat-label">Estimated Cost</div>
+                          <div className="stat-value">{formatCost(totals.totalCost)}</div>
+                        </div>
                       </div>
+                      <div style={{ width: '100px' }}>
+                        <Sparkline data={dailyUsage.map(d => d.requests > 0 ? value(d.total_cost_usd) / d.requests : 0)} color="var(--color-blue)" />
+                      </div>
+                    </div>
+                    <div className="stat-label" style={{ marginTop: '-2px' }}>
+                      Avg: <span style={{ color: 'var(--color-blue)', fontWeight: 600 }}>{formatCost(totals.requests > 0 ? totals.totalCost / totals.requests : 0)} / req</span>
                     </div>
                   </div>
                 </div>
 
                 <div className="widget">
-                  <div className="widget-body">
-                    <div className="icon-box icon-pink">⏱️</div>
-                    <div className="stat-group">
-                      <div className="stat-label">Average Response</div>
-                      <div className="stat-value">{formatLatency(totals.avgLatency)}</div>
-                      <div className="stat-label">
-                        Success Rate: <span style={{ color: 'var(--color-green)', fontWeight: 600 }}>{totals.successRate.toFixed(1)}%</span>
+                  <div className="widget-body" style={{ flexDirection: 'column', alignItems: 'stretch', justifyContent: 'center' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                        <div className="icon-box icon-blue">⚡</div>
+                        <div>
+                          <div className="stat-label">Performance</div>
+                          <div className="stat-value">{totals.rpm.toFixed(3)} <span style={{ fontSize: '12px', fontWeight: 500 }}>RPM</span></div>
+                        </div>
                       </div>
+                      <div style={{ width: '100px' }}>
+                        <Sparkline data={dailyUsage.map(d => value(d.total_tokens))} color="var(--color-purple)" />
+                      </div>
+                    </div>
+                    <div className="stat-label" style={{ marginTop: '-2px' }}>
+                      Avg Throughput: <span style={{ color: 'var(--color-purple)', fontWeight: 600 }}>{formatCompact(totals.tpm)} TPM</span>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="widget">
+                  <div className="widget-body" style={{ flexDirection: 'column', alignItems: 'stretch', justifyContent: 'center' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                        <div className="icon-box icon-pink">⏱️</div>
+                        <div>
+                          <div className="stat-label">Average Response</div>
+                          <div className="stat-value">{formatLatency(totals.avgLatency)}</div>
+                        </div>
+                      </div>
+                      <div style={{ width: '100px' }}>
+                        <Sparkline data={dailyUsage.map(d => value(d.avg_latency_ms))} color="var(--color-pink)" />
+                      </div>
+                    </div>
+                    <div className="stat-label" style={{ marginTop: '-2px' }}>
+                      Success Rate: <span style={{ color: 'var(--color-green)', fontWeight: 600 }}>{totals.successRate.toFixed(1)}%</span>
                     </div>
                   </div>
                 </div>
               </div>
 
-              <UsageHeatmap activeFilter={activeFilter} activeSource={activeSource} />
-
               <div style={{ display: 'flex', gap: '24px', alignItems: 'stretch' }}>
+                <div style={{ flex: 1 }}>
+                  <UsageHeatmap activeFilter={activeFilter} activeSource={activeSource} />
+                </div>
                 <div style={{ flex: 1 }}>
                   <TrendChart
                     data={dailyUsage}
                     title={`${(dateRange === '5h' || dateRange === '24h') ? 'Hourly' : 'Daily'} Usage Trend`}
-                  />
-                </div>
-                <div style={{ flex: 1 }}>
-                  <CostTrendChart
-                    data={dailyUsage}
-                    title={`${(dateRange === '5h' || dateRange === '24h') ? 'Hourly' : 'Daily'} Cost Trend`}
                   />
                 </div>
               </div>

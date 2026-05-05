@@ -865,6 +865,7 @@ def aggregate_usage_by_period(
         Usage.input_cost_usd,
         Usage.output_cost_usd,
         Usage.total_cost_usd,
+        Usage.latency_ms,
     ).order_by(Usage.ts.asc())
     if filters:
         query = query.where(and_(*filters))
@@ -895,6 +896,8 @@ def aggregate_usage_by_period(
                     "input_cost_usd": Decimal("0"),
                     "output_cost_usd": Decimal("0"),
                     "total_cost_usd": Decimal("0"),
+                    "_latency_sum": 0,
+                    "_latency_count": 0,
                 },
             )
             bucket["requests"] += 1
@@ -905,8 +908,17 @@ def aggregate_usage_by_period(
             bucket["input_cost_usd"] += row.input_cost_usd or Decimal("0")
             bucket["output_cost_usd"] += row.output_cost_usd or Decimal("0")
             bucket["total_cost_usd"] += row.total_cost_usd or Decimal("0")
+            if row.latency_ms is not None:
+                bucket["_latency_sum"] += row.latency_ms
+                bucket["_latency_count"] += 1
 
-    return [
-        {key: _normalize_value(value) for key, value in buckets[key].items()}
-        for key in sorted(buckets)
-    ]
+    result = []
+    for key in sorted(buckets):
+        bucket = buckets[key]
+        count = bucket.pop("_latency_count")
+        latency_sum = bucket.pop("_latency_sum")
+        bucket["avg_latency_ms"] = latency_sum / count if count > 0 else 0
+        result.append(
+            {_normalize_value(k): _normalize_value(v) for k, v in bucket.items()}
+        )
+    return result
