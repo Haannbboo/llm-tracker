@@ -12,7 +12,9 @@ AGENTS.md
 CLAUDE.md
 .superpowers/
 .claude/
+.superset/
 
 # Project specific
 todo.md
 docs/*
+.dev-env.json
