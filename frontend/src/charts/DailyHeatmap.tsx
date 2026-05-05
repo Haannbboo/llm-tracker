@@ -1,0 +1,306 @@
+import { useEffect, useMemo, useRef, useState } from 'react'
+import type { ActiveFilter, DailyUsage } from '../types'
+import { formatCost, formatNumber, getTimezoneOffset, value } from '../utils'
+
+export function DailyHeatmap({
+  mode,
+  activeFilter,
+  activeSource,
+}: {
+  mode: 'activity' | 'success-rate'
+  activeFilter: ActiveFilter
+  activeSource: string | null
+}) {
+  const [hoveredCell, setHoveredCell] = useState<{ date: string; data: DailyUsage | null; x: number; y: number } | null>(null)
+  const [heatmapData, setHeatmapData] = useState<DailyUsage[]>([])
+  const [containerWidth, setContainerWidth] = useState(0)
+  const containerRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!containerRef.current) return
+    const observer = new ResizeObserver((entries) => {
+      for (const entry of entries) setContainerWidth(entry.contentRect.width)
+    })
+    observer.observe(containerRef.current)
+    return () => observer.disconnect()
+  }, [])
+
+  useEffect(() => {
+    const controller = new AbortController()
+    const until = new Date().toISOString()
+    const since = new Date(Date.now() - 730 * 24 * 60 * 60 * 1000).toISOString()
+    const url = new URL('/usage/daily', window.location.origin)
+    url.searchParams.set('since', since)
+    url.searchParams.set('until', until)
+    url.searchParams.set('granularity', 'day')
+    url.searchParams.set('tz_offset', getTimezoneOffset())
+    if (activeFilter) {
+      url.searchParams.set('provider', activeFilter.provider)
+      if (activeFilter.model) url.searchParams.set('model', activeFilter.model)
+    }
+    if (activeSource) url.searchParams.set('client_source', activeSource)
+    fetch(url.toString(), { signal: controller.signal })
+      .then(r => r.ok ? r.json() : Promise.reject(r))
+      .then((data: DailyUsage[]) => setHeatmapData(data))
+      .catch(() => {})
+    return () => controller.abort()
+  }, [activeFilter, activeSource])
+
+  const allWeeks = useMemo(() => {
+    const dataMap = new Map<string, DailyUsage>()
+    for (const d of heatmapData) dataMap.set(d.period, d)
+
+    const today = new Date()
+    const endDate = new Date(today.getFullYear(), today.getMonth(), today.getDate())
+    const startDate = new Date(endDate)
+    startDate.setDate(startDate.getDate() - 728)
+    while (startDate.getDay() !== 0) startDate.setDate(startDate.getDate() - 1)
+
+    let max = 0
+    const weeks: { date: Date; metric: number; data: DailyUsage | null }[][] = []
+    const cursor = new Date(startDate)
+
+    while (cursor <= endDate) {
+      const week: { date: Date; metric: number; data: DailyUsage | null }[] = []
+      for (let d = 0; d < 7; d++) {
+        if (cursor > endDate) {
+          week.push({ date: new Date(cursor), metric: -1, data: null })
+        } else {
+          const key = cursor.toISOString().split('T')[0]
+          const dayData = dataMap.get(key) ?? null
+          let metric = -1
+          if (dayData) {
+            if (mode === 'activity') {
+              metric = value(dayData.total_tokens)
+              if (metric > max) max = metric
+            } else {
+              const total = value(dayData.requests)
+              const failed = value(dayData.failed_requests)
+              if (total > 0) metric = ((total - failed) / total) * 100
+            }
+          }
+          week.push({ date: new Date(cursor), metric, data: dayData })
+        }
+        cursor.setDate(cursor.getDate() + 1)
+      }
+      weeks.push(week)
+    }
+    return { weeks, maxVal: max }
+  }, [heatmapData, mode])
+
+  const cellSize = 13
+  const gap = 3
+  const leftPad = 36
+  const topPad = 20
+  const step = cellSize + gap
+
+  const visibleCount = Math.max(1, Math.min(allWeeks.weeks.length, Math.floor((containerWidth - leftPad - 8) / step)))
+  const visibleWeeks = allWeeks.weeks.slice(-visibleCount)
+
+  const monthLabels = useMemo(() => {
+    const labels: { label: string; col: number }[] = []
+    let lastMonth = -1
+    for (let wi = 0; wi < visibleWeeks.length; wi++) {
+      const firstDay = visibleWeeks[wi][0]
+      if (firstDay && firstDay.metric >= 0 && firstDay.date.getMonth() !== lastMonth) {
+        labels.push({ label: firstDay.date.toLocaleString(undefined, { month: 'short' }), col: wi })
+        lastMonth = firstDay.date.getMonth()
+      }
+    }
+    return labels
+  }, [visibleWeeks])
+
+  function getColor(metric: number): string {
+    if (metric < 0) return 'transparent'
+    if (mode === 'activity') {
+      if (metric === 0) return '#ebedf0'
+      const ratio = Math.min(metric / (allWeeks.maxVal || 1), 1)
+      if (ratio < 0.25) return '#9be9a8'
+      if (ratio < 0.5) return '#40c463'
+      if (ratio < 0.75) return '#30a14e'
+      return '#00b578'
+    } else {
+      if (metric >= 100) return '#10b981'
+      if (metric >= 99) return '#34d399'
+      if (metric >= 95) return '#a7f3d0'
+      if (metric >= 90) return '#fcd34d'
+      if (metric >= 80) return '#f97316'
+      return '#ef4444'
+    }
+  }
+
+  const gridWidth = visibleWeeks.length * step
+  const gridHeight = 7 * step
+
+  const title = mode === 'activity' ? '🗓 Daily Activity' : '✅ Success Rate'
+  const legendColors = mode === 'activity'
+    ? ['#ebedf0', '#9be9a8', '#40c463', '#30a14e', '#00b578']
+    : ['#10b981', '#34d399', '#a7f3d0', '#fcd34d', '#f97316', '#ef4444']
+  const legendStart = mode === 'activity' ? 'Less' : '100%'
+  const legendEnd = mode === 'activity' ? 'More' : 'Fail'
+
+  return (
+    <div ref={containerRef} className="widget" style={{ width: '100%', flex: 1, minHeight: 0, position: 'relative', overflow: 'visible', display: 'flex', flexDirection: 'column' }}>
+      <div className="widget-header">
+        <span>{title}</span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '4px', marginLeft: 'auto', fontSize: '10px', color: 'var(--text-muted)' }}>
+          <span>{legendStart}</span>
+          {legendColors.map(c => (
+            <div key={c} style={{ width: '11px', height: '11px', borderRadius: '2px', background: c, border: '1px solid rgba(0,0,0,0.06)' }} />
+          ))}
+          <span>{legendEnd}</span>
+        </div>
+      </div>
+      <div style={{ padding: '8px 0 12px', flex: 1, minHeight: 0, overflow: 'hidden' }}>
+        <svg viewBox={`0 0 ${leftPad + gridWidth + 8} ${topPad + gridHeight + 4}`} style={{ display: 'block', width: '100%', height: '100%' }} preserveAspectRatio="none">
+          {monthLabels.map((m, i) => (
+            <text key={i} x={leftPad + m.col * step} y={14} fontSize={10} fill="#94a3b8" fontWeight={500}>
+              {m.label}
+            </text>
+          ))}
+          {[1, 3, 5].map(d => (
+            <text key={d} x={0} y={topPad + d * step + cellSize - 2} fontSize={10} fill="#94a3b8" fontWeight={500}>
+              {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][d]}
+            </text>
+          ))}
+          {visibleWeeks.map((week, wi) =>
+            week.map((day, di) => {
+              const x = leftPad + wi * step
+              const y = topPad + di * step
+              const isNoData = day.metric < 0
+              return (
+                <rect
+                  key={`${wi}-${di}`}
+                  x={x}
+                  y={y}
+                  width={cellSize}
+                  height={cellSize}
+                  rx={2}
+                  ry={2}
+                  fill={isNoData ? '#ebedf0' : getColor(day.metric)}
+                  stroke={hoveredCell?.date === day.date.toISOString().split('T')[0] ? '#1e293b' : 'rgba(0,0,0,0.06)'}
+                  strokeWidth={hoveredCell?.date === day.date.toISOString().split('T')[0] ? 2 : 1}
+                  style={{ cursor: 'pointer', transition: 'stroke 0.1s' }}
+                  onMouseEnter={(e) => {
+                    const rect = e.currentTarget.getBoundingClientRect()
+                    const parent = containerRef.current!.getBoundingClientRect()
+                    setHoveredCell({
+                      date: day.date.toISOString().split('T')[0],
+                      data: day.data,
+                      x: rect.left - parent.left + cellSize / 2,
+                      y: rect.top - parent.top,
+                    })
+                  }}
+                  onMouseLeave={() => setHoveredCell(null)}
+                />
+              )
+            })
+          )}
+        </svg>
+      </div>
+      {hoveredCell && (() => {
+        const d = hoveredCell.data
+        const dateObj = new Date(hoveredCell.date + 'T12:00:00')
+        const dateLabel = dateObj.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })
+
+        let content: React.ReactNode
+        if (mode === 'activity') {
+          const total = d ? value(d.total_tokens) : 0
+          if (total === 0) {
+            content = <div style={{ color: '#94a3b8' }}>No activity</div>
+          } else {
+            const hCached = d ? value(d.cached_tokens) : 0
+            const hInput = d ? Math.max(0, value(d.prompt_tokens) - hCached) : 0
+            const hOutput = d ? value(d.completion_tokens) : 0
+            const requests = d ? value(d.requests) : 0
+            const cost = d ? value(d.total_cost_usd) : 0
+            content = (
+              <>
+                <div style={{ display: 'flex', justifyContent: 'space-between', gap: '16px', marginBottom: '3px' }}>
+                  <span style={{ color: '#94a3b8' }}>Input:</span>
+                  <span style={{ fontWeight: 600 }}>{formatNumber(hInput)}</span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', gap: '16px', marginBottom: '3px' }}>
+                  <span style={{ color: '#40c463' }}>Cached:</span>
+                  <span style={{ fontWeight: 600 }}>{formatNumber(hCached)}</span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', gap: '16px', marginBottom: '3px' }}>
+                  <span style={{ color: '#3b82f6' }}>Output:</span>
+                  <span style={{ fontWeight: 600 }}>{formatNumber(hOutput)}</span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', gap: '16px', marginTop: '6px', paddingTop: '6px', borderTop: '1px solid rgba(255,255,255,0.2)' }}>
+                  <span style={{ fontWeight: 700 }}>Total:</span>
+                  <span style={{ fontWeight: 800 }}>{formatNumber(total)}</span>
+                </div>
+                {cost > 0 && (
+                  <div style={{ display: 'flex', justifyContent: 'space-between', gap: '16px', marginTop: '3px' }}>
+                    <span style={{ color: '#f472b6' }}>Cost:</span>
+                    <span style={{ fontWeight: 800, color: '#f472b6' }}>{formatCost(cost)}</span>
+                  </div>
+                )}
+                <div style={{ display: 'flex', justifyContent: 'space-between', gap: '16px', marginTop: '3px' }}>
+                  <span style={{ color: '#f43f5e' }}>Requests:</span>
+                  <span style={{ fontWeight: 600, color: '#f43f5e' }}>{formatNumber(requests)}</span>
+                </div>
+              </>
+            )
+          }
+        } else {
+          const total = d ? value(d.requests) : 0
+          if (total === 0) {
+            content = <div style={{ color: '#94a3b8' }}>No requests</div>
+          } else {
+            const failed = d ? value(d.failed_requests) : 0
+            const successful = d ? value(d.successful_requests) : 0
+            const rate = ((total - failed) / total * 100)
+            content = (
+              <>
+                <div style={{ display: 'flex', justifyContent: 'space-between', gap: '16px', marginBottom: '3px' }}>
+                  <span style={{ color: '#94a3b8' }}>Success Rate:</span>
+                  <span style={{ fontWeight: 700, color: rate >= 99 ? '#10b981' : rate >= 90 ? '#fcd34d' : '#ef4444' }}>{rate.toFixed(1)}%</span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', gap: '16px', marginBottom: '3px' }}>
+                  <span style={{ color: '#10b981' }}>Successful:</span>
+                  <span style={{ fontWeight: 600 }}>{formatNumber(successful)}</span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', gap: '16px', marginBottom: '3px' }}>
+                  <span style={{ color: '#ef4444' }}>Failed:</span>
+                  <span style={{ fontWeight: 600 }}>{formatNumber(failed)}</span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', gap: '16px', marginTop: '6px', paddingTop: '6px', borderTop: '1px solid rgba(255,255,255,0.2)' }}>
+                  <span style={{ fontWeight: 700 }}>Total:</span>
+                  <span style={{ fontWeight: 800 }}>{formatNumber(total)}</span>
+                </div>
+              </>
+            )
+          }
+        }
+
+        return (
+          <div style={{
+            position: 'absolute',
+            left: hoveredCell.x,
+            top: hoveredCell.y - 8,
+            transform: 'translate(-50%, -100%)',
+            backgroundColor: 'rgba(15, 23, 42, 0.95)',
+            color: 'white',
+            padding: '10px 14px',
+            borderRadius: '8px',
+            fontSize: '12px',
+            zIndex: 200,
+            pointerEvents: 'none',
+            boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)',
+            minWidth: '180px',
+            border: '1px solid rgba(255, 255, 255, 0.1)',
+            whiteSpace: 'nowrap',
+          }}>
+            <div style={{ fontWeight: 600, marginBottom: '6px', borderBottom: '1px solid rgba(255,255,255,0.2)', paddingBottom: '4px' }}>
+              {dateLabel}
+            </div>
+            {content}
+          </div>
+        )
+      })()}
+    </div>
+  )
+}
