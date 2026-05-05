@@ -19,6 +19,7 @@ from .database import (
     log_usage,
     resolve_base_url_id,
     summarize_usage,
+    summarize_usage_by_provider,
     summarize_usage_by_source,
     summarize_usage_window,
 )
@@ -218,6 +219,23 @@ async def usage_by_source(
     client_source: str | None = None,
 ):
     return summarize_usage_by_source(
+        since=since,
+        until=until,
+        provider=provider,
+        model=model,
+        client_source=client_source,
+    )
+
+
+@app.get("/usage/by-provider")
+async def usage_by_provider(
+    since: str | None = None,
+    until: str | None = None,
+    provider: str | None = None,
+    model: str | None = None,
+    client_source: str | None = None,
+):
+    return summarize_usage_by_provider(
         since=since,
         until=until,
         provider=provider,

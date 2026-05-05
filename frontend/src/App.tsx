@@ -24,6 +24,22 @@ type UsageSummary = {
   failed_requests: number
 }
 
+type ProviderUsage = {
+  provider: string
+  requests: number | null
+  prompt_tokens: number | null
+  completion_tokens: number | null
+  reasoning_tokens: number | null
+  cached_tokens: number | null
+  total_tokens: number | null
+  avg_latency_ms: number | null
+  input_cost_usd: number | null
+  output_cost_usd: number | null
+  total_cost_usd: number | null
+  successful_requests: number | null
+  failed_requests: number | null
+}
+
 type SourceUsage = {
   client_source: string | null
   requests: number | null
@@ -746,6 +762,130 @@ function ModelTokenChart({
   );
 }
 
+function getProviderIcon(provider: string) {
+  const p = provider.toLowerCase()
+  const style = { width: 14, height: 14, display: 'block', objectFit: 'contain' as const }
+  if (p.includes('anthropic')) return <img src="/models/claude-ai-icon.svg" alt="" style={style} />
+  if (p.includes('openai')) return <img src="/models/chatgpt.svg" alt="" style={style} />
+  if (p.includes('google')) return <img src="/models/google-gemini-icon.svg" alt="" style={style} />
+  if (p.includes('minimax')) return <img src="/models/minimax-color.svg" alt="" style={style} />
+  if (p.includes('xiaomi')) return <img src="/models/xiaomi.svg" alt="" style={style} />
+  return null
+}
+
+function ProviderTokenChart({
+  data,
+  title
+}: {
+  data: ProviderUsage[],
+  title: string
+}) {
+  const [metric, setMetric] = useState<'tokens' | 'cost'>('tokens');
+
+  const sorted = useMemo(() => {
+    return [...data].sort((a, b) =>
+      metric === 'tokens'
+        ? (b.total_tokens ?? 0) - (a.total_tokens ?? 0)
+        : (b.total_cost_usd ?? 0) - (a.total_cost_usd ?? 0)
+    );
+  }, [data, metric]);
+
+  const maxValue = Math.max(
+    ...sorted.map(s => metric === 'tokens' ? (s.total_tokens ?? 0) : (s.total_cost_usd ?? 0)),
+    1
+  );
+
+  const providerColors: Record<string, string> = {
+    'anthropic': '#cc7c5e',
+    'google': '#528af2',
+    'openai': '#94a3b8',
+  };
+
+  return (
+    <div className="widget" style={{ flex: 1 }}>
+      <div className="widget-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <span>🏢 {title}</span>
+        <div className="tab-group" style={{ display: 'flex', background: '#f1f5f9', padding: '2px', borderRadius: '6px' }}>
+          <button
+            onClick={() => setMetric('tokens')}
+            style={{
+              padding: '2px 8px',
+              fontSize: '10px',
+              borderRadius: '4px',
+              fontWeight: 600,
+              border: 'none',
+              cursor: 'pointer',
+              background: metric === 'tokens' ? 'white' : 'transparent',
+              color: metric === 'tokens' ? 'var(--color-blue)' : '#64748b',
+              boxShadow: metric === 'tokens' ? '0 1px 2px rgba(0,0,0,0.05)' : 'none'
+            }}
+          >Tokens</button>
+          <button
+            onClick={() => setMetric('cost')}
+            style={{
+              padding: '2px 8px',
+              fontSize: '10px',
+              borderRadius: '4px',
+              fontWeight: 600,
+              border: 'none',
+              cursor: 'pointer',
+              background: metric === 'cost' ? 'white' : 'transparent',
+              color: metric === 'cost' ? 'var(--color-blue)' : '#64748b',
+              boxShadow: metric === 'cost' ? '0 1px 2px rgba(0,0,0,0.05)' : 'none'
+            }}
+          >Cost</button>
+        </div>
+      </div>
+      <div style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
+        {sorted.length === 0 ? (
+          <div style={{ padding: '40px', textAlign: 'center', color: 'var(--text-muted)' }}>No data available</div>
+        ) : (
+          sorted.map((s, index) => {
+            const currentVal = metric === 'tokens' ? (s.total_tokens ?? 0) : (s.total_cost_usd ?? 0);
+            const percentage = (currentVal / maxValue) * 100;
+            const name = s.provider;
+            const color = providerColors[name.toLowerCase()] || PALETTE[index % PALETTE.length];
+
+            return (
+              <div key={`${name}-${index}`} style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '12px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontWeight: 600 }}>
+                    {getProviderIcon(name)}
+                    <span style={{
+                      padding: '1px 6px',
+                      borderRadius: '4px',
+                      backgroundColor: '#f1f5f9',
+                      color: '#475569',
+                      fontSize: '11px',
+                      fontWeight: 600,
+                      border: '1px solid #e2e8f0'
+                    }}>{name}</span>
+                  </div>
+                  <div style={{ color: 'var(--text-secondary)', fontWeight: 700 }}>
+                    {metric === 'tokens' ? formatCompact(currentVal) : formatCost(currentVal)}
+                  </div>
+                </div>
+                <div style={{
+                  height: '8px',
+                  width: '100%',
+                  background: '#f1f5f9',
+                  borderRadius: '4px',
+                  overflow: 'hidden',
+                  display: 'flex'
+                }}>
+                  <div
+                    style={{ width: `${percentage}%`, height: '100%', background: color }}
+                  />
+                </div>
+              </div>
+            );
+          })
+        )}
+      </div>
+    </div>
+  );
+}
+
 function SourceTokenChart({
   data,
   title
@@ -1114,6 +1254,7 @@ function App() {
   const [activeSource, setActiveSource] = useState<string | null>(null)
   const [sources, setSources] = useState<string[]>([])
   const [sourceUsage, setSourceUsage] = useState<SourceUsage[]>([])
+  const [providerUsage, setProviderUsage] = useState<ProviderUsage[]>([])
   const [dateRange, setDateRange] = useState<DateRangeOption>('24h')
   const [customSince, setCustomSince] = useState('')
   const [customUntil, setCustomUntil] = useState('')
@@ -1222,6 +1363,15 @@ function App() {
         if (until) bySourceUrl.searchParams.set('until', until)
         if (activeSource) bySourceUrl.searchParams.set('client_source', activeSource)
 
+        const byProviderUrl = new URL('/usage/by-provider', window.location.origin)
+        if (activeFilter) {
+          byProviderUrl.searchParams.set('provider', activeFilter.provider)
+          if (activeFilter.model) byProviderUrl.searchParams.set('model', activeFilter.model)
+        }
+        if (since) byProviderUrl.searchParams.set('since', since)
+        if (until) byProviderUrl.searchParams.set('until', until)
+        if (activeSource) byProviderUrl.searchParams.set('client_source', activeSource)
+
         const countUrl = new URL('/usage/count', window.location.origin)
         if (activeFilter) {
           countUrl.searchParams.set('provider', activeFilter.provider)
@@ -1244,31 +1394,34 @@ function App() {
           dailyUrl.searchParams.set('granularity', 'hour')
         }
 
-        const [summaryResponse, usageResponse, countResponse, dailyResponse, bySourceResponse] = await Promise.all([
+        const [summaryResponse, usageResponse, countResponse, dailyResponse, bySourceResponse, byProviderResponse] = await Promise.all([
           fetch(summaryUrl.toString(), { signal: controller.signal }),
           fetch(usageUrl.toString(), { signal: controller.signal }),
           fetch(countUrl.toString(), { signal: controller.signal }),
           fetch(dailyUrl.toString(), { signal: controller.signal }),
           fetch(bySourceUrl.toString(), { signal: controller.signal }),
+          fetch(byProviderUrl.toString(), { signal: controller.signal }),
         ])
 
-        if (!summaryResponse.ok || !usageResponse.ok || !countResponse.ok || !dailyResponse.ok || !bySourceResponse.ok) {
+        if (!summaryResponse.ok || !usageResponse.ok || !countResponse.ok || !dailyResponse.ok || !bySourceResponse.ok || !byProviderResponse.ok) {
           throw new Error('Failed to fetch usage data')
         }
 
-        const [summaryData, usageData, countData, dailyData, bySourceData] = (await Promise.all([
+        const [summaryData, usageData, countData, dailyData, bySourceData, byProviderData] = (await Promise.all([
           summaryResponse.json(),
           usageResponse.json(),
           countResponse.json(),
           dailyResponse.json(),
           bySourceResponse.json(),
-        ])) as [UsageSummary[], UsageRow[], { total: number }, DailyUsage[], SourceUsage[]]
+          byProviderResponse.json(),
+        ])) as [UsageSummary[], UsageRow[], { total: number }, DailyUsage[], SourceUsage[], ProviderUsage[]]
 
         setSummary(summaryData)
         setUsageRows(usageData)
         setTotalLogs(countData.total)
         setDailyUsage(dailyData)
         setSourceUsage(bySourceData)
+        setProviderUsage(byProviderData)
       } catch (err) {
         if (controller.signal.aborted) return
         setError(err instanceof Error ? err.message : 'Unknown error')
@@ -1534,17 +1687,22 @@ function App() {
 
               <UsageHeatmap activeFilter={activeFilter} activeSource={activeSource} />
 
+              <TrendChart
+                data={dailyUsage}
+                title={`${(dateRange === '5h' || dateRange === '24h') ? 'Hourly' : 'Daily'} Usage Trend`}
+              />
+
               <div style={{ display: 'flex', gap: '24px', alignItems: 'stretch' }}>
-                <div style={{ flex: 2 }}>
-                  <TrendChart
-                    data={dailyUsage}
-                    title={`${(dateRange === '5h' || dateRange === '24h') ? 'Hourly' : 'Daily'} Usage Trend`}
-                  />
-                </div>
                 <div style={{ flex: 1 }}>
                   <ModelTokenChart
                     summary={summary}
                     title="Usage by Model"
+                  />
+                </div>
+                <div style={{ flex: 1 }}>
+                  <ProviderTokenChart
+                    data={providerUsage}
+                    title="Usage by Provider"
                   />
                 </div>
                 <div style={{ flex: 1 }}>
