@@ -88,6 +88,63 @@ class Usage(Base):
     base_url: Mapped[BaseUrl | None] = relationship(back_populates="usages")
 
 
+class UsageDaily(Base):
+    __tablename__ = "usage_daily"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    date: Mapped[str] = mapped_column(String, nullable=False)
+    provider: Mapped[str] = mapped_column(String, nullable=False)
+    model: Mapped[str] = mapped_column(String, nullable=False)
+    client_source: Mapped[str] = mapped_column(
+        String, nullable=False, server_default=text("''")
+    )
+    request_count: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default=text("0")
+    )
+    prompt_tokens: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default=text("0")
+    )
+    completion_tokens: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default=text("0")
+    )
+    reasoning_tokens: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default=text("0")
+    )
+    cached_tokens: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default=text("0")
+    )
+    total_tokens: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default=text("0")
+    )
+    tool_tokens: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default=text("0")
+    )
+    cache_creation_tokens: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default=text("0")
+    )
+    prompt_length: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default=text("0")
+    )
+    input_cost_usd: Mapped[Decimal] = mapped_column(
+        Numeric(18, 8), nullable=False, server_default=text("0")
+    )
+    output_cost_usd: Mapped[Decimal] = mapped_column(
+        Numeric(18, 8), nullable=False, server_default=text("0")
+    )
+    total_cost_usd: Mapped[Decimal] = mapped_column(
+        Numeric(18, 8), nullable=False, server_default=text("0")
+    )
+    successful_requests: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default=text("0")
+    )
+    failed_requests: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default=text("0")
+    )
+    latency_sum_ms: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default=text("0")
+    )
+
+
 DB_URL_ENV_VAR = "LLM_TRACKER_DB_URL"
 
 _engine_cache: dict[str, Engine] = {}
@@ -216,9 +273,82 @@ def resolve_base_url_id(
 
 
 def log_usage(usage: Usage, db_path: str | None = None) -> None:
-    """Persist a single usage row to the configured or explicitly provided DB."""
-    with Session(get_engine(db_path)) as session:
+    """Persist a single usage row and update the daily aggregation table."""
+    with Session(get_engine(db_path), expire_on_commit=False) as session:
         session.add(usage)
+        session.commit()
+    try:
+        upsert_daily_aggregate(usage, db_path=db_path)
+    except Exception:
+        import logging
+
+        logging.getLogger(__name__).warning(
+            "Failed to update daily aggregate for usage ts=%s", usage.ts
+        )
+
+
+def upsert_daily_aggregate(usage: Usage, db_path: str | None = None) -> None:
+    """Incrementally update the daily aggregation table for a single usage row."""
+    date = usage.ts[:10]
+    client_source = usage.client_source or ""
+    is_success = usage.status is None or usage.status < 400
+    latency = usage.latency_ms or 0
+    input_cost = Decimal(str(usage.input_cost_usd))
+    output_cost = Decimal(str(usage.output_cost_usd))
+    total_cost = Decimal(str(usage.total_cost_usd))
+
+    engine = get_engine(db_path)
+    with Session(engine) as session:
+        existing = session.scalar(
+            select(UsageDaily).where(
+                and_(
+                    UsageDaily.date == date,
+                    UsageDaily.provider == usage.provider,
+                    UsageDaily.model == usage.model,
+                    UsageDaily.client_source == client_source,
+                )
+            )
+        )
+        if existing:
+            existing.request_count += 1
+            existing.prompt_tokens += usage.prompt_tokens or 0
+            existing.completion_tokens += usage.completion_tokens or 0
+            existing.reasoning_tokens += usage.reasoning_tokens or 0
+            existing.cached_tokens += usage.cached_tokens or 0
+            existing.total_tokens += usage.total_tokens or 0
+            existing.tool_tokens += usage.tool_tokens or 0
+            existing.cache_creation_tokens += usage.cache_creation_tokens or 0
+            existing.prompt_length += usage.prompt_length
+            existing.input_cost_usd += input_cost
+            existing.output_cost_usd += output_cost
+            existing.total_cost_usd += total_cost
+            existing.successful_requests += 1 if is_success else 0
+            existing.failed_requests += 0 if is_success else 1
+            existing.latency_sum_ms += latency
+        else:
+            session.add(
+                UsageDaily(
+                    date=date,
+                    provider=usage.provider,
+                    model=usage.model,
+                    client_source=client_source,
+                    request_count=1,
+                    prompt_tokens=usage.prompt_tokens or 0,
+                    completion_tokens=usage.completion_tokens or 0,
+                    reasoning_tokens=usage.reasoning_tokens or 0,
+                    cached_tokens=usage.cached_tokens or 0,
+                    total_tokens=usage.total_tokens or 0,
+                    tool_tokens=usage.tool_tokens or 0,
+                    cache_creation_tokens=usage.cache_creation_tokens or 0,
+                    prompt_length=usage.prompt_length,
+                    input_cost_usd=input_cost,
+                    output_cost_usd=output_cost,
+                    total_cost_usd=total_cost,
+                    successful_requests=1 if is_success else 0,
+                    failed_requests=0 if is_success else 1,
+                    latency_sum_ms=latency,
+                )
+            )
         session.commit()
 
 
@@ -830,6 +960,55 @@ def summarize_usage_by_provider(
         return [_row_to_dict(row) for row in connection.execute(query)]
 
 
+def summarize_usage_daily(
+    *,
+    since: str | None = None,
+    until: str | None = None,
+    provider: str | None = None,
+    model: str | None = None,
+    client_source: str | None = None,
+) -> list[dict[str, Any]]:
+    """Aggregate usage_daily totals by provider and model for dashboard summaries."""
+    filters: list[Any] = []
+    if since:
+        filters.append(UsageDaily.date >= since[:10])
+    if until:
+        filters.append(UsageDaily.date <= until[:10])
+    if provider:
+        filters.append(UsageDaily.provider == provider)
+    if model:
+        filters.append(UsageDaily.model == model)
+    if client_source:
+        filters.append(UsageDaily.client_source == (client_source or ""))
+
+    query = (
+        select(
+            UsageDaily.provider,
+            UsageDaily.model,
+            func.sum(UsageDaily.request_count).label("requests"),
+            func.sum(UsageDaily.prompt_tokens).label("prompt_tokens"),
+            func.sum(UsageDaily.completion_tokens).label("completion_tokens"),
+            func.sum(UsageDaily.reasoning_tokens).label("reasoning_tokens"),
+            func.sum(UsageDaily.cached_tokens).label("cached_tokens"),
+            func.sum(UsageDaily.total_tokens).label("total_tokens"),
+            (
+                func.sum(UsageDaily.latency_sum_ms) / func.sum(UsageDaily.request_count)
+            ).label("avg_latency_ms"),
+            func.sum(UsageDaily.input_cost_usd).label("input_cost_usd"),
+            func.sum(UsageDaily.output_cost_usd).label("output_cost_usd"),
+            func.sum(UsageDaily.total_cost_usd).label("total_cost_usd"),
+            func.sum(UsageDaily.successful_requests).label("successful_requests"),
+            func.sum(UsageDaily.failed_requests).label("failed_requests"),
+        )
+        .group_by(UsageDaily.provider, UsageDaily.model)
+        .order_by(func.sum(UsageDaily.total_tokens).desc())
+    )
+    if filters:
+        query = query.where(and_(*filters))
+    with get_engine().connect() as connection:
+        return [_row_to_dict(row) for row in connection.execute(query)]
+
+
 def _parse_iso8601(ts: str) -> datetime:
     normalized = ts.replace("Z", "+00:00")
     parsed = datetime.fromisoformat(normalized)
@@ -929,3 +1108,45 @@ def aggregate_usage_by_period(
             {_normalize_value(k): _normalize_value(v) for k, v in bucket.items()}
         )
     return result
+
+
+def aggregate_daily_by_period(
+    *,
+    since: str | None = None,
+    until: str | None = None,
+    provider: str | None = None,
+    model: str | None = None,
+    client_source: str | None = None,
+) -> list[dict[str, Any]]:
+    """Read daily-bucketed usage from the pre-aggregated usage_daily table."""
+    filters: list[Any] = []
+    if since:
+        filters.append(UsageDaily.date >= since[:10])
+    if until:
+        filters.append(UsageDaily.date <= until[:10])
+    if provider:
+        filters.append(UsageDaily.provider == provider)
+    if model:
+        filters.append(UsageDaily.model == model)
+    if client_source:
+        filters.append(UsageDaily.client_source == (client_source or ""))
+
+    query = (
+        select(
+            UsageDaily.date.label("period"),
+            func.sum(UsageDaily.request_count).label("requests"),
+            func.sum(UsageDaily.prompt_tokens).label("prompt_tokens"),
+            func.sum(UsageDaily.completion_tokens).label("completion_tokens"),
+            func.sum(UsageDaily.cached_tokens).label("cached_tokens"),
+            func.sum(UsageDaily.total_tokens).label("total_tokens"),
+            func.sum(UsageDaily.input_cost_usd).label("input_cost_usd"),
+            func.sum(UsageDaily.output_cost_usd).label("output_cost_usd"),
+            func.sum(UsageDaily.total_cost_usd).label("total_cost_usd"),
+        )
+        .group_by(UsageDaily.date)
+        .order_by(UsageDaily.date)
+    )
+    if filters:
+        query = query.where(and_(*filters))
+    with get_engine().connect() as connection:
+        return [_row_to_dict(row) for row in connection.execute(query)]

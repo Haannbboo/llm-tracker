@@ -145,4 +145,102 @@ def migrate_database(db_path: str | None = None) -> list[str]:
         if _drop_column(engine, "base_urls", "last_error"):
             applied.append("base_urls.last_error")
 
+    if not _table_exists(engine, "usage_daily"):
+        if engine.dialect.name == "postgresql":
+            create_sql = """
+                CREATE TABLE usage_daily (
+                    id SERIAL PRIMARY KEY,
+                    date TEXT NOT NULL,
+                    provider TEXT NOT NULL,
+                    model TEXT NOT NULL,
+                    client_source TEXT NOT NULL DEFAULT '',
+                    request_count INTEGER NOT NULL DEFAULT 0,
+                    prompt_tokens INTEGER NOT NULL DEFAULT 0,
+                    completion_tokens INTEGER NOT NULL DEFAULT 0,
+                    reasoning_tokens INTEGER NOT NULL DEFAULT 0,
+                    cached_tokens INTEGER NOT NULL DEFAULT 0,
+                    total_tokens INTEGER NOT NULL DEFAULT 0,
+                    tool_tokens INTEGER NOT NULL DEFAULT 0,
+                    cache_creation_tokens INTEGER NOT NULL DEFAULT 0,
+                    prompt_length INTEGER NOT NULL DEFAULT 0,
+                    input_cost_usd NUMERIC(18, 8) NOT NULL DEFAULT 0,
+                    output_cost_usd NUMERIC(18, 8) NOT NULL DEFAULT 0,
+                    total_cost_usd NUMERIC(18, 8) NOT NULL DEFAULT 0,
+                    successful_requests INTEGER NOT NULL DEFAULT 0,
+                    failed_requests INTEGER NOT NULL DEFAULT 0,
+                    latency_sum_ms INTEGER NOT NULL DEFAULT 0,
+                    UNIQUE(date, provider, model, client_source)
+                )
+            """
+        else:
+            create_sql = """
+                CREATE TABLE usage_daily (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    date TEXT NOT NULL,
+                    provider TEXT NOT NULL,
+                    model TEXT NOT NULL,
+                    client_source TEXT NOT NULL DEFAULT '',
+                    request_count INTEGER NOT NULL DEFAULT 0,
+                    prompt_tokens INTEGER NOT NULL DEFAULT 0,
+                    completion_tokens INTEGER NOT NULL DEFAULT 0,
+                    reasoning_tokens INTEGER NOT NULL DEFAULT 0,
+                    cached_tokens INTEGER NOT NULL DEFAULT 0,
+                    total_tokens INTEGER NOT NULL DEFAULT 0,
+                    tool_tokens INTEGER NOT NULL DEFAULT 0,
+                    cache_creation_tokens INTEGER NOT NULL DEFAULT 0,
+                    prompt_length INTEGER NOT NULL DEFAULT 0,
+                    input_cost_usd NUMERIC(18, 8) NOT NULL DEFAULT 0,
+                    output_cost_usd NUMERIC(18, 8) NOT NULL DEFAULT 0,
+                    total_cost_usd NUMERIC(18, 8) NOT NULL DEFAULT 0,
+                    successful_requests INTEGER NOT NULL DEFAULT 0,
+                    failed_requests INTEGER NOT NULL DEFAULT 0,
+                    latency_sum_ms INTEGER NOT NULL DEFAULT 0,
+                    UNIQUE(date, provider, model, client_source)
+                )
+            """
+        with engine.begin() as connection:
+            connection.execute(text(create_sql))
+        applied.append("usage_daily.create")
+
+    if _table_exists(engine, "usage_daily") and _table_exists(engine, "usage"):
+        with engine.connect() as connection:
+            count = connection.execute(
+                text("SELECT COUNT(*) FROM usage_daily")
+            ).scalar()
+        if count == 0:
+            with engine.begin() as connection:
+                connection.execute(
+                    text("""
+                        INSERT INTO usage_daily (
+                            date, provider, model, client_source,
+                            request_count, prompt_tokens, completion_tokens,
+                            reasoning_tokens, cached_tokens, total_tokens,
+                            tool_tokens, cache_creation_tokens, prompt_length,
+                            input_cost_usd, output_cost_usd, total_cost_usd,
+                            successful_requests, failed_requests, latency_sum_ms
+                        )
+                        SELECT
+                            substr(ts, 1, 10) as date,
+                            provider, model, COALESCE(client_source, ''),
+                            COUNT(*),
+                            COALESCE(SUM(prompt_tokens), 0),
+                            COALESCE(SUM(completion_tokens), 0),
+                            COALESCE(SUM(reasoning_tokens), 0),
+                            COALESCE(SUM(cached_tokens), 0),
+                            COALESCE(SUM(total_tokens), 0),
+                            COALESCE(SUM(tool_tokens), 0),
+                            COALESCE(SUM(cache_creation_tokens), 0),
+                            COALESCE(SUM(prompt_length), 0),
+                            COALESCE(SUM(input_cost_usd), 0),
+                            COALESCE(SUM(output_cost_usd), 0),
+                            COALESCE(SUM(total_cost_usd), 0),
+                            SUM(CASE WHEN status IS NULL OR status < 400 THEN 1 ELSE 0 END),
+                            SUM(CASE WHEN status >= 400 THEN 1 ELSE 0 END),
+                            COALESCE(SUM(latency_ms), 0)
+                        FROM usage
+                        GROUP BY substr(ts, 1, 10), provider, model, COALESCE(client_source, '')
+                    """)
+                )
+            applied.append("usage_daily.backfill")
+
     return applied

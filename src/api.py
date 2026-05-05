@@ -12,6 +12,7 @@ from config.app import (
 from .costs import calculate_costs
 from .database import (
     Usage,
+    aggregate_daily_by_period,
     aggregate_usage_by_period,
     count_usage,
     distinct_client_sources,
@@ -23,6 +24,7 @@ from .database import (
     summarize_usage,
     summarize_usage_by_provider,
     summarize_usage_by_source,
+    summarize_usage_daily,
     summarize_usage_window,
 )
 from contextlib import asynccontextmanager
@@ -211,7 +213,7 @@ async def usage_summary(
     model: str | None = None,
     client_source: str | None = None,
 ):
-    return summarize_usage(
+    return summarize_usage_daily(
         since=since,
         until=until,
         provider=provider,
@@ -264,14 +266,22 @@ async def usage_daily(
     granularity: str = "day",
     tz_offset: str = "+00:00",
 ):
-    return aggregate_usage_by_period(
+    if granularity == "hour":
+        return aggregate_usage_by_period(
+            since=since,
+            until=until,
+            provider=provider,
+            model=model,
+            client_source=client_source,
+            granularity=granularity,
+            tz_offset=tz_offset,
+        )
+    return aggregate_daily_by_period(
         since=since,
         until=until,
         provider=provider,
         model=model,
         client_source=client_source,
-        granularity=granularity,
-        tz_offset=tz_offset,
     )
 
 

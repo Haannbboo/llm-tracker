@@ -274,7 +274,7 @@ def test_usage_summary_endpoint_passes_client_source(api_module, monkeypatch):
         captured.update(kwargs)
         return []
 
-    monkeypatch.setattr(api_module, "summarize_usage", fake_summary)
+    monkeypatch.setattr(api_module, "summarize_usage_daily", fake_summary)
 
     response = TestClient(api_module.app).get(
         "/usage/summary", params={"client_source": "gemini-cli"}
@@ -290,7 +290,7 @@ def test_usage_daily_endpoint_passes_client_source(api_module, monkeypatch):
         captured.update(kwargs)
         return []
 
-    monkeypatch.setattr(api_module, "aggregate_usage_by_period", fake_daily)
+    monkeypatch.setattr(api_module, "aggregate_daily_by_period", fake_daily)
 
     response = TestClient(api_module.app).get(
         "/usage/daily", params={"client_source": "claude-code"}

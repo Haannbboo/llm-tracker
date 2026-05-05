@@ -1194,3 +1194,583 @@ def test_ensure_column_ignores_duplicate_column_from_concurrent_migration(
         )
         is False
     )
+
+
+def test_upsert_daily_aggregate_inserts_and_updates(database_module, isolated_home):
+    db_path = str(isolated_home / "usage.db")
+    database_module.init_db(db_path)
+
+    usage1 = database_module.Usage(
+        ts="2026-04-17T10:00:00+00:00",
+        provider="anthropic",
+        model="claude-sonnet-4-6",
+        client_source="claude-code",
+        session_id="s1",
+        endpoint="/v1/messages",
+        prompt_tokens=100,
+        prompt_length=500,
+        completion_tokens=50,
+        reasoning_tokens=10,
+        cached_tokens=20,
+        total_tokens=160,
+        latency_ms=200,
+        ttft_ms=50,
+        tool_tokens=5,
+        cache_creation_tokens=0,
+        input_cost_usd=0.001,
+        output_cost_usd=0.002,
+        total_cost_usd=0.003,
+        status=200,
+        base_url_id=None,
+    )
+    database_module.log_usage(usage1, db_path=db_path)
+
+    # Verify insert
+    with database_module.get_engine(db_path).connect() as conn:
+        rows = list(conn.execute(database_module.select(database_module.UsageDaily)))
+    assert len(rows) == 1
+    assert rows[0].request_count == 1
+    assert rows[0].prompt_tokens == 100
+    assert rows[0].latency_sum_ms == 200
+    assert rows[0].successful_requests == 1
+    assert rows[0].failed_requests == 0
+
+    # Same date, provider, model, client_source -> upsert
+    usage2 = database_module.Usage(
+        ts="2026-04-17T11:00:00+00:00",
+        provider="anthropic",
+        model="claude-sonnet-4-6",
+        client_source="claude-code",
+        session_id="s1",
+        endpoint="/v1/messages",
+        prompt_tokens=200,
+        prompt_length=1000,
+        completion_tokens=100,
+        reasoning_tokens=20,
+        cached_tokens=40,
+        total_tokens=320,
+        latency_ms=300,
+        ttft_ms=80,
+        tool_tokens=10,
+        cache_creation_tokens=0,
+        input_cost_usd=0.002,
+        output_cost_usd=0.004,
+        total_cost_usd=0.006,
+        status=500,
+        base_url_id=None,
+    )
+    database_module.log_usage(usage2, db_path=db_path)
+
+    with database_module.get_engine(db_path).connect() as conn:
+        rows = list(conn.execute(database_module.select(database_module.UsageDaily)))
+    assert len(rows) == 1
+    assert rows[0].request_count == 2
+    assert rows[0].prompt_tokens == 300
+    assert rows[0].completion_tokens == 150
+    assert rows[0].latency_sum_ms == 500
+    assert rows[0].successful_requests == 1
+    assert rows[0].failed_requests == 1
+    assert float(rows[0].total_cost_usd) == 0.009
+
+
+def test_upsert_daily_aggregate_handles_null_client_source(
+    database_module, isolated_home
+):
+    db_path = str(isolated_home / "usage.db")
+    database_module.init_db(db_path)
+
+    usage = database_module.Usage(
+        ts="2026-04-17T10:00:00+00:00",
+        provider="openai",
+        model="gpt-4",
+        client_source=None,
+        session_id=None,
+        endpoint="/v1/chat/completions",
+        prompt_tokens=50,
+        prompt_length=200,
+        completion_tokens=25,
+        reasoning_tokens=None,
+        cached_tokens=None,
+        total_tokens=75,
+        latency_ms=100,
+        ttft_ms=None,
+        tool_tokens=None,
+        cache_creation_tokens=None,
+        input_cost_usd=0.001,
+        output_cost_usd=0.002,
+        total_cost_usd=0.003,
+        status=200,
+        base_url_id=None,
+    )
+    database_module.log_usage(usage, db_path=db_path)
+
+    with database_module.get_engine(db_path).connect() as conn:
+        rows = list(conn.execute(database_module.select(database_module.UsageDaily)))
+    assert len(rows) == 1
+    assert rows[0].client_source == ""
+    assert rows[0].request_count == 1
+
+
+def test_upsert_daily_aggregate_separates_by_date(database_module, isolated_home):
+    db_path = str(isolated_home / "usage.db")
+    database_module.init_db(db_path)
+
+    for ts in ["2026-04-17T10:00:00+00:00", "2026-04-18T10:00:00+00:00"]:
+        usage = database_module.Usage(
+            ts=ts,
+            provider="anthropic",
+            model="claude-sonnet-4-6",
+            client_source="claude-code",
+            session_id="s1",
+            endpoint="/v1/messages",
+            prompt_tokens=100,
+            prompt_length=500,
+            completion_tokens=50,
+            reasoning_tokens=10,
+            cached_tokens=20,
+            total_tokens=160,
+            latency_ms=200,
+            ttft_ms=50,
+            tool_tokens=5,
+            cache_creation_tokens=0,
+            input_cost_usd=0.001,
+            output_cost_usd=0.002,
+            total_cost_usd=0.003,
+            status=200,
+            base_url_id=None,
+        )
+        database_module.log_usage(usage, db_path=db_path)
+
+    with database_module.get_engine(db_path).connect() as conn:
+        rows = list(conn.execute(database_module.select(database_module.UsageDaily)))
+    assert len(rows) == 2
+    dates = {r.date for r in rows}
+    assert dates == {"2026-04-17", "2026-04-18"}
+
+
+def test_log_usage_automaticaly_upserts_daily_aggregate(database_module, isolated_home):
+    db_path = str(isolated_home / "usage.db")
+    database_module.init_db(db_path)
+
+    database_module.log_usage(
+        database_module.Usage(
+            ts="2026-04-17T10:00:00+00:00",
+            provider="anthropic",
+            model="claude-sonnet-4-6",
+            client_source="claude-code",
+            session_id="s1",
+            endpoint="/v1/messages",
+            prompt_tokens=100,
+            prompt_length=500,
+            completion_tokens=50,
+            reasoning_tokens=10,
+            cached_tokens=20,
+            total_tokens=160,
+            latency_ms=200,
+            ttft_ms=50,
+            tool_tokens=5,
+            cache_creation_tokens=0,
+            input_cost_usd=0.001,
+            output_cost_usd=0.002,
+            total_cost_usd=0.003,
+            status=200,
+            base_url_id=None,
+        ),
+        db_path=db_path,
+    )
+
+    with database_module.get_engine(db_path).connect() as conn:
+        rows = list(conn.execute(database_module.select(database_module.UsageDaily)))
+    assert len(rows) == 1
+    assert rows[0].request_count == 1
+    assert rows[0].prompt_tokens == 100
+
+
+def test_summarize_usage_daily_reads_from_aggregate_table(
+    database_module, isolated_home
+):
+    db_path = str(isolated_home / "usage.db")
+    database_module.init_db(db_path)
+
+    # Insert two rows on same day, same provider/model
+    for prompt, comp, latency, status in [
+        (100, 50, 200, 200),
+        (200, 100, 300, 500),
+    ]:
+        usage = database_module.Usage(
+            ts="2026-04-17T10:00:00+00:00",
+            provider="anthropic",
+            model="claude-sonnet-4-6",
+            client_source="claude-code",
+            session_id="s1",
+            endpoint="/v1/messages",
+            prompt_tokens=prompt,
+            prompt_length=500,
+            completion_tokens=comp,
+            reasoning_tokens=10,
+            cached_tokens=20,
+            total_tokens=prompt + comp,
+            latency_ms=latency,
+            ttft_ms=50,
+            tool_tokens=5,
+            cache_creation_tokens=0,
+            input_cost_usd=0.001,
+            output_cost_usd=0.002,
+            total_cost_usd=0.003,
+            status=status,
+            base_url_id=None,
+        )
+        database_module.log_usage(usage, db_path=db_path)
+
+    summary = database_module.summarize_usage_daily()
+
+    assert len(summary) == 1
+    row = summary[0]
+    assert row["provider"] == "anthropic"
+    assert row["model"] == "claude-sonnet-4-6"
+    assert row["requests"] == 2
+    assert row["prompt_tokens"] == 300
+    assert row["completion_tokens"] == 150
+    assert row["avg_latency_ms"] == 250.0
+    assert row["successful_requests"] == 1
+    assert row["failed_requests"] == 1
+
+
+def test_summarize_usage_daily_filters_by_provider(database_module, isolated_home):
+    db_path = str(isolated_home / "usage.db")
+    database_module.init_db(db_path)
+
+    for provider, model, ts in [
+        ("anthropic", "claude-sonnet-4-6", "2026-04-17T10:00:00+00:00"),
+        ("openai", "gpt-4", "2026-04-17T11:00:00+00:00"),
+    ]:
+        usage = database_module.Usage(
+            ts=ts,
+            provider=provider,
+            model=model,
+            client_source=None,
+            session_id=None,
+            endpoint="/v1/messages",
+            prompt_tokens=100,
+            prompt_length=500,
+            completion_tokens=50,
+            reasoning_tokens=None,
+            cached_tokens=None,
+            total_tokens=150,
+            latency_ms=100,
+            ttft_ms=None,
+            tool_tokens=None,
+            cache_creation_tokens=None,
+            input_cost_usd=0.001,
+            output_cost_usd=0.002,
+            total_cost_usd=0.003,
+            status=200,
+            base_url_id=None,
+        )
+        database_module.log_usage(usage, db_path=db_path)
+
+    summary = database_module.summarize_usage_daily(provider="anthropic")
+    assert len(summary) == 1
+    assert summary[0]["provider"] == "anthropic"
+
+
+def test_summarize_usage_daily_filters_by_since(database_module, isolated_home):
+    db_path = str(isolated_home / "usage.db")
+    database_module.init_db(db_path)
+
+    for ts in ["2026-04-17T10:00:00+00:00", "2026-04-20T10:00:00+00:00"]:
+        usage = database_module.Usage(
+            ts=ts,
+            provider="anthropic",
+            model="claude-sonnet-4-6",
+            client_source=None,
+            session_id=None,
+            endpoint="/v1/messages",
+            prompt_tokens=100,
+            prompt_length=500,
+            completion_tokens=50,
+            reasoning_tokens=None,
+            cached_tokens=None,
+            total_tokens=150,
+            latency_ms=100,
+            ttft_ms=None,
+            tool_tokens=None,
+            cache_creation_tokens=None,
+            input_cost_usd=0.001,
+            output_cost_usd=0.002,
+            total_cost_usd=0.003,
+            status=200,
+            base_url_id=None,
+        )
+        database_module.log_usage(usage, db_path=db_path)
+
+    summary = database_module.summarize_usage_daily(since="2026-04-20")
+    assert len(summary) == 1
+    assert summary[0]["requests"] == 1
+
+
+def test_aggregate_daily_by_period_reads_from_aggregate_table(
+    database_module, isolated_home
+):
+    db_path = str(isolated_home / "usage.db")
+    database_module.init_db(db_path)
+
+    for ts, tokens in [
+        ("2026-04-17T10:00:00+00:00", 100),
+        ("2026-04-17T11:00:00+00:00", 200),
+        ("2026-04-18T10:00:00+00:00", 300),
+    ]:
+        usage = database_module.Usage(
+            ts=ts,
+            provider="anthropic",
+            model="claude-sonnet-4-6",
+            client_source=None,
+            session_id=None,
+            endpoint="/v1/messages",
+            prompt_tokens=tokens,
+            prompt_length=500,
+            completion_tokens=tokens // 2,
+            reasoning_tokens=None,
+            cached_tokens=None,
+            total_tokens=tokens + tokens // 2,
+            latency_ms=100,
+            ttft_ms=None,
+            tool_tokens=None,
+            cache_creation_tokens=None,
+            input_cost_usd=0.001,
+            output_cost_usd=0.002,
+            total_cost_usd=0.003,
+            status=200,
+            base_url_id=None,
+        )
+        database_module.log_usage(usage, db_path=db_path)
+
+    result = database_module.aggregate_daily_by_period()
+
+    assert len(result) == 2
+    assert result[0]["period"] == "2026-04-17"
+    assert result[0]["requests"] == 2
+    assert result[0]["prompt_tokens"] == 300
+    assert result[0]["total_tokens"] == 450
+    assert result[1]["period"] == "2026-04-18"
+    assert result[1]["requests"] == 1
+    assert result[1]["prompt_tokens"] == 300
+
+
+def test_aggregate_daily_by_period_filters_by_provider(database_module, isolated_home):
+    db_path = str(isolated_home / "usage.db")
+    database_module.init_db(db_path)
+
+    for provider, model in [("anthropic", "claude-sonnet-4-6"), ("openai", "gpt-4")]:
+        usage = database_module.Usage(
+            ts="2026-04-17T10:00:00+00:00",
+            provider=provider,
+            model=model,
+            client_source=None,
+            session_id=None,
+            endpoint="/v1/messages",
+            prompt_tokens=100,
+            prompt_length=500,
+            completion_tokens=50,
+            reasoning_tokens=None,
+            cached_tokens=None,
+            total_tokens=150,
+            latency_ms=100,
+            ttft_ms=None,
+            tool_tokens=None,
+            cache_creation_tokens=None,
+            input_cost_usd=0.001,
+            output_cost_usd=0.002,
+            total_cost_usd=0.003,
+            status=200,
+            base_url_id=None,
+        )
+        database_module.log_usage(usage, db_path=db_path)
+
+    result = database_module.aggregate_daily_by_period(provider="anthropic")
+    assert len(result) == 1
+    assert result[0]["requests"] == 1
+
+
+def test_migrate_database_creates_usage_daily_table(
+    database_module, schema_migrations_module, isolated_home
+):
+    import sqlite3
+
+    db_file = isolated_home / "usage.db"
+    connection = sqlite3.connect(db_file)
+    connection.execute(
+        """
+        CREATE TABLE usage (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            ts TEXT NOT NULL,
+            provider TEXT NOT NULL,
+            model TEXT NOT NULL,
+            endpoint TEXT NOT NULL,
+            prompt_tokens INTEGER,
+            completion_tokens INTEGER,
+            reasoning_tokens INTEGER,
+            cached_tokens INTEGER,
+            total_tokens INTEGER,
+            latency_ms INTEGER,
+            ttft_ms INTEGER,
+            tool_tokens INTEGER,
+            cache_creation_tokens INTEGER,
+            input_cost_usd NUMERIC(18, 8) NOT NULL DEFAULT 0,
+            output_cost_usd NUMERIC(18, 8) NOT NULL DEFAULT 0,
+            total_cost_usd NUMERIC(18, 8) NOT NULL DEFAULT 0,
+            status INTEGER
+        )
+        """
+    )
+    connection.execute(
+        """
+        INSERT INTO usage (ts, provider, model, endpoint, prompt_tokens,
+            completion_tokens, reasoning_tokens, cached_tokens, total_tokens,
+            latency_ms, ttft_ms, tool_tokens, cache_creation_tokens,
+            input_cost_usd, output_cost_usd, total_cost_usd, status)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            "2026-04-17T10:00:00+00:00",
+            "anthropic",
+            "claude-sonnet-4-6",
+            "/v1/messages",
+            100,
+            50,
+            10,
+            20,
+            160,
+            200,
+            50,
+            5,
+            0,
+            0.001,
+            0.002,
+            0.003,
+            200,
+        ),
+    )
+    connection.execute(
+        """
+        INSERT INTO usage (ts, provider, model, endpoint, prompt_tokens,
+            completion_tokens, reasoning_tokens, cached_tokens, total_tokens,
+            latency_ms, ttft_ms, tool_tokens, cache_creation_tokens,
+            input_cost_usd, output_cost_usd, total_cost_usd, status)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            "2026-04-17T11:00:00+00:00",
+            "anthropic",
+            "claude-sonnet-4-6",
+            "/v1/messages",
+            200,
+            100,
+            20,
+            40,
+            320,
+            300,
+            80,
+            10,
+            0,
+            0.002,
+            0.004,
+            0.006,
+            500,
+        ),
+    )
+    connection.commit()
+    connection.close()
+
+    changes = schema_migrations_module.migrate_database(str(db_file))
+
+    assert schema_migrations_module._table_exists(
+        database_module.get_engine(str(db_file)), "usage_daily"
+    )
+    assert "usage_daily.backfill" in changes
+
+    # Verify backfill
+    with database_module.get_engine(str(db_file)).connect() as conn:
+        rows = list(conn.execute(database_module.select(database_module.UsageDaily)))
+    assert len(rows) == 1
+    assert rows[0].request_count == 2
+    assert rows[0].prompt_tokens == 300
+    assert rows[0].latency_sum_ms == 500
+    assert rows[0].successful_requests == 1
+    assert rows[0].failed_requests == 1
+
+
+def test_migrate_database_backfill_idempotent(
+    database_module, schema_migrations_module, isolated_home
+):
+    import sqlite3
+
+    db_file = isolated_home / "usage.db"
+    connection = sqlite3.connect(db_file)
+    connection.execute(
+        """
+        CREATE TABLE usage (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            ts TEXT NOT NULL,
+            provider TEXT NOT NULL,
+            model TEXT NOT NULL,
+            endpoint TEXT NOT NULL,
+            prompt_tokens INTEGER,
+            completion_tokens INTEGER,
+            reasoning_tokens INTEGER,
+            cached_tokens INTEGER,
+            total_tokens INTEGER,
+            latency_ms INTEGER,
+            ttft_ms INTEGER,
+            tool_tokens INTEGER,
+            cache_creation_tokens INTEGER,
+            input_cost_usd NUMERIC(18, 8) NOT NULL DEFAULT 0,
+            output_cost_usd NUMERIC(18, 8) NOT NULL DEFAULT 0,
+            total_cost_usd NUMERIC(18, 8) NOT NULL DEFAULT 0,
+            status INTEGER
+        )
+        """
+    )
+    connection.execute(
+        """
+        INSERT INTO usage (ts, provider, model, endpoint, prompt_tokens,
+            completion_tokens, reasoning_tokens, cached_tokens, total_tokens,
+            latency_ms, ttft_ms, tool_tokens, cache_creation_tokens,
+            input_cost_usd, output_cost_usd, total_cost_usd, status)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            "2026-04-17T10:00:00+00:00",
+            "anthropic",
+            "claude-sonnet-4-6",
+            "/v1/messages",
+            100,
+            50,
+            10,
+            20,
+            160,
+            200,
+            50,
+            5,
+            0,
+            0.001,
+            0.002,
+            0.003,
+            200,
+        ),
+    )
+    connection.commit()
+    connection.close()
+
+    schema_migrations_module.migrate_database(str(db_file))
+    changes2 = schema_migrations_module.migrate_database(str(db_file))
+
+    # Second run should not create or backfill again
+    assert "usage_daily.create" not in changes2
+    assert "usage_daily.backfill" not in changes2
+
+    # Data should still be there, not duplicated
+    with database_module.get_engine(str(db_file)).connect() as conn:
+        rows = list(conn.execute(database_module.select(database_module.UsageDaily)))
+    assert len(rows) == 1
+    assert rows[0].request_count == 1
