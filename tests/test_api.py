@@ -297,3 +297,78 @@ def test_usage_daily_endpoint_passes_client_source(api_module, monkeypatch):
     )
     assert response.status_code == 200
     assert captured["client_source"] == "claude-code"
+
+
+def test_usage_by_source_endpoint(api_module, monkeypatch):
+    captured = {}
+
+    def fake_by_source(**kwargs):
+        captured.update(kwargs)
+        return [
+            {
+                "client_source": "claude-code",
+                "requests": 10,
+                "prompt_tokens": 5000,
+                "completion_tokens": 3000,
+                "reasoning_tokens": 0,
+                "cached_tokens": 1000,
+                "total_tokens": 8000,
+                "avg_latency_ms": 250.0,
+                "input_cost_usd": 0.01,
+                "output_cost_usd": 0.02,
+                "total_cost_usd": 0.03,
+                "successful_requests": 9,
+                "failed_requests": 1,
+            },
+            {
+                "client_source": "codex",
+                "requests": 5,
+                "prompt_tokens": 2000,
+                "completion_tokens": 1000,
+                "reasoning_tokens": 0,
+                "cached_tokens": 500,
+                "total_tokens": 3000,
+                "avg_latency_ms": 180.0,
+                "input_cost_usd": 0.005,
+                "output_cost_usd": 0.01,
+                "total_cost_usd": 0.015,
+                "successful_requests": 5,
+                "failed_requests": 0,
+            },
+        ]
+
+    monkeypatch.setattr(api_module, "summarize_usage_by_source", fake_by_source)
+
+    response = TestClient(api_module.app).get(
+        "/usage/by-source",
+        params={
+            "since": "2026-01-01",
+            "until": "2026-12-31",
+            "client_source": "claude-code",
+        },
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert len(data) == 2
+    assert data[0]["client_source"] == "claude-code"
+    assert data[0]["requests"] == 10
+    assert captured["since"] == "2026-01-01"
+    assert captured["client_source"] == "claude-code"
+
+
+def test_usage_by_source_endpoint_passes_all_filters(api_module, monkeypatch):
+    captured = {}
+
+    def fake_by_source(**kwargs):
+        captured.update(kwargs)
+        return []
+
+    monkeypatch.setattr(api_module, "summarize_usage_by_source", fake_by_source)
+
+    response = TestClient(api_module.app).get(
+        "/usage/by-source",
+        params={"provider": "openai", "model": "gpt-4o"},
+    )
+    assert response.status_code == 200
+    assert captured["provider"] == "openai"
+    assert captured["model"] == "gpt-4o"

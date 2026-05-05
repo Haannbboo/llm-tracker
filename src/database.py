@@ -728,6 +728,57 @@ def summarize_usage(
         return [_row_to_dict(row) for row in connection.execute(query)]
 
 
+def summarize_usage_by_source(
+    *,
+    since: str | None = None,
+    until: str | None = None,
+    provider: str | None = None,
+    model: str | None = None,
+    client_source: str | None = None,
+) -> list[dict[str, Any]]:
+    """Aggregate usage totals by client_source for dashboard source chart."""
+    filters = _usage_filters(
+        since=since,
+        until=until,
+        provider=provider,
+        model=model,
+        client_source=client_source,
+    )
+    query = (
+        select(
+            Usage.client_source,
+            func.count().label("requests"),
+            func.sum(Usage.prompt_tokens).label("prompt_tokens"),
+            func.sum(Usage.completion_tokens).label("completion_tokens"),
+            func.sum(Usage.reasoning_tokens).label("reasoning_tokens"),
+            func.sum(Usage.cached_tokens).label("cached_tokens"),
+            func.sum(Usage.total_tokens).label("total_tokens"),
+            func.avg(Usage.latency_ms).label("avg_latency_ms"),
+            func.sum(Usage.input_cost_usd).label("input_cost_usd"),
+            func.sum(Usage.output_cost_usd).label("output_cost_usd"),
+            func.sum(Usage.total_cost_usd).label("total_cost_usd"),
+            func.sum(
+                case(
+                    (or_(Usage.status.is_(None), Usage.status < 400), 1),
+                    else_=0,
+                )
+            ).label("successful_requests"),
+            func.sum(
+                case(
+                    (Usage.status >= 400, 1),
+                    else_=0,
+                )
+            ).label("failed_requests"),
+        )
+        .group_by(Usage.client_source)
+        .order_by(func.sum(Usage.total_tokens).desc())
+    )
+    if filters:
+        query = query.where(and_(*filters))
+    with get_engine().connect() as connection:
+        return [_row_to_dict(row) for row in connection.execute(query)]
+
+
 def _parse_iso8601(ts: str) -> datetime:
     normalized = ts.replace("Z", "+00:00")
     parsed = datetime.fromisoformat(normalized)

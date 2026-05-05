@@ -24,6 +24,22 @@ type UsageSummary = {
   failed_requests: number
 }
 
+type SourceUsage = {
+  client_source: string | null
+  requests: number | null
+  prompt_tokens: number | null
+  completion_tokens: number | null
+  reasoning_tokens: number | null
+  cached_tokens: number | null
+  total_tokens: number | null
+  avg_latency_ms: number | null
+  input_cost_usd: number | null
+  output_cost_usd: number | null
+  total_cost_usd: number | null
+  successful_requests: number | null
+  failed_requests: number | null
+}
+
 type UsageRow = {
   id: number
   ts: string
@@ -730,6 +746,117 @@ function ModelTokenChart({
   );
 }
 
+function SourceTokenChart({
+  data,
+  title
+}: {
+  data: SourceUsage[],
+  title: string
+}) {
+  const [metric, setMetric] = useState<'tokens' | 'cost'>('tokens');
+
+  const sorted = useMemo(() => {
+    return [...data].sort((a, b) =>
+      metric === 'tokens'
+        ? (b.total_tokens ?? 0) - (a.total_tokens ?? 0)
+        : (b.total_cost_usd ?? 0) - (a.total_cost_usd ?? 0)
+    );
+  }, [data, metric]);
+
+  const maxValue = Math.max(
+    ...sorted.map(s => metric === 'tokens' ? (s.total_tokens ?? 0) : (s.total_cost_usd ?? 0)),
+    1
+  );
+
+  const sourceColors: Record<string, string> = {
+    'claude-code': '#d97706',
+    'codex': '#10b981',
+    'gemini-cli': '#3b82f6',
+    'proxy': '#8b5cf6',
+  };
+
+  return (
+    <div className="widget" style={{ flex: 1 }}>
+      <div className="widget-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <span>📡 {title}</span>
+        <div className="tab-group" style={{ display: 'flex', background: '#f1f5f9', padding: '2px', borderRadius: '6px' }}>
+          <button
+            onClick={() => setMetric('tokens')}
+            style={{
+              padding: '2px 8px',
+              fontSize: '10px',
+              borderRadius: '4px',
+              fontWeight: 600,
+              border: 'none',
+              cursor: 'pointer',
+              background: metric === 'tokens' ? 'white' : 'transparent',
+              color: metric === 'tokens' ? 'var(--color-blue)' : '#64748b',
+              boxShadow: metric === 'tokens' ? '0 1px 2px rgba(0,0,0,0.05)' : 'none'
+            }}
+          >Tokens</button>
+          <button
+            onClick={() => setMetric('cost')}
+            style={{
+              padding: '2px 8px',
+              fontSize: '10px',
+              borderRadius: '4px',
+              fontWeight: 600,
+              border: 'none',
+              cursor: 'pointer',
+              background: metric === 'cost' ? 'white' : 'transparent',
+              color: metric === 'cost' ? 'var(--color-blue)' : '#64748b',
+              boxShadow: metric === 'cost' ? '0 1px 2px rgba(0,0,0,0.05)' : 'none'
+            }}
+          >Cost</button>
+        </div>
+      </div>
+      <div style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
+        {sorted.length === 0 ? (
+          <div style={{ padding: '40px', textAlign: 'center', color: 'var(--text-muted)' }}>No data available</div>
+        ) : (
+          sorted.map((s, index) => {
+            const currentVal = metric === 'tokens' ? (s.total_tokens ?? 0) : (s.total_cost_usd ?? 0);
+            const percentage = (currentVal / maxValue) * 100;
+            const name = s.client_source || 'unknown';
+            const color = sourceColors[name] || '#94a3b8';
+
+            return (
+              <div key={`${name}-${index}`} style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '12px' }}>
+                  <span style={{
+                    padding: '1px 6px',
+                    borderRadius: '4px',
+                    backgroundColor: '#f1f5f9',
+                    color: '#475569',
+                    fontSize: '11px',
+                    fontWeight: 600,
+                    border: '1px solid #e2e8f0'
+                  }}>{name}</span>
+                  <div style={{ color: 'var(--text-secondary)', fontWeight: 700 }}>
+                    {metric === 'tokens' ? formatCompact(currentVal) : formatCost(currentVal)}
+                  </div>
+                </div>
+                <div style={{
+                  height: '8px',
+                  width: '100%',
+                  background: '#f1f5f9',
+                  borderRadius: '4px',
+                  overflow: 'hidden',
+                  display: 'flex'
+                }}>
+                  <div
+                    style={{ width: `${percentage}%`, height: '100%', background: color }}
+                  />
+                </div>
+              </div>
+            );
+          })
+        )}
+      </div>
+    </div>
+  );
+}
+
 function UsageHeatmap({
   activeFilter,
   activeSource,
@@ -985,6 +1112,7 @@ function App() {
   const [activeFilter, setActiveFilter] = useState<ActiveFilter>(null)
   const [activeSource, setActiveSource] = useState<string | null>(null)
   const [sources, setSources] = useState<string[]>([])
+  const [sourceUsage, setSourceUsage] = useState<SourceUsage[]>([])
   const [dateRange, setDateRange] = useState<DateRangeOption>('24h')
   const [customSince, setCustomSince] = useState('')
   const [customUntil, setCustomUntil] = useState('')
@@ -1084,6 +1212,15 @@ function App() {
         if (until) summaryUrl.searchParams.set('until', until)
         if (activeSource) summaryUrl.searchParams.set('client_source', activeSource)
 
+        const bySourceUrl = new URL('/usage/by-source', window.location.origin)
+        if (activeFilter) {
+          bySourceUrl.searchParams.set('provider', activeFilter.provider)
+          if (activeFilter.model) bySourceUrl.searchParams.set('model', activeFilter.model)
+        }
+        if (since) bySourceUrl.searchParams.set('since', since)
+        if (until) bySourceUrl.searchParams.set('until', until)
+        if (activeSource) bySourceUrl.searchParams.set('client_source', activeSource)
+
         const countUrl = new URL('/usage/count', window.location.origin)
         if (activeFilter) {
           countUrl.searchParams.set('provider', activeFilter.provider)
@@ -1106,28 +1243,31 @@ function App() {
           dailyUrl.searchParams.set('granularity', 'hour')
         }
 
-        const [summaryResponse, usageResponse, countResponse, dailyResponse] = await Promise.all([
+        const [summaryResponse, usageResponse, countResponse, dailyResponse, bySourceResponse] = await Promise.all([
           fetch(summaryUrl.toString(), { signal: controller.signal }),
           fetch(usageUrl.toString(), { signal: controller.signal }),
           fetch(countUrl.toString(), { signal: controller.signal }),
           fetch(dailyUrl.toString(), { signal: controller.signal }),
+          fetch(bySourceUrl.toString(), { signal: controller.signal }),
         ])
 
-        if (!summaryResponse.ok || !usageResponse.ok || !countResponse.ok || !dailyResponse.ok) {
+        if (!summaryResponse.ok || !usageResponse.ok || !countResponse.ok || !dailyResponse.ok || !bySourceResponse.ok) {
           throw new Error('Failed to fetch usage data')
         }
 
-        const [summaryData, usageData, countData, dailyData] = (await Promise.all([
+        const [summaryData, usageData, countData, dailyData, bySourceData] = (await Promise.all([
           summaryResponse.json(),
           usageResponse.json(),
           countResponse.json(),
           dailyResponse.json(),
-        ])) as [UsageSummary[], UsageRow[], { total: number }, DailyUsage[]]
+          bySourceResponse.json(),
+        ])) as [UsageSummary[], UsageRow[], { total: number }, DailyUsage[], SourceUsage[]]
 
         setSummary(summaryData)
         setUsageRows(usageData)
         setTotalLogs(countData.total)
         setDailyUsage(dailyData)
+        setSourceUsage(bySourceData)
       } catch (err) {
         if (controller.signal.aborted) return
         setError(err instanceof Error ? err.message : 'Unknown error')
@@ -1419,10 +1559,16 @@ function App() {
                     title={`${(dateRange === '5h' || dateRange === '24h') ? 'Hourly' : 'Daily'} Usage Trend`}
                   />
                 </div>
-                <div style={{ flex: 1, display: 'flex' }}>
-                  <ModelTokenChart 
+                <div style={{ flex: 1 }}>
+                  <ModelTokenChart
                     summary={summary}
                     title="Usage by Model"
+                  />
+                </div>
+                <div style={{ flex: 1 }}>
+                  <SourceTokenChart
+                    data={sourceUsage}
+                    title="Usage by Source"
                   />
                 </div>
               </div>
