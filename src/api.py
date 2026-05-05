@@ -1,5 +1,7 @@
 import os
+import time
 import yaml
+import httpx
 from decimal import Decimal
 from fastapi import FastAPI, HTTPException
 from config.app import (
@@ -29,6 +31,14 @@ from pydantic import BaseModel
 
 class ConfigUpdate(BaseModel):
     content: str
+
+
+class ConnectivityTest(BaseModel):
+    base_url: str
+    api_key: str
+    format: str  # "openai", "anthropic", "responses"
+    model: str | None = None
+    message: str | None = None
 
 
 class UsageIngest(BaseModel):
@@ -298,6 +308,78 @@ async def update_config(update: ConfigUpdate):
         raise HTTPException(status_code=400, detail=f"Invalid YAML: {str(e)}")
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/test-connectivity")
+async def test_connectivity(test: ConnectivityTest):
+    url = test.base_url.rstrip("/")
+    headers = {}
+    payload = {}
+
+    # Normalize: ensure /v1 is in the path
+    if "/v1" not in url:
+        url = f"{url}/v1"
+
+    if test.format == "openai":
+        if not url.endswith("/chat/completions"):
+            url = f"{url}/chat/completions"
+        headers = {"Authorization": f"Bearer {test.api_key}"}
+        payload = {
+            "model": test.model or "gpt-5.4",
+            "messages": [{"role": "user", "content": test.message or "What is 2 + 3?"}],
+            "max_tokens": 10,
+        }
+    elif test.format == "anthropic":
+        if not url.endswith("/messages"):
+            url = f"{url}/messages"
+        headers = {
+            "x-api-key": test.api_key,
+            "anthropic-version": "2023-06-01",
+            "content-type": "application/json",
+        }
+        payload = {
+            "model": test.model or "gpt-5.4",
+            "messages": [{"role": "user", "content": test.message or "What is 2 + 3?"}],
+            "max_tokens": 10,
+        }
+    elif test.format == "responses":
+        if not url.endswith("/responses"):
+            url = f"{url}/responses"
+        headers = {"Authorization": f"Bearer {test.api_key}"}
+        payload = {
+            "model": test.model or "gpt-5.4",
+            "messages": [{"role": "user", "content": test.message or "What is 2 + 3?"}],
+            "max_tokens": 10,
+        }
+    else:
+        raise HTTPException(
+            status_code=400, detail=f"Unsupported format: {test.format}"
+        )
+
+    start_time = time.monotonic()
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.post(url, headers=headers, json=payload)
+            latency_ms = int((time.monotonic() - start_time) * 1000)
+
+            try:
+                body = response.json()
+            except Exception:
+                body = response.text
+
+            return {
+                "status_code": response.status_code,
+                "latency_ms": latency_ms,
+                "body": body,
+                "url": url,
+            }
+    except Exception as e:
+        return {
+            "status_code": 0,
+            "latency_ms": int((time.monotonic() - start_time) * 1000),
+            "error": str(e),
+            "url": url,
+        }
 
 
 if __name__ == "__main__":

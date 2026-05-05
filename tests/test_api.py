@@ -372,3 +372,115 @@ def test_usage_by_source_endpoint_passes_all_filters(api_module, monkeypatch):
     assert response.status_code == 200
     assert captured["provider"] == "openai"
     assert captured["model"] == "gpt-4o"
+
+
+def test_connectivity_endpoint(api_module, monkeypatch):
+    class FakeResponse:
+        def __init__(self):
+            self.status_code = 200
+            self.text = '{"ok": true}'
+
+        def json(self):
+            return {"ok": True}
+
+    async def fake_post(*args, **kwargs):
+        return FakeResponse()
+
+    # Mock httpx.AsyncClient.post
+    from unittest.mock import AsyncMock, MagicMock
+
+    mock_client = MagicMock()
+    mock_client.post = AsyncMock(side_effect=fake_post)
+    mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+    mock_client.__aexit__ = AsyncMock(return_value=None)
+
+    monkeypatch.setattr("httpx.AsyncClient", lambda **kwargs: mock_client)
+
+    response = TestClient(api_module.app).post(
+        "/test-connectivity",
+        json={
+            "base_url": "https://api.openai.com/v1",
+            "api_key": "sk-test",
+            "format": "openai",
+            "model": "gpt-test",
+        },
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["status_code"] == 200
+    assert data["body"] == {"ok": True}
+    assert "latency_ms" in data
+    assert data["url"] == "https://api.openai.com/v1/chat/completions"
+
+
+def test_connectivity_endpoint_adds_v1(api_module, monkeypatch):
+    captured = {}
+
+    async def fake_post(url, **kwargs):
+        captured["url"] = url
+
+        class FakeResponse:
+            status_code = 200
+            text = '{"ok": true}'
+
+            def json(self):
+                return {"ok": True}
+
+        return FakeResponse()
+
+    from unittest.mock import AsyncMock, MagicMock
+
+    mock_client = MagicMock()
+    mock_client.post = AsyncMock(side_effect=fake_post)
+    mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+    mock_client.__aexit__ = AsyncMock(return_value=None)
+
+    monkeypatch.setattr("httpx.AsyncClient", lambda **kwargs: mock_client)
+
+    TestClient(api_module.app).post(
+        "/test-connectivity",
+        json={
+            "base_url": "https://free.codesonline.dev",
+            "api_key": "sk-test",
+            "format": "openai",
+        },
+    )
+
+    assert captured["url"] == "https://free.codesonline.dev/v1/chat/completions"
+
+
+def test_connectivity_endpoint_deduplicates_url(api_module, monkeypatch):
+    captured = {}
+
+    async def fake_post(url, **kwargs):
+        captured["url"] = url
+
+        class FakeResponse:
+            status_code = 200
+            text = '{"ok": true}'
+
+            def json(self):
+                return {"ok": True}
+
+        return FakeResponse()
+
+    from unittest.mock import AsyncMock, MagicMock
+
+    mock_client = MagicMock()
+    mock_client.post = AsyncMock(side_effect=fake_post)
+    mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+    mock_client.__aexit__ = AsyncMock(return_value=None)
+
+    monkeypatch.setattr("httpx.AsyncClient", lambda **kwargs: mock_client)
+
+    TestClient(api_module.app).post(
+        "/test-connectivity",
+        json={
+            "base_url": "https://api.openai.com/v1/chat/completions",
+            "api_key": "sk-test",
+            "format": "openai",
+        },
+    )
+
+    assert captured["url"] == "https://api.openai.com/v1/chat/completions"

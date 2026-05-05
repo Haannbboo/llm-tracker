@@ -15,12 +15,22 @@ import { SourceTokenChart } from './charts/SourceTokenChart'
 import { DailyHeatmap } from './charts/DailyHeatmap'
 
 function App() {
-  const [view, setView] = useState<'dashboard' | 'logs' | 'settings'>('dashboard')
+  const [view, setView] = useState<'dashboard' | 'logs' | 'settings' | 'test'>('dashboard')
   const [refreshTrigger, setRefreshTrigger] = useState(0)
   const [summary, setSummary] = useState<UsageSummary[]>([])
   const [usageRows, setUsageRows] = useState<UsageRow[]>([])
   const [dailyUsage, setDailyUsage] = useState<DailyUsage[]>([])
   const [totalLogs, setTotalLogs] = useState(0)
+  
+  // Connectivity Test State
+  const [testBaseUrl, setTestBaseUrl] = useState('')
+  const [testApiKey, setTestApiKey] = useState('')
+  const [testFormat, setTestFormat] = useState('openai')
+  const [testModel, setTestModel] = useState('')
+  const [testMessage, setTestMessage] = useState('What is 2 + 3?')
+  const [testResult, setTestResult] = useState<any>(null)
+  const [isTesting, setIsTesting] = useState(false)
+
   const [limit, setLimit] = useState(10)
   const [page, setPage] = useState(1)
   const [jumpPage, setJumpPage] = useState('')
@@ -290,6 +300,34 @@ function App() {
     }
   }
 
+  const handleRunTest = async () => {
+    setIsTesting(true)
+    setTestResult(null)
+    try {
+      const response = await fetch('/test-connectivity', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          base_url: testBaseUrl,
+          api_key: testApiKey,
+          format: testFormat,
+          model: testModel || null,
+          message: testMessage || null
+        })
+      })
+      const text = await response.text()
+      try {
+        setTestResult(JSON.parse(text))
+      } catch {
+        setTestResult({ status_code: response.status, body: text, url: '' })
+      }
+    } catch (err) {
+      setTestResult({ error: err instanceof Error ? err.message : 'Test failed' })
+    } finally {
+      setIsTesting(false)
+    }
+  }
+
   const handleCostChange = (model: string, field: string, value: string) => {
     const numValue = value === '' ? undefined : parseFloat(value);
     const newParsed = { ...configParsed };
@@ -344,6 +382,9 @@ function App() {
             </button>
             <button className={`nav-item ${view === 'settings' ? 'active' : ''}`} onClick={() => setView('settings')}>
               ⚙️ Settings
+            </button>
+            <button className={`nav-item ${view === 'test' ? 'active' : ''}`} onClick={() => setView('test')}>
+              🔌 Connectivity Test
             </button>
           </nav>
           <button
@@ -1282,6 +1323,212 @@ function App() {
                     >
                       {configStatus === 'saving' ? 'Saving...' : 'Save Configuration'}
                     </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {view === 'test' && (
+            <div className="test-page" style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
+              <div className="panel">
+                <div className="panel-tabs">
+                  <div className="tab active"><span>🧪</span> Upstream Connectivity Test</div>
+                </div>
+                <div className="panel-content" style={{ padding: '24px' }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '24px' }}>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                      <div className="filter-group">
+                        <div className="filter-label">Base URL</div>
+                        <input 
+                          type="text" 
+                          className="input-plain" 
+                          placeholder="https://api.openai.com/v1"
+                          value={testBaseUrl}
+                          onChange={(e) => setTestBaseUrl(e.target.value)}
+                          style={{ width: '100%' }}
+                        />
+                        <div style={{ fontSize: '10px', color: 'var(--text-muted)', marginTop: '4px' }}>
+                          The upstream API root URL, e.g. https://api.openai.com/v1
+                        </div>
+                      </div>
+
+                      <div className="filter-group">
+                        <div className="filter-label">API Key</div>
+                        <input 
+                          type="password" 
+                          className="input-plain" 
+                          placeholder="sk-..."
+                          value={testApiKey}
+                          onChange={(e) => setTestApiKey(e.target.value)}
+                          style={{ width: '100%' }}
+                        />
+                      </div>
+
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
+                        <div className="filter-group">
+                          <div className="filter-label">Format</div>
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                            {[
+                              { id: 'openai', label: 'OpenAI', sub: 'Chat Completion' },
+                              { id: 'anthropic', label: 'Anthropic', sub: 'Claude' },
+                              { id: 'responses', label: 'Codex', sub: 'Responses' },
+                            ].map((f) => (
+                              <button
+                                key={f.id}
+                                type="button"
+                                className={`format-chip${testFormat === f.id ? ' format-chip-active' : ''}`}
+                                onClick={() => setTestFormat(f.id)}
+                              >
+                                <span style={{ fontWeight: 700, fontSize: '12px' }}>{f.label}</span>
+                                <span style={{ fontSize: '10px', color: 'var(--text-muted)' }}>{f.sub}</span>
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                        <div className="filter-group">
+                          <div className="filter-label">Model</div>
+                          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '8px' }}>
+                            {[
+                              { id: 'gpt-5.5', label: 'GPT-5.5', sub: 'OpenAI' },
+                              { id: 'gpt-5.4', label: 'GPT-5.4', sub: 'OpenAI' },
+                              { id: 'claude-opus-4-7', label: 'Claude Opus 4.7', sub: 'Anthropic' },
+                              { id: 'claude-sonnet-4-6', label: 'Claude Sonnet 4.6', sub: 'Anthropic' },
+                            ].map((m) => (
+                              <button
+                                key={m.id}
+                                type="button"
+                                className={`model-chip${testModel === m.id ? ' model-chip-active' : ''}`}
+                                onClick={() => setTestModel(testModel === m.id ? '' : m.id)}
+                              >
+                                <span style={{ fontWeight: 700, fontSize: '12px' }}>{m.label}</span>
+                                <span style={{ fontSize: '10px', color: 'var(--text-muted)' }}>{m.sub}</span>
+                              </button>
+                            ))}
+                          </div>
+                          <div style={{ marginTop: '8px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                            <span style={{ fontSize: '11px', color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>Custom:</span>
+                            <input
+                              type="text"
+                              className="input-plain"
+                              placeholder="model-id"
+                              value={!['gpt-5.5','gpt-5.4','claude-opus-4-7','claude-sonnet-4-6'].includes(testModel) ? testModel : ''}
+                              onChange={(e) => setTestModel(e.target.value)}
+                              style={{ flex: 1 }}
+                            />
+                          </div>
+                        </div>
+                        <div className="filter-group" style={{ marginTop: '12px', gridColumn: '1 / -1' }}>
+                          <div className="filter-label">Message</div>
+                          <textarea
+                            className="input-plain"
+                            rows={2}
+                            value={testMessage}
+                            onChange={(e) => setTestMessage(e.target.value)}
+                            style={{ width: '100%', resize: 'vertical', fontFamily: 'var(--font-mono)', fontSize: '12px' }}
+                          />
+                        </div>
+                      </div>
+
+                      <button
+                        className="btn-primary"
+                        onClick={handleRunTest}
+                        disabled={isTesting || !testBaseUrl || !testApiKey}
+                        style={{ marginTop: '8px' }}
+                      >
+                        {isTesting ? '⌛ Testing...' : '🚀 Run Connectivity Test'}
+                      </button>
+
+                      <div style={{ marginTop: '16px', padding: '16px', background: 'var(--surface-hover)', borderRadius: '8px', border: '1px solid var(--border-color)' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                          <div style={{ fontSize: '11px', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase' }}>Manual curl equivalent</div>
+                          <button
+                            className="btn-copy"
+                            onClick={(e) => {
+                              const btn = e.currentTarget
+                              let base = testBaseUrl.replace(/\/$/, '')
+                              if (!base.includes('/v1')) base = base + '/v1'
+                              const endpoint = testFormat === 'openai' ? '/chat/completions' : testFormat === 'anthropic' ? '/messages' : '/responses'
+                              const fullUrl = base.endsWith(endpoint) ? base : base + endpoint
+                              const curlCmd = `curl ${fullUrl} \\\n  -H "${testFormat === 'anthropic' ? 'x-api-key' : 'Authorization: Bearer'}: ${testApiKey || 'YOUR_KEY'}" \\\n  -H "Content-Type: application/json" \\\n  -d '{"model": "${testModel || 'gpt-5.4'}", "messages": [{"role": "user", "content": "${(testMessage || 'What is 2 + 3?').replace(/"/g, '\\"')}"}], "max_tokens": 10}'`
+                              navigator.clipboard.writeText(curlCmd)
+                              btn.classList.add('btn-copy-clicked')
+                              btn.textContent = '✓ Copied'
+                              setTimeout(() => { btn.classList.remove('btn-copy-clicked'); btn.textContent = '📋 Copy' }, 800)
+                            }}
+                          >
+                            📋 Copy
+                          </button>
+                        </div>
+                        <pre style={{ margin: 0, fontSize: '11px', whiteSpace: 'pre-wrap', wordBreak: 'break-all', color: 'var(--text-secondary)' }}>
+                          {(() => { let base = testBaseUrl.replace(/\/$/, ''); if (!base.includes('/v1')) base = base + '/v1'; const ep = testFormat === 'openai' ? '/chat/completions' : testFormat === 'anthropic' ? '/messages' : '/responses'; const fullUrl = base.endsWith(ep) ? base : base + ep; return `curl ${fullUrl} \\\n  -H "${testFormat === 'anthropic' ? 'x-api-key' : 'Authorization: Bearer'}: ${testApiKey || 'YOUR_KEY'}" \\\n  -H "Content-Type: application/json" \\\n  -d '{"model": "${testModel || 'gpt-5.4'}", "messages": [{"role": "user", "content": "${(testMessage || 'What is 2 + 3?').replace(/"/g, '\\"')}"}], "max_tokens": 10}'` })()}
+                        </pre>
+                      </div>
+                    </div>
+
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                      <div className="filter-label">Test Result</div>
+                      {!testResult ? (
+                        <div style={{ 
+                          flex: 1, 
+                          display: 'flex', 
+                          flexDirection: 'column',
+                          alignItems: 'center', 
+                          justifyContent: 'center', 
+                          color: 'var(--text-muted)',
+                          border: '2px dashed var(--border-color)',
+                          borderRadius: '12px',
+                          minHeight: '300px'
+                        }}>
+                          <span style={{ fontSize: '32px', marginBottom: '12px' }}>⚡</span>
+                          <span>Results will appear here after testing</span>
+                        </div>
+                      ) : (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                            <div className="widget" style={{ padding: '16px', background: testResult.error || testResult.status_code >= 400 ? 'var(--icon-pink-bg)' : 'var(--icon-green-bg)' }}>
+                              <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Status Code</div>
+                              <div style={{ fontSize: '24px', fontWeight: 800, color: testResult.error || testResult.status_code >= 400 ? '#e11d48' : '#16a34a' }}>
+                                {testResult.error ? 'Error' : testResult.status_code}
+                              </div>
+                            </div>
+                            <div className="widget" style={{ padding: '16px' }}>
+                              <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Latency</div>
+                              <div style={{ fontSize: '24px', fontWeight: 800 }}>{testResult.latency_ms}ms</div>
+                            </div>
+                          </div>
+                          
+                          {typeof testResult.body === 'string' && testResult.body.trim().startsWith('<') ? (
+                            <div className="widget" style={{ padding: '16px', background: 'var(--icon-yellow-bg)' }}>
+                              <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginBottom: '4px' }}>Response</div>
+                              <div style={{ fontSize: '12px', color: '#b45309', fontWeight: 600, marginBottom: '8px' }}>
+                                Upstream returned HTML — check that base_url points to an API endpoint
+                              </div>
+                              <div style={{ fontSize: '11px', color: 'var(--text-secondary)', fontFamily: 'var(--font-mono)', whiteSpace: 'pre-wrap', wordBreak: 'break-all', maxHeight: '200px', overflow: 'auto' }}>
+                                {testResult.body.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 1000)}
+                              </div>
+                            </div>
+                          ) : (
+                            <div className="widget" style={{ padding: '16px' }}>
+                              <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginBottom: '8px' }}>Response Body</div>
+                              <pre style={{
+                                margin: 0,
+                                fontSize: '12px',
+                                fontFamily: 'var(--font-mono)',
+                                lineHeight: '1.5',
+                                whiteSpace: 'pre-wrap',
+                                wordBreak: 'break-all',
+                                color: 'var(--text-primary)',
+                                maxHeight: '400px',
+                                overflow: 'auto'
+                              }}>
+                                {typeof testResult.body === 'object' ? JSON.stringify(testResult.body, null, 2) : testResult.body || testResult.error}
+                              </pre>
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
                   </div>
                 </div>
               </div>

@@ -10,7 +10,7 @@ export const costFormatter = new Intl.NumberFormat(undefined, {
   style: 'currency',
   currency: 'USD',
   minimumFractionDigits: 2,
-  maximumFractionDigits: 6,
+  maximumFractionDigits: 4,
 })
 
 export function value(input: number | null | undefined) {

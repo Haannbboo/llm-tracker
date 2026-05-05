@@ -212,13 +212,15 @@
   font-weight: 500;
   color: var(--text-secondary);
   border-bottom: 2px solid transparent;
-  padding: 0 4px;
+  padding: 0 8px;
+  border-radius: 8px;
 }
 
 .tab.active {
   color: var(--color-blue);
   border-bottom-color: var(--color-blue);
   background-color: var(--tab-active-bg);
+  border-radius: 8px 8px 0 0;
 }
 
 .panel-body {
@@ -428,6 +430,72 @@
   border-radius: 8px;
   font-size: 12px;
   font-weight: 700;
+}
+
+.btn-copy {
+  font-size: 11px;
+  padding: 4px 12px;
+  background: #18181b;
+  color: white;
+  border: none;
+  border-radius: 6px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: transform 0.15s ease, background 0.15s ease;
+}
+.btn-copy:hover {
+  background: #27272a;
+}
+.btn-copy:active {
+  transform: scale(0.92);
+}
+.btn-copy-clicked {
+  background: #16a34a !important;
+}
+
+.model-chip {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 10px 8px;
+  background: var(--input-bg);
+  color: var(--text-primary);
+  border: 1.5px solid var(--border-color);
+  border-radius: 10px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.model-chip:hover {
+  border-color: var(--color-blue);
+  background: var(--card-bg);
+}
+.model-chip-active {
+  border-color: var(--color-blue);
+  background: rgba(59, 130, 246, 0.08);
+  box-shadow: 0 0 0 1px var(--color-blue);
+}
+
+.format-chip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  background: var(--input-bg);
+  color: var(--text-primary);
+  border: 1.5px solid var(--border-color);
+  border-radius: 10px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.format-chip:hover {
+  border-color: var(--color-blue);
+  background: var(--card-bg);
+}
+.format-chip-active {
+  border-color: var(--color-blue);
+  background: rgba(59, 130, 246, 0.08);
+  box-shadow: 0 0 0 1px var(--color-blue);
 }
 
 .pagination-btn {
