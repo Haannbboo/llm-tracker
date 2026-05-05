@@ -620,8 +620,222 @@ function TrendChart({
   );
 }
 
-function ModelTokenChart({ 
-  summary, 
+function CostTrendChart({
+  data,
+  title
+}: {
+  data: DailyUsage[],
+  title: string
+}) {
+  const [hoveredIdx, setHoveredIdx] = useState<number | null>(null);
+  const maxCost = Math.max(...data.map(x => value(x.total_cost_usd)), 0.001);
+  const maxRequests = Math.max(...data.map(x => value(x.requests)), 1);
+  const paddingX = 60;
+  const chartWidth = 1000 - (paddingX * 2);
+
+  const hoveredData = hoveredIdx !== null ? data[hoveredIdx] : null;
+
+  return (
+    <div className="widget" style={{ minHeight: '400px', width: '100%', position: 'relative' }}>
+      <div className="widget-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <span>💵 {title}</span>
+        <div style={{ display: 'flex', gap: '16px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <div style={{ width: '12px', height: '12px', background: '#f59e0b', borderRadius: '2px' }} />
+            <span style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)' }}>Input Cost</span>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <div style={{ width: '12px', height: '12px', background: '#8b5cf6', borderRadius: '2px' }} />
+            <span style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)' }}>Output Cost</span>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <div style={{ width: '12px', height: '3px', background: 'var(--color-pink)', borderRadius: '2px' }} />
+            <span style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)' }}>Requests</span>
+          </div>
+        </div>
+      </div>
+      <div style={{
+        flex: 1,
+        padding: '20px 0',
+        height: '280px',
+        position: 'relative',
+        display: 'flex',
+        flexDirection: 'column'
+      }}>
+        {data.length === 0 ? (
+          <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-muted)' }}>No cost data available</div>
+        ) : (
+          <>
+            {hoveredIdx !== null && hoveredData && (
+              <div style={{
+                position: 'absolute',
+                top: '-10px',
+                left: `${(paddingX + (hoveredIdx / (Math.max(data.length - 1, 1))) * chartWidth) / 10}%`,
+                transform: 'translateX(-50%)',
+                backgroundColor: 'rgba(15, 23, 42, 0.95)',
+                color: 'white',
+                padding: '12px',
+                borderRadius: '8px',
+                fontSize: '12px',
+                zIndex: 100,
+                pointerEvents: 'none',
+                boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1)',
+                minWidth: '180px',
+                border: '1px solid rgba(255, 255, 255, 0.1)',
+                backdropFilter: 'blur(4px)'
+              }}>
+                <div style={{ fontWeight: 600, marginBottom: '8px', borderBottom: '1px solid rgba(255, 255, 255, 0.2)', paddingBottom: '4px', fontSize: '13px' }}>
+                  {hoveredData.period}
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', gap: '12px', marginBottom: '4px' }}>
+                  <span style={{ color: '#f59e0b' }}>Input:</span>
+                  <span style={{ fontWeight: 600 }}>{formatCost(hoveredData.input_cost_usd)}</span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', gap: '12px', marginBottom: '4px' }}>
+                  <span style={{ color: '#8b5cf6' }}>Output:</span>
+                  <span style={{ fontWeight: 600 }}>{formatCost(hoveredData.output_cost_usd)}</span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', gap: '12px', marginTop: '8px', paddingTop: '8px', borderTop: '1px solid rgba(255, 255, 255, 0.2)' }}>
+                  <span style={{ fontWeight: 700 }}>Total Cost:</span>
+                  <span style={{ fontWeight: 800 }}>{formatCost(hoveredData.total_cost_usd)}</span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', gap: '12px', marginTop: '4px' }}>
+                  <span style={{ color: 'var(--color-pink)' }}>Requests:</span>
+                  <span style={{ fontWeight: 600, color: 'var(--color-pink)' }}>{formatNumber(hoveredData.requests)}</span>
+                </div>
+              </div>
+            )}
+
+            <svg
+              viewBox="0 0 1000 200"
+              preserveAspectRatio="none"
+              style={{ width: '100%', height: '220px', overflow: 'visible' }}
+            >
+              {[0, 0.25, 0.5, 0.75, 1].map(tick => (
+                <line
+                  key={tick}
+                  x1="0" y1={200 - tick * 200}
+                  x2="1000" y2={200 - tick * 200}
+                  stroke="#f1f5f9"
+                  strokeWidth="1"
+                />
+              ))}
+
+              {/* Stacked Bars for Cost */}
+              {data.map((d, i) => {
+                const x = paddingX + (i / (Math.max(data.length - 1, 1))) * chartWidth;
+                const barWidth = Math.min(chartWidth / (data.length * 1.5), 60);
+                const slotWidth = data.length > 1 ? chartWidth / (data.length - 1) : chartWidth;
+
+                const inputCost = value(d.input_cost_usd);
+                const outputCost = value(d.output_cost_usd);
+
+                const hInput = (inputCost / maxCost) * 200;
+                const hOutput = (outputCost / maxCost) * 200;
+
+                const isHovered = hoveredIdx === i;
+                const isDimmed = hoveredIdx !== null && !isHovered;
+
+                return (
+                  <g
+                    key={i}
+                    onMouseEnter={() => setHoveredIdx(i)}
+                    onMouseLeave={() => setHoveredIdx(null)}
+                  >
+                    <rect
+                      x={x - barWidth/2} y={200 - hInput}
+                      width={barWidth} height={hInput}
+                      fill="#f59e0b"
+                      opacity={isDimmed ? 0.3 : 1}
+                      style={{ transition: 'all 0.2s' }}
+                    />
+                    <rect
+                      x={x - barWidth/2} y={200 - hInput - hOutput}
+                      width={barWidth} height={hOutput}
+                      fill="#8b5cf6"
+                      opacity={isDimmed ? 0.3 : 1}
+                      style={{ transition: 'all 0.2s' }}
+                    />
+                    <rect
+                      x={x - slotWidth/2} y={0}
+                      width={slotWidth} height={200}
+                      fill="transparent"
+                      style={{ cursor: 'pointer' }}
+                    />
+                  </g>
+                );
+              })}
+
+              {/* Line for Requests */}
+              {(() => {
+                const points = data.map((d, i) => {
+                  const x = paddingX + (i / (Math.max(data.length - 1, 1))) * chartWidth;
+                  const y = 200 - (value(d.requests) / maxRequests) * 200;
+                  return `${x},${y}`;
+                }).join(' ');
+
+                return (
+                  <>
+                    <polyline
+                      points={points}
+                      fill="none"
+                      stroke="var(--color-pink)"
+                      strokeWidth="3"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      style={{ pointerEvents: 'none', opacity: hoveredIdx === null ? 1 : 0.4 }}
+                    />
+                    {data.map((d, i) => {
+                      const x = paddingX + (i / (Math.max(data.length - 1, 1))) * chartWidth;
+                      const y = 200 - (value(d.requests) / maxRequests) * 200;
+                      return (
+                        <circle
+                          key={i}
+                          cx={x} cy={y} r={hoveredIdx === i ? "5" : "3"}
+                          fill="white"
+                          stroke="var(--color-pink)"
+                          strokeWidth={hoveredIdx === i ? "3" : "2"}
+                          style={{ pointerEvents: 'none', transition: 'all 0.2s', opacity: hoveredIdx === null || hoveredIdx === i ? 1 : 0.4 }}
+                        />
+                      );
+                    })}
+                  </>
+                );
+              })()}
+            </svg>
+
+            <div style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              marginTop: '20px',
+              borderTop: '1px solid #f1f5f9',
+              paddingTop: '10px',
+              paddingLeft: `${(paddingX / 1000) * 100}%`,
+              paddingRight: `${(paddingX / 1000) * 100}%`
+            }}>
+              {data.map((d, i) => {
+                if (data.length > 12 && i % Math.ceil(data.length / 12) !== 0 && i !== data.length - 1) {
+                  return null;
+                }
+                const label = d.period.includes(':')
+                  ? d.period.split(' ')[1]
+                  : d.period.split('-').slice(1).join('/');
+                return (
+                  <div key={d.period} style={{ fontSize: '10px', color: 'var(--text-muted)' }}>
+                    {label}
+                  </div>
+                );
+              })}
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function ModelTokenChart({
+  summary,
   title
 }: { 
   summary: UsageSummary[], 
@@ -762,6 +976,32 @@ function ModelTokenChart({
   );
 }
 
+function getProviderBadgeColor(provider: string): string {
+  const p = provider.toLowerCase()
+  if (p.includes('anthropic')) return '#cc7c5e'
+  if (p.includes('google')) return '#528af2'
+  if (p.includes('openai')) return '#dcdcdc'
+  if (p.includes('minimax')) return '#ec6b53'
+  if (p.includes('xiaomi')) return '#dcc496'
+  return '#f1f5f9'
+}
+
+function getProviderBadgeBg(provider: string): string {
+  const base = getProviderBadgeColor(provider)
+  const p = provider.toLowerCase()
+  if (p.includes('openai') || p.includes('xiaomi')) return `${base}80`
+  if (p.includes('anthropic') || p.includes('google') || p.includes('minimax')) return `${base}26`
+  return '#f1f5f9'
+}
+
+function getProviderBadgeText(provider: string): string {
+  const p = provider.toLowerCase()
+  if (p.includes('openai')) return '#475569'
+  if (p.includes('xiaomi')) return '#6b4f2a'
+  if (p.includes('anthropic') || p.includes('google') || p.includes('minimax')) return getProviderBadgeColor(provider)
+  return '#475569'
+}
+
 function getProviderIcon(provider: string) {
   const p = provider.toLowerCase()
   const style = { width: 14, height: 14, display: 'block', objectFit: 'contain' as const }
@@ -771,6 +1011,22 @@ function getProviderIcon(provider: string) {
   if (p.includes('minimax')) return <img src="/models/minimax-color.svg" alt="" style={style} />
   if (p.includes('xiaomi')) return <img src="/models/xiaomi.svg" alt="" style={style} />
   return null
+}
+
+function getSourceBadgeBg(name: string): string {
+  if (name === 'codex') return '#dcdcdc80'
+  if (name === 'claude-code') return '#cc7c5e26'
+  if (name === 'gemini-cli') return '#528af226'
+  if (name === 'proxy') return '#8b5cf626'
+  return '#f1f5f9'
+}
+
+function getSourceBadgeText(name: string): string {
+  if (name === 'codex') return '#475569'
+  if (name === 'claude-code') return '#cc7c5e'
+  if (name === 'gemini-cli') return '#528af2'
+  if (name === 'proxy') return '#8b5cf6'
+  return '#475569'
 }
 
 function ProviderTokenChart({
@@ -787,7 +1043,7 @@ function ProviderTokenChart({
       metric === 'tokens'
         ? (b.total_tokens ?? 0) - (a.total_tokens ?? 0)
         : (b.total_cost_usd ?? 0) - (a.total_cost_usd ?? 0)
-    );
+    ).slice(0, 6);
   }, [data, metric]);
 
   const maxValue = Math.max(
@@ -799,6 +1055,7 @@ function ProviderTokenChart({
     'anthropic': '#cc7c5e',
     'google': '#528af2',
     'openai': '#94a3b8',
+    'xiaomi': '#dcc496',
   };
 
   return (
@@ -854,11 +1111,10 @@ function ProviderTokenChart({
                     <span style={{
                       padding: '1px 6px',
                       borderRadius: '4px',
-                      backgroundColor: '#f1f5f9',
-                      color: '#475569',
+                      backgroundColor: getProviderBadgeBg(name),
+                      color: getProviderBadgeText(name),
                       fontSize: '11px',
                       fontWeight: 600,
-                      border: '1px solid #e2e8f0'
                     }}>{name}</span>
                   </div>
                   <div style={{ color: 'var(--text-secondary)', fontWeight: 700 }}>
@@ -900,7 +1156,7 @@ function SourceTokenChart({
       metric === 'tokens'
         ? (b.total_tokens ?? 0) - (a.total_tokens ?? 0)
         : (b.total_cost_usd ?? 0) - (a.total_cost_usd ?? 0)
-    );
+    ).slice(0, 6);
   }, [data, metric]);
 
   const maxValue = Math.max(
@@ -909,9 +1165,9 @@ function SourceTokenChart({
   );
 
   const sourceColors: Record<string, string> = {
-    'claude-code': '#d97706',
-    'codex': '#10b981',
-    'gemini-cli': '#3b82f6',
+    'claude-code': '#cc7c5e',
+    'codex': '#dcdcdc',
+    'gemini-cli': '#528af2',
     'proxy': '#8b5cf6',
   };
 
@@ -966,11 +1222,10 @@ function SourceTokenChart({
                   <span style={{
                     padding: '1px 6px',
                     borderRadius: '4px',
-                    backgroundColor: '#f1f5f9',
-                    color: '#475569',
+                    backgroundColor: getSourceBadgeBg(name),
+                    color: getSourceBadgeText(name),
                     fontSize: '11px',
                     fontWeight: 600,
-                    border: '1px solid #e2e8f0'
                   }}>{name}</span>
                   <div style={{ color: 'var(--text-secondary)', fontWeight: 700 }}>
                     {metric === 'tokens' ? formatCompact(currentVal) : formatCost(currentVal)}
@@ -1687,10 +1942,20 @@ function App() {
 
               <UsageHeatmap activeFilter={activeFilter} activeSource={activeSource} />
 
-              <TrendChart
-                data={dailyUsage}
-                title={`${(dateRange === '5h' || dateRange === '24h') ? 'Hourly' : 'Daily'} Usage Trend`}
-              />
+              <div style={{ display: 'flex', gap: '24px', alignItems: 'stretch' }}>
+                <div style={{ flex: 1 }}>
+                  <TrendChart
+                    data={dailyUsage}
+                    title={`${(dateRange === '5h' || dateRange === '24h') ? 'Hourly' : 'Daily'} Usage Trend`}
+                  />
+                </div>
+                <div style={{ flex: 1 }}>
+                  <CostTrendChart
+                    data={dailyUsage}
+                    title={`${(dateRange === '5h' || dateRange === '24h') ? 'Hourly' : 'Daily'} Cost Trend`}
+                  />
+                </div>
+              </div>
 
               <div style={{ display: 'flex', gap: '24px', alignItems: 'stretch' }}>
                 <div style={{ flex: 1 }}>
