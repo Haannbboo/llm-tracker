@@ -1010,6 +1010,8 @@ def test_aggregate_usage_by_period_includes_cost_totals(database_module, isolate
             "input_cost_usd": 6e-05,
             "output_cost_usd": 9e-05,
             "total_cost_usd": 0.00015,
+            "successful_requests": 2,
+            "failed_requests": 0,
             "avg_latency_ms": 150.0,
         }
     ]

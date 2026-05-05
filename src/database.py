@@ -866,6 +866,7 @@ def aggregate_usage_by_period(
         Usage.output_cost_usd,
         Usage.total_cost_usd,
         Usage.latency_ms,
+        Usage.status,
     ).order_by(Usage.ts.asc())
     if filters:
         query = query.where(and_(*filters))
@@ -898,6 +899,8 @@ def aggregate_usage_by_period(
                     "total_cost_usd": Decimal("0"),
                     "_latency_sum": 0,
                     "_latency_count": 0,
+                    "successful_requests": 0,
+                    "failed_requests": 0,
                 },
             )
             bucket["requests"] += 1
@@ -911,6 +914,10 @@ def aggregate_usage_by_period(
             if row.latency_ms is not None:
                 bucket["_latency_sum"] += row.latency_ms
                 bucket["_latency_count"] += 1
+            if row.status is not None and row.status >= 400:
+                bucket["failed_requests"] += 1
+            else:
+                bucket["successful_requests"] += 1
 
     result = []
     for key in sorted(buckets):

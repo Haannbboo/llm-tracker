@@ -89,6 +89,8 @@ type DailyUsage = {
   output_cost_usd: number | null
   total_cost_usd: number | null
   avg_latency_ms: number | null
+  successful_requests: number | null
+  failed_requests: number | null
 }
 
 type ActiveFilter = { provider: string; model: string | null } | null
@@ -386,15 +388,17 @@ function ModelSelector({
   );
 }
 
-function TrendChart({ 
-  data, 
+function TrendChart({
+  data,
   title
-}: { 
-  data: DailyUsage[], 
+}: {
+  data: DailyUsage[],
   title: string
 }) {
+  const [metric, setMetric] = useState<'tokens' | 'cost'>('tokens');
   const [hoveredIdx, setHoveredIdx] = useState<number | null>(null);
   const maxTokens = Math.max(...data.map(x => value(x.total_tokens)), 1);
+  const maxCost = Math.max(...data.map(x => value(x.total_cost_usd)), 0.001);
   const maxRequests = Math.max(...data.map(x => value(x.requests)), 1);
   const paddingX = 60; // Internal horizontal padding
   const chartWidth = 1000 - (paddingX * 2);
@@ -408,22 +412,69 @@ function TrendChart({
     <div className="widget" style={{ minHeight: '400px', width: '100%', position: 'relative' }}>
       <div className="widget-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <span>📈 {title}</span>
-        <div style={{ display: 'flex', gap: '16px' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-            <div style={{ width: '12px', height: '12px', background: '#94a3b8', borderRadius: '2px' }} />
-            <span style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)' }}>Input</span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+          <div style={{ display: 'flex', gap: '16px' }}>
+            {metric === 'tokens' ? (
+              <>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <div style={{ width: '12px', height: '12px', background: '#94a3b8', borderRadius: '2px' }} />
+                  <span style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)' }}>Input</span>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <div style={{ width: '12px', height: '12px', background: 'var(--color-green)', borderRadius: '2px' }} />
+                  <span style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)' }}>Cached</span>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <div style={{ width: '12px', height: '12px', background: 'var(--color-blue)', borderRadius: '2px' }} />
+                  <span style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)' }}>Output</span>
+                </div>
+              </>
+            ) : (
+              <>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <div style={{ width: '12px', height: '12px', background: '#d97706', borderRadius: '2px' }} />
+                  <span style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)' }}>Input Cost</span>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <div style={{ width: '12px', height: '12px', background: '#a855f7', borderRadius: '2px' }} />
+                  <span style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)' }}>Output Cost</span>
+                </div>
+              </>
+            )}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <div style={{ width: '12px', height: '3px', background: 'var(--color-pink)', borderRadius: '2px' }} />
+              <span style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)' }}>Requests</span>
+            </div>
           </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-            <div style={{ width: '12px', height: '12px', background: 'var(--color-green)', borderRadius: '2px' }} />
-            <span style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)' }}>Cached</span>
-          </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-            <div style={{ width: '12px', height: '12px', background: 'var(--color-blue)', borderRadius: '2px' }} />
-            <span style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)' }}>Output</span>
-          </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-            <div style={{ width: '12px', height: '3px', background: 'var(--color-pink)', borderRadius: '2px' }} />
-            <span style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)' }}>Requests</span>
+          <div className="tab-group" style={{ display: 'flex', background: '#f1f5f9', padding: '2px', borderRadius: '6px' }}>
+            <button
+              onClick={() => setMetric('tokens')}
+              style={{
+                padding: '2px 8px',
+                fontSize: '10px',
+                borderRadius: '4px',
+                fontWeight: 600,
+                border: 'none',
+                cursor: 'pointer',
+                background: metric === 'tokens' ? 'white' : 'transparent',
+                color: metric === 'tokens' ? 'var(--color-blue)' : '#64748b',
+                boxShadow: metric === 'tokens' ? '0 1px 2px rgba(0,0,0,0.05)' : 'none'
+              }}
+            >Tokens</button>
+            <button
+              onClick={() => setMetric('cost')}
+              style={{
+                padding: '2px 8px',
+                fontSize: '10px',
+                borderRadius: '4px',
+                fontWeight: 600,
+                border: 'none',
+                cursor: 'pointer',
+                background: metric === 'cost' ? 'white' : 'transparent',
+                color: metric === 'cost' ? 'var(--color-blue)' : '#64748b',
+                boxShadow: metric === 'cost' ? '0 1px 2px rgba(0,0,0,0.05)' : 'none'
+              }}
+            >Cost</button>
           </div>
         </div>
       </div>
@@ -460,34 +511,57 @@ function TrendChart({
                 <div style={{ fontWeight: 600, marginBottom: '8px', borderBottom: '1px solid rgba(255, 255, 255, 0.2)', paddingBottom: '4px', fontSize: '13px' }}>
                   {hoveredData.period}
                 </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', gap: '12px', marginBottom: '4px' }}>
-                  <span style={{ color: '#94a3b8' }}>Input:</span>
-                  <span style={{ fontWeight: 600 }}>{formatNumber(hInput)}</span>
-                </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', gap: '12px', marginBottom: '4px' }}>
-                  <span style={{ color: 'var(--color-green)' }}>Cached:</span>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                    {value(hoveredData.prompt_tokens) > 0 && (
-                      <span style={{ fontSize: '10px', color: 'var(--color-green)', opacity: 0.8 }}>
-                        ({((hCached / value(hoveredData.prompt_tokens)) * 100).toFixed(1)}%)
-                      </span>
+                {metric === 'tokens' ? (
+                  <>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: '12px', marginBottom: '4px' }}>
+                      <span style={{ color: '#94a3b8' }}>Input:</span>
+                      <span style={{ fontWeight: 600 }}>{formatNumber(hInput)}</span>
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: '12px', marginBottom: '4px' }}>
+                      <span style={{ color: 'var(--color-green)' }}>Cached:</span>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        {value(hoveredData.prompt_tokens) > 0 && (
+                          <span style={{ fontSize: '10px', color: 'var(--color-green)', opacity: 0.8 }}>
+                            ({((hCached / value(hoveredData.prompt_tokens)) * 100).toFixed(1)}%)
+                          </span>
+                        )}
+                        <span style={{ fontWeight: 600 }}>{formatNumber(hCached)}</span>
+                      </div>
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: '12px', marginBottom: '4px' }}>
+                      <span style={{ color: 'var(--color-blue)' }}>Output:</span>
+                      <span style={{ fontWeight: 600 }}>{formatNumber(hOutput)}</span>
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: '12px', marginTop: '8px', paddingTop: '8px', borderTop: '1px solid rgba(255, 255, 255, 0.2)' }}>
+                      <span style={{ fontWeight: 700 }}>Total Tokens:</span>
+                      <span style={{ fontWeight: 800 }}>{formatNumber(value(hoveredData.total_tokens))}</span>
+                    </div>
+                    {hoveredData.total_cost_usd !== null && value(hoveredData.total_cost_usd) > 0 && (
+                      <div style={{ display: 'flex', justifyContent: 'space-between', gap: '12px', marginTop: '4px' }}>
+                        <span style={{ color: '#f472b6' }}>Est. Cost:</span>
+                        <span style={{ fontWeight: 800, color: '#f472b6' }}>{formatCost(hoveredData.total_cost_usd)}</span>
+                      </div>
                     )}
-                    <span style={{ fontWeight: 600 }}>{formatNumber(hCached)}</span>
-                  </div>
-                </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', gap: '12px', marginBottom: '4px' }}>
-                  <span style={{ color: 'var(--color-blue)' }}>Output:</span>
-                  <span style={{ fontWeight: 600 }}>{formatNumber(hOutput)}</span>
-                </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', gap: '12px', marginTop: '8px', paddingTop: '8px', borderTop: '1px solid rgba(255, 255, 255, 0.2)' }}>
-                  <span style={{ fontWeight: 700 }}>Total Tokens:</span>
-                  <span style={{ fontWeight: 800 }}>{formatNumber(value(hoveredData.total_tokens))}</span>
-                </div>
-                {hoveredData.total_cost_usd !== null && value(hoveredData.total_cost_usd) > 0 && (
-                  <div style={{ display: 'flex', justifyContent: 'space-between', gap: '12px', marginTop: '4px' }}>
-                    <span style={{ color: '#f472b6' }}>Est. Cost:</span>
-                    <span style={{ fontWeight: 800, color: '#f472b6' }}>{formatCost(hoveredData.total_cost_usd)}</span>
-                  </div>
+                  </>
+                ) : (
+                  <>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: '12px', marginBottom: '4px' }}>
+                      <span style={{ color: '#d97706' }}>Input Cost:</span>
+                      <span style={{ fontWeight: 600 }}>{formatCost(hoveredData.input_cost_usd)}</span>
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: '12px', marginBottom: '4px' }}>
+                      <span style={{ color: '#a855f7' }}>Output Cost:</span>
+                      <span style={{ fontWeight: 600 }}>{formatCost(hoveredData.output_cost_usd)}</span>
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: '12px', marginTop: '8px', paddingTop: '8px', borderTop: '1px solid rgba(255, 255, 255, 0.2)' }}>
+                      <span style={{ fontWeight: 700 }}>Total Cost:</span>
+                      <span style={{ fontWeight: 800 }}>{formatCost(hoveredData.total_cost_usd)}</span>
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: '12px', marginTop: '4px' }}>
+                      <span style={{ color: 'var(--text-muted)' }}>Tokens:</span>
+                      <span style={{ fontWeight: 600 }}>{formatNumber(value(hoveredData.total_tokens))}</span>
+                    </div>
+                  </>
                 )}
                 <div style={{ display: 'flex', justifyContent: 'space-between', gap: '12px', marginTop: '4px' }}>
                   <span style={{ color: 'var(--color-pink)' }}>Requests:</span>
@@ -511,59 +585,60 @@ function TrendChart({
                 />
               ))}
 
-              {/* Stacked Bars for Tokens */}
+              {/* Stacked Bars */}
               {data.map((d, i) => {
                 const x = paddingX + (i / (Math.max(data.length - 1, 1))) * chartWidth;
                 const barWidth = Math.min(chartWidth / (data.length * 1.5), 60);
                 const slotWidth = data.length > 1 ? chartWidth / (data.length - 1) : chartWidth;
-                
-                const cached = value(d.cached_tokens);
-                const input = Math.max(0, value(d.prompt_tokens) - cached);
-                const output = value(d.completion_tokens);
-                
-                const hInputRect = (input / maxTokens) * 200;
-                const hCachedRect = (cached / maxTokens) * 200;
-                const hOutputRect = (output / maxTokens) * 200;
 
                 const isHovered = hoveredIdx === i;
                 const isDimmed = hoveredIdx !== null && !isHovered;
 
+                let bars: { y: number; h: number; fill: string }[];
+                if (metric === 'tokens') {
+                  const cached = value(d.cached_tokens);
+                  const input = Math.max(0, value(d.prompt_tokens) - cached);
+                  const output = value(d.completion_tokens);
+                  const hInputRect = (input / maxTokens) * 200;
+                  const hCachedRect = (cached / maxTokens) * 200;
+                  const hOutputRect = (output / maxTokens) * 200;
+                  bars = [
+                    { y: 200 - hInputRect, h: hInputRect, fill: '#94a3b8' },
+                    { y: 200 - hInputRect - hCachedRect, h: hCachedRect, fill: 'var(--color-green)' },
+                    { y: 200 - hInputRect - hCachedRect - hOutputRect, h: hOutputRect, fill: 'var(--color-blue)' },
+                  ];
+                } else {
+                  const inputCost = value(d.input_cost_usd);
+                  const outputCost = value(d.output_cost_usd);
+                  const hInputCost = (inputCost / maxCost) * 200;
+                  const hOutputCost = (outputCost / maxCost) * 200;
+                  bars = [
+                    { y: 200 - hInputCost, h: hInputCost, fill: '#d97706' },
+                    { y: 200 - hInputCost - hOutputCost, h: hOutputCost, fill: '#a855f7' },
+                  ];
+                }
+
                 return (
-                  <g 
+                  <g
                     key={i}
                     onMouseEnter={() => setHoveredIdx(i)}
                     onMouseLeave={() => setHoveredIdx(null)}
                   >
-                    {/* Input */}
-                    <rect 
-                      x={x - barWidth/2} y={200 - hInputRect} 
-                      width={barWidth} height={hInputRect} 
-                      fill="#94a3b8" 
-                      opacity={isDimmed ? 0.3 : 1}
-                      style={{ transition: 'all 0.2s' }}
-                    />
-                    {/* Cached */}
-                    <rect 
-                      x={x - barWidth/2} y={200 - hInputRect - hCachedRect} 
-                      width={barWidth} height={hCachedRect} 
-                      fill="var(--color-green)" 
-                      opacity={isDimmed ? 0.3 : 1}
-                      style={{ transition: 'all 0.2s' }}
-                    />
-                    {/* Output */}
-                    <rect 
-                      x={x - barWidth/2} y={200 - hInputRect - hCachedRect - hOutputRect} 
-                      width={barWidth} height={hOutputRect} 
-                      fill="var(--color-blue)" 
-                      opacity={isDimmed ? 0.3 : 1}
-                      style={{ transition: 'all 0.2s' }}
-                    />
-                    
+                    {bars.map((bar, bi) => (
+                      <rect
+                        key={bi}
+                        x={x - barWidth/2} y={bar.y}
+                        width={barWidth} height={bar.h}
+                        fill={bar.fill}
+                        opacity={isDimmed ? 0.3 : 1}
+                        style={{ transition: 'all 0.2s' }}
+                      />
+                    ))}
                     {/* Invisible overlay for easier hovering */}
-                    <rect 
-                      x={x - slotWidth/2} y={0} 
-                      width={slotWidth} height={200} 
-                      fill="transparent" 
+                    <rect
+                      x={x - slotWidth/2} y={0}
+                      width={slotWidth} height={200}
+                      fill="transparent"
                       style={{ cursor: 'pointer' }}
                     />
                   </g>
@@ -1057,10 +1132,12 @@ function SourceTokenChart({
   );
 }
 
-function UsageHeatmap({
+function DailyHeatmap({
+  mode,
   activeFilter,
   activeSource,
 }: {
+  mode: 'activity' | 'success-rate'
   activeFilter: ActiveFilter
   activeSource: string | null
 }) {
@@ -1072,9 +1149,7 @@ function UsageHeatmap({
   useEffect(() => {
     if (!containerRef.current) return
     const observer = new ResizeObserver((entries) => {
-      for (const entry of entries) {
-        setContainerWidth(entry.contentRect.width)
-      }
+      for (const entry of entries) setContainerWidth(entry.contentRect.width)
     })
     observer.observe(containerRef.current)
     return () => observer.disconnect()
@@ -1112,27 +1187,36 @@ function UsageHeatmap({
     while (startDate.getDay() !== 0) startDate.setDate(startDate.getDate() - 1)
 
     let max = 0
-    const weeks: { date: Date; tokens: number; data: DailyUsage | null }[][] = []
+    const weeks: { date: Date; metric: number; data: DailyUsage | null }[][] = []
     const cursor = new Date(startDate)
 
     while (cursor <= endDate) {
-      const week: { date: Date; tokens: number; data: DailyUsage | null }[] = []
+      const week: { date: Date; metric: number; data: DailyUsage | null }[] = []
       for (let d = 0; d < 7; d++) {
         if (cursor > endDate) {
-          week.push({ date: new Date(cursor), tokens: -1, data: null })
+          week.push({ date: new Date(cursor), metric: -1, data: null })
         } else {
           const key = cursor.toISOString().split('T')[0]
           const dayData = dataMap.get(key) ?? null
-          const tokens = dayData ? value(dayData.total_tokens) : 0
-          if (tokens > max) max = tokens
-          week.push({ date: new Date(cursor), tokens, data: dayData })
+          let metric = -1
+          if (dayData) {
+            if (mode === 'activity') {
+              metric = value(dayData.total_tokens)
+              if (metric > max) max = metric
+            } else {
+              const total = value(dayData.requests)
+              const failed = value(dayData.failed_requests)
+              if (total > 0) metric = ((total - failed) / total) * 100
+            }
+          }
+          week.push({ date: new Date(cursor), metric, data: dayData })
         }
         cursor.setDate(cursor.getDate() + 1)
       }
       weeks.push(week)
     }
-    return { weeks, maxTokens: max }
-  }, [heatmapData])
+    return { weeks, maxVal: max }
+  }, [heatmapData, mode])
 
   const cellSize = 13
   const gap = 3
@@ -1148,7 +1232,7 @@ function UsageHeatmap({
     let lastMonth = -1
     for (let wi = 0; wi < visibleWeeks.length; wi++) {
       const firstDay = visibleWeeks[wi][0]
-      if (firstDay && firstDay.tokens >= 0 && firstDay.date.getMonth() !== lastMonth) {
+      if (firstDay && firstDay.metric >= 0 && firstDay.date.getMonth() !== lastMonth) {
         labels.push({ label: firstDay.date.toLocaleString(undefined, { month: 'short' }), col: wi })
         lastMonth = firstDay.date.getMonth()
       }
@@ -1156,33 +1240,49 @@ function UsageHeatmap({
     return labels
   }, [visibleWeeks])
 
-  function getColor(tokens: number): string {
-    if (tokens < 0) return 'transparent'
-    if (tokens === 0) return '#ebedf0'
-    const ratio = Math.min(tokens / (allWeeks.maxTokens || 1), 1)
-    if (ratio < 0.25) return '#9be9a8'
-    if (ratio < 0.5) return '#40c463'
-    if (ratio < 0.75) return '#30a14e'
-    return '#00b578'
+  function getColor(metric: number): string {
+    if (metric < 0) return 'transparent'
+    if (mode === 'activity') {
+      if (metric === 0) return '#ebedf0'
+      const ratio = Math.min(metric / (allWeeks.maxVal || 1), 1)
+      if (ratio < 0.25) return '#9be9a8'
+      if (ratio < 0.5) return '#40c463'
+      if (ratio < 0.75) return '#30a14e'
+      return '#00b578'
+    } else {
+      if (metric >= 100) return '#10b981'
+      if (metric >= 99) return '#34d399'
+      if (metric >= 95) return '#a7f3d0'
+      if (metric >= 90) return '#fcd34d'
+      if (metric >= 80) return '#f97316'
+      return '#ef4444'
+    }
   }
 
   const gridWidth = visibleWeeks.length * step
   const gridHeight = 7 * step
 
+  const title = mode === 'activity' ? '🗓 Daily Activity' : '✅ Success Rate'
+  const legendColors = mode === 'activity'
+    ? ['#ebedf0', '#9be9a8', '#40c463', '#30a14e', '#00b578']
+    : ['#10b981', '#34d399', '#a7f3d0', '#fcd34d', '#f97316', '#ef4444']
+  const legendStart = mode === 'activity' ? 'Less' : '100%'
+  const legendEnd = mode === 'activity' ? 'More' : 'Fail'
+
   return (
-    <div ref={containerRef} className="widget" style={{ width: '100%', position: 'relative', overflow: 'visible' }}>
+    <div ref={containerRef} className="widget" style={{ width: '100%', flex: 1, minHeight: 0, position: 'relative', overflow: 'visible', display: 'flex', flexDirection: 'column' }}>
       <div className="widget-header">
-        <span>🗓 Daily Activity</span>
+        <span>{title}</span>
         <div style={{ display: 'flex', alignItems: 'center', gap: '4px', marginLeft: 'auto', fontSize: '10px', color: 'var(--text-muted)' }}>
-          <span>Less</span>
-          {['#ebedf0', '#9be9a8', '#40c463', '#30a14e', '#00b578'].map(c => (
+          <span>{legendStart}</span>
+          {legendColors.map(c => (
             <div key={c} style={{ width: '11px', height: '11px', borderRadius: '2px', background: c, border: '1px solid rgba(0,0,0,0.06)' }} />
           ))}
-          <span>More</span>
+          <span>{legendEnd}</span>
         </div>
       </div>
-      <div style={{ padding: '8px 0 12px' }}>
-        <svg width={leftPad + gridWidth + 8} height={topPad + gridHeight + 4} style={{ display: 'block' }}>
+      <div style={{ padding: '8px 0 12px', flex: 1, minHeight: 0, overflow: 'hidden' }}>
+        <svg viewBox={`0 0 ${leftPad + gridWidth + 8} ${topPad + gridHeight + 4}`} style={{ display: 'block', width: '100%', height: '100%' }} preserveAspectRatio="none">
           {monthLabels.map((m, i) => (
             <text key={i} x={leftPad + m.col * step} y={14} fontSize={10} fill="#94a3b8" fontWeight={500}>
               {m.label}
@@ -1197,7 +1297,7 @@ function UsageHeatmap({
             week.map((day, di) => {
               const x = leftPad + wi * step
               const y = topPad + di * step
-              const isFuture = day.tokens < 0
+              const isNoData = day.metric < 0
               return (
                 <rect
                   key={`${wi}-${di}`}
@@ -1207,14 +1307,13 @@ function UsageHeatmap({
                   height={cellSize}
                   rx={2}
                   ry={2}
-                  fill={isFuture ? 'transparent' : getColor(day.tokens)}
+                  fill={isNoData ? '#ebedf0' : getColor(day.metric)}
                   stroke={hoveredCell?.date === day.date.toISOString().split('T')[0] ? '#1e293b' : 'rgba(0,0,0,0.06)'}
                   strokeWidth={hoveredCell?.date === day.date.toISOString().split('T')[0] ? 2 : 1}
-                  style={{ cursor: isFuture ? 'default' : 'pointer', transition: 'stroke 0.1s' }}
+                  style={{ cursor: 'pointer', transition: 'stroke 0.1s' }}
                   onMouseEnter={(e) => {
-                    if (isFuture) return
                     const rect = e.currentTarget.getBoundingClientRect()
-                    const parent = e.currentTarget.closest('svg')!.getBoundingClientRect()
+                    const parent = containerRef.current!.getBoundingClientRect()
                     setHoveredCell({
                       date: day.date.toISOString().split('T')[0],
                       data: day.data,
@@ -1228,73 +1327,110 @@ function UsageHeatmap({
             })
           )}
         </svg>
-        {hoveredCell && (() => {
-          const d = hoveredCell.data
-          const hCached = d ? value(d.cached_tokens) : 0
-          const hInput = d ? Math.max(0, value(d.prompt_tokens) - hCached) : 0
-          const hOutput = d ? value(d.completion_tokens) : 0
-          const total = d ? value(d.total_tokens) : 0
-          const requests = d ? value(d.requests) : 0
-          const cost = d ? value(d.total_cost_usd) : 0
-          const dateObj = new Date(hoveredCell.date + 'T12:00:00')
-          const dateLabel = dateObj.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })
-          return (
-            <div style={{
-              position: 'absolute',
-              left: hoveredCell.x,
-              top: hoveredCell.y - 8,
-              transform: 'translate(-50%, -100%)',
-              backgroundColor: 'rgba(15, 23, 42, 0.95)',
-              color: 'white',
-              padding: '10px 14px',
-              borderRadius: '8px',
-              fontSize: '12px',
-              zIndex: 200,
-              pointerEvents: 'none',
-              boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)',
-              minWidth: '180px',
-              border: '1px solid rgba(255, 255, 255, 0.1)',
-              whiteSpace: 'nowrap',
-            }}>
-              <div style={{ fontWeight: 600, marginBottom: '6px', borderBottom: '1px solid rgba(255,255,255,0.2)', paddingBottom: '4px' }}>
-                {dateLabel}
-              </div>
-              {total === 0 ? (
-                <div style={{ color: '#94a3b8' }}>No activity</div>
-              ) : (
-                <>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', gap: '16px', marginBottom: '3px' }}>
-                    <span style={{ color: '#94a3b8' }}>Input:</span>
-                    <span style={{ fontWeight: 600 }}>{formatNumber(hInput)}</span>
-                  </div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', gap: '16px', marginBottom: '3px' }}>
-                    <span style={{ color: '#40c463' }}>Cached:</span>
-                    <span style={{ fontWeight: 600 }}>{formatNumber(hCached)}</span>
-                  </div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', gap: '16px', marginBottom: '3px' }}>
-                    <span style={{ color: '#3b82f6' }}>Output:</span>
-                    <span style={{ fontWeight: 600 }}>{formatNumber(hOutput)}</span>
-                  </div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', gap: '16px', marginTop: '6px', paddingTop: '6px', borderTop: '1px solid rgba(255,255,255,0.2)' }}>
-                    <span style={{ fontWeight: 700 }}>Total:</span>
-                    <span style={{ fontWeight: 800 }}>{formatNumber(total)}</span>
-                  </div>
-                  {cost > 0 && (
-                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: '16px', marginTop: '3px' }}>
-                      <span style={{ color: '#f472b6' }}>Cost:</span>
-                      <span style={{ fontWeight: 800, color: '#f472b6' }}>{formatCost(cost)}</span>
-                    </div>
-                  )}
-                  <div style={{ display: 'flex', justifyContent: 'space-between', gap: '16px', marginTop: '3px' }}>
-                    <span style={{ color: '#f43f5e' }}>Requests:</span>
-                    <span style={{ fontWeight: 600, color: '#f43f5e' }}>{formatNumber(requests)}</span>
-                  </div>
-                </>
-              )}
-            </div>
-          )
-        })()}
       </div>
+      {hoveredCell && (() => {
+        const d = hoveredCell.data
+        const dateObj = new Date(hoveredCell.date + 'T12:00:00')
+        const dateLabel = dateObj.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })
+
+        let content: React.ReactNode
+        if (mode === 'activity') {
+          const total = d ? value(d.total_tokens) : 0
+          if (total === 0) {
+            content = <div style={{ color: '#94a3b8' }}>No activity</div>
+          } else {
+            const hCached = d ? value(d.cached_tokens) : 0
+            const hInput = d ? Math.max(0, value(d.prompt_tokens) - hCached) : 0
+            const hOutput = d ? value(d.completion_tokens) : 0
+            const requests = d ? value(d.requests) : 0
+            const cost = d ? value(d.total_cost_usd) : 0
+            content = (
+              <>
+                <div style={{ display: 'flex', justifyContent: 'space-between', gap: '16px', marginBottom: '3px' }}>
+                  <span style={{ color: '#94a3b8' }}>Input:</span>
+                  <span style={{ fontWeight: 600 }}>{formatNumber(hInput)}</span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', gap: '16px', marginBottom: '3px' }}>
+                  <span style={{ color: '#40c463' }}>Cached:</span>
+                  <span style={{ fontWeight: 600 }}>{formatNumber(hCached)}</span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', gap: '16px', marginBottom: '3px' }}>
+                  <span style={{ color: '#3b82f6' }}>Output:</span>
+                  <span style={{ fontWeight: 600 }}>{formatNumber(hOutput)}</span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', gap: '16px', marginTop: '6px', paddingTop: '6px', borderTop: '1px solid rgba(255,255,255,0.2)' }}>
+                  <span style={{ fontWeight: 700 }}>Total:</span>
+                  <span style={{ fontWeight: 800 }}>{formatNumber(total)}</span>
+                </div>
+                {cost > 0 && (
+                  <div style={{ display: 'flex', justifyContent: 'space-between', gap: '16px', marginTop: '3px' }}>
+                    <span style={{ color: '#f472b6' }}>Cost:</span>
+                    <span style={{ fontWeight: 800, color: '#f472b6' }}>{formatCost(cost)}</span>
+                  </div>
+                )}
+                <div style={{ display: 'flex', justifyContent: 'space-between', gap: '16px', marginTop: '3px' }}>
+                  <span style={{ color: '#f43f5e' }}>Requests:</span>
+                  <span style={{ fontWeight: 600, color: '#f43f5e' }}>{formatNumber(requests)}</span>
+                </div>
+              </>
+            )
+          }
+        } else {
+          const total = d ? value(d.requests) : 0
+          if (total === 0) {
+            content = <div style={{ color: '#94a3b8' }}>No requests</div>
+          } else {
+            const failed = d ? value(d.failed_requests) : 0
+            const successful = d ? value(d.successful_requests) : 0
+            const rate = ((total - failed) / total * 100)
+            content = (
+              <>
+                <div style={{ display: 'flex', justifyContent: 'space-between', gap: '16px', marginBottom: '3px' }}>
+                  <span style={{ color: '#94a3b8' }}>Success Rate:</span>
+                  <span style={{ fontWeight: 700, color: rate >= 99 ? '#10b981' : rate >= 90 ? '#fcd34d' : '#ef4444' }}>{rate.toFixed(1)}%</span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', gap: '16px', marginBottom: '3px' }}>
+                  <span style={{ color: '#10b981' }}>Successful:</span>
+                  <span style={{ fontWeight: 600 }}>{formatNumber(successful)}</span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', gap: '16px', marginBottom: '3px' }}>
+                  <span style={{ color: '#ef4444' }}>Failed:</span>
+                  <span style={{ fontWeight: 600 }}>{formatNumber(failed)}</span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', gap: '16px', marginTop: '6px', paddingTop: '6px', borderTop: '1px solid rgba(255,255,255,0.2)' }}>
+                  <span style={{ fontWeight: 700 }}>Total:</span>
+                  <span style={{ fontWeight: 800 }}>{formatNumber(total)}</span>
+                </div>
+              </>
+            )
+          }
+        }
+
+        return (
+          <div style={{
+            position: 'absolute',
+            left: hoveredCell.x,
+            top: hoveredCell.y - 8,
+            transform: 'translate(-50%, -100%)',
+            backgroundColor: 'rgba(15, 23, 42, 0.95)',
+            color: 'white',
+            padding: '10px 14px',
+            borderRadius: '8px',
+            fontSize: '12px',
+            zIndex: 200,
+            pointerEvents: 'none',
+            boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)',
+            minWidth: '180px',
+            border: '1px solid rgba(255, 255, 255, 0.1)',
+            whiteSpace: 'nowrap',
+          }}>
+            <div style={{ fontWeight: 600, marginBottom: '6px', borderBottom: '1px solid rgba(255,255,255,0.2)', paddingBottom: '4px' }}>
+              {dateLabel}
+            </div>
+            {content}
+          </div>
+        )
+      })()}
     </div>
   )
 }
@@ -1778,17 +1914,19 @@ function App() {
                     </div>
                   </div>
                 </div>
+
               </div>
 
-              <div style={{ display: 'flex', gap: '24px', alignItems: 'stretch' }}>
-                <div style={{ flex: 1 }}>
-                  <UsageHeatmap activeFilter={activeFilter} activeSource={activeSource} />
-                </div>
-                <div style={{ flex: 1 }}>
+              <div style={{ display: 'flex', gap: '24px', height: '400px' }}>
+                <div style={{ flex: '1 1 0', minWidth: 0 }}>
                   <TrendChart
                     data={dailyUsage}
                     title={`${(dateRange === '5h' || dateRange === '24h') ? 'Hourly' : 'Daily'} Usage Trend`}
                   />
+                </div>
+                <div style={{ flex: '1 1 0', minWidth: 0, display: 'flex', flexDirection: 'column', gap: '24px' }}>
+                  <DailyHeatmap mode="activity" activeFilter={activeFilter} activeSource={activeSource} />
+                  <DailyHeatmap mode="success-rate" activeFilter={activeFilter} activeSource={activeSource} />
                 </div>
               </div>
 
