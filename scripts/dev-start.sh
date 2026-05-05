@@ -12,6 +12,33 @@ STATE_FILE="${ROOT_DIR}/.dev-env.json"
 MAIN_DB="${HOME}/.llm-tracker/usage.db"
 VENV_DIR="${ROOT_DIR}/.venv"
 PYTHON="${VENV_DIR}/bin/python"
+REQS_STAMP="${VENV_DIR}/.requirements.sha256"
+
+# --- Bootstrap venv ---
+if ! command -v uv >/dev/null 2>&1; then
+  echo "==> Installing uv..."
+  curl -LsSf https://astral.sh/uv/install.sh | sh
+  export PATH="${HOME}/.local/bin:${PATH}"
+fi
+
+if [[ ! -x "${PYTHON}" ]]; then
+  echo "==> Creating venv..."
+  uv venv --python 3.13 "${VENV_DIR}"
+fi
+
+CURRENT_HASH="$(shasum -a 256 "${ROOT_DIR}/requirements.txt" | awk '{print $1}')"
+SAVED_HASH="$(cat "${REQS_STAMP}" 2>/dev/null || true)"
+if [[ "${CURRENT_HASH}" != "${SAVED_HASH}" ]]; then
+  echo "==> Installing Python dependencies..."
+  uv pip install --python "${PYTHON}" -r "${ROOT_DIR}/requirements.txt"
+  echo "${CURRENT_HASH}" > "${REQS_STAMP}"
+fi
+
+# --- Bootstrap frontend deps ---
+if [[ ! -d "${ROOT_DIR}/frontend/node_modules" ]]; then
+  echo "==> Installing frontend dependencies..."
+  (cd "${ROOT_DIR}/frontend" && npm install)
+fi
 
 # --- Check if already running ---
 if [[ -f "${STATE_FILE}" ]]; then
