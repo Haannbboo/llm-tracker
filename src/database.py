@@ -8,7 +8,7 @@ The steady-state pattern in this module is:
 from __future__ import annotations
 
 import os
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from decimal import Decimal
 from pathlib import Path
 from typing import Any
@@ -22,6 +22,7 @@ from sqlalchemy import (
     case,
     create_engine,
     func,
+    or_,
     select,
     text,
 )
@@ -995,6 +996,58 @@ def _parse_iso8601(ts: str) -> datetime:
     return parsed.astimezone(timezone.utc)
 
 
+def _parse_tz_offset(tz_offset: str) -> tuple[int, int]:
+    """Parse '+05:30' into (hours, minutes) with sign."""
+    sign = 1 if tz_offset.startswith("+") else -1
+    hours_str, minutes_str = tz_offset[1:].split(":", 1)
+    return sign * int(hours_str), sign * int(minutes_str)
+
+
+def _period_expression(granularity: str, tz_offset: str) -> Any:
+    """Return a dialect-aware SQL expression that buckets Usage.ts into period strings."""
+    dialect = get_engine().dialect.name
+    offset_hours, offset_minutes = _parse_tz_offset(tz_offset)
+
+    if dialect == "sqlite":
+        fmt = "%Y-%m-%d %H:00" if granularity == "hour" else "%Y-%m-%d"
+        modifiers: list[str] = []
+        if offset_hours:
+            modifiers.append(f"{offset_hours:+d} hours")
+        if offset_minutes:
+            modifiers.append(f"{offset_minutes:+d} minutes")
+        return func.strftime(fmt, Usage.ts, *modifiers)
+
+    if dialect == "postgresql":
+        from sqlalchemy import types as sa_types
+
+        pg_fmt = "YYYY-MM-DD HH24:00" if granularity == "hour" else "YYYY-MM-DD"
+        ts_cast = func.cast(Usage.ts, sa_types.DateTime(timezone=True))
+        parts: list[str] = []
+        if offset_hours:
+            parts.append(f"{offset_hours} hours")
+        if offset_minutes:
+            parts.append(f"{offset_minutes} minutes")
+        ts_adjusted = (
+            ts_cast + text(f"interval '{' '.join(parts)}'") if parts else ts_cast
+        )
+        return func.to_char(ts_adjusted, pg_fmt)
+
+    if dialect == "mysql":
+        fmt = "%Y-%m-%d %H:00" if granularity == "hour" else "%Y-%m-%d"
+        ts_parsed = func.str_to_date(func.left(Usage.ts, 19), "%Y-%m-%dT%H:%i:%s")
+        mysql_parts: list[str] = []
+        if offset_hours:
+            mysql_parts.append(f"INTERVAL {offset_hours} HOUR")
+        if offset_minutes:
+            mysql_parts.append(f"INTERVAL {offset_minutes} MINUTE")
+        ts_adjusted = ts_parsed
+        for part in mysql_parts:
+            ts_adjusted = func.date_add(ts_adjusted, text(part))
+        return func.date_format(ts_adjusted, fmt)
+
+    raise ValueError(f"Unsupported database dialect: {dialect}")
+
+
 def aggregate_usage_by_period(
     *,
     since: str | None = None,
@@ -1005,7 +1058,7 @@ def aggregate_usage_by_period(
     granularity: str = "day",
     tz_offset: str = "+00:00",
 ) -> list[dict[str, Any]]:
-    """Bucket usage into local-time hourly or daily periods in Python."""
+    """Bucket usage into local-time hourly or daily periods via SQL GROUP BY."""
     filters = _usage_filters(
         provider=provider,
         model=model,
@@ -1013,78 +1066,64 @@ def aggregate_usage_by_period(
         since=since,
         until=until,
     )
-    query = select(
-        Usage.ts,
-        Usage.prompt_tokens,
-        Usage.completion_tokens,
-        Usage.cached_tokens,
-        Usage.total_tokens,
-        Usage.input_cost_usd,
-        Usage.output_cost_usd,
-        Usage.total_cost_usd,
-        Usage.latency_ms,
-        Usage.status,
-    ).order_by(Usage.ts.asc())
+
+    period_expr = _period_expression(granularity, tz_offset)
+
+    latency_count = func.count(case((Usage.latency_ms.isnot(None), 1)))
+    latency_sum = func.coalesce(
+        func.sum(case((Usage.latency_ms.isnot(None), Usage.latency_ms), else_=0)),
+        0,
+    )
+
+    query = (
+        select(
+            period_expr.label("period"),
+            func.count().label("requests"),
+            func.coalesce(func.sum(Usage.prompt_tokens), 0).label("prompt_tokens"),
+            func.coalesce(func.sum(Usage.completion_tokens), 0).label(
+                "completion_tokens"
+            ),
+            func.coalesce(func.sum(Usage.cached_tokens), 0).label("cached_tokens"),
+            func.coalesce(func.sum(Usage.total_tokens), 0).label("total_tokens"),
+            func.coalesce(func.sum(Usage.input_cost_usd), 0).label("input_cost_usd"),
+            func.coalesce(func.sum(Usage.output_cost_usd), 0).label("output_cost_usd"),
+            func.coalesce(func.sum(Usage.total_cost_usd), 0).label("total_cost_usd"),
+            latency_sum.label("latency_sum"),
+            latency_count.label("latency_count"),
+            func.count(
+                case((and_(Usage.status.isnot(None), Usage.status >= 400), 1))
+            ).label("failed_requests"),
+            func.count(
+                case((or_(Usage.status.is_(None), Usage.status < 400), 1))
+            ).label("successful_requests"),
+        )
+        .group_by(period_expr)
+        .order_by(period_expr)
+    )
     if filters:
         query = query.where(and_(*filters))
 
-    sign = 1 if tz_offset.startswith("+") else -1
-    hours_str, minutes_str = tz_offset[1:].split(":", 1)
-    offset_delta = timedelta(
-        hours=sign * int(hours_str),
-        minutes=sign * int(minutes_str),
-    )
-
-    buckets: dict[str, dict[str, Any]] = {}
+    result = []
     with get_engine().connect() as connection:
         for row in connection.execute(query):
-            ts = _parse_iso8601(row.ts) + offset_delta
-            period = ts.strftime(
-                "%Y-%m-%d %H:00" if granularity == "hour" else "%Y-%m-%d"
-            )
-            bucket = buckets.setdefault(
-                period,
+            count = row.latency_count
+            avg_latency = row.latency_sum / count if count > 0 else 0
+            result.append(
                 {
-                    "period": period,
-                    "requests": 0,
-                    "prompt_tokens": 0,
-                    "completion_tokens": 0,
-                    "cached_tokens": 0,
-                    "total_tokens": 0,
-                    "input_cost_usd": Decimal("0"),
-                    "output_cost_usd": Decimal("0"),
-                    "total_cost_usd": Decimal("0"),
-                    "_latency_sum": 0,
-                    "_latency_count": 0,
-                    "successful_requests": 0,
-                    "failed_requests": 0,
-                },
+                    "period": row.period,
+                    "requests": row.requests,
+                    "prompt_tokens": row.prompt_tokens,
+                    "completion_tokens": row.completion_tokens,
+                    "cached_tokens": row.cached_tokens,
+                    "total_tokens": row.total_tokens,
+                    "input_cost_usd": _normalize_value(row.input_cost_usd),
+                    "output_cost_usd": _normalize_value(row.output_cost_usd),
+                    "total_cost_usd": _normalize_value(row.total_cost_usd),
+                    "avg_latency_ms": _normalize_value(avg_latency),
+                    "successful_requests": row.successful_requests,
+                    "failed_requests": row.failed_requests,
+                }
             )
-            bucket["requests"] += 1
-            bucket["prompt_tokens"] += row.prompt_tokens or 0
-            bucket["completion_tokens"] += row.completion_tokens or 0
-            bucket["cached_tokens"] += row.cached_tokens or 0
-            bucket["total_tokens"] += row.total_tokens or 0
-            bucket["input_cost_usd"] += row.input_cost_usd or Decimal("0")
-            bucket["output_cost_usd"] += row.output_cost_usd or Decimal("0")
-            bucket["total_cost_usd"] += row.total_cost_usd or Decimal("0")
-            if row.latency_ms is not None:
-                bucket["_latency_sum"] += row.latency_ms
-                bucket["_latency_count"] += 1
-            if row.status is not None and row.status >= 400:
-                bucket["failed_requests"] += 1
-            else:
-                bucket["successful_requests"] += 1
-
-    result = []
-    for key in sorted(buckets):
-        bucket = buckets[key]
-        count = bucket.pop("_latency_count")
-        latency_sum = bucket.pop("_latency_sum")
-        bucket["avg_latency_ms"] = latency_sum / count if count > 0 else 0
-        result.append(
-            {_normalize_value(k): _normalize_value(v) for k, v in bucket.items()}
-        )
     return result
 
 

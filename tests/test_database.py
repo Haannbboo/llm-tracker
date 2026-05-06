@@ -1709,3 +1709,186 @@ def test_migrate_database_backfill_idempotent(
         rows = list(conn.execute(database_module.select(database_module.UsageDaily)))
     assert len(rows) == 1
     assert rows[0].request_count == 1
+
+
+def test_aggregate_usage_by_period_hourly_with_tz_offset(
+    database_module, isolated_home
+):
+    db_path = str(isolated_home / "usage.db")
+    database_module.init_db(db_path)
+
+    # Two rows 1 hour apart in UTC
+    for ts, tokens in [
+        ("2026-05-05T10:30:00+00:00", 100),
+        ("2026-05-05T11:45:00+00:00", 200),
+    ]:
+        database_module.log_usage(
+            database_module.Usage(
+                ts=ts,
+                provider="anthropic",
+                model="claude-sonnet-4-20250514",
+                client_source=None,
+                session_id=None,
+                endpoint="/v1/messages",
+                prompt_tokens=50,
+                completion_tokens=50,
+                reasoning_tokens=None,
+                cached_tokens=None,
+                total_tokens=tokens,
+                latency_ms=100,
+                ttft_ms=None,
+                tool_tokens=None,
+                cache_creation_tokens=None,
+                input_cost_usd=0.002,
+                output_cost_usd=0.003,
+                total_cost_usd=0.005,
+                status=200,
+                base_url_id=None,
+            ),
+            db_path=db_path,
+        )
+
+    # With +05:30 offset, 10:30 UTC -> 16:00 IST, 11:45 UTC -> 17:15 IST
+    result = database_module.aggregate_usage_by_period(
+        granularity="hour", tz_offset="+05:30"
+    )
+    assert len(result) == 2
+    assert result[0]["period"] == "2026-05-05 16:00"
+    assert result[0]["requests"] == 1
+    assert result[0]["total_tokens"] == 100
+    assert result[1]["period"] == "2026-05-05 17:00"
+    assert result[1]["requests"] == 1
+    assert result[1]["total_tokens"] == 200
+
+
+def test_aggregate_usage_by_period_hourly_merges_same_hour(
+    database_module, isolated_home
+):
+    db_path = str(isolated_home / "usage.db")
+    database_module.init_db(db_path)
+
+    # Two rows in the same UTC hour
+    for ts, prompt, completion in [
+        ("2026-05-05T10:15:00+00:00", 50, 50),
+        ("2026-05-05T10:45:00+00:00", 30, 70),
+    ]:
+        database_module.log_usage(
+            database_module.Usage(
+                ts=ts,
+                provider="anthropic",
+                model="claude-sonnet-4-20250514",
+                client_source=None,
+                session_id=None,
+                endpoint="/v1/messages",
+                prompt_tokens=prompt,
+                completion_tokens=completion,
+                reasoning_tokens=None,
+                cached_tokens=None,
+                total_tokens=prompt + completion,
+                latency_ms=200,
+                ttft_ms=None,
+                tool_tokens=None,
+                cache_creation_tokens=None,
+                input_cost_usd=0.001,
+                output_cost_usd=0.002,
+                total_cost_usd=0.003,
+                status=200,
+                base_url_id=None,
+            ),
+            db_path=db_path,
+        )
+
+    result = database_module.aggregate_usage_by_period(granularity="hour")
+    assert len(result) == 1
+    assert result[0]["period"] == "2026-05-05 10:00"
+    assert result[0]["requests"] == 2
+    assert result[0]["prompt_tokens"] == 80
+    assert result[0]["completion_tokens"] == 120
+    assert result[0]["total_tokens"] == 200
+    assert result[0]["avg_latency_ms"] == 200
+
+
+def test_aggregate_usage_by_period_hourly_counts_failures(
+    database_module, isolated_home
+):
+    db_path = str(isolated_home / "usage.db")
+    database_module.init_db(db_path)
+
+    for ts, status in [
+        ("2026-05-05T10:00:00+00:00", 200),
+        ("2026-05-05T10:01:00+00:00", 500),
+        ("2026-05-05T10:02:00+00:00", 200),
+    ]:
+        database_module.log_usage(
+            database_module.Usage(
+                ts=ts,
+                provider="anthropic",
+                model="claude-sonnet-4-20250514",
+                client_source=None,
+                session_id=None,
+                endpoint="/v1/messages",
+                prompt_tokens=10,
+                completion_tokens=10,
+                reasoning_tokens=None,
+                cached_tokens=None,
+                total_tokens=20,
+                latency_ms=100,
+                ttft_ms=None,
+                tool_tokens=None,
+                cache_creation_tokens=None,
+                input_cost_usd=0.001,
+                output_cost_usd=0.001,
+                total_cost_usd=0.002,
+                status=status,
+                base_url_id=None,
+            ),
+            db_path=db_path,
+        )
+
+    result = database_module.aggregate_usage_by_period(granularity="hour")
+    assert len(result) == 1
+    assert result[0]["requests"] == 3
+    assert result[0]["successful_requests"] == 2
+    assert result[0]["failed_requests"] == 1
+
+
+def test_aggregate_usage_by_period_hourly_negative_tz_offset(
+    database_module, isolated_home
+):
+    db_path = str(isolated_home / "usage.db")
+    database_module.init_db(db_path)
+
+    database_module.log_usage(
+        database_module.Usage(
+            ts="2026-05-05T03:30:00+00:00",
+            provider="anthropic",
+            model="claude-sonnet-4-20250514",
+            client_source=None,
+            session_id=None,
+            endpoint="/v1/messages",
+            prompt_tokens=10,
+            completion_tokens=10,
+            reasoning_tokens=None,
+            cached_tokens=None,
+            total_tokens=20,
+            latency_ms=100,
+            ttft_ms=None,
+            tool_tokens=None,
+            cache_creation_tokens=None,
+            input_cost_usd=0.001,
+            output_cost_usd=0.001,
+            total_cost_usd=0.002,
+            status=200,
+            base_url_id=None,
+        ),
+        db_path=db_path,
+    )
+
+    # 03:30 UTC with -05:00 offset = 22:30 previous day (2026-05-04 22:00)
+    result = database_module.aggregate_usage_by_period(
+        granularity="hour", tz_offset="-05:00"
+    )
+    assert len(result) == 1
+    assert result[0]["period"] == "2026-05-04 22:00"
+    assert result[0]["requests"] == 1
+    assert result[0]["total_tokens"] == 20
