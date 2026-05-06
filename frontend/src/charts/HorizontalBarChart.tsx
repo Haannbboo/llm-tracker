@@ -1,15 +1,18 @@
 import { useState } from 'react'
-import { formatCompact, formatCost } from '../utils'
+import { formatCompact, formatCost, formatRate } from '../utils'
 
 export type BarItem = {
   name: string
   icon: React.ReactNode
   tokens: number
   cost: number
+  pricePerMillion?: number | null
   color: string
   badgeBg: string
   badgeText: string
 }
+
+type Metric = 'tokens' | 'cost'
 
 export function HorizontalBarChart({
   title,
@@ -24,14 +27,18 @@ export function HorizontalBarChart({
   maxCount?: number
   children?: React.ReactNode
 }) {
-  const [metric, setMetric] = useState<'tokens' | 'cost'>('tokens')
+  const [metric, setMetric] = useState<Metric>('tokens')
+  const getMetricValue = (item: BarItem) => {
+    if (metric === 'tokens') return item.tokens
+    return item.cost
+  }
 
   const sorted = [...items]
-    .sort((a, b) => metric === 'tokens' ? b.tokens - a.tokens : b.cost - a.cost)
+    .sort((a, b) => getMetricValue(b) - getMetricValue(a))
     .slice(0, maxCount)
 
   const maxValue = Math.max(
-    ...sorted.map(s => metric === 'tokens' ? s.tokens : s.cost),
+    ...sorted.map(getMetricValue),
     1
   )
 
@@ -55,7 +62,7 @@ export function HorizontalBarChart({
           <div style={{ padding: '40px', textAlign: 'center', color: 'var(--text-muted)' }}>No data available</div>
         ) : (
           sorted.map((s, index) => {
-            const currentVal = metric === 'tokens' ? s.tokens : s.cost
+            const currentVal = getMetricValue(s)
             const percentage = (currentVal / maxValue) * 100
 
             return (
@@ -72,8 +79,15 @@ export function HorizontalBarChart({
                       fontWeight: 600,
                     }}>{s.name}</span>
                   </div>
-                  <div style={{ color: 'var(--text-secondary)', fontWeight: 700 }}>
-                    {metric === 'tokens' ? formatCompact(currentVal) : formatCost(currentVal)}
+                  <div style={{ display: 'flex', alignItems: 'baseline', gap: '6px' }}>
+                    <span style={{ color: 'var(--text-secondary)', fontWeight: 700 }}>
+                      {metric === 'tokens' ? formatCompact(currentVal) : formatCost(currentVal, 2)}
+                    </span>
+                    {metric === 'cost' && s.pricePerMillion != null && (
+                      <span style={{ fontSize: '10px', color: 'var(--text-muted)' }}>
+                        {formatRate(s.pricePerMillion)}
+                      </span>
+                    )}
                   </div>
                 </div>
                 <div className="progress-track" style={{ width: '100%', display: 'flex' }}>

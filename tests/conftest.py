@@ -31,6 +31,7 @@ providers:
   test-provider:
     base_url: https://api.example.com/v1
     api_key: test-key
+    price_multiplier: 1.25
     models:
       test-model: {{}}
       gpt-4.1: {{}}

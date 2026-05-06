@@ -378,9 +378,9 @@ async def test_forward_logs_base_url_id_from_provider_config(proxy_module, monke
     assert captured["url"] == "https://api.example.com/v1/responses"
     assert captured["usage"].base_url_id == 7
     assert captured["usage"].provider == "test-provider"
-    assert captured["usage"].input_cost_usd == Decimal("0.00002")
-    assert captured["usage"].output_cost_usd == Decimal("0.00003")
-    assert captured["usage"].total_cost_usd == Decimal("0.00005")
+    assert captured["usage"].input_cost_usd == Decimal("0.000025")
+    assert captured["usage"].output_cost_usd == Decimal("0.0000375")
+    assert captured["usage"].total_cost_usd == Decimal("0.0000625")
     assert captured["usage"].status == 200
     assert captured["usage"].ttft_ms is None
 

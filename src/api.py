@@ -21,7 +21,6 @@ from .database import (
     init_db,
     log_usage,
     resolve_base_url_id,
-    summarize_usage,
     summarize_usage_by_provider,
     summarize_usage_by_source,
     summarize_usage_daily,

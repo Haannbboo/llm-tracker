@@ -17,6 +17,7 @@ sync_config_file_with_defaults = merge_helpers.sync_config_file_with_defaults
 class ProviderConfig:
     name: str
     base_url: str
+    price_multiplier: float = 1.0
 
 
 @dataclass(frozen=True)
@@ -110,7 +111,9 @@ def build_maps(
 
     for provider_name, provider in config["providers"].items():
         provider_config = ProviderConfig(
-            name=provider_name, base_url=provider["base_url"]
+            name=provider_name,
+            base_url=provider["base_url"],
+            price_multiplier=float(provider.get("price_multiplier", 1.0)),
         )
         provider_map[provider_name] = provider_config
         for model in _iter_provider_models(provider):

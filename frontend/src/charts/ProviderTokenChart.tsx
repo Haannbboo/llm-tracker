@@ -19,15 +19,21 @@ export function ProviderTokenChart({
   }
 
   const items: BarItem[] = useMemo(() =>
-    data.map((s, i) => ({
-      name: s.provider,
-      icon: getProviderIcon(s.provider),
-      tokens: s.total_tokens ?? 0,
-      cost: s.total_cost_usd ?? 0,
-      color: providerColors[s.provider.toLowerCase()] || PALETTE[i % PALETTE.length],
-      badgeBg: getProviderBadgeBg(s.provider),
-      badgeText: getProviderBadgeText(s.provider),
-    })),
+    data.map((s, i) => {
+      const tokens = s.total_tokens ?? 0
+      const cost = s.total_cost_usd ?? 0
+      return {
+        name: s.provider,
+        icon: getProviderIcon(s.provider),
+        tokens,
+        cost,
+        pricePerMillion: s.avg_effective_price_per_million_usd
+          ?? (tokens > 0 ? (cost / tokens) * 1_000_000 : null),
+        color: providerColors[s.provider.toLowerCase()] || PALETTE[i % PALETTE.length],
+        badgeBg: getProviderBadgeBg(s.provider),
+        badgeText: getProviderBadgeText(s.provider),
+      }
+    }),
     [data]
   )
 

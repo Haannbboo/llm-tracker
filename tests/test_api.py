@@ -374,6 +374,51 @@ def test_usage_by_source_endpoint_passes_all_filters(api_module, monkeypatch):
     assert captured["model"] == "gpt-4o"
 
 
+def test_usage_by_provider_endpoint_includes_avg_effective_price_per_million(
+    api_module, monkeypatch
+):
+    captured = {}
+
+    def fake_by_provider(**kwargs):
+        captured.update(kwargs)
+        return [
+            {
+                "provider": "openai",
+                "requests": 3,
+                "prompt_tokens": 600,
+                "completion_tokens": 300,
+                "reasoning_tokens": 0,
+                "cached_tokens": 100,
+                "total_tokens": 900,
+                "avg_latency_ms": 210.0,
+                "input_cost_usd": 0.003,
+                "output_cost_usd": 0.006,
+                "total_cost_usd": 0.009,
+                "avg_effective_price_usd": 0.00001,
+                "avg_effective_price_per_million_usd": 10.0,
+                "successful_requests": 3,
+                "failed_requests": 0,
+            }
+        ]
+
+    monkeypatch.setattr(api_module, "summarize_usage_by_provider", fake_by_provider)
+
+    response = TestClient(api_module.app).get(
+        "/usage/by-provider",
+        params={"provider": "openai", "model": "gpt-4o", "client_source": "codex"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()[0]["avg_effective_price_per_million_usd"] == 10.0
+    assert captured == {
+        "since": None,
+        "until": None,
+        "provider": "openai",
+        "model": "gpt-4o",
+        "client_source": "codex",
+    }
+
+
 def test_connectivity_endpoint(api_module, monkeypatch):
     class FakeResponse:
         def __init__(self):

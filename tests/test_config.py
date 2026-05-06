@@ -139,6 +139,28 @@ def test_build_maps_allows_provider_model_mapping(config_module):
     assert model_map["alpha-2"] == provider_map["alpha"]
 
 
+def test_build_maps_parses_provider_price_multiplier(config_module):
+    provider_map, model_map = config_module.build_maps(
+        {
+            "models": {"alpha-1": {}},
+            "providers": {
+                "alpha": {
+                    "base_url": "https://alpha.example/v1",
+                    "price_multiplier": 1.35,
+                    "models": {"alpha-1": {}},
+                },
+            },
+        }
+    )
+
+    assert provider_map["alpha"] == config_module.ProviderConfig(
+        name="alpha",
+        base_url="https://alpha.example/v1",
+        price_multiplier=1.35,
+    )
+    assert model_map["alpha-1"] == provider_map["alpha"]
+
+
 def test_build_maps_allows_provider_without_models(config_module):
     provider_map, model_map = config_module.build_maps(
         {

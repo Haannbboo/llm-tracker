@@ -6,12 +6,20 @@ export const compactFormatter = new Intl.NumberFormat(undefined, {
   maximumFractionDigits: 1,
   notation: 'compact',
 })
-export const costFormatter = new Intl.NumberFormat(undefined, {
-  style: 'currency',
-  currency: 'USD',
-  minimumFractionDigits: 2,
-  maximumFractionDigits: 4,
-})
+const costFormatters = new Map<number, Intl.NumberFormat>()
+function getCostFormatter(maxDigits: number) {
+  let fmt = costFormatters.get(maxDigits)
+  if (!fmt) {
+    fmt = new Intl.NumberFormat(undefined, {
+      style: 'currency',
+      currency: 'USD',
+      minimumFractionDigits: 2,
+      maximumFractionDigits: maxDigits,
+    })
+    costFormatters.set(maxDigits, fmt)
+  }
+  return fmt
+}
 
 export function value(input: number | null | undefined) {
   return input ?? 0
@@ -25,10 +33,12 @@ export function formatCompact(input: number | null | undefined) {
   return compactFormatter.format(value(input))
 }
 
-export function formatCost(input: number | null | undefined) {
+export function formatCost(input: number | null | undefined, maxDigits = 6) {
   const v = value(input)
   if (v === 0) return '$0.00'
-  return costFormatter.format(v)
+  if (Math.abs(v) < 0.01) return `$${v.toFixed(Math.min(4, maxDigits))}`
+  if (Math.abs(v) < 0.1) return `$${v.toFixed(Math.min(3, maxDigits))}`
+  return getCostFormatter(maxDigits).format(v)
 }
 
 export function formatRate(input: number | null | undefined) {

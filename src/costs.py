@@ -4,10 +4,20 @@ from decimal import Decimal
 
 from config.app import (
     MODEL_COSTS,
+    PROVIDER_MAP,
     PROVIDER_MODEL_COSTS,
     ModelCost,
     normalize_model_cost_key,
 )
+
+
+def get_provider_price_multiplier(provider: str | None) -> Decimal:
+    if not provider:
+        return Decimal("1.0")
+    provider_config = PROVIDER_MAP.get(provider)
+    if provider_config is None:
+        return Decimal("1.0")
+    return Decimal(str(provider_config.price_multiplier))
 
 
 def resolve_model_cost(provider: str, model: str) -> ModelCost | None:
@@ -43,9 +53,10 @@ def calculate_costs(
         Decimal(cached) * Decimal(str(cost.cache_read)) / Decimal(1_000_000)
     )
     output_cost = Decimal(completion) * Decimal(str(cost.output)) / Decimal(1_000_000)
+    multiplier = get_provider_price_multiplier(provider)
 
     return {
-        "input_cost_usd": input_cost + cached_input_cost,
-        "output_cost_usd": output_cost,
-        "total_cost_usd": input_cost + cached_input_cost + output_cost,
+        "input_cost_usd": (input_cost + cached_input_cost) * multiplier,
+        "output_cost_usd": output_cost * multiplier,
+        "total_cost_usd": (input_cost + cached_input_cost + output_cost) * multiplier,
     }

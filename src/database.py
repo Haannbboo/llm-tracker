@@ -22,7 +22,6 @@ from sqlalchemy import (
     case,
     create_engine,
     func,
-    or_,
     select,
     text,
 )
@@ -31,6 +30,22 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, relationship
 
 from config.app import CONFIG
+
+
+def _avg_effective_price_expr(total_cost_col: Any, total_tokens_col: Any) -> Any:
+    return case(
+        (
+            func.sum(total_tokens_col) > 0,
+            func.sum(total_cost_col) / func.sum(total_tokens_col),
+        ),
+        else_=0,
+    )
+
+
+def _avg_effective_price_per_million_expr(
+    total_cost_col: Any, total_tokens_col: Any
+) -> Any:
+    return _avg_effective_price_expr(total_cost_col, total_tokens_col) * 1_000_000
 
 
 class Base(DeclarativeBase):
@@ -815,58 +830,6 @@ def _build_usage_window_summary(
     return result
 
 
-def summarize_usage(
-    *,
-    since: str | None = None,
-    until: str | None = None,
-    provider: str | None = None,
-    model: str | None = None,
-    client_source: str | None = None,
-) -> list[dict[str, Any]]:
-    """Aggregate usage totals by provider and model for dashboard summaries."""
-    filters = _usage_filters(
-        since=since,
-        until=until,
-        provider=provider,
-        model=model,
-        client_source=client_source,
-    )
-    query = (
-        select(
-            Usage.provider,
-            Usage.model,
-            func.count().label("requests"),
-            func.sum(Usage.prompt_tokens).label("prompt_tokens"),
-            func.sum(Usage.completion_tokens).label("completion_tokens"),
-            func.sum(Usage.reasoning_tokens).label("reasoning_tokens"),
-            func.sum(Usage.cached_tokens).label("cached_tokens"),
-            func.sum(Usage.total_tokens).label("total_tokens"),
-            func.avg(Usage.latency_ms).label("avg_latency_ms"),
-            func.sum(Usage.input_cost_usd).label("input_cost_usd"),
-            func.sum(Usage.output_cost_usd).label("output_cost_usd"),
-            func.sum(Usage.total_cost_usd).label("total_cost_usd"),
-            func.sum(
-                case(
-                    (or_(Usage.status.is_(None), Usage.status < 400), 1),
-                    else_=0,
-                )
-            ).label("successful_requests"),
-            func.sum(
-                case(
-                    (Usage.status >= 400, 1),
-                    else_=0,
-                )
-            ).label("failed_requests"),
-        )
-        .group_by(Usage.provider, Usage.model)
-        .order_by(func.sum(Usage.total_tokens).desc())
-    )
-    if filters:
-        query = query.where(and_(*filters))
-    with get_engine().connect() as connection:
-        return [_row_to_dict(row) for row in connection.execute(query)]
-
-
 def summarize_usage_by_source(
     *,
     since: str | None = None,
@@ -951,6 +914,12 @@ def summarize_usage_by_provider(
             func.sum(UsageDaily.input_cost_usd).label("input_cost_usd"),
             func.sum(UsageDaily.output_cost_usd).label("output_cost_usd"),
             func.sum(UsageDaily.total_cost_usd).label("total_cost_usd"),
+            _avg_effective_price_expr(
+                UsageDaily.total_cost_usd, UsageDaily.total_tokens
+            ).label("avg_effective_price_usd"),
+            _avg_effective_price_per_million_expr(
+                UsageDaily.total_cost_usd, UsageDaily.total_tokens
+            ).label("avg_effective_price_per_million_usd"),
             func.sum(UsageDaily.successful_requests).label("successful_requests"),
             func.sum(UsageDaily.failed_requests).label("failed_requests"),
         )
@@ -1000,6 +969,12 @@ def summarize_usage_daily(
             func.sum(UsageDaily.input_cost_usd).label("input_cost_usd"),
             func.sum(UsageDaily.output_cost_usd).label("output_cost_usd"),
             func.sum(UsageDaily.total_cost_usd).label("total_cost_usd"),
+            _avg_effective_price_expr(
+                UsageDaily.total_cost_usd, UsageDaily.total_tokens
+            ).label("avg_effective_price_usd"),
+            _avg_effective_price_per_million_expr(
+                UsageDaily.total_cost_usd, UsageDaily.total_tokens
+            ).label("avg_effective_price_per_million_usd"),
             func.sum(UsageDaily.successful_requests).label("successful_requests"),
             func.sum(UsageDaily.failed_requests).label("failed_requests"),
         )

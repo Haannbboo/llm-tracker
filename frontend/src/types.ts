@@ -11,6 +11,8 @@ export type UsageSummary = {
   input_cost_usd: number | null
   output_cost_usd: number | null
   total_cost_usd: number | null
+  avg_effective_price_usd: number | null
+  avg_effective_price_per_million_usd: number | null
   successful_requests: number
   failed_requests: number
 }
@@ -27,6 +29,8 @@ export type ProviderUsage = {
   input_cost_usd: number | null
   output_cost_usd: number | null
   total_cost_usd: number | null
+  avg_effective_price_usd: number | null
+  avg_effective_price_per_million_usd: number | null
   successful_requests: number | null
   failed_requests: number | null
 }

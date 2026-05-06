@@ -232,6 +232,20 @@ function App() {
     const totalTokens = data.reduce((sum, row) => sum + value(row.total_tokens), 0)
     const totalCost = data.reduce((sum, row) => sum + value(row.total_cost_usd), 0)
     const latencyWeight = data.reduce((sum, row) => sum + value(row.avg_latency_ms) * value(row.requests), 0)
+    let effectivePriceWeight = 0, effectivePriceRequests = 0,
+        effectivePricePerMillionWeight = 0, effectivePricePerMillionTokens = 0
+    for (const row of data) {
+      const reqs = value(row.requests)
+      const tokens = value(row.total_tokens)
+      if (row.avg_effective_price_usd != null) {
+        effectivePriceWeight += row.avg_effective_price_usd * reqs
+        effectivePriceRequests += reqs
+      }
+      if (row.avg_effective_price_per_million_usd != null) {
+        effectivePricePerMillionWeight += row.avg_effective_price_per_million_usd * tokens
+        effectivePricePerMillionTokens += tokens
+      }
+    }
 
     const successfulRequests = data.reduce((sum, row) => sum + value(row.successful_requests), 0)
     const successRate = requests > 0 ? (successfulRequests / requests) * 100 : 100
@@ -252,6 +266,12 @@ function App() {
       totalTokens,
       totalCost,
       avgLatency: requests === 0 ? 0 : latencyWeight / requests,
+      avgEffectivePrice: effectivePriceRequests > 0
+        ? effectivePriceWeight / effectivePriceRequests
+        : requests === 0 ? 0 : totalCost / requests,
+      avgEffectivePricePerMillion: effectivePricePerMillionTokens > 0
+        ? effectivePricePerMillionWeight / effectivePricePerMillionTokens
+        : totalTokens === 0 ? 0 : (totalCost / totalTokens) * 1_000_000,
       rpm: requests / minutes,
       tpm: totalTokens / minutes,
       avgTokensPerRequest: requests === 0 ? 0 : totalTokens / requests,
@@ -467,7 +487,7 @@ function App() {
                         <div className="icon-box icon-green">$</div>
                         <div>
                           <div className="stat-label">Estimated Cost</div>
-                          <div className="stat-value">{formatCost(totals.totalCost)}</div>
+                          <div className="stat-value">{formatCost(totals.totalCost, 2)}</div>
                         </div>
                       </div>
                       <div style={{ width: '100px' }}>
@@ -475,7 +495,10 @@ function App() {
                       </div>
                     </div>
                     <div className="stat-label" style={{ marginTop: '-2px' }}>
-                      Avg: <span style={{ color: 'var(--color-blue)', fontWeight: 600 }}>{formatCost(totals.requests > 0 ? totals.totalCost / totals.requests : 0)} / req</span>
+                      Avg: <span style={{ color: 'var(--color-blue)', fontWeight: 600 }}>{formatCost(totals.avgEffectivePrice, 3)} / req</span>
+                    </div>
+                    <div className="stat-label" style={{ fontSize: '11px', marginBottom: 0 }}>
+                      Avg $/M tokens: <span style={{ color: 'var(--color-green)', fontWeight: 600 }}>{formatRate(totals.avgEffectivePricePerMillion)}</span>
                     </div>
                   </div>
                 </div>
