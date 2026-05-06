@@ -527,6 +527,9 @@ function App() {
                   <TrendChart
                     data={dailyUsage}
                     title={`${dateRange === '24h' ? 'Hourly' : 'Daily'} Usage Trend`}
+                    granularity={dateRange === '24h' ? 'hour' : 'day'}
+                    periodCount={dateRange === '24h' ? 24 : dateRange === '7d' ? 7 : dateRange === '30d' ? 30 : 365}
+                    showDots={dateRange !== 'all'}
                   />
                 </div>
                 <div style={{ flex: '1 1 0', minWidth: 0, display: 'flex', gap: '24px' }}>

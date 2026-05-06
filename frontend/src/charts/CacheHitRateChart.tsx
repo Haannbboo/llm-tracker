@@ -5,10 +5,10 @@ import { ChartTooltip, TooltipRow } from './ChartTooltip'
 
 export function CacheHitRateChart({
   data,
-  title
+  title,
 }: {
   data: DailyUsage[],
-  title: string
+  title: string,
 }) {
   const [hoveredIdx, setHoveredIdx] = useState<number | null>(null);
   const [containerWidth, setContainerWidth] = useState(0);

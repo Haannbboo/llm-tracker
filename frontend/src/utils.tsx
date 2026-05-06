@@ -1,4 +1,4 @@
-import type { DateRangeOption } from './types'
+import type { DateRangeOption, DailyUsage } from './types'
 import { getTheme } from './theme'
 
 export const numberFormatter = new Intl.NumberFormat()
@@ -60,6 +60,43 @@ export function getSinceDate(option: DateRangeOption): string | null {
   else if (option === '7d') now.setDate(now.getDate() - 7)
   else if (option === '30d') now.setDate(now.getDate() - 30)
   return now.toISOString()
+}
+
+export function fillGaps(data: DailyUsage[], granularity: 'hour' | 'day', periodCount: number): DailyUsage[] {
+  const zeroRow = (period: string): DailyUsage => ({
+    period, requests: 0, prompt_tokens: 0, completion_tokens: 0,
+    cached_tokens: 0, total_tokens: 0, input_cost_usd: 0,
+    output_cost_usd: 0, total_cost_usd: 0, avg_latency_ms: 0,
+    successful_requests: 0, failed_requests: 0,
+  })
+
+  const map = new Map(data.map(d => [d.period, d]))
+  const result: DailyUsage[] = []
+  const now = new Date()
+
+  if (granularity === 'hour') {
+    const start = new Date(now)
+    start.setMinutes(0, 0, 0)
+    start.setHours(start.getHours() - (periodCount - 1))
+    for (let i = 0; i < periodCount; i++) {
+      const d = new Date(start)
+      d.setHours(d.getHours() + i)
+      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')} ${String(d.getHours()).padStart(2, '0')}:00`
+      result.push(map.get(key) ?? zeroRow(key))
+    }
+  } else {
+    const start = new Date(now)
+    start.setHours(0, 0, 0, 0)
+    start.setDate(start.getDate() - (periodCount - 1))
+    for (let i = 0; i < periodCount; i++) {
+      const d = new Date(start)
+      d.setDate(d.getDate() + i)
+      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+      result.push(map.get(key) ?? zeroRow(key))
+    }
+  }
+
+  return result
 }
 
 export function getTimezoneOffset(): string {

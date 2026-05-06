@@ -1,24 +1,31 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import type { DailyUsage } from '../types'
-import { formatCost, formatNumber, value } from '../utils'
+import { fillGaps, formatCost, formatNumber, value } from '../utils'
 import { ChartTooltip, TooltipRow, TooltipDivider } from './ChartTooltip'
 
 export function TrendChart({
   data,
-  title
+  title,
+  granularity = 'day',
+  periodCount,
+  showDots = true,
 }: {
   data: DailyUsage[],
-  title: string
+  title: string,
+  granularity?: 'hour' | 'day',
+  periodCount: number,
+  showDots?: boolean,
 }) {
   const [metric, setMetric] = useState<'tokens' | 'cost'>('tokens');
   const [hoveredIdx, setHoveredIdx] = useState<number | null>(null);
-  const maxTokens = Math.max(...data.map(x => value(x.total_tokens)), 1);
-  const maxCost = Math.max(...data.map(x => value(x.total_cost_usd)), 0.001);
-  const maxRequests = Math.max(...data.map(x => value(x.requests)), 1);
+  const filled = useMemo(() => fillGaps(data, granularity, periodCount), [data, granularity, periodCount]);
+  const maxTokens = Math.max(...filled.map(x => value(x.total_tokens)), 1);
+  const maxCost = Math.max(...filled.map(x => value(x.total_cost_usd)), 0.001);
+  const maxRequests = Math.max(...filled.map(x => value(x.requests)), 1);
   const paddingX = 60;
   const chartWidth = 1000 - (paddingX * 2);
 
-  const hoveredData = hoveredIdx !== null ? data[hoveredIdx] : null;
+  const hoveredData = hoveredIdx !== null ? filled[hoveredIdx] : null;
   const hCached = hoveredData ? value(hoveredData.cached_tokens) : 0;
   const hInput = hoveredData ? Math.max(0, value(hoveredData.prompt_tokens) - hCached) : 0;
   const hOutput = hoveredData ? value(hoveredData.completion_tokens) : 0;
@@ -81,12 +88,12 @@ export function TrendChart({
         display: 'flex',
         flexDirection: 'column'
       }}>
-        {data.length === 0 ? (
+        {filled.length === 0 ? (
           <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-muted)' }}>No trend data available</div>
         ) : (
           <>
             {hoveredIdx !== null && hoveredData && (
-              <ChartTooltip left={`${(paddingX + ((hoveredIdx + 0.5) / data.length) * chartWidth) / 10}%`}>
+              <ChartTooltip left={`${(paddingX + ((hoveredIdx + 0.5) / filled.length) * chartWidth) / 10}%`}>
                 <div style={{ fontWeight: 600, marginBottom: '8px', borderBottom: '1px solid var(--border-color)', paddingBottom: '4px', fontSize: '13px' }}>
                   {hoveredData.period}
                 </div>
@@ -180,7 +187,7 @@ export function TrendChart({
 
               {/* Stacked Bars */}
               {(() => {
-                const barSlot = chartWidth / data.length;
+                const barSlot = chartWidth / filled.length;
                 const barW = barSlot * 0.65;
                 const radius = Math.min(3, barW / 4);
 
@@ -191,8 +198,8 @@ export function TrendChart({
                   return `M ${x + t},${y} L ${x + w - t},${y} Q ${x + w},${y} ${x + w},${y + t} L ${x + w},${y + h - b} Q ${x + w},${y + h} ${x + w - b},${y + h} L ${x + b},${y + h} Q ${x},${y + h} ${x},${y + h - b} L ${x},${y + t} Q ${x},${y} ${x + t},${y} Z`;
                 };
 
-                return data.map((d, i) => {
-                  const cx = paddingX + (i + 0.5) / data.length * chartWidth;
+                return filled.map((d, i) => {
+                  const cx = paddingX + (i + 0.5) / filled.length * chartWidth;
                   const x = cx - barW / 2;
                   const dimmed = hoveredIdx !== null && hoveredIdx !== i;
 
@@ -258,9 +265,9 @@ export function TrendChart({
               })()}
 
               {/* Hover hitboxes */}
-              {data.map((_, i) => {
-                const barSlot = chartWidth / data.length;
-                const cx = paddingX + (i + 0.5) / data.length * chartWidth;
+              {filled.map((_, i) => {
+                const barSlot = chartWidth / filled.length;
+                const cx = paddingX + (i + 0.5) / filled.length * chartWidth;
                 return (
                   <rect
                     key={i}
@@ -276,8 +283,8 @@ export function TrendChart({
 
               {/* Requests line */}
               {(() => {
-                const points = data.map((d, i) => {
-                  const x = paddingX + (i + 0.5) / data.length * chartWidth;
+                const points = filled.map((d, i) => {
+                  const x = paddingX + (i + 0.5) / filled.length * chartWidth;
                   const y = 200 - (value(d.requests) / maxRequests) * 200;
                   return `${x},${y}`;
                 }).join(' ');
@@ -291,10 +298,10 @@ export function TrendChart({
                       strokeWidth="2.5"
                       strokeLinecap="round"
                       strokeLinejoin="round"
-                      style={{ pointerEvents: 'none', opacity: hoveredIdx === null ? 1 : 0.4 }}
+                      style={{ pointerEvents: 'none', opacity: hoveredIdx === null ? 0.6 : 0.3 }}
                     />
-                    {data.map((d, i) => {
-                      const x = paddingX + (i + 0.5) / data.length * chartWidth;
+                    {showDots && filled.map((d, i) => {
+                      const x = paddingX + (i + 0.5) / filled.length * chartWidth;
                       const y = 200 - (value(d.requests) / maxRequests) * 200;
                       return (
                         <circle
@@ -303,7 +310,7 @@ export function TrendChart({
                           fill="var(--chart-dot-fill)"
                           stroke="var(--color-pink)"
                           strokeWidth={hoveredIdx === i ? "3" : "2"}
-                          style={{ pointerEvents: 'none', transition: 'all 0.2s', opacity: hoveredIdx === null || hoveredIdx === i ? 1 : 0.4 }}
+                          style={{ pointerEvents: 'none', transition: 'all 0.2s', opacity: hoveredIdx === null || hoveredIdx === i ? 0.6 : 0.3 }}
                         />
                       );
                     })}
@@ -321,8 +328,8 @@ export function TrendChart({
               paddingLeft: `${(paddingX / 1000) * 100}%`,
               paddingRight: `${(paddingX / 1000) * 100}%`
             }}>
-              {data.map((d, i) => {
-                if (data.length > 12 && i % Math.ceil(data.length / 12) !== 0 && i !== data.length - 1) {
+              {filled.map((d, i) => {
+                if (filled.length > 12 && i % Math.ceil(filled.length / 12) !== 0 && i !== filled.length - 1) {
                   return null;
                 }
                 const label = d.period.includes(':')
