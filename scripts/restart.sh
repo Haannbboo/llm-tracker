@@ -9,6 +9,16 @@ SUPERVISORCTL="${ROOT_DIR}/.venv/bin/supervisorctl"
 PYTHON="${ROOT_DIR}/.venv/bin/python"
 PORT_CHECKER="${ROOT_DIR}/scripts/check-service-ports.py"
 
+# Verification: Check if environment is ready
+if [[ ! -x "${PYTHON}" ]]; then
+  echo "ERROR: Virtual environment not found. Please run 'scripts/install.sh' first."
+  exit 1
+fi
+
+if [[ ! -L "${HOME}/.local/bin/llm-tracker" ]]; then
+  echo "NOTE: 'llm-tracker' CLI symlink is missing. Run 'scripts/install.sh' to set it up."
+fi
+
 if [[ ! -f "${SUPERVISORD_CONF}" ]]; then
   echo "Not running. Run scripts/start.sh first." >&2
   exit 1

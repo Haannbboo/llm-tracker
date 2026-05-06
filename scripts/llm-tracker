@@ -7,8 +7,16 @@ while [ -L "$SCRIPT_PATH" ]; do
   SCRIPT_PATH="$(readlink "$SCRIPT_PATH")"
 done
 ROOT_DIR="$(cd "$(dirname "$SCRIPT_PATH")/.." && pwd)"
-PYTHON="${ROOT_DIR}/.venv/bin/python"
+SCRIPTS_DIR="${ROOT_DIR}/scripts"
 
+case "${1:-}" in
+  start)   shift; exec bash "${SCRIPTS_DIR}/start.sh" "$@" ;;
+  stop)    shift; exec bash "${SCRIPTS_DIR}/stop.sh" "$@" ;;
+  restart) shift; exec bash "${SCRIPTS_DIR}/restart.sh" "$@" ;;
+  status)  shift; exec bash "${SCRIPTS_DIR}/status.sh" "$@" ;;
+esac
+
+PYTHON="${ROOT_DIR}/.venv/bin/python"
 if [[ ! -x "${PYTHON}" ]]; then
   PYTHON="python3"
 fi
