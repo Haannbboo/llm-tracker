@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react'
 import type { ActiveFilter, UsageSummary } from './types'
 import { getModelIcon, getProviderColor } from './utils'
+import { t } from './i18n/index.ts'
 
 export function ModelSelector({
   activeFilter,
@@ -63,7 +64,7 @@ export function ModelSelector({
           ) : (
             <>
               <span>🌐</span>
-              <span style={{ fontWeight: 600 }}>All Models</span>
+              <span style={{ fontWeight: 600 }}>{t('All Models')}</span>
             </>
           )}
         </div>
@@ -104,7 +105,7 @@ export function ModelSelector({
                 textAlign: 'left'
               }}
             >
-              <span>🌐</span> All Models
+              <span>🌐</span> {t('All Models')}
             </button>
             {grouped.map(([provider, models]) => (
               <div key={provider}>
@@ -137,7 +138,7 @@ export function ModelSelector({
                     {provider}
                   </span>
                   <span style={{ fontWeight: 400, color: 'var(--text-muted)', marginLeft: 'auto', fontSize: '11px' }}>
-                    {models.length} model{models.length > 1 ? 's' : ''}
+                    {models.length} {t('model')}
                   </span>
                 </button>
                 {models.map(s => (

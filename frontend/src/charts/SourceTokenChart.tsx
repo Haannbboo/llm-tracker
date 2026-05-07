@@ -2,6 +2,7 @@ import { useMemo } from 'react'
 import type { Theme } from '../theme'
 import type { SourceUsage } from '../types'
 import { getSourceBadgeBg, getSourceBadgeText, getProviderIcon } from '../utils'
+import { t } from '../i18n/index.ts'
 import { HorizontalBarChart } from './HorizontalBarChart'
 import type { BarItem } from './HorizontalBarChart'
 
@@ -23,7 +24,7 @@ export function SourceTokenChart({
 }) {
   const items: BarItem[] = useMemo(() =>
     data.map(s => {
-      const name = s.client_source || 'unknown'
+      const name = s.client_source || t('unknown')
       return {
         name,
         icon: getProviderIcon(name, theme),

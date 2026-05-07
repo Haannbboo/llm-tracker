@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { DailyUsage } from '../types'
 import { formatCost, formatNumber, value } from '../utils'
+import { t } from '../i18n/index.ts'
 
 export function DailyHeatmap({
   mode,
@@ -108,12 +109,12 @@ export function DailyHeatmap({
   const gridWidth = visibleWeeks.length * step
   const gridHeight = 7 * step
 
-  const title = mode === 'activity' ? '🗓 Daily Activity' : '✅ Success Rate'
+  const title = mode === 'activity' ? `🗓 ${t('Daily Activity')}` : `✅ ${t('Success Rate')}`
   const legendColors = mode === 'activity'
     ? ['var(--heatmap-empty)', '#9be9a8', '#40c463', '#30a14e', '#00b578']
     : ['#10b981', '#34d399', '#a7f3d0', '#fcd34d', '#f97316', '#ef4444']
-  const legendStart = mode === 'activity' ? 'Less' : '100%'
-  const legendEnd = mode === 'activity' ? 'More' : 'Fail'
+  const legendStart = mode === 'activity' ? t('Less') : t('100%')
+  const legendEnd = mode === 'activity' ? t('More') : t('Fail')
 
   return (
     <div ref={containerRef} className="widget" style={{ width: '100%', flex: 1, minHeight: 0, position: 'relative', overflow: 'visible', display: 'flex', flexDirection: 'column' }}>
@@ -136,7 +137,7 @@ export function DailyHeatmap({
           ))}
           {[1, 3, 5].map(d => (
             <text key={d} x={0} y={topPad + d * step + cellSize - 2} fontSize={10} fill="var(--heatmap-label)" fontWeight={500}>
-              {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][d]}
+              {[t('Sun'), t('Mon'), t('Tue'), t('Wed'), t('Thu'), t('Fri'), t('Sat')][d]}
             </text>
           ))}
           {visibleWeeks.map((week, wi) =>
@@ -183,7 +184,7 @@ export function DailyHeatmap({
         if (mode === 'activity') {
           const total = d ? value(d.total_tokens) : 0
           if (total === 0) {
-            content = <div style={{ color: 'var(--text-muted)' }}>No activity</div>
+            content = <div style={{ color: 'var(--text-muted)' }}>{t('No activity')}</div>
           } else {
             const hCached = d ? value(d.cached_tokens) : 0
             const hInput = d ? Math.max(0, value(d.prompt_tokens) - hCached) : 0
@@ -193,29 +194,29 @@ export function DailyHeatmap({
             content = (
               <>
                 <div style={{ display: 'flex', justifyContent: 'space-between', gap: '16px', marginBottom: '3px' }}>
-                  <span style={{ color: 'var(--text-muted)' }}>Input:</span>
+                  <span style={{ color: 'var(--text-muted)' }}>{t('Input:')}</span>
                   <span style={{ fontWeight: 600 }}>{formatNumber(hInput)}</span>
                 </div>
                 <div style={{ display: 'flex', justifyContent: 'space-between', gap: '16px', marginBottom: '3px' }}>
-                  <span style={{ color: '#40c463' }}>Cached:</span>
+                  <span style={{ color: '#40c463' }}>{t('Cached:')}</span>
                   <span style={{ fontWeight: 600 }}>{formatNumber(hCached)}</span>
                 </div>
                 <div style={{ display: 'flex', justifyContent: 'space-between', gap: '16px', marginBottom: '3px' }}>
-                  <span style={{ color: '#3b82f6' }}>Output:</span>
+                  <span style={{ color: '#3b82f6' }}>{t('Output:')}</span>
                   <span style={{ fontWeight: 600 }}>{formatNumber(hOutput)}</span>
                 </div>
                 <div style={{ display: 'flex', justifyContent: 'space-between', gap: '16px', marginTop: '6px', paddingTop: '6px', borderTop: '1px solid rgba(255,255,255,0.2)' }}>
-                  <span style={{ fontWeight: 700 }}>Total:</span>
+                  <span style={{ fontWeight: 700 }}>{t('Total:')}</span>
                   <span style={{ fontWeight: 800 }}>{formatNumber(total)}</span>
                 </div>
                 {cost > 0 && (
                   <div style={{ display: 'flex', justifyContent: 'space-between', gap: '16px', marginTop: '3px' }}>
-                    <span style={{ color: '#f472b6' }}>Cost:</span>
+                    <span style={{ color: '#f472b6' }}>{t('Cost:')}</span>
                     <span style={{ fontWeight: 800, color: '#f472b6' }}>{formatCost(cost)}</span>
                   </div>
                 )}
                 <div style={{ display: 'flex', justifyContent: 'space-between', gap: '16px', marginTop: '3px' }}>
-                  <span style={{ color: '#f43f5e' }}>Requests:</span>
+                  <span style={{ color: '#f43f5e' }}>{t('Requests:')}</span>
                   <span style={{ fontWeight: 600, color: '#f43f5e' }}>{formatNumber(requests)}</span>
                 </div>
               </>
@@ -224,7 +225,7 @@ export function DailyHeatmap({
         } else {
           const total = d ? value(d.requests) : 0
           if (total === 0) {
-            content = <div style={{ color: 'var(--text-muted)' }}>No requests</div>
+            content = <div style={{ color: 'var(--text-muted)' }}>{t('No requests')}</div>
           } else {
             const failed = d ? value(d.failed_requests) : 0
             const successful = d ? value(d.successful_requests) : 0
@@ -232,19 +233,19 @@ export function DailyHeatmap({
             content = (
               <>
                 <div style={{ display: 'flex', justifyContent: 'space-between', gap: '16px', marginBottom: '3px' }}>
-                  <span style={{ color: 'var(--text-muted)' }}>Success Rate:</span>
+                  <span style={{ color: 'var(--text-muted)' }}>{t('Success Rate:')}</span>
                   <span style={{ fontWeight: 700, color: rate >= 99 ? '#10b981' : rate >= 90 ? '#fcd34d' : '#ef4444' }}>{rate.toFixed(1)}%</span>
                 </div>
                 <div style={{ display: 'flex', justifyContent: 'space-between', gap: '16px', marginBottom: '3px' }}>
-                  <span style={{ color: '#10b981' }}>Successful:</span>
+                  <span style={{ color: '#10b981' }}>{t('Successful:')}</span>
                   <span style={{ fontWeight: 600 }}>{formatNumber(successful)}</span>
                 </div>
                 <div style={{ display: 'flex', justifyContent: 'space-between', gap: '16px', marginBottom: '3px' }}>
-                  <span style={{ color: '#ef4444' }}>Failed:</span>
+                  <span style={{ color: '#ef4444' }}>{t('Failed:')}</span>
                   <span style={{ fontWeight: 600 }}>{formatNumber(failed)}</span>
                 </div>
                 <div style={{ display: 'flex', justifyContent: 'space-between', gap: '16px', marginTop: '6px', paddingTop: '6px', borderTop: '1px solid rgba(255,255,255,0.2)' }}>
-                  <span style={{ fontWeight: 700 }}>Total:</span>
+                  <span style={{ fontWeight: 700 }}>{t('Total:')}</span>
                   <span style={{ fontWeight: 800 }}>{formatNumber(total)}</span>
                 </div>
               </>

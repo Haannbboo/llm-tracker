@@ -1,3 +1,5 @@
+[English](README.md) | [中文](README_CN.md)
+
 # llm-tracker
 
 Local-first usage tracking for command-line LLM agents.

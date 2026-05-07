@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { formatCompact, formatCost, formatRate } from '../utils'
+import { t } from '../i18n/index.ts'
 
 export type BarItem = {
   name: string
@@ -50,16 +51,16 @@ export function HorizontalBarChart({
           <button
             className={`tab-toggle-btn ${metric === 'tokens' ? 'active' : ''}`}
             onClick={() => setMetric('tokens')}
-          >Tokens</button>
+          >{t('Tokens')}</button>
           <button
             className={`tab-toggle-btn ${metric === 'cost' ? 'active' : ''}`}
             onClick={() => setMetric('cost')}
-          >Cost</button>
+          >{t('Cost')}</button>
         </div>
       </div>
       <div style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
         {sorted.length === 0 ? (
-          <div style={{ padding: '40px', textAlign: 'center', color: 'var(--text-muted)' }}>No data available</div>
+          <div style={{ padding: '40px', textAlign: 'center', color: 'var(--text-muted)' }}>{t('No data available')}</div>
         ) : (
           sorted.map((s, index) => {
             const currentVal = getMetricValue(s)

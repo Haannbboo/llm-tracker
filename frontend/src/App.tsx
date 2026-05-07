@@ -13,6 +13,7 @@ import { ModelTokenChart } from './charts/ModelTokenChart'
 import { ProviderTokenChart } from './charts/ProviderTokenChart'
 import { SourceTokenChart } from './charts/SourceTokenChart'
 import { DailyHeatmap } from './charts/DailyHeatmap'
+import { t, useLang } from './i18n/index.ts'
 
 function App() {
   const [view, setView] = useState<'dashboard' | 'logs' | 'settings' | 'test'>('dashboard')
@@ -52,6 +53,7 @@ function App() {
 
   const [error, setError] = useState<string | null>(null)
   const [theme, setTheme] = useState<'light' | 'dark'>(getTheme)
+  const { lang, setLang } = useLang()
 
   const [modelColWidth, setModelColWidth] = useState(180)
   const resizeRef = useRef<{ startX: number; startWidth: number } | null>(null)
@@ -173,7 +175,7 @@ function App() {
           fetch(byProviderUrl.toString(), sig),
         ])
 
-        if (responses.some(r => !r.ok)) throw new Error('Failed to fetch dashboard data')
+        if (responses.some(r => !r.ok)) throw new Error(t('Failed to fetch dashboard data'))
         const [summaryData, dailyData, heatmapRaw, bySourceData, byProviderData] =
           await Promise.all(responses.map(r => r.json())) as [UsageSummary[], DailyUsage[], DailyUsage[], SourceUsage[], ProviderUsage[]]
 
@@ -184,7 +186,7 @@ function App() {
         setProviderUsage(byProviderData)
       } catch (err) {
         if (controller.signal.aborted) return
-        setError(err instanceof Error ? err.message : 'Unknown error')
+        setError(err instanceof Error ? err.message : t('Unknown error'))
       }
     }
 
@@ -209,7 +211,7 @@ function App() {
           fetch(countUrl.toString(), sig),
         ])
 
-        if (responses.some(r => !r.ok)) throw new Error('Failed to fetch log data')
+        if (responses.some(r => !r.ok)) throw new Error(t('Failed to fetch log data'))
         const [usageData, countData] =
           await Promise.all(responses.map(r => r.json())) as [UsageRow[], { total: number }]
 
@@ -217,7 +219,7 @@ function App() {
         setTotalLogs(countData.total)
       } catch (err) {
         if (controller.signal.aborted) return
-        setError(err instanceof Error ? err.message : 'Unknown error')
+        setError(err instanceof Error ? err.message : t('Unknown error'))
       }
     }
 
@@ -319,11 +321,11 @@ function App() {
         setTimeout(() => setConfigStatus('idle'), 3000)
       } else {
         const error = await response.json()
-        setError(error.detail || 'Failed to save config')
+        setError(error.detail || t('Failed to save config'))
         setConfigStatus('error')
       }
     } catch (err) {
-      setError('Connection error while saving config')
+      setError(t('Connection error while saving config'))
       setConfigStatus('error')
     }
   }
@@ -350,7 +352,7 @@ function App() {
         setTestResult({ status_code: response.status, body: text, url: '' })
       }
     } catch (err) {
-      setTestResult({ error: err instanceof Error ? err.message : 'Test failed' })
+      setTestResult({ error: err instanceof Error ? err.message : t('Test failed') })
     } finally {
       setIsTesting(false)
     }
@@ -403,25 +405,33 @@ function App() {
 </pre>
           <nav className="navbar-nav">
             <button className={`nav-item ${view === 'dashboard' ? 'active' : ''}`} onClick={() => setView('dashboard')}>
-              📊 Dashboard
+              📊 {t('Dashboard')}
             </button>
             <button className={`nav-item ${view === 'logs' ? 'active' : ''}`} onClick={() => setView('logs')}>
-              📜 Request Logs
+              📜 {t('Request Logs')}
             </button>
             <button className={`nav-item ${view === 'settings' ? 'active' : ''}`} onClick={() => setView('settings')}>
-              ⚙️ Settings
+              ⚙️ {t('Settings')}
             </button>
             <button className={`nav-item ${view === 'test' ? 'active' : ''}`} onClick={() => setView('test')}>
-              🔌 Connectivity Test
+              🔌 {t('Connectivity Test')}
             </button>
           </nav>
           <button
             className="nav-item"
             style={{ marginLeft: 'auto', fontSize: '18px' }}
             onClick={() => setTheme(toggleTheme())}
-            title={`Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`}
+            title={theme === 'dark' ? t('Switch to light mode') : t('Switch to dark mode')}
           >
             {theme === 'dark' ? '☀️' : '🌙'}
+          </button>
+          <button
+            className="nav-item"
+            style={{ fontSize: '13px', fontWeight: 700, minWidth: '36px', textAlign: 'center' }}
+            onClick={() => setLang(lang === 'zh' ? 'en' : 'zh')}
+            title={lang === 'zh' ? '切换到中文' : 'Switch to English'}
+          >
+            {lang === 'zh' ? '中' : 'EN'}
           </button>
         </header>
 
@@ -434,11 +444,11 @@ function App() {
                     value={dateRange}
                     onChange={(e) => setDateRange(e.target.value as DateRangeOption)}
                   >
-                    <option value="24h">Last 24 Hours</option>
-                    <option value="7d">Last 7 Days</option>
-                    <option value="30d">Last 30 Days</option>
-                    <option value="all">All Time</option>
-                    <option value="custom">Custom Range</option>
+                    <option value="24h">{t('Last 24 Hours')}</option>
+                    <option value="7d">{t('Last 7 Days')}</option>
+                    <option value="30d">{t('Last 30 Days')}</option>
+                    <option value="all">{t('All Time')}</option>
+                    <option value="custom">{t('Custom Range')}</option>
                   </select>
                   <ModelSelector
                     activeFilter={activeFilter}
@@ -451,7 +461,7 @@ function App() {
                     value={activeSource || ''}
                     onChange={(e) => setActiveSource(e.target.value || null)}
                   >
-                    <option value="">All Sources</option>
+                    <option value="">{t('All Sources')}</option>
                     {sources.map(source => (
                       <option key={source} value={source}>{source}</option>
                     ))}
@@ -465,7 +475,7 @@ function App() {
                       <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
                         <div className="icon-box icon-yellow">#</div>
                         <div>
-                          <div className="stat-label">Token Usage</div>
+                          <div className="stat-label">{t('Token Usage')}</div>
                           <div className="stat-value">{formatCompact(totals.totalTokens)}</div>
                         </div>
                       </div>
@@ -474,12 +484,12 @@ function App() {
                       </div>
                     </div>
                     <div className="stat-label" style={{ marginBottom: 0 }}>
-                      In: {formatCompact(totals.promptTokens)} / Out: {formatCompact(totals.completionTokens)}
+                      {t('In:')} {formatCompact(totals.promptTokens)} / {t('Out:')} {formatCompact(totals.completionTokens)}
                     </div>
                     <div className="stat-label" style={{ fontSize: '11px', marginBottom: 0 }}>
-                      Cached: {formatCompact(totals.cachedTokens)}
+                      {t('Cached:')} {formatCompact(totals.cachedTokens)}
                       <span style={{ marginLeft: '6px', color: 'var(--color-green)', fontWeight: 600 }}>
-                        ({totals.totalTokens > 0 ? ((value(totals.cachedTokens) / totals.totalTokens) * 100).toFixed(1) : 0}% Hit)
+                        ({totals.totalTokens > 0 ? ((value(totals.cachedTokens) / totals.totalTokens) * 100).toFixed(1) : 0}% {t('Hit)')}
                       </span>
                     </div>
                   </div>
@@ -491,7 +501,7 @@ function App() {
                       <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
                         <div className="icon-box icon-green">↑</div>
                         <div>
-                          <div className="stat-label">Requests</div>
+                          <div className="stat-label">{t('Requests')}</div>
                           <div className="stat-value">{formatNumber(totals.requests)}</div>
                         </div>
                       </div>
@@ -500,7 +510,7 @@ function App() {
                       </div>
                     </div>
                     <div className="stat-label" style={{ marginTop: '-2px' }}>
-                      Avg: <span style={{ color: 'var(--color-purple)', fontWeight: 600 }}>{formatCompact(totals.avgTokensPerRequest)} tokens/req</span>
+                      {t('Avg:')} <span style={{ color: 'var(--color-purple)', fontWeight: 600 }}>{formatCompact(totals.avgTokensPerRequest)} {t('tokens/req')}</span>
                     </div>
                   </div>
                 </div>
@@ -511,7 +521,7 @@ function App() {
                       <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
                         <div className="icon-box icon-green">$</div>
                         <div>
-                          <div className="stat-label">Estimated Cost</div>
+                          <div className="stat-label">{t('Estimated Cost')}</div>
                           <div className="stat-value">{formatCost(totals.totalCost, 2)}</div>
                         </div>
                       </div>
@@ -520,10 +530,10 @@ function App() {
                       </div>
                     </div>
                     <div className="stat-label" style={{ marginTop: '-2px' }}>
-                      Avg: <span style={{ color: 'var(--color-blue)', fontWeight: 600 }}>{formatCost(totals.avgEffectivePrice, 3)} / req</span>
+                      {t('Avg:')} <span style={{ color: 'var(--color-blue)', fontWeight: 600 }}>{formatCost(totals.avgEffectivePrice, 3)} {t('/ req')}</span>
                     </div>
                     <div className="stat-label" style={{ fontSize: '11px', marginBottom: 0 }}>
-                      Avg $/M tokens: <span style={{ color: 'var(--color-green)', fontWeight: 600 }}>{formatRate(totals.avgEffectivePricePerMillion)}</span>
+                      {t('Avg $/M tokens:')} <span style={{ color: 'var(--color-green)', fontWeight: 600 }}>{formatRate(totals.avgEffectivePricePerMillion)}</span>
                     </div>
                   </div>
                 </div>
@@ -534,8 +544,8 @@ function App() {
                       <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
                         <div className="icon-box icon-blue">⚡</div>
                         <div>
-                          <div className="stat-label">Performance</div>
-                          <div className="stat-value">{totals.rpm.toFixed(3)} <span style={{ fontSize: '12px', fontWeight: 500 }}>RPM</span></div>
+                          <div className="stat-label">{t('Performance')}</div>
+                          <div className="stat-value">{totals.rpm.toFixed(3)} <span style={{ fontSize: '12px', fontWeight: 500 }}>{t('RPM')}</span></div>
                         </div>
                       </div>
                       <div style={{ width: '100px' }}>
@@ -543,7 +553,7 @@ function App() {
                       </div>
                     </div>
                     <div className="stat-label" style={{ marginTop: '-2px' }}>
-                      Avg Throughput: <span style={{ color: 'var(--color-purple)', fontWeight: 600 }}>{formatCompact(totals.tpm)} TPM</span>
+                      {t('Avg Throughput:')} <span style={{ color: 'var(--color-purple)', fontWeight: 600 }}>{formatCompact(totals.tpm)} {t('TPM')}</span>
                     </div>
                   </div>
                 </div>
@@ -554,7 +564,7 @@ function App() {
                       <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
                         <div className="icon-box icon-pink">~</div>
                         <div>
-                          <div className="stat-label">Average Response</div>
+                          <div className="stat-label">{t('Average Response')}</div>
                           <div className="stat-value">{formatLatency(totals.avgLatency)}</div>
                         </div>
                       </div>
@@ -563,7 +573,7 @@ function App() {
                       </div>
                     </div>
                     <div className="stat-label" style={{ marginTop: '-2px' }}>
-                      Success Rate: <span style={{ color: 'var(--color-green)', fontWeight: 600 }}>{totals.successRate.toFixed(1)}%</span>
+                      {t('Success Rate:')} <span style={{ color: 'var(--color-green)', fontWeight: 600 }}>{totals.successRate.toFixed(1)}%</span>
                     </div>
                   </div>
                 </div>
@@ -574,7 +584,7 @@ function App() {
                 <div style={{ flex: '1 1 0', minWidth: 0 }}>
                   <TrendChart
                     data={dailyUsage}
-                    title={`${dateRange === '24h' ? 'Hourly' : 'Daily'} Usage Trend`}
+                    title={`${dateRange === '24h' ? t('Hourly Usage Trend') : t('Daily Usage Trend')}`}
                     granularity={dateRange === '24h' ? 'hour' : 'day'}
                     periodCount={dateRange === '24h' ? 24 : dateRange === '7d' ? 7 : dateRange === '30d' ? 30 : 365}
                     showDots={dateRange !== 'all'}
@@ -584,7 +594,7 @@ function App() {
                   <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
                     <CacheHitRateChart
                       data={dailyUsage}
-                      title="Cache Hit Rate"
+                      title={t('Cache Hit Rate')}
                     />
                   </div>
                   <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: '16px' }}>
@@ -598,21 +608,21 @@ function App() {
                 <div style={{ flex: 1 }}>
                   <ModelTokenChart
                     summary={summary}
-                    title="Top Models"
+                    title={t('Top Models')}
                     theme={theme}
                   />
                 </div>
                 <div style={{ flex: 1 }}>
                   <ProviderTokenChart
                     data={providerUsage}
-                    title="Top Providers"
+                    title={t('Top Providers')}
                     theme={theme}
                   />
                 </div>
                 <div style={{ flex: 1 }}>
                   <SourceTokenChart
                     data={sourceUsage}
-                    title="Top Sources"
+                    title={t('Top Sources')}
                     theme={theme}
                   />
                 </div>
@@ -628,7 +638,7 @@ function App() {
             <div className="logs-page">
               <div className="filter-bar">
                 <div className="filter-group">
-                  <div className="filter-label">Model</div>
+                  <div className="filter-label">{t('Model')}</div>
                   <ModelSelector
                     activeFilter={activeFilter}
                     summary={summary}
@@ -638,13 +648,13 @@ function App() {
                 </div>
 
                 <div className="filter-group">
-                  <div className="filter-label">Source</div>
+                  <div className="filter-label">{t('Source')}</div>
                   <select
                     className="input-plain"
                     value={activeSource || ''}
                     onChange={(e) => setActiveSource(e.target.value || null)}
                   >
-                    <option value="">All Sources</option>
+                    <option value="">{t('All Sources')}</option>
                     {sources.map(source => (
                       <option key={source} value={source}>{source}</option>
                     ))}
@@ -652,24 +662,24 @@ function App() {
                 </div>
 
                 <div className="filter-group">
-                  <div className="filter-label">Date Range</div>
+                  <div className="filter-label">{t('Date Range')}</div>
                   <select
                     className="input-plain"
                     value={dateRange}
                     onChange={(e) => setDateRange(e.target.value as DateRangeOption)}
                   >
-                    <option value="24h">Last 24 Hours</option>
-                    <option value="7d">Last 7 Days</option>
-                    <option value="30d">Last 30 Days</option>
-                    <option value="all">All Time</option>
-                    <option value="custom">Custom Range</option>
+                    <option value="24h">{t('Last 24 Hours')}</option>
+                    <option value="7d">{t('Last 7 Days')}</option>
+                    <option value="30d">{t('Last 30 Days')}</option>
+                    <option value="all">{t('All Time')}</option>
+                    <option value="custom">{t('Custom Range')}</option>
                   </select>
                 </div>
 
                 {dateRange === 'custom' && (
                   <>
                     <div className="filter-group">
-                      <div className="filter-label">Since</div>
+                      <div className="filter-label">{t('Since')}</div>
                       <input
                         type="datetime-local"
                         className="input-plain"
@@ -678,7 +688,7 @@ function App() {
                       />
                     </div>
                     <div className="filter-group">
-                      <div className="filter-label">Until</div>
+                      <div className="filter-label">{t('Until')}</div>
                       <input
                         type="datetime-local"
                         className="input-plain"
@@ -694,7 +704,7 @@ function App() {
                     className="btn-ghost"
                     onClick={() => setRefreshTrigger(t => t + 1)}
                    >
-                     <span>🔄</span> Refresh
+                     <span>🔄</span> {t('Refresh')}
                    </button>
                    <button
                     style={{ padding: '8px 16px', background: 'var(--color-blue)', color: 'white', borderRadius: '8px', fontSize: '12px', fontWeight: 700 }}
@@ -703,7 +713,7 @@ function App() {
                       setPage(1)
                     }}
                    >
-                     Today
+                     {t('Today')}
                    </button>
                 </div>
               </div>
@@ -713,9 +723,9 @@ function App() {
                   <table className="table">
                     <thead>
                       <tr>
-                        <th style={{ width: '120px' }}>Time</th>
+                        <th style={{ width: '120px' }}>{t('Time')}</th>
                         <th style={{ width: modelColWidth, padding: '12px 8px', position: 'relative' }}>
-                          Model
+                          {t('Model')}
                           <div
                             onMouseDown={handleResizeStart}
                             style={{
@@ -732,23 +742,23 @@ function App() {
                             onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'rgba(128,128,128,0.2)'}
                           />
                         </th>
-                        <th style={{ width: '120px', padding: '12px 8px' }}>Provider</th>
-                        <th style={{ width: '110px', padding: '12px 8px' }}>Source</th>
-                        <th style={{ minWidth: '140px' }}>Input (Prompt)</th>
-                        <th style={{ minWidth: '120px' }}>Output</th>
-                        <th style={{ minWidth: '100px' }}>Cost</th>
+                        <th style={{ width: '120px', padding: '12px 8px' }}>{t('Provider')}</th>
+                        <th style={{ width: '110px', padding: '12px 8px' }}>{t('Source')}</th>
+                        <th style={{ minWidth: '140px' }}>{t('Input (Prompt)')}</th>
+                        <th style={{ minWidth: '120px' }}>{t('Output')}</th>
+                        <th style={{ minWidth: '100px' }}>{t('Cost')}</th>
                         <th style={{ padding: '12px 8px' }}>
                           <div className="has-tooltip">
                             TTFT / Latency
                             <div className="tooltip-text">
-                              <b>Claude Code:</b> No TTFT<br/>
-                              <b>Gemini CLI:</b> Time to first chunk<br/>
-                              <b>Codex:</b> Actual TTFT<br/>
-                              <b>Proxy:</b> Time to first chunk
+                              <b>Claude Code:</b> {t('Claude Code: No TTFT')}<br/>
+                              <b>Gemini CLI:</b> {t('Gemini CLI: Time to first chunk')}<br/>
+                              <b>Codex:</b> {t('Codex: Actual TTFT')}<br/>
+                              <b>Proxy:</b> {t('Proxy: Time to first chunk')}
                             </div>
                           </div>
                         </th>
-                        <th style={{ width: '80px' }}>Status</th>
+                        <th style={{ width: '80px' }}>{t('Status')}</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -813,16 +823,16 @@ function App() {
                             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
                               <div style={{ color: 'var(--text-secondary)', fontWeight: 600 }}>
                                 {formatNumber(row.prompt_tokens)}
-                                <span style={{ fontSize: '10px', fontWeight: 400, marginLeft: '4px', color: 'var(--text-secondary)' }}>tokens</span>
+                                <span style={{ fontSize: '10px', fontWeight: 400, marginLeft: '4px', color: 'var(--text-secondary)' }}>{t('tokens')}</span>
                                 {value(row.prompt_length) > 0 && (
                                   <span style={{ fontSize: '10px', fontWeight: 400, marginLeft: '6px', color: 'var(--text-muted)' }}>
-                                    (Prompt: {formatNumber(row.prompt_length)} chars)
+                                    {t('(Prompt:')} {formatNumber(row.prompt_length)}{t(' chars)')}
                                   </span>
                                 )}
                               </div>
                               {value(row.cached_tokens) > 0 && (
                                 <div style={{ fontSize: '9px', color: 'var(--color-green)', fontWeight: 700 }}>
-                                  Cache read {formatNumber(row.cached_tokens)} ({Math.round((value(row.cached_tokens) / (value(row.prompt_tokens) || 1)) * 100)}%)
+                                  {t('Cache read')} {formatNumber(row.cached_tokens)} ({Math.round((value(row.cached_tokens) / (value(row.prompt_tokens) || 1)) * 100)}%)
                                 </div>
                               )}
                             </div>
@@ -852,7 +862,7 @@ function App() {
                               <div>{formatNumber(row.completion_tokens)}</div>
                               {value(row.reasoning_tokens) > 0 && (
                                 <div style={{ fontSize: '9px', color: 'var(--text-secondary)', fontWeight: 700 }}>
-                                  Reasoning {formatNumber(row.reasoning_tokens)} ({Math.round((value(row.reasoning_tokens) / (value(row.completion_tokens) || 1)) * 100)}%)
+                                  {t('Reasoning')} {formatNumber(row.reasoning_tokens)} ({Math.round((value(row.reasoning_tokens) / (value(row.completion_tokens) || 1)) * 100)}%)
                                 </div>
                               )}
                             </div>
@@ -909,7 +919,7 @@ function App() {
                                   <div className="tooltip-text" style={{ width: '200px', marginLeft: '-100px' }}>
                                     <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
                                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
-                                        <span style={{ color: 'rgba(255, 255, 255, 0.6)' }}>Input:</span>
+                                        <span style={{ color: 'rgba(255, 255, 255, 0.6)' }}>{t('Input:')}</span>
                                         <div style={{ textAlign: 'right' }}>
                                           <div>{formatCost(actualInputCost)}</div>
                                           {modelConfig?.input !== undefined && (
@@ -918,7 +928,7 @@ function App() {
                                         </div>
                                       </div>
                                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
-                                        <span style={{ color: 'rgba(255, 255, 255, 0.6)' }}>Output:</span>
+                                        <span style={{ color: 'rgba(255, 255, 255, 0.6)' }}>{t('Output:')}</span>
                                         <div style={{ textAlign: 'right' }}>
                                           <div>{formatCost(outputCost)}</div>
                                           {modelConfig?.output !== undefined && (
@@ -928,7 +938,7 @@ function App() {
                                       </div>
                                       {cacheCost > 0 && (
                                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
-                                          <span style={{ color: 'rgba(255, 255, 255, 0.6)' }}>Cache:</span>
+                                          <span style={{ color: 'rgba(255, 255, 255, 0.6)' }}>{t('Cache:')}</span>
                                           <div style={{ textAlign: 'right' }}>
                                             <div style={{ color: 'var(--color-green)' }}>{formatCost(cacheCost)}</div>
                                             {modelConfig?.cacheRead !== undefined && (
@@ -938,7 +948,7 @@ function App() {
                                         </div>
                                       )}
                                       <div style={{ marginTop: '4px', paddingTop: '4px', borderTop: '1px solid #334155', display: 'flex', justifyContent: 'space-between', color: 'white' }}>
-                                        <span style={{ color: 'rgba(255, 255, 255, 0.6)' }}>Total:</span>
+                                        <span style={{ color: 'rgba(255, 255, 255, 0.6)' }}>{t('Total:')}</span>
                                         <span>{formatCost(total)}</span>
                                       </div>
                                     </div>
@@ -957,7 +967,7 @@ function App() {
                                   borderRadius: '999px',
                                   fontSize: '12px',
                                   whiteSpace: 'nowrap'
-                                }} title="Time To First Token">
+                                }} title={t('Time To First Token')}>
                                   {formatLatency(row.ttft_ms)}
                                 </div>
                               )}
@@ -968,7 +978,7 @@ function App() {
                                 borderRadius: '999px',
                                 fontSize: '12px',
                                 whiteSpace: 'nowrap'
-                              }} title="Total Latency">
+                              }} title={t('Total Latency')}>
                                 {formatLatency(row.latency_ms)}
                               </div>
                             </div>
@@ -983,7 +993,7 @@ function App() {
                       {usageRows.length === 0 && (
                         <tr>
                           <td colSpan={7} style={{ textAlign: 'center', padding: '40px', color: 'var(--text-muted)' }}>
-                            No requests found for the selected filters.
+                            {t('No requests found for the selected filters.')}
                           </td>
                         </tr>
                       )}
@@ -1000,7 +1010,7 @@ function App() {
                   background: 'var(--surface-hover)'
                 }}>
                   <div style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>
-                    Showing <span style={{ fontWeight: 700, color: 'var(--text-primary)' }}>{Math.min(totalLogs, (page - 1) * limit + 1)}-{Math.min(totalLogs, page * limit)}</span> of <span style={{ fontWeight: 700, color: 'var(--text-primary)' }}>{totalLogs}</span> logs
+                    {t('Showing')} <span style={{ fontWeight: 700, color: 'var(--text-primary)' }}>{Math.min(totalLogs, (page - 1) * limit + 1)}-{Math.min(totalLogs, page * limit)}</span> {t('of')} <span style={{ fontWeight: 700, color: 'var(--text-primary)' }}>{totalLogs}</span> {t('logs')}
                   </div>
 
                   <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
@@ -1013,7 +1023,7 @@ function App() {
                         opacity: page === 1 ? 0.5 : 1
                       }}
                     >
-                      ◀ Prev
+                      ◀ {t('Prev')}
                     </button>
 
                     <div style={{ display: 'flex', gap: '4px' }}>
@@ -1057,11 +1067,11 @@ function App() {
                         opacity: (page === totalPages || totalPages === 0) ? 0.5 : 1
                       }}
                     >
-                      Next ▶
+                      {t('Next')} ▶
                     </button>
 
                     <div style={{ marginLeft: '8px', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                      <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>Jump:</span>
+                      <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>{t('Jump:')}</span>
                       <input
                         type="text"
                         value={jumpPage}
@@ -1109,10 +1119,10 @@ function App() {
                         cursor: 'pointer'
                       }}
                     >
-                      <option value={10}>10 / page</option>
-                      <option value={25}>25 / page</option>
-                      <option value={50}>50 / page</option>
-                      <option value={100}>100 / page</option>
+                      <option value={10}>10 {t('/ page')}</option>
+                      <option value={25}>25 {t('/ page')}</option>
+                      <option value={50}>50 {t('/ page')}</option>
+                      <option value={100}>100 {t('/ page')}</option>
                     </select>
                   </div>
                 </div>
@@ -1124,15 +1134,15 @@ function App() {
             <div className="settings-page" style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
               <div className="panel">
                 <div className="panel-tabs">
-                  <div className="tab active"><span>🔌</span> Active Providers</div>
+                  <div className="tab active"><span>🔌</span> {t('Active Providers')}</div>
                 </div>
                 <div className="panel-body" style={{ padding: '0' }}>
                   <table className="table">
                     <thead>
                       <tr>
-                        <th>Provider</th>
-                        <th>Base URL</th>
-                        <th>Models</th>
+                        <th>{t('Provider')}</th>
+                        <th>{t('Base URL')}</th>
+                        <th>{t('Models')}</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -1175,7 +1185,7 @@ function App() {
                                       gap: '4px'
                                     }}>
                                       {m}
-                                      {hasOverride && <span title="Cost Override" style={{ fontSize: '10px' }}>💰</span>}
+                                      {hasOverride && <span title={t('Cost Override')} style={{ fontSize: '10px' }}>💰</span>}
                                     </span>
                                   );
                                 })}
@@ -1186,7 +1196,7 @@ function App() {
                       }) : (
                         <tr>
                           <td colSpan={3} style={{ textAlign: 'center', padding: '24px', color: 'var(--text-muted)' }}>
-                            No providers configured in config.yaml.
+                            {t('No providers configured in config.yaml.')}
                           </td>
                         </tr>
                       )}
@@ -1197,9 +1207,9 @@ function App() {
 
               <div className="panel">
                 <div className="panel-tabs" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <div className="tab active"><span>💎</span> Model Pricing</div>
+                  <div className="tab active"><span>💎</span> {t('Model Pricing')}</div>
                   <div style={{ paddingRight: '20px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <span style={{ fontSize: '11px', fontWeight: 500, color: 'var(--text-muted)', textTransform: 'uppercase' }}>Scope:</span>
+                    <span style={{ fontSize: '11px', fontWeight: 500, color: 'var(--text-muted)', textTransform: 'uppercase' }}>{t('Scope:')}</span>
                     <select
                       value={selectedPricingProvider}
                       onChange={(e) => setSelectedPricingProvider(e.target.value)}
@@ -1213,9 +1223,9 @@ function App() {
                         outline: 'none'
                       }}
                     >
-                      <option value="global">Global Default</option>
+                      <option value="global">{t('Global Default')}</option>
                       {configParsed?.providers && Object.keys(configParsed.providers).map(p => (
-                        <option key={p} value={p}>Provider: {p}</option>
+                        <option key={p} value={p}>{t('Provider:')} {p}</option>
                       ))}
                     </select>
                   </div>
@@ -1224,11 +1234,11 @@ function App() {
                   <table className="table">
                     <thead>
                       <tr>
-                        <th style={{ width: '220px' }}>Model</th>
-                        <th>Input (per 1M)</th>
-                        <th>Output (per 1M)</th>
-                        <th>Cache Read (per 1M)</th>
-                        <th>Cache Write (per 1M)</th>
+                        <th style={{ width: '220px' }}>{t('Model')}</th>
+                        <th>{t('Input (per 1M)')}</th>
+                        <th>{t('Output (per 1M)')}</th>
+                        <th>{t('Cache Read (per 1M)')}</th>
+                        <th>{t('Cache Write (per 1M)')}</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -1267,7 +1277,7 @@ function App() {
                               <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                                 {getModelIcon(name)}
                                 {name}
-                                {isOverridden && <span title="Provider Override" style={{ fontSize: '10px' }}>💰</span>}
+                                {isOverridden && <span title={t('Provider Override')} style={{ fontSize: '10px' }}>💰</span>}
                               </div>
                             </td>
                             <td><input {...inputProps('input')} /></td>
@@ -1279,7 +1289,7 @@ function App() {
                       }) : (
                         <tr>
                           <td colSpan={5} style={{ textAlign: 'center', padding: '24px', color: 'var(--text-muted)' }}>
-                            No global models configured in config.yaml.
+                            {t('No global models configured in config.yaml.')}
                           </td>
                         </tr>
                       )}
@@ -1290,12 +1300,10 @@ function App() {
 
               <div className="panel">
                 <div className="panel-tabs">
-                  <div className="tab active"><span>📝</span> Configuration (YAML)</div>
+                  <div className="tab active"><span>📝</span> {t('Configuration (YAML)')}</div>
                 </div>
                 <div className="panel-body">
-                  <p style={{ fontSize: '13px', color: 'var(--text-secondary)', marginBottom: '16px' }}>
-                    Directly edit your <code>config.yaml</code>. Providers and routing are defined here.
-                  </p>
+                  <p style={{ fontSize: '13px', color: 'var(--text-secondary)', marginBottom: '16px' }} dangerouslySetInnerHTML={{ __html: t('Directly edit your <code>config.yaml</code>. Providers and routing are defined here.') }} />
 
                   <div style={{ position: 'relative', background: '#1e293b', borderRadius: '8px', overflow: 'hidden', border: '1px solid #334155' }}>
                     <div style={{
@@ -1356,7 +1364,7 @@ function App() {
                   <div style={{ marginTop: '20px', display: 'flex', justifyContent: 'flex-end', gap: '12px', alignItems: 'center' }}>
                     {configStatus === 'saved' && (
                       <span style={{ color: 'var(--color-green)', fontSize: '13px', fontWeight: 600 }}>
-                        ✓ Configuration saved successfully
+                        ✓ {t('Configuration saved successfully')}
                       </span>
                     )}
                     <button
@@ -1374,7 +1382,7 @@ function App() {
                         boxShadow: '0 2px 4px rgba(0,0,0,0.1)'
                       }}
                     >
-                      {configStatus === 'saving' ? 'Saving...' : 'Save Configuration'}
+                      {configStatus === 'saving' ? t('Saving...') : t('Save Configuration')}
                     </button>
                   </div>
                 </div>
@@ -1386,28 +1394,28 @@ function App() {
             <div className="test-page" style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
               <div className="panel">
                 <div className="panel-tabs">
-                  <div className="tab active"><span>🧪</span> Upstream Connectivity Test</div>
+                  <div className="tab active"><span>🧪</span> {t('Upstream Connectivity Test')}</div>
                 </div>
                 <div className="panel-content" style={{ padding: '24px' }}>
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '24px' }}>
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
                       <div className="filter-group">
-                        <div className="filter-label">Base URL</div>
-                        <input 
-                          type="text" 
-                          className="input-plain" 
+                        <div className="filter-label">{t('Base URL')}</div>
+                        <input
+                          type="text"
+                          className="input-plain"
                           placeholder="https://api.openai.com/v1"
                           value={testBaseUrl}
                           onChange={(e) => setTestBaseUrl(e.target.value)}
                           style={{ width: '100%' }}
                         />
                         <div style={{ fontSize: '10px', color: 'var(--text-muted)', marginTop: '4px' }}>
-                          The upstream API root URL, e.g. https://api.openai.com/v1
+                          {t('The upstream API root URL, e.g. https://api.openai.com/v1')}
                         </div>
                       </div>
 
                       <div className="filter-group">
-                        <div className="filter-label">API Key</div>
+                        <div className="filter-label">{t('API Key')}</div>
                         <input 
                           type="password" 
                           className="input-plain" 
@@ -1420,12 +1428,12 @@ function App() {
 
                       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
                         <div className="filter-group">
-                          <div className="filter-label">Format</div>
+                          <div className="filter-label">{t('Format')}</div>
                           <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
                             {[
-                              { id: 'openai', label: 'OpenAI', sub: 'Chat Completion' },
-                              { id: 'anthropic', label: 'Anthropic', sub: 'Claude' },
-                              { id: 'responses', label: 'Codex', sub: 'Responses' },
+                              { id: 'openai', label: t('OpenAI'), sub: t('Chat Completion') },
+                              { id: 'anthropic', label: t('Anthropic'), sub: t('Claude') },
+                              { id: 'responses', label: t('Codex'), sub: t('Responses') },
                             ].map((f) => (
                               <button
                                 key={f.id}
@@ -1440,7 +1448,7 @@ function App() {
                           </div>
                         </div>
                         <div className="filter-group">
-                          <div className="filter-label">Model</div>
+                          <div className="filter-label">{t('Model')}</div>
                           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '8px' }}>
                             {[
                               { id: 'gpt-5.5', label: 'GPT-5.5', sub: 'OpenAI' },
@@ -1460,7 +1468,7 @@ function App() {
                             ))}
                           </div>
                           <div style={{ marginTop: '8px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                            <span style={{ fontSize: '11px', color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>Custom:</span>
+                            <span style={{ fontSize: '11px', color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>{t('Custom:')}</span>
                             <input
                               type="text"
                               className="input-plain"
@@ -1472,7 +1480,7 @@ function App() {
                           </div>
                         </div>
                         <div className="filter-group" style={{ marginTop: '12px', gridColumn: '1 / -1' }}>
-                          <div className="filter-label">Message</div>
+                          <div className="filter-label">{t('Message')}</div>
                           <textarea
                             className="input-plain"
                             rows={2}
@@ -1489,12 +1497,12 @@ function App() {
                         disabled={isTesting || !testBaseUrl || !testApiKey}
                         style={{ marginTop: '8px' }}
                       >
-                        {isTesting ? '⌛ Testing...' : '🚀 Run Connectivity Test'}
+                        {isTesting ? `⌛ ${t('Testing...')}` : `🚀 ${t('Run Connectivity Test')}`}
                       </button>
 
                       <div style={{ marginTop: '16px', padding: '16px', background: 'var(--surface-hover)', borderRadius: '8px', border: '1px solid var(--border-color)' }}>
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
-                          <div style={{ fontSize: '11px', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase' }}>Manual curl equivalent</div>
+                          <div style={{ fontSize: '11px', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase' }}>{t('Manual curl equivalent')}</div>
                           <button
                             className="btn-copy"
                             onClick={(e) => {
@@ -1506,11 +1514,11 @@ function App() {
                               const curlCmd = `curl ${fullUrl} \\\n  -H "${testFormat === 'anthropic' ? 'x-api-key' : 'Authorization: Bearer'}: ${testApiKey || 'YOUR_KEY'}" \\\n  -H "Content-Type: application/json" \\\n  -d '{"model": "${testModel || 'gpt-5.4'}", "messages": [{"role": "user", "content": "${(testMessage || 'What is 2 + 3?').replace(/"/g, '\\"')}"}], "max_tokens": 10}'`
                               navigator.clipboard.writeText(curlCmd)
                               btn.classList.add('btn-copy-clicked')
-                              btn.textContent = '✓ Copied'
-                              setTimeout(() => { btn.classList.remove('btn-copy-clicked'); btn.textContent = '📋 Copy' }, 800)
+                              btn.textContent = `✓ ${t('Copied')}`
+                              setTimeout(() => { btn.classList.remove('btn-copy-clicked'); btn.textContent = `📋 ${t('Copy')}` }, 800)
                             }}
                           >
-                            📋 Copy
+                            📋 {t('Copy')}
                           </button>
                         </div>
                         <pre style={{ margin: 0, fontSize: '11px', whiteSpace: 'pre-wrap', wordBreak: 'break-all', color: 'var(--text-secondary)' }}>
@@ -1520,7 +1528,7 @@ function App() {
                     </div>
 
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-                      <div className="filter-label">Test Result</div>
+                      <div className="filter-label">{t('Test Result')}</div>
                       {!testResult ? (
                         <div style={{ 
                           flex: 1, 
@@ -1534,28 +1542,28 @@ function App() {
                           minHeight: '300px'
                         }}>
                           <span style={{ fontSize: '32px', marginBottom: '12px' }}>⚡</span>
-                          <span>Results will appear here after testing</span>
+                          <span>{t('Results will appear here after testing')}</span>
                         </div>
                       ) : (
                         <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
                           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
                             <div className="widget" style={{ padding: '16px', background: testResult.error || testResult.status_code >= 400 ? 'var(--icon-pink-bg)' : 'var(--icon-green-bg)' }}>
-                              <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Status Code</div>
+                              <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{t('Status Code')}</div>
                               <div style={{ fontSize: '24px', fontWeight: 800, color: testResult.error || testResult.status_code >= 400 ? '#e11d48' : '#16a34a' }}>
-                                {testResult.error ? 'Error' : testResult.status_code}
+                                {testResult.error ? t('Error') : testResult.status_code}
                               </div>
                             </div>
                             <div className="widget" style={{ padding: '16px' }}>
-                              <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Latency</div>
+                              <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{t('Latency')}</div>
                               <div style={{ fontSize: '24px', fontWeight: 800 }}>{testResult.latency_ms}ms</div>
                             </div>
                           </div>
                           
                           {typeof testResult.body === 'string' && testResult.body.trim().startsWith('<') ? (
                             <div className="widget" style={{ padding: '16px', background: 'var(--icon-yellow-bg)' }}>
-                              <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginBottom: '4px' }}>Response</div>
+                              <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginBottom: '4px' }}>{t('Response')}</div>
                               <div style={{ fontSize: '12px', color: '#b45309', fontWeight: 600, marginBottom: '8px' }}>
-                                Upstream returned HTML — check that base_url points to an API endpoint
+                                {t('Upstream returned HTML -- check that base_url points to an API endpoint')}
                               </div>
                               <div style={{ fontSize: '11px', color: 'var(--text-secondary)', fontFamily: 'var(--font-mono)', whiteSpace: 'pre-wrap', wordBreak: 'break-all', maxHeight: '200px', overflow: 'auto' }}>
                                 {testResult.body.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 1000)}
@@ -1563,7 +1571,7 @@ function App() {
                             </div>
                           ) : (
                             <div className="widget" style={{ padding: '16px' }}>
-                              <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginBottom: '8px' }}>Response Body</div>
+                              <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginBottom: '8px' }}>{t('Response Body')}</div>
                               <pre style={{
                                 margin: 0,
                                 fontSize: '12px',

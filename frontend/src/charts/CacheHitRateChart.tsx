@@ -2,6 +2,7 @@ import { useState, useRef, useEffect, useCallback } from 'react'
 import type { DailyUsage } from '../types'
 import { formatNumber, value } from '../utils'
 import { ChartTooltip, TooltipRow } from './ChartTooltip'
+import { t } from '../i18n/index.ts'
 
 export function CacheHitRateChart({
   data,
@@ -50,10 +51,10 @@ export function CacheHitRateChart({
         <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
             <div style={{ width: '12px', height: '12px', background: 'var(--color-green)', borderRadius: '2px' }} />
-            <span style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)' }}>Hit Rate</span>
+            <span style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)' }}>{t('Hit Rate')}</span>
           </div>
           <span style={{ fontSize: '13px', fontWeight: 700, color: 'var(--color-green)' }}>
-            {avg.toFixed(1)}% avg
+            {avg.toFixed(1)}% {t('avg')}
           </span>
         </div>
       </div>
@@ -65,7 +66,7 @@ export function CacheHitRateChart({
         flexDirection: 'column'
       }}>
         {!hasData ? (
-          <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-muted)' }}>No cache data available</div>
+          <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-muted)' }}>{t('No cache data available')}</div>
         ) : (
           <>
             {hoveredIdx !== null && hoveredData && (
@@ -73,13 +74,13 @@ export function CacheHitRateChart({
                 <div style={{ fontWeight: 600, marginBottom: '8px', borderBottom: '1px solid var(--border-color)', paddingBottom: '4px', fontSize: '13px' }}>
                   {hoveredData.period}
                 </div>
-                <TooltipRow label="Hit Rate:" labelColor="var(--color-green)">
+                <TooltipRow label={t('Hit Rate:')} labelColor="var(--color-green)">
                   <span style={{ fontWeight: 700, color: 'var(--color-green)' }}>{hoveredRate.toFixed(1)}%</span>
                 </TooltipRow>
-                <TooltipRow label="Cached:">
+                <TooltipRow label={t('Cached:')}>
                   <span style={{ fontWeight: 600 }}>{formatNumber(hoveredData.cached_tokens)}</span>
                 </TooltipRow>
-                <TooltipRow label="Prompt:">
+                <TooltipRow label={t('Prompt:')}>
                   <span style={{ fontWeight: 600 }}>{formatNumber(hoveredData.prompt_tokens)}</span>
                 </TooltipRow>
               </ChartTooltip>

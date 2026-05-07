@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react'
 import type { DailyUsage } from '../types'
 import { fillGaps, formatCost, formatNumber, value } from '../utils'
 import { ChartTooltip, TooltipRow, TooltipDivider } from './ChartTooltip'
+import { t } from '../i18n/index.ts'
 
 export function TrendChart({
   data,
@@ -40,43 +41,43 @@ export function TrendChart({
               <>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                   <div style={{ width: '12px', height: '12px', background: '#94a3b8', borderRadius: '2px' }} />
-                  <span style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)' }}>Input</span>
+                  <span style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)' }}>{t('Input')}</span>
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                   <div style={{ width: '12px', height: '12px', background: 'var(--color-green)', borderRadius: '2px' }} />
-                  <span style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)' }}>Cached</span>
+                  <span style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)' }}>{t('Cached')}</span>
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                   <div style={{ width: '12px', height: '12px', background: 'var(--color-blue)', borderRadius: '2px' }} />
-                  <span style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)' }}>Output</span>
+                  <span style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)' }}>{t('Output')}</span>
                 </div>
               </>
             ) : (
               <>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                   <div style={{ width: '12px', height: '12px', background: '#d97706', borderRadius: '2px' }} />
-                  <span style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)' }}>Input Cost</span>
+                  <span style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)' }}>{t('Input Cost')}</span>
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                   <div style={{ width: '12px', height: '12px', background: '#a855f7', borderRadius: '2px' }} />
-                  <span style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)' }}>Output Cost</span>
+                  <span style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)' }}>{t('Output Cost')}</span>
                 </div>
               </>
             )}
             <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
               <div style={{ width: '12px', height: '3px', background: 'var(--color-pink)', borderRadius: '2px' }} />
-              <span style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)' }}>Requests</span>
+              <span style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)' }}>{t('Requests')}</span>
             </div>
           </div>
           <div className="tab-toggle">
             <button
               className={`tab-toggle-btn ${metric === 'tokens' ? 'active' : ''}`}
               onClick={() => setMetric('tokens')}
-            >Tokens</button>
+            >{t('Tokens')}</button>
             <button
               className={`tab-toggle-btn ${metric === 'cost' ? 'active' : ''}`}
               onClick={() => setMetric('cost')}
-            >Cost</button>
+            >{t('Cost')}</button>
           </div>
         </div>
       </div>
@@ -89,7 +90,7 @@ export function TrendChart({
         flexDirection: 'column'
       }}>
         {filled.length === 0 ? (
-          <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-muted)' }}>No trend data available</div>
+          <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-muted)' }}>{t('No trend data available')}</div>
         ) : (
           <>
             {hoveredIdx !== null && hoveredData && (
@@ -99,10 +100,10 @@ export function TrendChart({
                 </div>
                 {metric === 'tokens' ? (
                   <>
-                    <TooltipRow label="Input:" labelColor="#94a3b8">
+                    <TooltipRow label={t('Input:')} labelColor="#94a3b8">
                       <span style={{ fontWeight: 600 }}>{formatNumber(hInput)}</span>
                     </TooltipRow>
-                    <TooltipRow label="Cached:" labelColor="var(--color-green)">
+                    <TooltipRow label={t('Cached:')} labelColor="var(--color-green)">
                       <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                         {value(hoveredData.prompt_tokens) > 0 && (
                           <span style={{ fontSize: '10px', color: 'var(--color-green)', opacity: 0.8 }}>
@@ -112,37 +113,37 @@ export function TrendChart({
                         <span style={{ fontWeight: 600 }}>{formatNumber(hCached)}</span>
                       </div>
                     </TooltipRow>
-                    <TooltipRow label="Output:" labelColor="var(--color-blue)">
+                    <TooltipRow label={t('Output:')} labelColor="var(--color-blue)">
                       <span style={{ fontWeight: 600 }}>{formatNumber(hOutput)}</span>
                     </TooltipRow>
                     <TooltipDivider />
-                    <TooltipRow label="Total Tokens:">
+                    <TooltipRow label={t('Total Tokens:')}>
                       <span style={{ fontWeight: 800 }}>{formatNumber(value(hoveredData.total_tokens))}</span>
                     </TooltipRow>
                     {hoveredData.total_cost_usd !== null && value(hoveredData.total_cost_usd) > 0 && (
-                      <TooltipRow label="Est. Cost:" labelColor="#f472b6">
+                      <TooltipRow label={t('Est. Cost:')} labelColor="#f472b6">
                         <span style={{ fontWeight: 800, color: '#f472b6' }}>{formatCost(hoveredData.total_cost_usd)}</span>
                       </TooltipRow>
                     )}
                   </>
                 ) : (
                   <>
-                    <TooltipRow label="Input Cost:" labelColor="#d97706">
+                    <TooltipRow label={t('Input Cost:')} labelColor="#d97706">
                       <span style={{ fontWeight: 600 }}>{formatCost(hoveredData.input_cost_usd)}</span>
                     </TooltipRow>
-                    <TooltipRow label="Output Cost:" labelColor="#a855f7">
+                    <TooltipRow label={t('Output Cost:')} labelColor="#a855f7">
                       <span style={{ fontWeight: 600 }}>{formatCost(hoveredData.output_cost_usd)}</span>
                     </TooltipRow>
                     <TooltipDivider />
-                    <TooltipRow label="Total Cost:">
+                    <TooltipRow label={t('Total Cost:')}>
                       <span style={{ fontWeight: 800 }}>{formatCost(hoveredData.total_cost_usd)}</span>
                     </TooltipRow>
-                    <TooltipRow label="Tokens:">
+                    <TooltipRow label={t('Tokens:')}>
                       <span style={{ fontWeight: 600 }}>{formatNumber(value(hoveredData.total_tokens))}</span>
                     </TooltipRow>
                   </>
                 )}
-                <TooltipRow label="Requests:" labelColor="var(--color-pink)">
+                <TooltipRow label={t('Requests:')} labelColor="var(--color-pink)">
                   <span style={{ fontWeight: 600, color: 'var(--color-pink)' }}>{formatNumber(hoveredData.requests)}</span>
                 </TooltipRow>
               </ChartTooltip>

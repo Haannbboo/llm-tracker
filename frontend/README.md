@@ -1,3 +1,5 @@
+[English](README.md) | [中文](README_CN.md)
+
 # llm-tracker Dashboard
 
 The frontend for visualizing LLM usage, cost trends, and performance metrics across different providers and agents.
