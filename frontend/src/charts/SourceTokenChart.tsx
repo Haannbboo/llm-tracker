@@ -1,29 +1,32 @@
 import { useMemo } from 'react'
+import type { Theme } from '../theme'
 import type { SourceUsage } from '../types'
 import { getSourceBadgeBg, getSourceBadgeText, getProviderIcon } from '../utils'
 import { HorizontalBarChart } from './HorizontalBarChart'
 import type { BarItem } from './HorizontalBarChart'
 
+const sourceColors: Record<string, string> = {
+  'claude-code': '#cc7c5e',
+  'codex': '#dcdcdc',
+  'gemini-cli': '#528af2',
+  'proxy': '#8b5cf6',
+}
+
 export function SourceTokenChart({
   data,
-  title
+  title,
+  theme
 }: {
   data: SourceUsage[],
   title: string
+  theme: Theme
 }) {
-  const sourceColors: Record<string, string> = {
-    'claude-code': '#cc7c5e',
-    'codex': '#dcdcdc',
-    'gemini-cli': '#528af2',
-    'proxy': '#8b5cf6',
-  }
-
   const items: BarItem[] = useMemo(() =>
     data.map(s => {
       const name = s.client_source || 'unknown'
       return {
         name,
-        icon: getProviderIcon(name),
+        icon: getProviderIcon(name, theme),
         tokens: s.total_tokens ?? 0,
         cost: s.total_cost_usd ?? 0,
         color: sourceColors[name] || '#94a3b8',
@@ -31,7 +34,7 @@ export function SourceTokenChart({
         badgeText: getSourceBadgeText(name),
       }
     }),
-    [data]
+    [data, theme]
   )
 
   return (

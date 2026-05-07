@@ -16,6 +16,7 @@ PROVIDER_RULES: list[tuple[str, str]] = [
     ("api.minimaxi", "MiniMax"),
     ("xiaomimimo", "Xiaomi"),
     ("api.anthropic", "Anthropic"),
+    ("openrouter.ai", "OpenRouter"),
     ("api.openai", "OpenAI"),
     ("api.github", "GitHub"),
     ("azure", "Azure"),

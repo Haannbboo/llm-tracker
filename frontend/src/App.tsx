@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState, useRef } from 'react'
 import yaml from 'js-yaml'
 import './App.css'
 import { toggleTheme, getTheme } from './theme'
@@ -52,6 +52,31 @@ function App() {
 
   const [error, setError] = useState<string | null>(null)
   const [theme, setTheme] = useState<'light' | 'dark'>(getTheme)
+
+  const [modelColWidth, setModelColWidth] = useState(180)
+  const resizeRef = useRef<{ startX: number; startWidth: number } | null>(null)
+
+  const handleResizeStart = (e: React.MouseEvent) => {
+    e.preventDefault()
+    resizeRef.current = { startX: e.clientX, startWidth: modelColWidth }
+    document.body.style.userSelect = 'none'
+    document.body.style.cursor = 'col-resize'
+    const handleMouseMove = (e: MouseEvent) => {
+      if (!resizeRef.current) return
+      const delta = e.clientX - resizeRef.current.startX
+      const newWidth = Math.max(100, resizeRef.current.startWidth + delta)
+      setModelColWidth(newWidth)
+    }
+    const handleMouseUp = () => {
+      resizeRef.current = null
+      document.body.style.userSelect = ''
+      document.body.style.cursor = ''
+      document.removeEventListener('mousemove', handleMouseMove)
+      document.removeEventListener('mouseup', handleMouseUp)
+    }
+    document.addEventListener('mousemove', handleMouseMove)
+    document.addEventListener('mouseup', handleMouseUp)
+  }
 
   const providerColors = useMemo(() => {
     const allProviders = Array.from(new Set(summary.map(s => s.provider))).sort();
@@ -574,18 +599,21 @@ function App() {
                   <ModelTokenChart
                     summary={summary}
                     title="Top Models"
+                    theme={theme}
                   />
                 </div>
                 <div style={{ flex: 1 }}>
                   <ProviderTokenChart
                     data={providerUsage}
                     title="Top Providers"
+                    theme={theme}
                   />
                 </div>
                 <div style={{ flex: 1 }}>
                   <SourceTokenChart
                     data={sourceUsage}
                     title="Top Sources"
+                    theme={theme}
                   />
                 </div>
               </div>
@@ -686,7 +714,24 @@ function App() {
                     <thead>
                       <tr>
                         <th style={{ width: '120px' }}>Time</th>
-                        <th style={{ width: '150px', padding: '12px 8px' }}>Model</th>
+                        <th style={{ width: modelColWidth, padding: '12px 8px', position: 'relative' }}>
+                          Model
+                          <div
+                            onMouseDown={handleResizeStart}
+                            style={{
+                              position: 'absolute',
+                              right: 0,
+                              top: 0,
+                              bottom: 0,
+                              width: '3px',
+                              cursor: 'col-resize',
+                              userSelect: 'none',
+                              backgroundColor: 'rgba(128,128,128,0.2)',
+                            }}
+                            onMouseEnter={(e) => e.currentTarget.style.backgroundColor = 'rgba(128,128,128,0.5)'}
+                            onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'rgba(128,128,128,0.2)'}
+                          />
+                        </th>
                         <th style={{ width: '120px', padding: '12px 8px' }}>Provider</th>
                         <th style={{ width: '110px', padding: '12px 8px' }}>Source</th>
                         <th style={{ minWidth: '140px' }}>Input (Prompt)</th>
@@ -720,9 +765,10 @@ function App() {
                               fontSize: '11px',
                               backgroundColor: getModelBadgeBackgroundColor(row.model),
                               color: getModelTextColor(row.model),
-                              maxWidth: '140px',
-                              fontWeight: 600
-                            }}>
+                              maxWidth: modelColWidth - 10,
+                              fontWeight: 600,
+                              cursor: 'pointer'
+                            }} title={row.model}>
                               {getModelIcon(row.model)}
                               <span style={{
                                 overflow: 'hidden',

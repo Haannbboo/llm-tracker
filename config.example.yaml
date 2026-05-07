@@ -272,6 +272,15 @@ providers:
       gemini-3.1-pro-preview: {}
       claude-sonnet-4-6: {}
       gpt-5.4: {}
+  openrouter:
+    base_url: https://openrouter.ai/api/v1
+    models:
+      claude-sonnet-4-6: {}
+      claude-haiku-4-5: {}
+      gpt-5.4: {}
+      gpt-5.4-mini: {}
+      gemini-2.5-pro: {}
+      gemini-2.5-flash: {}
 
 server:
   host: 127.0.0.1
