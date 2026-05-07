@@ -125,6 +125,10 @@ body {
   letter-spacing: -0.01em;
 }
 
+button {
+  color: inherit;
+}
+
 .widget {
   background: var(--glass-bg);
   backdrop-filter: var(--glass-blur);

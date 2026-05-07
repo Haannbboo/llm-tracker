@@ -83,6 +83,7 @@ export function ModelSelector({
             right: 0,
             marginTop: '4px',
             background: 'var(--card-bg)',
+            color: 'var(--text-primary)',
             border: '1px solid var(--border-color)',
             borderRadius: '8px',
             boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
