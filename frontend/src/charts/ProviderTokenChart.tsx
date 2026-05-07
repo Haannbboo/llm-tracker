@@ -25,11 +25,14 @@ export function ProviderTokenChart({
     data.map((s, i) => {
       const tokens = s.total_tokens ?? 0
       const cost = s.total_cost_usd ?? 0
+      const completion = s.completion_tokens ?? 0
+      const latency = s.latency_sum_ms ?? 0
       return {
         name: s.provider,
         icon: getProviderIcon(s.provider, theme),
         tokens,
         cost,
+        throughput: latency > 0 ? (completion * 1000) / latency : 0,
         pricePerMillion: s.avg_effective_price_per_million_usd
           ?? (tokens > 0 ? (cost / tokens) * 1_000_000 : null),
         color: providerColors[s.provider.toLowerCase()] || PALETTE[i % PALETTE.length],

@@ -940,6 +940,7 @@ def test_aggregate_usage_by_period_includes_cost_totals(database_module, isolate
             "requests": 2,
             "prompt_tokens": 30,
             "completion_tokens": 15,
+            "avg_throughput": 50.0,
             "cached_tokens": 6,
             "total_tokens": 45,
             "input_cost_usd": 6e-05,

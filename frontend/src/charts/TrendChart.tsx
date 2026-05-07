@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import type { DailyUsage } from '../types'
-import { fillGaps, formatCost, formatNumber, value } from '../utils'
+import { fillGaps, formatCost, formatNumber, formatThroughput, value } from '../utils'
 import { ChartTooltip, TooltipRow, TooltipDivider } from './ChartTooltip'
 import { t } from '../i18n/index.ts'
 
@@ -17,11 +17,12 @@ export function TrendChart({
   periodCount: number,
   showDots?: boolean,
 }) {
-  const [metric, setMetric] = useState<'tokens' | 'cost'>('tokens');
+  const [metric, setMetric] = useState<'tokens' | 'cost' | 'throughput'>('tokens');
   const [hoveredIdx, setHoveredIdx] = useState<number | null>(null);
   const filled = useMemo(() => fillGaps(data, granularity, periodCount), [data, granularity, periodCount]);
   const maxTokens = Math.max(...filled.map(x => value(x.total_tokens)), 1);
   const maxCost = Math.max(...filled.map(x => value(x.total_cost_usd)), 0.001);
+  const maxThroughput = Math.max(...filled.map(x => value(x.avg_throughput)), 1);
   const maxRequests = Math.max(...filled.map(x => value(x.requests)), 1);
   const paddingX = 60;
   const chartWidth = 1000 - (paddingX * 2);
@@ -30,6 +31,7 @@ export function TrendChart({
   const hCached = hoveredData ? value(hoveredData.cached_tokens) : 0;
   const hInput = hoveredData ? Math.max(0, value(hoveredData.prompt_tokens) - hCached) : 0;
   const hOutput = hoveredData ? value(hoveredData.completion_tokens) : 0;
+  const hThroughput = hoveredData ? value(hoveredData.avg_throughput) : 0;
 
   return (
     <div className="widget" style={{ minHeight: '400px', width: '100%', position: 'relative' }}>
@@ -52,7 +54,7 @@ export function TrendChart({
                   <span style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)' }}>{t('Output')}</span>
                 </div>
               </>
-            ) : (
+            ) : metric === 'cost' ? (
               <>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                   <div style={{ width: '12px', height: '12px', background: '#d97706', borderRadius: '2px' }} />
@@ -61,6 +63,13 @@ export function TrendChart({
                 <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                   <div style={{ width: '12px', height: '12px', background: '#a855f7', borderRadius: '2px' }} />
                   <span style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)' }}>{t('Output Cost')}</span>
+                </div>
+              </>
+            ) : (
+              <>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <div style={{ width: '12px', height: '12px', background: 'var(--color-pink)', borderRadius: '2px' }} />
+                  <span style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)' }}>Throughput</span>
                 </div>
               </>
             )}
@@ -78,6 +87,10 @@ export function TrendChart({
               className={`tab-toggle-btn ${metric === 'cost' ? 'active' : ''}`}
               onClick={() => setMetric('cost')}
             >{t('Cost')}</button>
+            <button
+              className={`tab-toggle-btn ${metric === 'throughput' ? 'active' : ''}`}
+              onClick={() => setMetric('throughput')}
+            >{t('Throughput')}</button>
           </div>
         </div>
       </div>
@@ -126,7 +139,7 @@ export function TrendChart({
                       </TooltipRow>
                     )}
                   </>
-                ) : (
+                ) : metric === 'cost' ? (
                   <>
                     <TooltipRow label={t('Input Cost:')} labelColor="#d97706">
                       <span style={{ fontWeight: 600 }}>{formatCost(hoveredData.input_cost_usd)}</span>
@@ -140,6 +153,19 @@ export function TrendChart({
                     </TooltipRow>
                     <TooltipRow label={t('Tokens:')}>
                       <span style={{ fontWeight: 600 }}>{formatNumber(value(hoveredData.total_tokens))}</span>
+                    </TooltipRow>
+                  </>
+                ) : (
+                  <>
+                    <TooltipRow label="Throughput:" labelColor="var(--color-pink)">
+                      <span style={{ fontWeight: 800, color: 'var(--color-pink)' }}>{formatThroughput(hThroughput)}</span>
+                    </TooltipRow>
+                    <TooltipDivider />
+                    <TooltipRow label="Output Tokens:">
+                      <span style={{ fontWeight: 600 }}>{formatNumber(value(hoveredData.completion_tokens))}</span>
+                    </TooltipRow>
+                    <TooltipRow label="Latency:">
+                      <span style={{ fontWeight: 600 }}>{value(hoveredData.avg_latency_ms).toFixed(0)}ms</span>
                     </TooltipRow>
                   </>
                 )}
@@ -236,7 +262,7 @@ export function TrendChart({
                         )}
                       </g>
                     );
-                  } else {
+                  } else if (metric === 'cost') {
                     const inputCost = value(d.input_cost_usd);
                     const outputCost = value(d.output_cost_usd);
                     const total = inputCost + outputCost;
@@ -259,6 +285,18 @@ export function TrendChart({
                         {isTop && (
                           <path d={roundedRect(x, yInput, barW, hInput, radius, 0)} fill="url(#grad-cost-input)" />
                         )}
+                      </g>
+                    );
+                  } else {
+                    const throughput = value(d.avg_throughput);
+                    if (throughput === 0) return null;
+
+                    const hThroughput = (throughput / maxThroughput) * 200;
+                    const yThroughput = 200 - hThroughput;
+
+                    return (
+                      <g key={i} style={{ opacity: dimmed ? 0.3 : 1, transition: 'opacity 0.2s' }}>
+                        <path d={roundedRect(x, yThroughput, barW, hThroughput, radius, radius)} fill="var(--color-pink)" style={{ opacity: 0.8 }} />
                       </g>
                     );
                   }

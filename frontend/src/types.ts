@@ -8,6 +8,8 @@ export type UsageSummary = {
   cached_tokens: number | null
   total_tokens: number | null
   avg_latency_ms: number | null
+  latency_sum_ms: number | null
+  avg_throughput: number | null
   input_cost_usd: number | null
   output_cost_usd: number | null
   total_cost_usd: number | null
@@ -26,6 +28,8 @@ export type ProviderUsage = {
   cached_tokens: number | null
   total_tokens: number | null
   avg_latency_ms: number | null
+  latency_sum_ms: number | null
+  avg_throughput: number | null
   input_cost_usd: number | null
   output_cost_usd: number | null
   total_cost_usd: number | null
@@ -44,6 +48,8 @@ export type SourceUsage = {
   cached_tokens: number | null
   total_tokens: number | null
   avg_latency_ms: number | null
+  latency_sum_ms: number | null
+  avg_throughput: number | null
   input_cost_usd: number | null
   output_cost_usd: number | null
   total_cost_usd: number | null
@@ -84,6 +90,8 @@ export type DailyUsage = {
   output_cost_usd: number | null
   total_cost_usd: number | null
   avg_latency_ms: number | null
+  latency_sum_ms: number | null
+  avg_throughput: number | null
   successful_requests: number | null
   failed_requests: number | null
 }

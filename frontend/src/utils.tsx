@@ -51,6 +51,11 @@ export function formatLatency(input: number | null | undefined) {
   return latency >= 1000 ? `${(latency / 1000).toFixed(2)}s` : `${Math.round(latency)}ms`
 }
 
+export function formatThroughput(val: number | null | undefined): string {
+  if (val == null || val === 0) return '—'
+  return `${val.toFixed(1)} t/s`
+}
+
 export function formatTime(input: string) {
   const date = new Date(input)
   if (Number.isNaN(date.valueOf())) return input
@@ -77,6 +82,8 @@ export function fillGaps(data: DailyUsage[], granularity: 'hour' | 'day', period
     period, requests: 0, prompt_tokens: 0, completion_tokens: 0,
     cached_tokens: 0, total_tokens: 0, input_cost_usd: 0,
     output_cost_usd: 0, total_cost_usd: 0, avg_latency_ms: 0,
+    latency_sum_ms: 0,
+    avg_throughput: 0,
     successful_requests: 0, failed_requests: 0,
   })
 

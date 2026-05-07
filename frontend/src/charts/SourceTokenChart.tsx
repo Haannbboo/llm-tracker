@@ -30,6 +30,7 @@ export function SourceTokenChart({
         icon: getProviderIcon(name, theme),
         tokens: s.total_tokens ?? 0,
         cost: s.total_cost_usd ?? 0,
+        throughput: (s.latency_sum_ms ?? 0) > 0 ? ((s.completion_tokens ?? 0) * 1000) / (s.latency_sum_ms ?? 0) : 0,
         color: sourceColors[name] || '#94a3b8',
         badgeBg: getSourceBadgeBg(name),
         badgeText: getSourceBadgeText(name),

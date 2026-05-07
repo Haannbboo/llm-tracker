@@ -864,6 +864,12 @@ def summarize_usage_by_source(
             (
                 func.sum(UsageDaily.latency_sum_ms) / func.sum(UsageDaily.request_count)
             ).label("avg_latency_ms"),
+            func.sum(UsageDaily.latency_sum_ms).label("latency_sum_ms"),
+            (
+                func.sum(UsageDaily.completion_tokens)
+                * 1000.0
+                / func.nullif(func.sum(UsageDaily.latency_sum_ms), 0)
+            ).label("avg_throughput"),
             func.sum(UsageDaily.input_cost_usd).label("input_cost_usd"),
             func.sum(UsageDaily.output_cost_usd).label("output_cost_usd"),
             func.sum(UsageDaily.total_cost_usd).label("total_cost_usd"),
@@ -912,6 +918,12 @@ def summarize_usage_by_provider(
             (
                 func.sum(UsageDaily.latency_sum_ms) / func.sum(UsageDaily.request_count)
             ).label("avg_latency_ms"),
+            func.sum(UsageDaily.latency_sum_ms).label("latency_sum_ms"),
+            (
+                func.sum(UsageDaily.completion_tokens)
+                * 1000.0
+                / func.nullif(func.sum(UsageDaily.latency_sum_ms), 0)
+            ).label("avg_throughput"),
             func.sum(UsageDaily.input_cost_usd).label("input_cost_usd"),
             func.sum(UsageDaily.output_cost_usd).label("output_cost_usd"),
             func.sum(UsageDaily.total_cost_usd).label("total_cost_usd"),
@@ -967,6 +979,12 @@ def summarize_usage_daily(
             (
                 func.sum(UsageDaily.latency_sum_ms) / func.sum(UsageDaily.request_count)
             ).label("avg_latency_ms"),
+            func.sum(UsageDaily.latency_sum_ms).label("latency_sum_ms"),
+            (
+                func.sum(UsageDaily.completion_tokens)
+                * 1000.0
+                / func.nullif(func.sum(UsageDaily.latency_sum_ms), 0)
+            ).label("avg_throughput"),
             func.sum(UsageDaily.input_cost_usd).label("input_cost_usd"),
             func.sum(UsageDaily.output_cost_usd).label("output_cost_usd"),
             func.sum(UsageDaily.total_cost_usd).label("total_cost_usd"),
@@ -1083,6 +1101,11 @@ def aggregate_usage_by_period(
             func.coalesce(func.sum(Usage.completion_tokens), 0).label(
                 "completion_tokens"
             ),
+            (
+                func.sum(Usage.completion_tokens)
+                * 1000.0
+                / func.nullif(func.sum(Usage.latency_ms), 0)
+            ).label("avg_throughput"),
             func.coalesce(func.sum(Usage.cached_tokens), 0).label("cached_tokens"),
             func.coalesce(func.sum(Usage.total_tokens), 0).label("total_tokens"),
             func.coalesce(func.sum(Usage.input_cost_usd), 0).label("input_cost_usd"),
@@ -1114,6 +1137,7 @@ def aggregate_usage_by_period(
                     "requests": row.requests,
                     "prompt_tokens": row.prompt_tokens,
                     "completion_tokens": row.completion_tokens,
+                    "avg_throughput": _normalize_value(row.avg_throughput),
                     "cached_tokens": row.cached_tokens,
                     "total_tokens": row.total_tokens,
                     "input_cost_usd": _normalize_value(row.input_cost_usd),
@@ -1164,6 +1188,12 @@ def aggregate_daily_by_period(
             (
                 func.sum(UsageDaily.latency_sum_ms) / func.sum(UsageDaily.request_count)
             ).label("avg_latency_ms"),
+            func.sum(UsageDaily.latency_sum_ms).label("latency_sum_ms"),
+            (
+                func.sum(UsageDaily.completion_tokens)
+                * 1000.0
+                / func.nullif(func.sum(UsageDaily.latency_sum_ms), 0)
+            ).label("avg_throughput"),
         )
         .group_by(UsageDaily.date)
         .order_by(UsageDaily.date)

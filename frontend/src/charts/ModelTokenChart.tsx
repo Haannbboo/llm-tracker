@@ -16,11 +16,13 @@ export function ModelTokenChart({
   theme: Theme
 }) {
   const items: BarItem[] = useMemo(() => {
-    const map = new Map<string, { tokens: number; cost: number; priceWeight: number; priceTokens: number }>()
+    const map = new Map<string, { tokens: number; completion: number; latency: number; cost: number; priceWeight: number; priceTokens: number }>()
     for (const s of summary) {
-      const existing = map.get(s.model) || { tokens: 0, cost: 0, priceWeight: 0, priceTokens: 0 }
+      const existing = map.get(s.model) || { tokens: 0, completion: 0, latency: 0, cost: 0, priceWeight: 0, priceTokens: 0 }
       const tokens = value(s.total_tokens)
       existing.tokens += tokens
+      existing.completion += value(s.completion_tokens)
+      existing.latency += value(s.latency_sum_ms)
       existing.cost += value(s.total_cost_usd)
       if (s.avg_effective_price_per_million_usd != null) {
         existing.priceWeight += s.avg_effective_price_per_million_usd * tokens
@@ -33,6 +35,7 @@ export function ModelTokenChart({
       icon: getModelIcon(model, theme),
       tokens: v.tokens,
       cost: v.cost,
+      throughput: v.latency > 0 ? (v.completion * 1000) / v.latency : 0,
       pricePerMillion: v.priceTokens > 0
         ? v.priceWeight / v.priceTokens
         : v.tokens > 0 ? (v.cost / v.tokens) * 1_000_000 : null,
