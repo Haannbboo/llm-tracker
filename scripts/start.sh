@@ -167,3 +167,9 @@ for prog in llm-tracker-proxy llm-tracker-api llm-tracker-otlp; do
               "${SUPERVISORCTL}" -c "${SUPERVISORD_CONF}" start "${prog}" ;;
   esac
 done
+
+# Restart API server so it picks up frontend/dist (static mount happens at import time)
+if [[ -d "${ROOT_DIR}/frontend/dist" ]]; then
+  "${SUPERVISORCTL}" -c "${SUPERVISORD_CONF}" restart llm-tracker-api
+  echo "==> llm-tracker-api: restarted (frontend available)"
+fi

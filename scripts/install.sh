@@ -28,13 +28,29 @@ fi
 echo "==> Installing dependencies..."
 uv pip install --python "${VENV_DIR}/bin/python" -r "${ROOT_DIR}/requirements.txt"
 
-# 4. CLI Setup
+# 4. Build frontend
+FRONTEND_DIR="${ROOT_DIR}/frontend"
+if command -v node >/dev/null 2>&1 && command -v npm >/dev/null 2>&1; then
+  if [[ -d "${FRONTEND_DIR}" ]]; then
+    echo "==> Building frontend..."
+    (cd "${FRONTEND_DIR}" && npm install --ignore-scripts 2>&1 | tail -1 && npm run build 2>&1 | tail -3)
+    echo "==> Frontend built: ${FRONTEND_DIR}/dist"
+  fi
+else
+  echo ""
+  echo "⚠️  Node.js not found — skipping frontend build."
+  echo "   The dashboard will not be available until you install Node.js and run:"
+  echo "     cd frontend && npm install && npm run build"
+  echo ""
+fi
+
+# 5. CLI Setup
 echo "==> Setting up CLI symlink..."
 mkdir -p "${BIN_DIR}"
 ln -sf "${CLI_SOURCE}" "${CLI_LINK}"
 chmod +x "${CLI_SOURCE}"
 
-# 5. PATH Check & Notification
+# 6. PATH Check & Notification
 if [[ ":$PATH:" != *":${BIN_DIR}:"* ]]; then
   echo ""
   echo "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"

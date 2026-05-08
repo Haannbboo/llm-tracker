@@ -3,7 +3,9 @@ import time
 import yaml
 import httpx
 from decimal import Decimal
+from pathlib import Path
 from fastapi import FastAPI, HTTPException
+from fastapi.staticfiles import StaticFiles
 from config.app import (
     CONFIG,
     CONFIG_PATH,
@@ -389,6 +391,14 @@ async def test_connectivity(test: ConnectivityTest):
             "error": str(e),
             "url": url,
         }
+
+
+# Serve built frontend if available (must come after all API routes)
+_frontend_dist = Path(__file__).resolve().parent.parent / "frontend" / "dist"
+if _frontend_dist.is_dir():
+    app.mount(
+        "/", StaticFiles(directory=str(_frontend_dist), html=True), name="frontend"
+    )
 
 
 if __name__ == "__main__":

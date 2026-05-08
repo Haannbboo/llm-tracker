@@ -13,8 +13,9 @@ from pathlib import Path
 class _HealthHandler(BaseHTTPRequestHandler):
     def do_GET(self):  # noqa: N802
         self.send_response(200)
+        self.send_header("Content-Type", "text/html")
         self.end_headers()
-        self.wfile.write(b"ok")
+        self.wfile.write(b"<html>ok</html>")
 
     def log_message(self, format, *args):  # noqa: A002
         return
@@ -120,6 +121,7 @@ def test_bootstrap_succeeds_when_install_start_and_post_checks_pass(tmp_path):
     assert f"API running: http://127.0.0.1:{api.port}" in output
     assert f"Proxy listening: http://127.0.0.1:{proxy.port}" in output
     assert f"OTLP listening: http://127.0.0.1:{otlp.port}" in output
+    assert f"Dashboard: http://127.0.0.1:{api.port}" in output
 
 
 def test_bootstrap_exits_nonzero_when_post_start_checks_fail(tmp_path):

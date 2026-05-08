@@ -139,6 +139,21 @@ else
   CHECKS_FAIL=$((CHECKS_FAIL + 1))
 fi
 
+# Dashboard reachable (API serves frontend)
+if command -v curl >/dev/null 2>&1; then
+  _dash_ct="$(curl --connect-timeout 3 -s -o /dev/null -w '%{content_type}' "http://${HOST}:${API_PORT}/" 2>/dev/null || true)"
+  if [[ "${_dash_ct}" == text/html* ]]; then
+    _pass "Dashboard: http://${HOST}:${API_PORT}"
+    CHECKS_PASS=$((CHECKS_PASS + 1))
+  else
+    _fail "Dashboard: http://${HOST}:${API_PORT} (frontend not served — run: cd frontend && npm run build)"
+    CHECKS_FAIL=$((CHECKS_FAIL + 1))
+  fi
+else
+  _pass "Dashboard: http://${HOST}:${API_PORT} (curl not available, skipped check)"
+  CHECKS_PASS=$((CHECKS_PASS + 1))
+fi
+
 # ── Final report ────────────────────────────────────────────────────
 echo ""
 if [[ "${CHECKS_FAIL}" -eq 0 ]]; then
@@ -153,12 +168,6 @@ if [[ "${CHECKS_FAIL}" -ne 0 ]]; then
 fi
 
 echo ""
-echo "Dashboard for this slice still runs separately:"
-echo "  cd frontend"
-echo "  npm install"
-echo "  npm run dev"
-echo ""
-echo "Then open:"
-echo "  http://127.0.0.1:5173"
+echo "Dashboard: http://${HOST}:${API_PORT}"
 
 exit "${exit_code}"

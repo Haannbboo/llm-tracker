@@ -29,7 +29,7 @@ function App() {
   const [testFormat, setTestFormat] = useState('openai')
   const [testModel, setTestModel] = useState('')
   const [testMessage, setTestMessage] = useState('What is 2 + 3?')
-  const [testResult, setTestResult] = useState<Record<string, unknown> | null>(null)
+  const [testResult, setTestResult] = useState<Record<string, any> | null>(null)
   const [isTesting, setIsTesting] = useState(false)
 
   const [limit, setLimit] = useState(10)
@@ -48,7 +48,7 @@ function App() {
   const [customUntil, setCustomUntil] = useState('')
 
   const [configContent, setConfigContent] = useState('')
-  const [configParsed, setConfigParsed] = useState<Record<string, unknown> | null>(null)
+  const [configParsed, setConfigParsed] = useState<Record<string, any> | null>(null)
   const [selectedPricingProvider, setSelectedPricingProvider] = useState('global')
   const [configStatus, setConfigStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle')
 
