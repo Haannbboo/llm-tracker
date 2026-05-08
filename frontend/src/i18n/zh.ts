@@ -243,6 +243,8 @@ export const zh: Record<string, string> = {
   'Waiting for your first event...': '正在等待你的第一个请求...',
   'No event found yet': '还没找到事件',
   'Tracking works': '追踪已生效',
+  'Tracking works. Your first request is recorded.': '追踪已生效。你的第一个请求已记录。',
+  'View request logs': '查看请求日志',
   'Not found': '未找到',
 
   // Empty state / onboarding (Commit 1 reframe)

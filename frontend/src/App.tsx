@@ -641,18 +641,23 @@ function App() {
                               fontWeight: 600,
                               fontSize: '13px',
                             }}>
-                              {t('Tracking works')}
+                              {t('Tracking works. Your first request is recorded.')}
                             </div>
                             <div style={{ fontSize: '12px', display: 'flex', flexDirection: 'column', gap: '4px' }}>
                               <div><span style={{ color: 'var(--text-muted)' }}>{t('Source:')}</span> {verificationResult.client_source || '—'}</div>
-                              <div><span style={{ color: 'var(--text-muted)' }}>{t('Model:')}</span> {verificationResult.model}</div>
+                              <div><span style={{ color: 'var(--text-muted)' }}>{t('Model:')}</span> {verificationResult.model || '—'}</div>
                               <div><span style={{ color: 'var(--text-muted)' }}>{t('Tokens:')}</span> {formatNumber(verificationResult.prompt_tokens)} {t('In:')} / {formatNumber(verificationResult.completion_tokens)} {t('Out:')}</div>
                               <div><span style={{ color: 'var(--text-muted)' }}>{t('Cost:')}</span> {formatCost(value(verificationResult.total_cost_usd))}</div>
                               <div><span style={{ color: 'var(--text-muted)' }}>{t('Latency:')}</span> {formatLatency(verificationResult.latency_ms)}</div>
                             </div>
-                            <button className="btn-ghost" onClick={() => { setVerifyPhase('idle'); setVerificationResult(null); }} style={{ fontSize: '12px', alignSelf: 'flex-start' }}>
-                              {t('Reset')}
-                            </button>
+                            <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                              <button className="btn-primary" onClick={() => setView('logs')} style={{ fontSize: '12px', alignSelf: 'flex-start' }}>
+                                {t('View request logs')}
+                              </button>
+                              <button className="btn-ghost" onClick={() => { setVerifyPhase('idle'); setVerificationResult(null); }} style={{ fontSize: '12px', alignSelf: 'flex-start' }}>
+                                {t('Reset')}
+                              </button>
+                            </div>
                           </>
                         ) : (
                           <>
