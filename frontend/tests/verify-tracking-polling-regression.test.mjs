@@ -9,10 +9,10 @@ const appSource = readFileSync(join(here, 'src', 'App.tsx'), 'utf-8')
 const zhSource = readFileSync(join(here, 'src', 'i18n', 'zh.ts'), 'utf-8')
 
 const verifyStart = appSource.indexOf('const handleVerifyEvent = () => {')
-const copyStart = appSource.indexOf('const handleCopyCmd = (cmd: string) => {')
+const verifyEnd = appSource.indexOf('const manualCurlEquivalent = (() => {')
 assert.notEqual(verifyStart, -1)
-assert.notEqual(copyStart, -1)
-const verifyHandler = appSource.slice(verifyStart, copyStart)
+assert.notEqual(verifyEnd, -1)
+const verifyHandler = appSource.slice(verifyStart, verifyEnd)
 
 test('verify tracking uses a polling state machine instead of a one-shot check', () => {
   assert.match(appSource, /const \[verifyPhase, setVerifyPhase\] = useState<'idle' \| 'polling' \| 'success' \| 'timeout'>\('idle'\)/)

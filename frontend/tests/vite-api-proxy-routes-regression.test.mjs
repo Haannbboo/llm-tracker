@@ -8,6 +8,7 @@ const proxiedRoutes = [
   '/usage/logs?limit=1',
   '/test-connectivity',
   '/local/agents',
+  '/local/setup-health',
 ]
 
 for (const route of proxiedRoutes) {

@@ -1,5 +1,7 @@
+import json
 import os
 import time
+import tomllib
 import yaml
 import httpx
 from decimal import Decimal
@@ -403,6 +405,132 @@ async def detect_local_agents():
         path = shutil.which(name)
         agents[name] = {"found": path is not None, "path": path}
     return agents
+
+
+def _local_setup_expected_endpoints() -> dict[str, str]:
+    otlp_port = CONFIG["server"].get(
+        "otlp_port", CONFIG["server"].get("port", 4000) + 2
+    )
+    base = f"http://localhost:{otlp_port}"
+    return {"otlp_endpoint": base, "otlp_logs_endpoint": f"{base}/v1/logs"}
+
+
+def _read_json_file(path: Path) -> dict:
+    if not path.exists():
+        return {}
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+
+
+def _read_toml_file(path: Path) -> dict:
+    if not path.exists():
+        return {}
+    try:
+        return tomllib.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+
+
+def _agent_health(
+    configured: bool, configured_endpoint: str | None, expected_endpoint: str
+) -> dict:
+    endpoint_matches = configured_endpoint == expected_endpoint
+    if not configured:
+        status = "missing_config"
+    elif endpoint_matches:
+        status = "ready"
+    else:
+        status = "wrong_endpoint"
+    return {
+        "configured": configured,
+        "endpoint_matches": endpoint_matches,
+        "configured_endpoint": configured_endpoint,
+        "expected_endpoint": expected_endpoint,
+        "status": status,
+    }
+
+
+@app.get("/local/setup-health")
+async def get_local_setup_health():
+    """Report local AI-agent OTLP config without returning secrets."""
+    home = Path.home()
+    expected = _local_setup_expected_endpoints()
+
+    claude_settings = _read_json_file(home / ".claude" / "settings.json")
+    claude_env = (
+        claude_settings.get("env")
+        if isinstance(claude_settings.get("env"), dict)
+        else {}
+    )
+    claude_endpoint = claude_env.get("OTEL_EXPORTER_OTLP_LOGS_ENDPOINT")
+    claude_configured = (
+        claude_env.get("CLAUDE_CODE_ENABLE_TELEMETRY") in ("1", "true", "True", True)
+        and claude_env.get("OTEL_LOGS_EXPORTER") == "otlp"
+        and isinstance(claude_endpoint, str)
+    )
+
+    codex_config = _read_toml_file(home / ".codex" / "config.toml")
+    codex_otel = (
+        codex_config.get("otel") if isinstance(codex_config.get("otel"), dict) else {}
+    )
+    codex_exporter = (
+        codex_otel.get("exporter", {})
+        if isinstance(codex_otel.get("exporter"), dict)
+        else {}
+    )
+    codex_otlp_http = (
+        codex_exporter.get("otlp-http", {})
+        if isinstance(codex_exporter.get("otlp-http"), dict)
+        else {}
+    )
+    codex_endpoint = codex_otlp_http.get("endpoint")
+    codex_configured = codex_otel.get("enabled") is True and isinstance(
+        codex_endpoint, str
+    )
+
+    gemini_settings = _read_json_file(home / ".gemini" / "settings.json")
+    gemini_telemetry = (
+        gemini_settings.get("telemetry")
+        if isinstance(gemini_settings.get("telemetry"), dict)
+        else {}
+    )
+    gemini_endpoint = gemini_telemetry.get("otlpEndpoint")
+    gemini_configured = gemini_telemetry.get("enabled") is True and isinstance(
+        gemini_endpoint, str
+    )
+
+    agents = {
+        "claude": _agent_health(
+            claude_configured,
+            claude_endpoint if isinstance(claude_endpoint, str) else None,
+            expected["otlp_logs_endpoint"],
+        ),
+        "codex": _agent_health(
+            codex_configured,
+            codex_endpoint if isinstance(codex_endpoint, str) else None,
+            expected["otlp_logs_endpoint"],
+        ),
+        "gemini": _agent_health(
+            gemini_configured,
+            gemini_endpoint if isinstance(gemini_endpoint, str) else None,
+            expected["otlp_endpoint"],
+        ),
+    }
+    return {
+        "expected": expected,
+        "summary": {
+            "total_agents": len(agents),
+            "configured_agents": sum(
+                1 for agent in agents.values() if agent["configured"]
+            ),
+            "matching_agents": sum(
+                1 for agent in agents.values() if agent["endpoint_matches"]
+            ),
+        },
+        "agents": agents,
+    }
 
 
 # Serve built frontend if available (must come after all API routes)

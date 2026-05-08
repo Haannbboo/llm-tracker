@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState, useRef, useCallback } from 'react'
+import type { CSSProperties, ReactNode } from 'react'
 import yaml from 'js-yaml'
 import './App.css'
 import { toggleTheme, getTheme } from './theme'
@@ -15,6 +16,61 @@ import { SourceTokenChart } from './charts/SourceTokenChart'
 import { DailyHeatmap } from './charts/DailyHeatmap'
 import { t, useLang } from './i18n/index.ts'
 import { useCountUp } from './useCountUp'
+
+type SetupAgentHealth = {
+  configured: boolean
+  endpoint_matches: boolean
+  configured_endpoint: string | null
+  expected_endpoint: string
+  status: 'ready' | 'missing_config' | 'wrong_endpoint'
+}
+
+type SetupDiagnostics = {
+  expected: {
+    otlp_endpoint: string
+    otlp_logs_endpoint: string
+  }
+  summary: {
+    total_agents: number
+    configured_agents: number
+    matching_agents: number
+  }
+  agents: Record<string, SetupAgentHealth>
+}
+
+function CopyButton({
+  text,
+  className = 'btn-ghost',
+  style,
+  idleLabel,
+  copiedLabel,
+  timeoutMs = 1500,
+}: {
+  text: string
+  className?: string
+  style?: CSSProperties
+  idleLabel: ReactNode
+  copiedLabel: ReactNode
+  timeoutMs?: number
+}) {
+  const [copied, setCopied] = useState(false)
+
+  const handleCopy = () => {
+    navigator.clipboard.writeText(text)
+    setCopied(true)
+    setTimeout(() => setCopied(false), timeoutMs)
+  }
+
+  return (
+    <button
+      className={`${className}${copied ? ' btn-copy-clicked' : ''}`}
+      onClick={handleCopy}
+      style={style}
+    >
+      {copied ? copiedLabel : idleLabel}
+    </button>
+  )
+}
 
 function App() {
   const [view, setView] = useState<'dashboard' | 'logs' | 'settings' | 'test'>('dashboard')
@@ -67,10 +123,10 @@ function App() {
   // Empty-state verification polling state machine
   const [verifyPhase, setVerifyPhase] = useState<'idle' | 'polling' | 'success' | 'timeout'>('idle')
   const [verificationResult, setVerificationResult] = useState<UsageRow | null>(null)
-  const [copiedCmd, setCopiedCmd] = useState<string | null>(null)
   const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const pollingStartRef = useRef<number>(0)
   const [localAgents, setLocalAgents] = useState<Record<string, { found: boolean; path: string | null }> | null>(null)
+  const [setupDiagnostics, setSetupDiagnostics] = useState<SetupDiagnostics | null>(null)
 
   const [modelColWidth, setModelColWidth] = useState(180)
   const resizeRef = useRef<{ startX: number; startWidth: number } | null>(null)
@@ -140,8 +196,15 @@ function App() {
         if (response.ok) setLocalAgents(await response.json())
       } catch {}
     }
+    async function fetchSetupDiagnostics() {
+      try {
+        const response = await fetch('/local/setup-health')
+        if (response.ok) setSetupDiagnostics(await response.json())
+      } catch {}
+    }
     void fetchInitialConfig()
     void fetchLocalAgents()
+    void fetchSetupDiagnostics()
     return () => controller.abort()
   }, [])
 
@@ -473,13 +536,45 @@ function App() {
     return name
   }
 
-  const handleCopyCmd = (cmd: string) => {
-    navigator.clipboard.writeText(cmd)
-    setCopiedCmd(cmd)
-    setTimeout(() => setCopiedCmd(null), 1500)
+  const getSetupAgentKey = (name: string) => {
+    const normalized = name.toLowerCase()
+    if (normalized.includes('vectorengine') || normalized.includes('claude')) return 'claude'
+    if (normalized.includes('codesonline') || normalized.includes('codex')) return 'codex'
+    if (normalized.includes('gemini')) return 'gemini'
+    return normalized
   }
 
+  const manualCurlEquivalent = (() => {
+    let base = testBaseUrl.replace(/\/$/, '')
+    if (!base.includes('/v1')) base = base + '/v1'
+    const endpoint = testFormat === 'openai' ? '/chat/completions' : testFormat === 'anthropic' ? '/messages' : '/responses'
+    const fullUrl = base.endsWith(endpoint) ? base : base + endpoint
+    return `curl ${fullUrl} \\\
+  -H "${testFormat === 'anthropic' ? 'x-api-key' : 'Authorization: Bearer'}: ${testApiKey || 'YOUR_KEY'}" \\\
+  -H "Content-Type: application/json" \\\
+  -d '{"model": "${testModel || 'gpt-5.4'}", "messages": [{"role": "user", "content": "${(testMessage || 'What is 2 + 3?').replace(/"/g, '\\"')}"}], "max_tokens": 10}'`
+  })()
+
   const showFirstRunOnboarding = !dashboardLoading && totalTrackedEvents === 0
+  const foundLocalAgents = localAgents
+    ? Object.entries(localAgents).filter(([, info]) => info.found)
+    : []
+  const foundLocalAgentCount = foundLocalAgents.length
+  const setupLocalAgentTotal = setupDiagnostics
+    ? foundLocalAgents.filter(([name]) => setupDiagnostics.agents[getSetupAgentKey(name)]).length
+    : foundLocalAgentCount
+  const setupMatchingAgents = setupDiagnostics
+    ? foundLocalAgents.filter(([name]) => setupDiagnostics.agents[getSetupAgentKey(name)]?.endpoint_matches).length
+    : 0
+  const setupConfiguredAgents = setupDiagnostics
+    ? foundLocalAgents.filter(([name]) => setupDiagnostics.agents[getSetupAgentKey(name)]?.configured).length
+    : 0
+  const setupSummaryText = setupDiagnostics
+    ? setupLocalAgentTotal > 0
+      ? `${setupMatchingAgents}/${setupLocalAgentTotal}`
+      : t('No local Agent')
+    : t('Unknown')
+  const setupSummaryColor = setupDiagnostics && setupMatchingAgents > 0 ? 'var(--color-green)' : 'var(--text-muted)'
 
   return (
     <div className="app">
@@ -590,6 +685,46 @@ function App() {
                     </div>
                   </div>
 
+                  {/* Setup health */}
+                  <div style={{ width: '100%', maxWidth: '680px', textAlign: 'left' }}>
+                    <div style={{ fontSize: '13px', fontWeight: 700, color: 'var(--text-muted)', marginBottom: '10px', textTransform: 'uppercase' }}>
+                      {t('Setup health')}
+                    </div>
+                    <div style={{
+                      display: 'grid',
+                      gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
+                      gap: '8px',
+                    }}>
+                      <div style={{
+                        padding: '10px 12px',
+                        borderRadius: '8px',
+                        background: 'var(--surface-hover)',
+                        border: '1px solid var(--border-color)',
+                      }}>
+                        <div style={{ fontSize: '11px', color: 'var(--text-muted)', fontWeight: 700, marginBottom: '4px' }}>{t('API server')}</div>
+                        <div style={{ fontSize: '13px', color: error ? 'var(--color-red)' : 'var(--color-green)', fontWeight: 700 }}>
+                          {error ? t('Broken') : t('Reachable')}
+                        </div>
+                      </div>
+                      <div style={{
+                        padding: '10px 12px',
+                        borderRadius: '8px',
+                        background: 'var(--surface-hover)',
+                        border: '1px solid var(--border-color)',
+                      }}>
+                        <div style={{ fontSize: '11px', color: 'var(--text-muted)', fontWeight: 700, marginBottom: '4px' }}>{t('OTLP configured')}</div>
+                        <div style={{ fontSize: '13px', color: setupSummaryColor, fontWeight: 700 }}>
+                          {setupSummaryText}
+                        </div>
+                      </div>
+                    </div>
+                    {setupDiagnostics && setupConfiguredAgents === 0 && (
+                      <div style={{ marginTop: '8px', fontSize: '12px', color: 'var(--text-secondary)' }}>
+                        {t('No local OTLP config found yet. Run a test command, then use Check for Event to verify tracking.')}
+                      </div>
+                    )}
+                  </div>
+
                   {/* Step 1: Run a test command */}
                   <div style={{ width: '100%', maxWidth: '680px', textAlign: 'left' }}>
                     <div style={{ fontSize: '13px', fontWeight: 700, color: 'var(--text-muted)', marginBottom: '12px', textTransform: 'uppercase' }}>
@@ -597,9 +732,9 @@ function App() {
                     </div>
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                       {[
-                        { cmd: 'llm-tracker -- claude', label: 'Claude Code' },
-                        { cmd: 'llm-tracker -- codex exec "hello"', label: 'Codex' },
-                        { cmd: 'llm-tracker -- gemini -p "hello"', label: 'Gemini CLI' },
+                        { cmd: 'llm-tracker claude', label: 'Claude Code' },
+                        { cmd: 'llm-tracker codex exec "hello"', label: 'Codex' },
+                        { cmd: 'llm-tracker gemini -p "hello"', label: 'Gemini CLI' },
                       ].map(({ cmd, label }) => (
                         <div key={cmd} style={{
                           display: 'flex',
@@ -614,13 +749,12 @@ function App() {
                             <span style={{ fontSize: '11px', fontWeight: 700, color: 'var(--text-muted)', minWidth: '80px' }}>{label}</span>
                             <code style={{ fontSize: '13px', fontFamily: 'var(--font-mono)', color: 'var(--text-primary)' }}>{cmd}</code>
                           </div>
-                          <button
-                            className="btn-ghost"
-                            onClick={() => handleCopyCmd(cmd)}
+                          <CopyButton
+                            text={cmd}
                             style={{ fontSize: '11px', padding: '4px 10px', whiteSpace: 'nowrap' }}
-                          >
-                            {copiedCmd === cmd ? `✓ ${t('Copied!')}` : `📋 ${t('Copy')}`}
-                          </button>
+                            idleLabel={`📋 ${t('Copy')}`}
+                            copiedLabel={`✓ ${t('Copied!')}`}
+                          />
                         </div>
                       ))}
                     </div>
@@ -746,7 +880,7 @@ function App() {
                           </div>
                         ) : (
                           <div style={{ fontSize: '13px', color: 'var(--text-muted)' }}>
-                            {t('No agents detected yet. Run any test command below to create your first event.')}
+                            {t('No local Agent')}
                           </div>
                         )}
                       </div>
@@ -1498,6 +1632,91 @@ function App() {
 
           {view === 'settings' && (
             <div className="settings-page" style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
+              {/* Settings detected local agents */}
+              <div className="panel">
+                <div className="panel-tabs">
+                  <div className="tab active"><span>🧭</span> {t('Detected Agents')}</div>
+                </div>
+                <div className="panel-body" style={{ padding: '0' }}>
+                  <div style={{ padding: '16px', borderBottom: '1px solid var(--border-color)', fontSize: '13px', color: 'var(--text-secondary)' }}>
+                    {t('Detected from your local config and available commands.')}
+                  </div>
+                  <table className="table">
+                    <thead>
+                      <tr>
+                        <th>{t('Agent')}</th>
+                        <th>{t('Status')}</th>
+                        <th>{t('Detected:')}</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {localAgents && Object.keys(localAgents).length > 0 ? Object.entries(localAgents).map(([name, info]) => (
+                        <tr key={name}>
+                          <td style={{ fontWeight: 700 }}>{getAgentDisplayName(name)}</td>
+                          <td>
+                            <span className={`badge ${info.found ? 'badge-success' : 'badge-error'}`}>
+                              {info.found ? t('Ready') : t('Not found')}
+                            </span>
+                          </td>
+                          <td style={{ fontSize: '12px', fontFamily: 'var(--font-mono)', color: info.path ? 'var(--text-secondary)' : 'var(--text-muted)' }}>
+                            {info.path || t('Unknown')}
+                          </td>
+                        </tr>
+                      )) : (
+                        <tr>
+                          <td colSpan={3} style={{ textAlign: 'center', padding: '24px', color: 'var(--text-muted)' }}>
+                            {localAgents ? t('No local Agent') : t('Unknown')}
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              <div className="panel">
+                <div className="panel-tabs">
+                  <div className="tab active"><span>📡</span> {t('OTLP Tracking Setup')}</div>
+                </div>
+                <div className="panel-body" style={{ padding: '0' }}>
+                  <table className="table">
+                    <thead>
+                      <tr>
+                        <th>{t('Agent')}</th>
+                        <th>{t('Status')}</th>
+                        <th>{t('Expected endpoint')}</th>
+                        <th>{t('Configured endpoint')}</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {setupDiagnostics ? Object.entries(setupDiagnostics.agents).map(([name, agent]) => (
+                        <tr key={name}>
+                          <td style={{ fontWeight: 700 }}>{getAgentDisplayName(name)}</td>
+                          <td>
+                            <span className={`badge ${agent.endpoint_matches ? 'badge-success' : 'badge-error'}`}>
+                              {agent.status === 'ready' ? t('Ready') : agent.status === 'wrong_endpoint' ? t('Wrong endpoint') : t('Missing config')}
+                            </span>
+                          </td>
+                          <td style={{ fontSize: '12px', fontFamily: 'var(--font-mono)', color: 'var(--text-secondary)' }}>{agent.expected_endpoint}</td>
+                          <td style={{ fontSize: '12px', fontFamily: 'var(--font-mono)', color: agent.endpoint_matches ? 'var(--color-green)' : 'var(--color-red)' }}>
+                            {agent.configured_endpoint ?? '—'}
+                          </td>
+                        </tr>
+                      )) : (
+                        <tr>
+                          <td colSpan={4} style={{ textAlign: 'center', padding: '24px', color: 'var(--text-muted)' }}>
+                            {t('Unknown')}
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                  <div style={{ padding: '16px', borderTop: '1px solid var(--border-color)', fontSize: '13px', color: 'var(--text-secondary)' }}>
+                    {t('OTLP configured')}: <strong>{setupSummaryText}</strong> · {t('Configured')}: <strong>{setupConfiguredAgents}/{setupLocalAgentTotal}</strong>
+                  </div>
+                </div>
+              </div>
+
               <div className="panel">
                 <div className="panel-tabs">
                   <div className="tab active"><span>🔌</span> {t('Active Providers')}</div>
@@ -1871,26 +2090,16 @@ function App() {
                       <div style={{ marginTop: '16px', padding: '16px', background: 'var(--surface-hover)', borderRadius: '8px', border: '1px solid var(--border-color)' }}>
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
                           <div style={{ fontSize: '11px', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase' }}>{t('Manual curl equivalent')}</div>
-                          <button
+                          <CopyButton
                             className="btn-copy"
-                            onClick={(e) => {
-                              const btn = e.currentTarget
-                              let base = testBaseUrl.replace(/\/$/, '')
-                              if (!base.includes('/v1')) base = base + '/v1'
-                              const endpoint = testFormat === 'openai' ? '/chat/completions' : testFormat === 'anthropic' ? '/messages' : '/responses'
-                              const fullUrl = base.endsWith(endpoint) ? base : base + endpoint
-                              const curlCmd = `curl ${fullUrl} \\\n  -H "${testFormat === 'anthropic' ? 'x-api-key' : 'Authorization: Bearer'}: ${testApiKey || 'YOUR_KEY'}" \\\n  -H "Content-Type: application/json" \\\n  -d '{"model": "${testModel || 'gpt-5.4'}", "messages": [{"role": "user", "content": "${(testMessage || 'What is 2 + 3?').replace(/"/g, '\\"')}"}], "max_tokens": 10}'`
-                              navigator.clipboard.writeText(curlCmd)
-                              btn.classList.add('btn-copy-clicked')
-                              btn.textContent = `✓ ${t('Copied')}`
-                              setTimeout(() => { btn.classList.remove('btn-copy-clicked'); btn.textContent = `📋 ${t('Copy')}` }, 800)
-                            }}
-                          >
-                            📋 {t('Copy')}
-                          </button>
+                            text={manualCurlEquivalent}
+                            idleLabel={`📋 ${t('Copy')}`}
+                            copiedLabel={`✓ ${t('Copied')}`}
+                            timeoutMs={800}
+                          />
                         </div>
                         <pre style={{ margin: 0, fontSize: '11px', whiteSpace: 'pre-wrap', wordBreak: 'break-all', color: 'var(--text-secondary)' }}>
-                          {(() => { let base = testBaseUrl.replace(/\/$/, ''); if (!base.includes('/v1')) base = base + '/v1'; const ep = testFormat === 'openai' ? '/chat/completions' : testFormat === 'anthropic' ? '/messages' : '/responses'; const fullUrl = base.endsWith(ep) ? base : base + ep; return `curl ${fullUrl} \\\n  -H "${testFormat === 'anthropic' ? 'x-api-key' : 'Authorization: Bearer'}: ${testApiKey || 'YOUR_KEY'}" \\\n  -H "Content-Type: application/json" \\\n  -d '{"model": "${testModel || 'gpt-5.4'}", "messages": [{"role": "user", "content": "${(testMessage || 'What is 2 + 3?').replace(/"/g, '\\"')}"}], "max_tokens": 10}'` })()}
+                          {manualCurlEquivalent}
                         </pre>
                       </div>
                     </div>
