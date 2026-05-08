@@ -240,4 +240,12 @@ export const zh: Record<string, string> = {
   'Reset': '重置',
   'Checking...': '检查中...',
   'Not found': '未找到',
+
+  // Empty state / onboarding (Commit 1 reframe)
+  'No traffic tracked yet': '暂无流量追踪记录',
+  'Run one test command below. When llm-tracker sees the request, usage, cost, and latency will appear here.': '运行下面的测试命令。当 llm-tracker 收到请求后，用量、费用和延迟将显示在这里。',
+  'Step 1: Run a test command': '步骤 1：运行测试命令',
+  'Step 2: Verify tracking': '步骤 2：验证追踪',
+  'After running a command above, click below to confirm tracking works.': '运行上面的命令后，点击下方确认追踪正常工作。',
+  'No agents detected yet. Commands above work without detection.': '尚未检测到代理。以上命令无需检测即可使用。',
 }
