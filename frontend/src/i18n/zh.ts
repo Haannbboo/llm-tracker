@@ -246,6 +246,11 @@ export const zh: Record<string, string> = {
   'Tracking works. Your first request is recorded.': '追踪已生效。你的第一个请求已记录。',
   'View request logs': '查看请求日志',
   'Not found': '未找到',
+  'Ready': '就绪',
+  'Unknown': '未知',
+  'Test:': '测试：',
+  'Detected:': '检测到：',
+  'Detected from your local config and available commands.': '根据你的本地配置和可用命令检测。',
 
   // Empty state / onboarding (Commit 1 reframe)
   'No traffic tracked yet': '暂无流量追踪记录',
@@ -253,7 +258,7 @@ export const zh: Record<string, string> = {
   'Step 1: Run a test command': '步骤 1：运行测试命令',
   'Step 2: Verify tracking': '步骤 2：验证追踪',
   'After running a command above, click below to confirm tracking works.': '运行上面的命令后，点击下方确认追踪正常工作。',
-  'No agents detected yet. Commands above work without detection.': '尚未检测到代理。以上命令无需检测即可使用。',
+  'No agents detected yet. Run any test command below to create your first event.': '尚未检测到代理。运行下面任一测试命令来创建你的第一个事件。',
 
   // Expanded row details
   'Request ID': '请求 ID',

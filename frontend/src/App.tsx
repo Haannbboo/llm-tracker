@@ -465,6 +465,14 @@ function App() {
     pollingRef.current = setInterval(checkForEvent, 2000)
   }
 
+  const getAgentDisplayName = (name: string) => {
+    const normalized = name.toLowerCase()
+    if (normalized.includes('vectorengine') || normalized.includes('claude')) return 'Claude Code'
+    if (normalized.includes('codesonline') || normalized.includes('codex')) return 'Codex'
+    if (normalized.includes('gemini')) return 'Gemini CLI'
+    return name
+  }
+
   const handleCopyCmd = (cmd: string) => {
     navigator.clipboard.writeText(cmd)
     setCopiedCmd(cmd)
@@ -589,9 +597,9 @@ function App() {
                     </div>
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                       {[
-                        { cmd: 'llm-tracker claude -p "hello"', label: 'Claude Code' },
-                        { cmd: 'llm-tracker codex exec "hello"', label: 'Codex' },
-                        { cmd: 'llm-tracker gemini -p "hello"', label: 'Gemini CLI' },
+                        { cmd: 'llm-tracker -- claude', label: 'Claude Code' },
+                        { cmd: 'llm-tracker -- codex exec "hello"', label: 'Codex' },
+                        { cmd: 'llm-tracker -- gemini -p "hello"', label: 'Gemini CLI' },
                       ].map(({ cmd, label }) => (
                         <div key={cmd} style={{
                           display: 'flex',
@@ -687,19 +695,39 @@ function App() {
                         <div className="tab active"><span>🤖</span> {t('Detected Agents')}</div>
                       </div>
                       <div className="panel-body" style={{ padding: '16px' }}>
+                        <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginBottom: '12px' }}>
+                          {t('Detected from your local config and available commands.')}
+                        </div>
                         {localAgents ? (
-                          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
                             {Object.entries(localAgents).map(([name, info]) => (
-                              <div key={name} style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px' }}>
-                                <span style={{
-                                  width: '8px', height: '8px', borderRadius: '50%',
-                                  background: info.found ? 'var(--color-green)' : 'var(--text-muted)',
-                                  flexShrink: 0,
-                                }} />
-                                <span style={{ fontWeight: 600, minWidth: '80px' }}>{name}</span>
-                                <span style={{ color: info.found ? 'var(--color-green)' : 'var(--text-muted)' }}>
-                                  {info.found ? info.path : t('Not found')}
-                                </span>
+                              <div key={name} style={{
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'space-between',
+                                gap: '12px',
+                                padding: '10px 12px',
+                                borderRadius: '8px',
+                                background: 'var(--bg-secondary)',
+                              }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '10px', minWidth: 0 }}>
+                                  <span style={{
+                                    width: '8px', height: '8px', borderRadius: '50%',
+                                    background: info.found ? 'var(--color-green)' : 'var(--text-muted)',
+                                    flexShrink: 0,
+                                  }} />
+                                  <div style={{ minWidth: 0 }}>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                                      <span style={{ fontWeight: 700, fontSize: '13px' }}>{getAgentDisplayName(name)}</span>
+                                      <span style={{ fontSize: '11px', color: info.found ? 'var(--color-green)' : 'var(--text-muted)', fontWeight: 700 }}>
+                                        {info.found ? t('Ready') : t('Not found')}
+                                      </span>
+                                    </div>
+                                    <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '3px', wordBreak: 'break-all' }}>
+                                      {t('Detected:')} {info.path || t('Unknown')}
+                                    </div>
+                                  </div>
+                                </div>
                               </div>
                             ))}
                           </div>
@@ -718,7 +746,7 @@ function App() {
                           </div>
                         ) : (
                           <div style={{ fontSize: '13px', color: 'var(--text-muted)' }}>
-                            {t('No agents detected yet. Commands above work without detection.')}
+                            {t('No agents detected yet. Run any test command below to create your first event.')}
                           </div>
                         )}
                       </div>
