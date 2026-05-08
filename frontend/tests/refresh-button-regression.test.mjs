@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
 
-const here = dirname(fileURLToPath(import.meta.url))
+const here = join(dirname(fileURLToPath(import.meta.url)), '..')
 const appSource = readFileSync(join(here, 'src', 'App.tsx'), 'utf-8')
 const appStyles = readFileSync(join(here, 'src', 'App.css'), 'utf-8')
 

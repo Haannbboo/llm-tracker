@@ -7,7 +7,7 @@ import ts from 'typescript'
 import vm from 'node:vm'
 
 const require = createRequire(import.meta.url)
-const root = dirname(new URL(import.meta.url).pathname)
+const root = resolve(dirname(new URL(import.meta.url).pathname), '..')
 const moduleCache = new Map()
 
 function loadSourceModule(filePath) {

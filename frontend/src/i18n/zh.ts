@@ -239,6 +239,10 @@ export const zh: Record<string, string> = {
   'No event received yet — run a test command and click "Check for Event"': '尚未收到事件 — 运行测试命令后点击"检查事件"',
   'Reset': '重置',
   'Checking...': '检查中...',
+  'Waiting...': '等待中...',
+  'Waiting for your first event...': '正在等待你的第一个请求...',
+  'No event found yet': '还没找到事件',
+  'Tracking works': '追踪已生效',
   'Not found': '未找到',
 
   // Empty state / onboarding (Commit 1 reframe)

@@ -6,8 +6,10 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
-    "test:refresh-button": "node --test refresh-button-regression.test.mjs",
-    "test:theme-logos": "node --test theme-logo-regression.test.mjs",
+    "test": "node --test tests/*.test.mjs",
+    "test:refresh-button": "node --test tests/refresh-button-regression.test.mjs",
+    "test:theme-logos": "node --test tests/theme-logo-regression.test.mjs",
+    "test:verify-tracking": "node --test tests/verify-tracking-polling-regression.test.mjs",
     "lint": "eslint .",
     "preview": "vite preview"
   },

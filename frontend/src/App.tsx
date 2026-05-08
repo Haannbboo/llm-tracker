@@ -61,10 +61,12 @@ function App() {
   const [theme, setTheme] = useState<'light' | 'dark'>(getTheme)
   const { lang, setLang } = useLang()
 
-  // Empty-state verification (P0-6 / P0-7)
-  const [verifying, setVerifying] = useState(false)
+  // Empty-state verification polling state machine
+  const [verifyPhase, setVerifyPhase] = useState<'idle' | 'polling' | 'success' | 'timeout'>('idle')
   const [verificationResult, setVerificationResult] = useState<UsageRow | null>(null)
   const [copiedCmd, setCopiedCmd] = useState<string | null>(null)
+  const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const pollingStartRef = useRef<number>(0)
   const [localAgents, setLocalAgents] = useState<Record<string, { found: boolean; path: string | null }> | null>(null)
 
   const [modelColWidth, setModelColWidth] = useState(180)
@@ -398,27 +400,56 @@ function App() {
     setConfigContent(yaml.dump(newParsed, { indent: 2, noRefs: true }));
   }
 
-  const handleVerifyEvent = async () => {
-    setVerifying(true)
+  const stopVerificationPolling = () => {
+    if (pollingRef.current) {
+      clearInterval(pollingRef.current)
+      pollingRef.current = null
+    }
+  }
+
+  useEffect(() => stopVerificationPolling, [])
+
+  const handleVerifyEvent = () => {
+    stopVerificationPolling()
+    setVerifyPhase('polling')
     setVerificationResult(null)
-    try {
-      const countRes = await fetch('/usage/count')
-      if (!countRes.ok) throw new Error('Failed to check')
-      const { total } = await countRes.json()
-      setTotalTrackedEvents(total)
-      if (total > 0) {
-        const usageRes = await fetch('/usage?limit=1')
-        if (usageRes.ok) {
-          const rows = await usageRes.json() as UsageRow[]
-          if (rows.length > 0) {
-            setVerificationResult(rows[0])
-            setRefreshTrigger(t => t + 1)
+    pollingStartRef.current = Date.now()
+
+    const checkForEvent = async () => {
+      try {
+        const countRes = await fetch('/usage/count')
+        if (!countRes.ok) throw new Error('Failed to check')
+        const { total } = await countRes.json()
+        setTotalTrackedEvents(total)
+
+        if (total > 0) {
+          stopVerificationPolling()
+          setVerifyPhase('success')
+          const usageRes = await fetch('/usage?limit=1')
+          if (usageRes.ok) {
+            const rows = await usageRes.json() as UsageRow[]
+            if (rows.length > 0) {
+              setVerificationResult(rows[0])
+              setRefreshTrigger(t => t + 1)
+            }
           }
+          return
+        }
+
+        if (Date.now() - pollingStartRef.current >= 45000) {
+          stopVerificationPolling()
+          setVerifyPhase('timeout')
+        }
+      } catch {
+        if (Date.now() - pollingStartRef.current >= 45000) {
+          stopVerificationPolling()
+          setVerifyPhase('timeout')
         }
       }
-    } catch {} finally {
-      setVerifying(false)
     }
+
+    void checkForEvent()
+    pollingRef.current = setInterval(checkForEvent, 2000)
   }
 
   const handleCopyCmd = (cmd: string) => {
@@ -597,7 +628,7 @@ function App() {
                               fontWeight: 600,
                               fontSize: '13px',
                             }}>
-                              {t('Event received!')}
+                              {t('Tracking works')}
                             </div>
                             <div style={{ fontSize: '12px', display: 'flex', flexDirection: 'column', gap: '4px' }}>
                               <div><span style={{ color: 'var(--text-muted)' }}>{t('Source:')}</span> {verificationResult.client_source || '—'}</div>
@@ -606,22 +637,26 @@ function App() {
                               <div><span style={{ color: 'var(--text-muted)' }}>{t('Cost:')}</span> {formatCost(value(verificationResult.total_cost_usd))}</div>
                               <div><span style={{ color: 'var(--text-muted)' }}>{t('Latency:')}</span> {formatLatency(verificationResult.latency_ms)}</div>
                             </div>
-                            <button className="btn-ghost" onClick={() => { setVerificationResult(null); setSummary([]); }} style={{ fontSize: '12px', alignSelf: 'flex-start' }}>
+                            <button className="btn-ghost" onClick={() => { setVerifyPhase('idle'); setVerificationResult(null); }} style={{ fontSize: '12px', alignSelf: 'flex-start' }}>
                               {t('Reset')}
                             </button>
                           </>
                         ) : (
                           <>
-                            <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
-                              {t('After running a command above, click below to confirm tracking works.')}
+                            <div style={{ fontSize: '12px', color: verifyPhase === 'timeout' ? 'var(--color-red)' : 'var(--text-muted)' }}>
+                              {verifyPhase === 'polling'
+                                ? t('Waiting for your first event...')
+                                : verifyPhase === 'timeout'
+                                  ? t('No event found yet')
+                                  : t('After running a command above, click below to confirm tracking works.')}
                             </div>
                             <button
                               className="btn-primary"
                               onClick={handleVerifyEvent}
-                              disabled={verifying}
+                              disabled={verifyPhase === 'polling'}
                               style={{ alignSelf: 'flex-start', fontSize: '13px', padding: '8px 16px' }}
                             >
-                              {verifying ? `⌛ ${t('Checking...')}` : `🔍 ${t('Check for Event')}`}
+                              {verifyPhase === 'polling' ? `⌛ ${t('Waiting...')}` : `🔍 ${t('Check for Event')}`}
                             </button>
                           </>
                         )}
