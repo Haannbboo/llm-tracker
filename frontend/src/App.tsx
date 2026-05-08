@@ -36,6 +36,9 @@ function App() {
   const [page, setPage] = useState(1)
   const [jumpPage, setJumpPage] = useState('')
   const resetPage = useCallback(() => setPage(1), [])
+  const requestUsageRefresh = useCallback(() => {
+    setRefreshTrigger(trigger => trigger + 1)
+  }, [])
 
   const [activeFilter, setActiveFilter] = useState<ActiveFilter>(null)
   const [activeSource, setActiveSource] = useState<string | null>(null)
@@ -417,7 +420,7 @@ function App() {
         <div className="content-body">
           {view === 'dashboard' && (
             <>
-              <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: '8px' }}>
+              <div className="dashboard-filter-row" style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: '8px' }}>
                   <select
                     className="input-plain"
                     value={dateRange}
@@ -445,6 +448,14 @@ function App() {
                       <option key={source} value={source}>{source}</option>
                     ))}
                   </select>
+                  <button
+                    className="btn-ghost btn-refresh"
+                    onClick={requestUsageRefresh}
+                    aria-label={t('Refresh')}
+                    title={t('Refresh')}
+                  >
+                    <span className="refresh-icon">↻</span>
+                  </button>
                 </div>
 
               <div className="widgets-grid">
@@ -678,10 +689,12 @@ function App() {
 
                 <div style={{ marginLeft: 'auto', display: 'flex', gap: '8px', alignItems: 'center', alignSelf: 'flex-end' }}>
                    <button
-                    className="btn-ghost"
-                    onClick={() => setRefreshTrigger(t => t + 1)}
+                    className="btn-ghost btn-refresh"
+                    onClick={requestUsageRefresh}
+                    aria-label={t('Refresh')}
+                    title={t('Refresh')}
                    >
-                     <span>🔄</span> {t('Refresh')}
+                     <span className="refresh-icon">↻</span>
                    </button>
                    <button
                     style={{ padding: '8px 16px', background: 'var(--color-blue)', color: 'white', borderRadius: '8px', fontSize: '12px', fontWeight: 700 }}
@@ -690,7 +703,7 @@ function App() {
                       setPage(1)
                     }}
                    >
-                     {t('Today')}
+                     {t('Last 24h')}
                    </button>
                 </div>
               </div>

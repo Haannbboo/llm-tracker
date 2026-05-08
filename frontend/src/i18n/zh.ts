@@ -109,7 +109,7 @@ export const zh: Record<string, string> = {
   'Since': '开始时间',
   'Until': '结束时间',
   'Refresh': '刷新',
-  'Today': '今天',
+  'Last 24h': '最近 24 小时',
 
   // Table headers
   'Time': '时间',
