@@ -1,0 +1,164 @@
+#!/usr/bin/env bash
+# scripts/bootstrap.sh
+# One-command local startup: install, start, and verify llm-tracker services.
+set -euo pipefail
+
+# ── Resolve repo root ───────────────────────────────────────────────
+BOOTSTRAP_SOURCE="${BASH_SOURCE[0]}"
+while [[ -L "${BOOTSTRAP_SOURCE}" ]]; do
+  BOOTSTRAP_SOURCE="$(readlink "${BOOTSTRAP_SOURCE}")"
+done
+ROOT_DIR="$(cd "$(dirname "${BOOTSTRAP_SOURCE}")/.." && pwd)"
+
+SCRIPTS_DIR="${ROOT_DIR}/scripts"
+CONFIG_PATH="${HOME}/.llm-tracker/config.yaml"
+CLI_WRAPPER="${SCRIPTS_DIR}/llm-tracker"
+CLI_SYMLINK="${HOME}/.local/bin/llm-tracker"
+
+# ── Helpers ─────────────────────────────────────────────────────────
+_pass() { printf "  ✅ %s\n" "$*"; }
+_fail() { printf "  ❌ %s\n" "$*"; }
+
+_port_listening() {
+  # Test if a TCP port is reachable (short timeout).
+  # Returns 0 if something is listening, 1 otherwise.
+  local host="$1" port="$2"
+  if command -v curl >/dev/null 2>&1; then
+    curl --connect-timeout 3 -sf "http://${host}:${port}/" >/dev/null 2>&1 && return 0
+    # curl exits non-200 on 404/405 etc., but connection succeeded → port is open.
+    # Retry without -f to catch services that return error codes but are alive.
+    curl --connect-timeout 3 -s -o /dev/null -w '%{http_code}' "http://${host}:${port}/" 2>/dev/null | grep -qE '^[2-5]' && return 0
+    return 1
+  elif command -v python3 >/dev/null 2>&1; then
+    python3 -c "
+import socket, sys
+s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+s.settimeout(3)
+try:
+    s.connect(('${host}', ${port}))
+    s.close()
+except Exception:
+    sys.exit(1)
+" && return 0
+    return 1
+  else
+    # Fallback: /dev/tcp (bash built-in)
+    (echo >/dev/tcp/"${host}"/"${port}") 2>/dev/null && return 0
+    return 1
+  fi
+}
+
+# ── Step 1: Install ─────────────────────────────────────────────────
+echo ""
+echo "==> [1/3] Installing dependencies and CLI..."
+bash "${SCRIPTS_DIR}/install.sh"
+
+# ── Step 2: Start services ──────────────────────────────────────────
+echo ""
+echo "==> [2/3] Starting services..."
+bash "${SCRIPTS_DIR}/start.sh"
+
+# ── Step 3: Post-start checks ──────────────────────────────────────
+echo ""
+echo "==> [3/3] Running post-start checks..."
+
+# Read configured ports (fallback to defaults)
+PROXY_PORT=4000
+API_PORT=4001
+OTLP_PORT=4002
+if [[ -f "${CONFIG_PATH}" ]]; then
+  _read_port() {
+    local key="$1" default="$2"
+    local val
+    val="$(grep -E "^\s+${key}:" "${CONFIG_PATH}" 2>/dev/null | head -1 | awk '{print $2}')"
+    if [[ -n "${val}" && "${val}" =~ ^[0-9]+$ ]]; then
+      echo "${val}"
+    else
+      echo "${default}"
+    fi
+  }
+  PROXY_PORT="$(_read_port port 4000)"
+  API_PORT="$(_read_port api_port 4001)"
+  OTLP_PORT="$(_read_port otlp_port 4002)"
+fi
+
+HOST="127.0.0.1"
+CHECKS_PASS=0
+CHECKS_FAIL=0
+# Config file
+if [[ -f "${CONFIG_PATH}" ]]; then
+  _pass "Config: ${CONFIG_PATH}"
+  CHECKS_PASS=$((CHECKS_PASS + 1))
+else
+  _fail "Config: ${CONFIG_PATH} (not found)"
+  CHECKS_FAIL=$((CHECKS_FAIL + 1))
+fi
+
+# CLI wrapper
+if [[ -x "${CLI_WRAPPER}" ]]; then
+  _pass "CLI wrapper: scripts/llm-tracker"
+  CHECKS_PASS=$((CHECKS_PASS + 1))
+else
+  _fail "CLI wrapper: scripts/llm-tracker (not executable)"
+  CHECKS_FAIL=$((CHECKS_FAIL + 1))
+fi
+
+# CLI symlink
+if [[ -L "${CLI_SYMLINK}" ]]; then
+  _pass "CLI symlink: ${CLI_SYMLINK}"
+  CHECKS_PASS=$((CHECKS_PASS + 1))
+else
+  _fail "CLI symlink: ${CLI_SYMLINK} (not found)"
+  CHECKS_FAIL=$((CHECKS_FAIL + 1))
+fi
+
+# API reachable
+if _port_listening "${HOST}" "${API_PORT}"; then
+  _pass "API running: http://${HOST}:${API_PORT}"
+  CHECKS_PASS=$((CHECKS_PASS + 1))
+else
+  _fail "API reachable: http://${HOST}:${API_PORT} (not responding)"
+  CHECKS_FAIL=$((CHECKS_FAIL + 1))
+fi
+
+# Proxy listening
+if _port_listening "${HOST}" "${PROXY_PORT}"; then
+  _pass "Proxy listening: http://${HOST}:${PROXY_PORT}"
+  CHECKS_PASS=$((CHECKS_PASS + 1))
+else
+  _fail "Proxy listening: http://${HOST}:${PROXY_PORT} (not responding)"
+  CHECKS_FAIL=$((CHECKS_FAIL + 1))
+fi
+
+# OTLP listening
+if _port_listening "${HOST}" "${OTLP_PORT}"; then
+  _pass "OTLP listening: http://${HOST}:${OTLP_PORT}"
+  CHECKS_PASS=$((CHECKS_PASS + 1))
+else
+  _fail "OTLP listening: http://${HOST}:${OTLP_PORT} (not responding)"
+  CHECKS_FAIL=$((CHECKS_FAIL + 1))
+fi
+
+# ── Final report ────────────────────────────────────────────────────
+echo ""
+if [[ "${CHECKS_FAIL}" -eq 0 ]]; then
+  echo "✅ llm-tracker bootstrap complete"
+else
+  echo "⚠️  llm-tracker bootstrap finished with ${CHECKS_FAIL} issue(s)"
+fi
+
+exit_code=0
+if [[ "${CHECKS_FAIL}" -ne 0 ]]; then
+  exit_code=1
+fi
+
+echo ""
+echo "Dashboard for this slice still runs separately:"
+echo "  cd frontend"
+echo "  npm install"
+echo "  npm run dev"
+echo ""
+echo "Then open:"
+echo "  http://127.0.0.1:5173"
+
+exit "${exit_code}"

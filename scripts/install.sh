@@ -3,6 +3,7 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+PYTHON_VERSION="${LLM_TRACKER_PYTHON_VERSION:-3.13}"
 VENV_DIR="${ROOT_DIR}/.venv"
 BIN_DIR="${HOME}/.local/bin"
 CLI_LINK="${BIN_DIR}/llm-tracker"
@@ -20,7 +21,7 @@ fi
 # 2. Create venv
 if [[ ! -x "${VENV_DIR}/bin/python" ]]; then
   echo "==> Creating venv..."
-  uv venv --python 3.13 "${VENV_DIR}"
+  uv venv --python "${PYTHON_VERSION}" "${VENV_DIR}"
 fi
 
 # 3. Install initial dependencies

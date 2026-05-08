@@ -31,9 +31,9 @@ def main() -> int:
     changes = migrate_database(args.db_url)
 
     if changes:
-        print(f"Applied schema migrations for {args.db_url}: {', '.join(changes)}")
+        print(f"Applied schema migrations: {', '.join(changes)}")
     else:
-        print(f"Schema is up to date for {args.db_url}.")
+        print("Schema is up to date (configured database).")
 
     return 0
 

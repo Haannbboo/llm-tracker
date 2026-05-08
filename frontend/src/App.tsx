@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, useRef } from 'react'
+import { useEffect, useMemo, useState, useRef, useCallback } from 'react'
 import yaml from 'js-yaml'
 import './App.css'
 import { toggleTheme, getTheme } from './theme'
@@ -29,12 +29,13 @@ function App() {
   const [testFormat, setTestFormat] = useState('openai')
   const [testModel, setTestModel] = useState('')
   const [testMessage, setTestMessage] = useState('What is 2 + 3?')
-  const [testResult, setTestResult] = useState<any>(null)
+  const [testResult, setTestResult] = useState<Record<string, unknown> | null>(null)
   const [isTesting, setIsTesting] = useState(false)
 
   const [limit, setLimit] = useState(10)
   const [page, setPage] = useState(1)
   const [jumpPage, setJumpPage] = useState('')
+  const resetPage = useCallback(() => setPage(1), [])
 
   const [activeFilter, setActiveFilter] = useState<ActiveFilter>(null)
   const [activeSource, setActiveSource] = useState<string | null>(null)
@@ -47,7 +48,7 @@ function App() {
   const [customUntil, setCustomUntil] = useState('')
 
   const [configContent, setConfigContent] = useState('')
-  const [configParsed, setConfigParsed] = useState<any>(null)
+  const [configParsed, setConfigParsed] = useState<Record<string, unknown> | null>(null)
   const [selectedPricingProvider, setSelectedPricingProvider] = useState('global')
   const [configStatus, setConfigStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle')
 
@@ -121,7 +122,7 @@ function App() {
   }, [])
 
   // Shared helper: apply filter/source/date params to a URL
-  function applyFilterParams(url: URL, opts: { withPagination?: boolean } = {}) {
+  const applyFilterParams = useCallback((url: URL, opts: { withPagination?: boolean } = {}) => {
     const since = dateRange === 'custom' ? customSince : getSinceDate(dateRange)
     const until = dateRange === 'custom' ? customUntil : null
 
@@ -137,7 +138,7 @@ function App() {
     if (since) url.searchParams.set('since', since)
     if (until) url.searchParams.set('until', until)
     return url
-  }
+  }, [dateRange, customSince, customUntil, limit, page, activeFilter, activeSource])
 
   // Dashboard: summary, daily, heatmap, by-source, by-provider (no paginated logs)
   useEffect(() => {
@@ -192,7 +193,7 @@ function App() {
 
     void fetchDashboard()
     return () => controller.abort()
-  }, [view, activeFilter, activeSource, dateRange, customSince, customUntil, refreshTrigger])
+  }, [view, activeFilter, activeSource, dateRange, customSince, customUntil, refreshTrigger, applyFilterParams])
 
   // Logs: paginated rows, count
   useEffect(() => {
@@ -225,7 +226,7 @@ function App() {
 
     void fetchLogs()
     return () => controller.abort()
-  }, [view, activeFilter, activeSource, limit, page, dateRange, customSince, customUntil, refreshTrigger])
+  }, [view, activeFilter, activeSource, limit, page, dateRange, customSince, customUntil, refreshTrigger, applyFilterParams])
 
   useEffect(() => {
     if (view !== 'dashboard' && view !== 'logs') return
@@ -242,10 +243,6 @@ function App() {
     return () => controller.abort()
   }, [view, dateRange, customSince, customUntil, refreshTrigger])
 
-  useEffect(() => {
-    setPage(1)
-  }, [activeFilter, activeSource, dateRange, customSince, customUntil, limit])
-
   const totals = useMemo(() => {
     const data = activeFilter
       ? summary.filter(s => s.provider === activeFilter.provider && (activeFilter.model === null || s.model === activeFilter.model))
@@ -259,20 +256,6 @@ function App() {
     const totalTokens = data.reduce((sum, row) => sum + value(row.total_tokens), 0)
     const totalCost = data.reduce((sum, row) => sum + value(row.total_cost_usd), 0)
     const latencyWeight = data.reduce((sum, row) => sum + value(row.avg_latency_ms) * value(row.requests), 0)
-    let effectivePriceWeight = 0, effectivePriceRequests = 0,
-        effectivePricePerMillionWeight = 0, effectivePricePerMillionTokens = 0
-    for (const row of data) {
-      const reqs = value(row.requests)
-      const tokens = value(row.total_tokens)
-      if (row.avg_effective_price_usd != null) {
-        effectivePriceWeight += row.avg_effective_price_usd * reqs
-        effectivePriceRequests += reqs
-      }
-      if (row.avg_effective_price_per_million_usd != null) {
-        effectivePricePerMillionWeight += row.avg_effective_price_per_million_usd * tokens
-        effectivePricePerMillionTokens += tokens
-      }
-    }
 
     const successfulRequests = data.reduce((sum, row) => sum + value(row.successful_requests), 0)
     const successRate = requests > 0 ? (successfulRequests / requests) * 100 : 100
@@ -293,12 +276,8 @@ function App() {
       totalTokens,
       totalCost,
       avgLatency: requests === 0 ? 0 : latencyWeight / requests,
-      avgEffectivePrice: effectivePriceRequests > 0
-        ? effectivePriceWeight / effectivePriceRequests
-        : requests === 0 ? 0 : totalCost / requests,
-      avgEffectivePricePerMillion: effectivePricePerMillionTokens > 0
-        ? effectivePricePerMillionWeight / effectivePricePerMillionTokens
-        : totalTokens === 0 ? 0 : (totalCost / totalTokens) * 1_000_000,
+      avgEffectivePrice: requests === 0 ? 0 : totalCost / requests,
+      avgEffectivePricePerMillion: totalTokens === 0 ? 0 : (totalCost / totalTokens) * 1_000_000,
       rpm: requests / minutes,
       tpm: totalTokens / minutes,
       avgTokensPerRequest: requests === 0 ? 0 : totalTokens / requests,
@@ -324,7 +303,7 @@ function App() {
         setError(error.detail || t('Failed to save config'))
         setConfigStatus('error')
       }
-    } catch (err) {
+    } catch {
       setError(t('Connection error while saving config'))
       setConfigStatus('error')
     }
@@ -442,7 +421,7 @@ function App() {
                   <select
                     className="input-plain"
                     value={dateRange}
-                    onChange={(e) => setDateRange(e.target.value as DateRangeOption)}
+                    onChange={(e) => { setDateRange(e.target.value as DateRangeOption); resetPage(); }}
                   >
                     <option value="24h">{t('Last 24 Hours')}</option>
                     <option value="7d">{t('Last 7 Days')}</option>
@@ -454,12 +433,12 @@ function App() {
                     activeFilter={activeFilter}
                     summary={summary}
                     providerColors={providerColors}
-                    onChange={setActiveFilter}
+                    onChange={(f) => { setActiveFilter(f); resetPage(); }}
                   />
                   <select
                     className="input-plain"
                     value={activeSource || ''}
-                    onChange={(e) => setActiveSource(e.target.value || null)}
+                    onChange={(e) => { setActiveSource(e.target.value || null); resetPage(); }}
                   >
                     <option value="">{t('All Sources')}</option>
                     {sources.map(source => (
@@ -643,16 +622,16 @@ function App() {
                     activeFilter={activeFilter}
                     summary={summary}
                     providerColors={providerColors}
-                    onChange={setActiveFilter}
+                    onChange={(f) => { setActiveFilter(f); resetPage(); }}
                   />
-                </div>
+                  </div>
 
                 <div className="filter-group">
                   <div className="filter-label">{t('Source')}</div>
                   <select
                     className="input-plain"
                     value={activeSource || ''}
-                    onChange={(e) => setActiveSource(e.target.value || null)}
+                    onChange={(e) => { setActiveSource(e.target.value || null); resetPage(); }}
                   >
                     <option value="">{t('All Sources')}</option>
                     {sources.map(source => (
@@ -684,18 +663,16 @@ function App() {
                         type="datetime-local"
                         className="input-plain"
                         value={customSince.split('.')[0]}
-                        onChange={(e) => setCustomSince(new Date(e.target.value).toISOString())}
-                      />
-                    </div>
+                        onChange={(e) => { setCustomSince(new Date(e.target.value).toISOString()); resetPage(); }}
+                        />                    </div>
                     <div className="filter-group">
                       <div className="filter-label">{t('Until')}</div>
                       <input
                         type="datetime-local"
                         className="input-plain"
                         value={customUntil.split('.')[0]}
-                        onChange={(e) => setCustomUntil(new Date(e.target.value).toISOString())}
-                      />
-                    </div>
+                        onChange={(e) => { setCustomUntil(new Date(e.target.value).toISOString()); resetPage(); }}
+                        />                    </div>
                   </>
                 )}
 
@@ -1108,8 +1085,7 @@ function App() {
 
                     <select
                       value={limit}
-                      onChange={(e) => setLimit(Number(e.target.value))}
-                      style={{
+                      onChange={(e) => { setLimit(Number(e.target.value)); resetPage(); }}                      style={{
                         border: 'none',
                         background: 'transparent',
                         fontWeight: 700,
@@ -1146,10 +1122,11 @@ function App() {
                       </tr>
                     </thead>
                     <tbody>
-                      {configParsed?.providers ? Object.entries(configParsed.providers).map(([name, conf]: [string, any]) => {
-                        const models = Array.isArray(conf.models)
-                          ? conf.models
-                          : (conf.models ? Object.keys(conf.models) : []);
+                      {configParsed?.providers ? Object.entries(configParsed.providers as Record<string, unknown>).map(([name, conf]) => {
+                        const c = conf as { models?: unknown[] | Record<string, unknown>, base_url?: string };
+                        const models = Array.isArray(c.models)
+                          ? c.models
+                          : (c.models ? Object.keys(c.models) : []);
                         const color = getProviderColor(name, providerColors);
                         return (
                           <tr key={name}>
@@ -1167,11 +1144,12 @@ function App() {
                                 {name}
                               </div>
                             </td>
-                            <td style={{ fontSize: '12px', color: 'var(--text-secondary)', fontFamily: 'var(--font-mono)' }}>{conf.base_url}</td>
+                            <td style={{ fontSize: '12px', color: 'var(--text-secondary)', fontFamily: 'var(--font-mono)' }}>{c.base_url}</td>
                             <td>
                               <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
-                                {models.map((m: string) => {
-                                  const hasOverride = conf.models?.[m]?.cost !== undefined;
+                                {(models as string[]).map((m: string) => {
+                                  const mConf = !Array.isArray(c.models) ? (c.models?.[m] as { cost?: unknown }) : undefined;
+                                  const hasOverride = mConf?.cost !== undefined;
                                   return (
                                     <span key={m} style={{
                                       fontSize: '10px',

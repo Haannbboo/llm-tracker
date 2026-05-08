@@ -34,25 +34,32 @@ def _load_config(config_path: str) -> dict:
 
 def _collect_port_listeners(port: int) -> list[PortListener]:
     """Read current listeners for a port using ``lsof`` when available."""
-    if shutil.which("lsof") is None:
-        return []
+    import socket
 
-    result = subprocess.run(
-        ["lsof", "-nP", f"-iTCP:{port}", "-sTCP:LISTEN"],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    if result.returncode not in {0, 1}:
-        return []
+    if shutil.which("lsof") is not None:
+        result = subprocess.run(
+            ["lsof", "-nP", f"-iTCP:{port}", "-sTCP:LISTEN"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if result.returncode in {0, 1}:
+            listeners: list[PortListener] = []
+            for line in result.stdout.splitlines()[1:]:
+                parts = line.split()
+                if len(parts) < 2:
+                    continue
+                listeners.append(PortListener(pid=int(parts[1]), command=parts[0]))
+            return listeners
 
-    listeners: list[PortListener] = []
-    for line in result.stdout.splitlines()[1:]:
-        parts = line.split()
-        if len(parts) < 2:
-            continue
-        listeners.append(PortListener(pid=int(parts[1]), command=parts[0]))
-    return listeners
+    # Fallback: probe the port directly via socket bind.
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            sock.bind(("127.0.0.1", port))
+        return []
+    except OSError:
+        return [PortListener(pid=-1, command="(unknown)")]
 
 
 def _read_supervisor_states(supervisorctl: str, supervisord_conf: str | None) -> dict:

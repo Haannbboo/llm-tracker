@@ -14,6 +14,7 @@ SUPERVISORD="${VENV_DIR}/bin/supervisord"
 SUPERVISORCTL="${VENV_DIR}/bin/supervisorctl"
 REQS_STAMP="${VENV_DIR}/.requirements.sha256"
 PORT_CHECKER="${ROOT_DIR}/scripts/check-service-ports.py"
+AUTO_PORT_ASSIGNER="${ROOT_DIR}/scripts/auto-assign-ports.py"
 
 # Verification: Check if environment is ready
 if [[ ! -x "${PYTHON}" ]]; then
@@ -38,22 +39,33 @@ fi
 
 mkdir -p "${ROOT_DIR}/logs" "${RUNTIME_DIR}"
 
-# Seed config without overwriting an existing user config.
+CONFIG_WAS_CREATED=0
 if [[ -e "${CONFIG_PATH}" || -L "${CONFIG_PATH}" ]]; then
   echo "==> Config already exists at ${CONFIG_PATH}"
 else
   cp "${ROOT_DIR}/config.example.yaml" "${CONFIG_PATH}"
+  CONFIG_WAS_CREATED=1
   echo "==> Config created at ${CONFIG_PATH}"
 fi
 
 "${PYTHON}" "${ROOT_DIR}/scripts/sync-config.py" "${CONFIG_PATH}" "${ROOT_DIR}/config.example.yaml"
 
-if ! "${PYTHON}" "${PORT_CHECKER}" \
+if ! PORT_CHECK_OUTPUT="$("${PYTHON}" "${PORT_CHECKER}" \
   --strict \
   --config "${CONFIG_PATH}" \
   --supervisorctl "${SUPERVISORCTL}" \
-  --supervisord-conf "${SUPERVISORD_CONF}"; then
-  exit 1
+  --supervisord-conf "${SUPERVISORD_CONF}" 2>&1)"; then
+  if [[ "${CONFIG_WAS_CREATED}" -eq 1 ]]; then
+    "${PYTHON}" "${AUTO_PORT_ASSIGNER}" --config "${CONFIG_PATH}"
+    "${PYTHON}" "${PORT_CHECKER}" \
+      --strict \
+      --config "${CONFIG_PATH}" \
+      --supervisorctl "${SUPERVISORCTL}" \
+      --supervisord-conf "${SUPERVISORD_CONF}"
+  else
+    printf "%s\n" "${PORT_CHECK_OUTPUT}"
+    exit 1
+  fi
 fi
 
 # Configure Codex OTLP telemetry if Codex is installed

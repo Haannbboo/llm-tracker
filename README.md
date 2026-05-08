@@ -31,19 +31,23 @@ Prerequisites:
 - Python 3.13, or `uv` available so the startup script can create it
 - Node.js 18+ for the optional dashboard
 
-Start the backend services:
+One-command local startup:
 
 ```bash
-bash scripts/start.sh
+bash scripts/bootstrap.sh
 ```
 
-The startup script creates `.venv`, installs Python dependencies, creates `~/.llm-tracker/config.yaml` if needed, applies schema migrations, configures supported agent telemetry, and starts services with Supervisor.
+Bootstrap calls `scripts/install.sh` (creates `.venv`, installs dependencies, sets up CLI symlink) then `scripts/start.sh` (creates config if needed, applies schema migrations, configures agent telemetry, starts services with Supervisor). It finishes with a health check on all service ports.
 
-Check service status:
+The dashboard still runs separately:
 
 ```bash
-bash scripts/status.sh
+cd frontend
+npm install
+npm run dev
 ```
+
+The dashboard is usually available at [http://localhost:5173](http://localhost:5173).
 
 Default backend ports:
 
@@ -53,15 +57,11 @@ Default backend ports:
 | API | `http://127.0.0.1:4001` |
 | OTLP | `http://127.0.0.1:4002` |
 
-Start the dashboard:
+Check service status:
 
 ```bash
-cd frontend
-npm install
-npm run dev
+bash scripts/status.sh
 ```
-
-The dashboard is usually available at [http://localhost:5173](http://localhost:5173).
 
 ## Command Summaries
 
@@ -253,6 +253,15 @@ Run tests:
 ```bash
 ./.venv/bin/python -m pytest -q
 ```
+
+Maintainer-only bootstrap smoke:
+
+```bash
+bash scripts/dev/smoke-bootstrap-container.sh
+```
+
+This opt-in check runs `scripts/bootstrap.sh` in a fresh Docker or Apple
+`container` environment. It is not part of normal user setup.
 
 Manage services:
 
