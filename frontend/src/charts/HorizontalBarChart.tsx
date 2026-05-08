@@ -9,12 +9,13 @@ export type BarItem = {
   cost: number
   throughput?: number | null
   pricePerMillion?: number | null
+  successRate?: number | null
   color: string
   badgeBg: string
   badgeText: string
 }
 
-type Metric = 'tokens' | 'cost' | 'throughput'
+type Metric = 'tokens' | 'cost' | 'throughput' | 'successRate'
 
 export function HorizontalBarChart({
   title,
@@ -33,6 +34,7 @@ export function HorizontalBarChart({
   const getMetricValue = (item: BarItem) => {
     if (metric === 'tokens') return item.tokens
     if (metric === 'cost') return item.cost
+    if (metric === 'successRate') return item.successRate ?? 100
     return item.throughput ?? 0
   }
 
@@ -62,6 +64,10 @@ export function HorizontalBarChart({
             className={`tab-toggle-btn ${metric === 'throughput' ? 'active' : ''}`}
             onClick={() => setMetric('throughput')}
           >{t('Speed')}</button>
+          <button
+            className={`tab-toggle-btn ${metric === 'successRate' ? 'active' : ''}`}
+            onClick={() => setMetric('successRate')}
+          >{t('Success')}</button>
         </div>
       </div>
       <div style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
@@ -88,7 +94,7 @@ export function HorizontalBarChart({
                   </div>
                   <div style={{ display: 'flex', alignItems: 'baseline', gap: '6px' }}>
                     <span style={{ color: 'var(--text-secondary)', fontWeight: 700 }}>
-                      {metric === 'tokens' ? formatCompact(currentVal) : metric === 'cost' ? formatCost(currentVal, 2) : formatThroughput(currentVal)}
+                      {metric === 'tokens' ? formatCompact(currentVal) : metric === 'cost' ? formatCost(currentVal, 2) : metric === 'successRate' ? `${currentVal.toFixed(1)}%` : formatThroughput(currentVal)}
                     </span>
                     {metric === 'cost' && s.pricePerMillion != null && (
                       <span style={{ fontSize: '10px', color: 'var(--text-muted)' }}>

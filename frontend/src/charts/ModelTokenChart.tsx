@@ -16,14 +16,16 @@ export function ModelTokenChart({
   theme: Theme
 }) {
   const items: BarItem[] = useMemo(() => {
-    const map = new Map<string, { tokens: number; completion: number; latency: number; cost: number; priceWeight: number; priceTokens: number }>()
+    const map = new Map<string, { tokens: number; completion: number; latency: number; cost: number; priceWeight: number; priceTokens: number; successful: number; total: number }>()
     for (const s of summary) {
-      const existing = map.get(s.model) || { tokens: 0, completion: 0, latency: 0, cost: 0, priceWeight: 0, priceTokens: 0 }
+      const existing = map.get(s.model) || { tokens: 0, completion: 0, latency: 0, cost: 0, priceWeight: 0, priceTokens: 0, successful: 0, total: 0 }
       const tokens = value(s.total_tokens)
       existing.tokens += tokens
       existing.completion += value(s.completion_tokens)
       existing.latency += value(s.latency_sum_ms)
       existing.cost += value(s.total_cost_usd)
+      existing.successful += s.successful_requests ?? 0
+      existing.total += (s.successful_requests ?? 0) + (s.failed_requests ?? 0)
       if (s.avg_effective_price_per_million_usd != null) {
         existing.priceWeight += s.avg_effective_price_per_million_usd * tokens
         existing.priceTokens += tokens
@@ -39,6 +41,7 @@ export function ModelTokenChart({
       pricePerMillion: v.priceTokens > 0
         ? v.priceWeight / v.priceTokens
         : v.tokens > 0 ? (v.cost / v.tokens) * 1_000_000 : null,
+      successRate: v.total > 0 ? (v.successful / v.total) * 100 : 100,
       color: getModelColor(model),
       badgeBg: getModelBadgeBackgroundColor(model, theme),
       badgeText: getModelTextColor(model, theme),
