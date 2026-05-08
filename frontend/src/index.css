@@ -156,3 +156,149 @@ a {
   text-decoration: none;
   color: inherit;
 }
+
+/* Staggered widget entrance animation */
+@keyframes widget-enter {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.widgets-grid > .widget {
+  opacity: 0;
+  animation: widget-enter 0.4s ease-out forwards;
+}
+
+.widgets-grid > .widget:nth-child(1) { animation-delay: 0.05s; }
+.widgets-grid > .widget:nth-child(2) { animation-delay: 0.1s; }
+.widgets-grid > .widget:nth-child(3) { animation-delay: 0.15s; }
+.widgets-grid > .widget:nth-child(4) { animation-delay: 0.2s; }
+.widgets-grid > .widget:nth-child(5) { animation-delay: 0.25s; }
+
+/* Loading skeleton shimmer */
+@keyframes shimmer {
+  0% { background-position: -200px 0; }
+  100% { background-position: calc(200px + 100%) 0; }
+}
+
+.skeleton {
+  background: var(--progress-bg);
+  background-image: linear-gradient(
+    90deg,
+    var(--progress-bg) 0%,
+    var(--surface-hover) 50%,
+    var(--progress-bg) 100%
+  );
+  background-size: 200px 100%;
+  background-repeat: no-repeat;
+  border-radius: 6px;
+  animation: shimmer 1.5s ease-in-out infinite;
+}
+
+.skeleton-text {
+  height: 14px;
+  margin-bottom: 8px;
+}
+
+.skeleton-text-sm {
+  height: 11px;
+  margin-bottom: 6px;
+}
+
+.skeleton-value {
+  height: 28px;
+  width: 80px;
+  margin-bottom: 4px;
+}
+
+.skeleton-chart {
+  height: 100%;
+  border-radius: 12px;
+}
+
+/* Table row hover */
+.table tbody tr {
+  transition: background-color 0.15s ease;
+}
+
+.table tbody tr:hover {
+  background-color: var(--surface-hover);
+}
+
+.table tbody tr:hover td {
+  border-bottom-color: transparent;
+}
+
+/* Expanded row detail */
+.table .expanded-row td {
+  padding: 0;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.table .expanded-detail {
+  padding: 12px 16px;
+  background: var(--surface-hover);
+  display: flex;
+  gap: 24px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  animation: expand-in 0.2s ease-out;
+}
+
+@keyframes expand-in {
+  from {
+    opacity: 0;
+    max-height: 0;
+  }
+  to {
+    opacity: 1;
+    max-height: 200px;
+  }
+}
+
+.table .expanded-detail .detail-group {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.table .expanded-detail .detail-label {
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--text-muted);
+  text-transform: uppercase;
+}
+
+.table .expanded-detail .detail-value {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+}
+
+.table tbody tr.expandable-row {
+  cursor: pointer;
+}
+
+.table tbody tr.expandable-row td:first-child::before {
+  content: '▸';
+  display: inline-block;
+  margin-right: 6px;
+  font-size: 10px;
+  color: var(--text-muted);
+  transition: transform 0.15s ease;
+}
+
+.table tbody tr.expandable-row.expanded td:first-child::before {
+  transform: rotate(90deg);
+}
+
+/* Progress bar fill animation */
+.progress-track .progress-fill {
+  transition: width 0.6s ease-out;
+}

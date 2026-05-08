@@ -14,6 +14,7 @@ import { ProviderTokenChart } from './charts/ProviderTokenChart'
 import { SourceTokenChart } from './charts/SourceTokenChart'
 import { DailyHeatmap } from './charts/DailyHeatmap'
 import { t, useLang } from './i18n/index.ts'
+import { useCountUp } from './useCountUp'
 
 function App() {
   const [view, setView] = useState<'dashboard' | 'logs' | 'settings' | 'test'>('dashboard')
@@ -23,8 +24,7 @@ function App() {
   const [dailyUsage, setDailyUsage] = useState<DailyUsage[]>([])
   const [totalLogs, setTotalLogs] = useState(0)
   const [totalTrackedEvents, setTotalTrackedEvents] = useState<number | null>(null)
-  const [dashboardLoading, setDashboardLoading] = useState(true)
-  
+
   // Connectivity Test State
   const [testBaseUrl, setTestBaseUrl] = useState('')
   const [testApiKey, setTestApiKey] = useState('')
@@ -60,6 +60,9 @@ function App() {
   const [error, setError] = useState<string | null>(null)
   const [theme, setTheme] = useState<'light' | 'dark'>(getTheme)
   const { lang, setLang } = useLang()
+  const [dashboardLoading, setDashboardLoading] = useState(true)
+  const [logsLoading, setLogsLoading] = useState(true)
+  const [expandedRow, setExpandedRow] = useState<number | null>(null)
 
   // Empty-state verification polling state machine
   const [verifyPhase, setVerifyPhase] = useState<'idle' | 'polling' | 'success' | 'timeout'>('idle')
@@ -172,6 +175,7 @@ function App() {
     async function fetchDashboard() {
       setDashboardLoading(true)
       setError(null)
+      setDashboardLoading(true)
       try {
         const summaryUrl = applyFilterParams(new URL('/usage/summary', window.location.origin))
         const dailyUrl = applyFilterParams(new URL('/usage/daily', window.location.origin))
@@ -234,6 +238,7 @@ function App() {
 
     async function fetchLogs() {
       setError(null)
+      setLogsLoading(true)
       try {
         const usageUrl = applyFilterParams(new URL('/usage', window.location.origin), { withPagination: true })
         const countUrl = applyFilterParams(new URL('/usage/count', window.location.origin))
@@ -252,6 +257,8 @@ function App() {
       } catch (err) {
         if (controller.signal.aborted) return
         setError(err instanceof Error ? err.message : t('Unknown error'))
+      } finally {
+        setLogsLoading(false)
       }
     }
 
@@ -315,6 +322,12 @@ function App() {
       successRate
     }
   }, [activeFilter, summary, dateRange])
+
+  const animatedTotalTokens = useCountUp(dashboardLoading ? 0 : totals.totalTokens)
+  const animatedRequests = useCountUp(dashboardLoading ? 0 : totals.requests)
+  const animatedCost = useCountUp(dashboardLoading ? 0 : totals.totalCost)
+  const animatedRpm = useCountUp(dashboardLoading ? 0 : totals.rpm)
+  const animatedLatency = useCountUp(dashboardLoading ? 0 : totals.avgLatency)
 
   const totalPages = Math.ceil(totalLogs / limit)
 
@@ -710,6 +723,27 @@ function App() {
               ) : (
               <>
               <div className="widgets-grid">
+                {dashboardLoading ? (
+                  Array.from({ length: 5 }, (_, i) => (
+                    <div key={i} className="widget">
+                      <div className="widget-body" style={{ flexDirection: 'column', alignItems: 'stretch', justifyContent: 'center', gap: '10px' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                            <div className="skeleton" style={{ width: 40, height: 40, borderRadius: 12 }} />
+                            <div>
+                              <div className="skeleton skeleton-text" style={{ width: 80 }} />
+                              <div className="skeleton skeleton-value" />
+                            </div>
+                          </div>
+                          <div className="skeleton" style={{ width: 100, height: 32, borderRadius: 6 }} />
+                        </div>
+                        <div className="skeleton skeleton-text-sm" style={{ width: '60%' }} />
+                        <div className="skeleton skeleton-text-sm" style={{ width: '40%' }} />
+                      </div>
+                    </div>
+                  ))
+                ) : (
+                  <>
                 <div className="widget">
                   <div className="widget-body" style={{ flexDirection: 'column', alignItems: 'stretch', justifyContent: 'center' }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -717,7 +751,7 @@ function App() {
                         <div className="icon-box icon-yellow">#</div>
                         <div>
                           <div className="stat-label">{t('Token Usage')}</div>
-                          <div className="stat-value">{formatCompact(totals.totalTokens)}</div>
+                          <div className="stat-value">{formatCompact(animatedTotalTokens)}</div>
                         </div>
                       </div>
                       <div style={{ width: '100px' }}>
@@ -743,7 +777,7 @@ function App() {
                         <div className="icon-box icon-green">↑</div>
                         <div>
                           <div className="stat-label">{t('Requests')}</div>
-                          <div className="stat-value">{formatNumber(totals.requests)}</div>
+                          <div className="stat-value">{formatNumber(animatedRequests)}</div>
                         </div>
                       </div>
                       <div style={{ width: '100px' }}>
@@ -763,7 +797,7 @@ function App() {
                         <div className="icon-box icon-green">$</div>
                         <div>
                           <div className="stat-label">{t('Estimated Cost')}</div>
-                          <div className="stat-value">{formatCost(totals.totalCost, 2)}</div>
+                          <div className="stat-value">{formatCost(animatedCost, 2)}</div>
                         </div>
                       </div>
                       <div style={{ width: '100px' }}>
@@ -786,7 +820,7 @@ function App() {
                         <div className="icon-box icon-blue">⚡</div>
                         <div>
                           <div className="stat-label">{t('Performance')}</div>
-                          <div className="stat-value">{totals.rpm.toFixed(3)} <span style={{ fontSize: '12px', fontWeight: 500 }}>{t('RPM')}</span></div>
+                          <div className="stat-value">{animatedRpm.toFixed(3)} <span style={{ fontSize: '12px', fontWeight: 500 }}>{t('RPM')}</span></div>
                         </div>
                       </div>
                       <div style={{ width: '100px' }}>
@@ -806,7 +840,7 @@ function App() {
                         <div className="icon-box icon-pink">~</div>
                         <div>
                           <div className="stat-label">{t('Average Response')}</div>
-                          <div className="stat-value">{formatLatency(totals.avgLatency)}</div>
+                          <div className="stat-value">{formatLatency(animatedLatency)}</div>
                         </div>
                       </div>
                       <div style={{ width: '100px' }}>
@@ -818,7 +852,8 @@ function App() {
                     </div>
                   </div>
                 </div>
-
+                  </>
+                )}
               </div>
 
               <div style={{ display: 'flex', gap: '24px', height: '400px' }}>
@@ -1005,8 +1040,27 @@ function App() {
                       </tr>
                     </thead>
                     <tbody>
-                      {usageRows.map(row => (
-                        <tr key={row.id}>
+                      {logsLoading ? (
+                        Array.from({ length: 5 }, (_, i) => (
+                          <tr key={`skeleton-${i}`}>
+                            <td><div className="skeleton" style={{ width: 90, height: 14 }} /></td>
+                            <td><div className="skeleton" style={{ width: 120, height: 24, borderRadius: 6 }} /></td>
+                            <td><div className="skeleton" style={{ width: 70, height: 20, borderRadius: 4 }} /></td>
+                            <td><div className="skeleton" style={{ width: 60, height: 20, borderRadius: 4 }} /></td>
+                            <td><div className="skeleton" style={{ width: 80, height: 14 }} /></td>
+                            <td><div className="skeleton" style={{ width: 60, height: 14 }} /></td>
+                            <td><div className="skeleton" style={{ width: 50, height: 14 }} /></td>
+                            <td><div className="skeleton" style={{ width: 100, height: 20, borderRadius: 999 }} /></td>
+                            <td><div className="skeleton" style={{ width: 40, height: 20, borderRadius: 6 }} /></td>
+                          </tr>
+                        ))
+                      ) : usageRows.map(row => (
+                        <>
+                        <tr
+                          key={row.id}
+                          className={`expandable-row${expandedRow === row.id ? ' expanded' : ''}`}
+                          onClick={() => setExpandedRow(expandedRow === row.id ? null : row.id)}
+                        >
                           <td style={{ color: 'var(--text-secondary)' }}>{formatTime(row.ts)}</td>
                           <td style={{ padding: '8px' }}>
                             <div style={{
@@ -1232,8 +1286,45 @@ function App() {
                             </span>
                           </td>
                         </tr>
+                        {expandedRow === row.id && (
+                          <tr className="expanded-row">
+                            <td colSpan={9}>
+                              <div className="expanded-detail">
+                                <div className="detail-group">
+                                  <span className="detail-label">{t('Request ID')}</span>
+                                  <span className="detail-value">#{row.id}</span>
+                                </div>
+                                <div className="detail-group">
+                                  <span className="detail-label">{t('Full Timestamp')}</span>
+                                  <span className="detail-value">{row.ts}</span>
+                                </div>
+                                <div className="detail-group">
+                                  <span className="detail-label">{t('Endpoint')}</span>
+                                  <span className="detail-value">{row.endpoint}</span>
+                                </div>
+                                <div className="detail-group">
+                                  <span className="detail-label">{t('Total Tokens')}</span>
+                                  <span className="detail-value">{formatNumber(row.total_tokens ?? (value(row.prompt_tokens) + value(row.completion_tokens)))}</span>
+                                </div>
+                                {value(row.tool_tokens) > 0 && (
+                                  <div className="detail-group">
+                                    <span className="detail-label">{t('Tool Tokens')}</span>
+                                    <span className="detail-value">{formatNumber(row.tool_tokens)}</span>
+                                  </div>
+                                )}
+                                {value(row.prompt_length) > 0 && (
+                                  <div className="detail-group">
+                                    <span className="detail-label">{t('Prompt Length')}</span>
+                                    <span className="detail-value">{formatNumber(row.prompt_length)} {t('chars')}</span>
+                                  </div>
+                                )}
+                              </div>
+                            </td>
+                          </tr>
+                        )}
+                        </>
                       ))}
-                      {usageRows.length === 0 && (
+                      {usageRows.length === 0 && !logsLoading && (
                         <tr>
                           <td colSpan={7} style={{ textAlign: 'center', padding: '40px', color: 'var(--text-muted)' }}>
                             {t('No requests found for the selected filters.')}

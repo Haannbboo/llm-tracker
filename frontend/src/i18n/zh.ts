@@ -252,4 +252,13 @@ export const zh: Record<string, string> = {
   'Step 2: Verify tracking': '步骤 2：验证追踪',
   'After running a command above, click below to confirm tracking works.': '运行上面的命令后，点击下方确认追踪正常工作。',
   'No agents detected yet. Commands above work without detection.': '尚未检测到代理。以上命令无需检测即可使用。',
+
+  // Expanded row details
+  'Request ID': '请求 ID',
+  'Full Timestamp': '完整时间戳',
+  'Endpoint': '端点',
+  'Tool Tokens': '工具 Token',
+  'Prompt Length': '提示词长度',
+  'chars': '字符',
+  'Total Tokens': '总 Token',
 }
