@@ -19,6 +19,16 @@ CLI_SYMLINK="${HOME}/.local/bin/llm-tracker"
 _pass() { printf "  ✅ %s\n" "$*"; }
 _fail() { printf "  ❌ %s\n" "$*"; }
 
+_python_cmd() {
+  if [[ -x "${ROOT_DIR}/.venv/bin/python" ]]; then
+    echo "${ROOT_DIR}/.venv/bin/python"
+  elif command -v python3 >/dev/null 2>&1; then
+    command -v python3
+  else
+    return 1
+  fi
+}
+
 _port_listening() {
   # Test if a TCP port is reachable (short timeout).
   # Returns 0 if something is listening, 1 otherwise.
@@ -45,6 +55,117 @@ except Exception:
     # Fallback: /dev/tcp (bash built-in)
     (echo >/dev/tcp/"${host}"/"${port}") 2>/dev/null && return 0
     return 1
+  fi
+}
+
+_fetch_setup_health() {
+  local url="$1"
+  if command -v curl >/dev/null 2>&1; then
+    curl --connect-timeout 3 -sS "${url}"
+    return
+  fi
+
+  local python
+  python="$(_python_cmd)" || return 1
+  "${python}" -c '
+import sys
+import urllib.request
+
+url = sys.argv[1]
+try:
+    with urllib.request.urlopen(url, timeout=3) as response:
+        sys.stdout.write(response.read().decode("utf-8"))
+except Exception:
+    sys.exit(1)
+' "${url}"
+}
+
+_verify_agent_setup_health() {
+  local url="http://${HOST}:${API_PORT}/local/setup-health"
+  local health_json
+  local python
+  local claude_detected=0
+  local codex_detected=0
+  local gemini_detected=0
+
+  echo ""
+  echo "==> Agent tracking verification (/local/setup-health)..."
+
+  python="$(_python_cmd)" || {
+    _fail "Agent tracking: Python not available for setup-health verification"
+    CHECKS_FAIL=$((CHECKS_FAIL + 1))
+    return
+  }
+
+  if ! health_json="$(_fetch_setup_health "${url}" 2>/dev/null)"; then
+    _fail "Agent tracking: could not read ${url}"
+    CHECKS_FAIL=$((CHECKS_FAIL + 1))
+    return
+  fi
+
+  command -v claude >/dev/null 2>&1 && claude_detected=1
+  command -v codex >/dev/null 2>&1 && codex_detected=1
+  command -v gemini >/dev/null 2>&1 && gemini_detected=1
+
+  if printf "%s" "${health_json}" \
+      | LLM_TRACKER_CLAUDE_DETECTED="${claude_detected}" \
+        LLM_TRACKER_CODEX_DETECTED="${codex_detected}" \
+        LLM_TRACKER_GEMINI_DETECTED="${gemini_detected}" \
+        "${python}" -c '
+import json
+import os
+import sys
+
+try:
+    data = json.loads(sys.stdin.read())
+except Exception:
+    print("  ❌ Agent tracking: invalid setup-health response")
+    sys.exit(1)
+
+agents = data.get("agents")
+if not isinstance(agents, dict):
+    print("  ❌ Agent tracking: setup-health response is missing agents")
+    sys.exit(1)
+
+ready = 0
+skipped = 0
+failed = 0
+for key, label in (("claude", "Claude"), ("codex", "Codex"), ("gemini", "Gemini")):
+    agent = agents.get(key)
+    if not isinstance(agent, dict):
+        failed += 1
+        print(f"  ❌ {label}: setup health unavailable")
+        continue
+
+    status = agent.get("status")
+    configured = agent.get("configured") is True
+    endpoint_matches = agent.get("endpoint_matches") is True
+    detected = os.environ.get(f"LLM_TRACKER_{key.upper()}_DETECTED") == "1"
+
+    if not detected:
+        skipped += 1
+        print(f"  ✅ {label}: skipped")
+    elif status == "ready" and endpoint_matches:
+        ready += 1
+        print(f"  ✅ {label}: ready")
+    elif status == "wrong_endpoint" or (configured and not endpoint_matches):
+        failed += 1
+        print(f"  ❌ {label}: configured endpoint mismatch with current llm-tracker OTLP endpoint")
+    elif status == "missing_config":
+        failed += 1
+        print(f"  ❌ {label}: OTLP not configured")
+    else:
+        failed += 1
+        print(f"  ❌ {label}: setup health unavailable")
+
+icon = "✅" if failed == 0 else "❌"
+print(f"  {icon} Agent tracking: {ready} ready, {skipped} skipped, {failed} failed")
+sys.exit(1 if failed else 0)
+'
+  then
+    CHECKS_PASS=$((CHECKS_PASS + 1))
+  else
+    CHECKS_FAIL=$((CHECKS_FAIL + 1))
   fi
 }
 
@@ -153,6 +274,8 @@ else
   _pass "Dashboard: http://${HOST}:${API_PORT} (curl not available, skipped check)"
   CHECKS_PASS=$((CHECKS_PASS + 1))
 fi
+
+_verify_agent_setup_health
 
 # ── Final report ────────────────────────────────────────────────────
 echo ""
