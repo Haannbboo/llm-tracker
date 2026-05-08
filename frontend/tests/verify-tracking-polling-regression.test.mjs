@@ -37,7 +37,7 @@ test('verify tracking stops polling on duplicate click, success, timeout, and un
 
 test('verify tracking UI exposes polling, timeout, and success states', () => {
   assert.match(appSource, /verifyPhase === 'polling'\s*\? t\('Waiting for your first event\.\.\.'\)/)
-  assert.match(appSource, /verifyPhase === 'timeout'\s*\? t\('No event found yet'\)/)
+  assert.match(appSource, /verifyPhase === 'timeout'\s*\? t\(verifyTimeoutGuidance\)/)
   assert.match(appSource, /disabled=\{verifyPhase === 'polling'\}/)
   assert.match(appSource, /verifyPhase === 'polling' \? `⌛ \$\{t\('Waiting\.\.\.'\)\}`/)
   assert.match(appSource, /\{t\('Tracking works\. Your first request is recorded\.'\)\}/)

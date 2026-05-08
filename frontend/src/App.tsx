@@ -16,6 +16,7 @@ import { SourceTokenChart } from './charts/SourceTokenChart'
 import { DailyHeatmap } from './charts/DailyHeatmap'
 import { t, useLang } from './i18n/index.ts'
 import { useCountUp } from './useCountUp'
+import { getVerifyTimeoutGuidance } from './setup-guidance'
 
 type SetupAgentHealth = {
   configured: boolean
@@ -575,6 +576,14 @@ function App() {
       : t('No local Agent')
     : t('Unknown')
   const setupSummaryColor = setupDiagnostics && setupMatchingAgents > 0 ? 'var(--color-green)' : 'var(--text-muted)'
+  const verifyTimeoutGuidance = getVerifyTimeoutGuidance({
+    setupHealthAvailable: setupDiagnostics !== null,
+    localAgentDetectionAvailable: localAgents !== null,
+    localAgentCount: foundLocalAgentCount,
+    setupLocalAgentTotal,
+    configuredAgents: setupConfiguredAgents,
+    matchingAgents: setupMatchingAgents,
+  })
 
   return (
     <div className="app">
@@ -807,7 +816,7 @@ function App() {
                               {verifyPhase === 'polling'
                                 ? t('Waiting for your first event...')
                                 : verifyPhase === 'timeout'
-                                  ? t('No event found yet')
+                                  ? t(verifyTimeoutGuidance)
                                   : t('After running a command above, click below to confirm tracking works.')}
                             </div>
                             <button
