@@ -216,4 +216,28 @@ export const zh: Record<string, string> = {
 
   // SourceTokenChart
   'unknown': '未知',
+
+  // Empty state / onboarding (P0-6)
+  'Welcome to llm-tracker': '欢迎使用 llm-tracker',
+  'Your local dashboard for AI coding agents': '你的本地 AI 编程代理仪表盘',
+  'Track Claude Code, Codex, Gemini, and OpenAI-compatible traffic in one place — usage, cost, latency.': '在一个地方追踪 Claude Code、Codex、Gemini 和 OpenAI 兼容流量 — 用量、费用、延迟。',
+  'Get Started': '开始使用',
+  'Detected Agents': '已检测到的代理',
+  'Telemetry Status': '遥测状态',
+  'No data yet — send your first event to get started': '暂无数据 — 发送你的第一个事件开始使用',
+  'Test Commands': '测试命令',
+  'Run any of these to send your first event:': '运行以下任一命令发送你的第一个事件：',
+  'Copied!': '已复制！',
+  'Waiting for first event...': '等待第一个事件...',
+  'Event received!': '事件已收到！',
+  'First event details:': '首个事件详情：',
+  'Source:': '来源：',
+  'Latency:': '延迟：',
+  'Start Tracking': '开始追踪',
+  'Verify Tracking': '验证追踪',
+  'Check for Event': '检查事件',
+  'No event received yet — run a test command and click "Check for Event"': '尚未收到事件 — 运行测试命令后点击"检查事件"',
+  'Reset': '重置',
+  'Checking...': '检查中...',
+  'Not found': '未找到',
 }

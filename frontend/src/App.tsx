@@ -59,6 +59,12 @@ function App() {
   const [theme, setTheme] = useState<'light' | 'dark'>(getTheme)
   const { lang, setLang } = useLang()
 
+  // Empty-state verification (P0-6 / P0-7)
+  const [verifying, setVerifying] = useState(false)
+  const [verificationResult, setVerificationResult] = useState<UsageRow | null>(null)
+  const [copiedCmd, setCopiedCmd] = useState<string | null>(null)
+  const [localAgents, setLocalAgents] = useState<Record<string, { found: boolean; path: string | null }> | null>(null)
+
   const [modelColWidth, setModelColWidth] = useState(180)
   const resizeRef = useRef<{ startX: number; startWidth: number } | null>(null)
 
@@ -120,7 +126,14 @@ function App() {
         console.error('Failed to load initial config:', err)
       }
     }
+    async function fetchLocalAgents() {
+      try {
+        const response = await fetch('/local/agents', { signal: controller.signal })
+        if (response.ok) setLocalAgents(await response.json())
+      } catch {}
+    }
     void fetchInitialConfig()
+    void fetchLocalAgents()
     return () => controller.abort()
   }, [])
 
@@ -372,6 +385,34 @@ function App() {
     setConfigContent(yaml.dump(newParsed, { indent: 2, noRefs: true }));
   }
 
+  const handleVerifyEvent = async () => {
+    setVerifying(true)
+    setVerificationResult(null)
+    try {
+      const countRes = await fetch('/usage/count')
+      if (!countRes.ok) throw new Error('Failed to check')
+      const { total } = await countRes.json()
+      if (total > 0) {
+        const usageRes = await fetch('/usage?limit=1')
+        if (usageRes.ok) {
+          const rows = await usageRes.json() as UsageRow[]
+          if (rows.length > 0) {
+            setVerificationResult(rows[0])
+            setRefreshTrigger(t => t + 1)
+          }
+        }
+      }
+    } catch {} finally {
+      setVerifying(false)
+    }
+  }
+
+  const handleCopyCmd = (cmd: string) => {
+    navigator.clipboard.writeText(cmd)
+    setCopiedCmd(cmd)
+    setTimeout(() => setCopiedCmd(null), 1500)
+  }
+
   return (
     <div className="app">
       <main className="main">
@@ -420,6 +461,7 @@ function App() {
         <div className="content-body">
           {view === 'dashboard' && (
             <>
+              {summary.length > 0 && (
               <div className="dashboard-filter-row" style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: '8px' }}>
                   <select
                     className="input-plain"
@@ -457,7 +499,163 @@ function App() {
                     <span className="refresh-icon">↻</span>
                   </button>
                 </div>
+              )}
 
+              {summary.length === 0 ? (
+                <div style={{
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  padding: '60px 24px',
+                  textAlign: 'center',
+                  gap: '32px',
+                }}>
+                  <div style={{ maxWidth: '560px' }}>
+                    <div style={{ fontSize: '28px', marginBottom: '8px' }}>
+                      {t('Welcome to llm-tracker')}
+                    </div>
+                    <div style={{ fontSize: '15px', color: 'var(--text-secondary)', lineHeight: 1.6 }}>
+                      {t('Track Claude Code, Codex, Gemini, and OpenAI-compatible traffic in one place — usage, cost, latency.')}
+                    </div>
+                  </div>
+
+                  <div style={{
+                    display: 'grid',
+                    gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))',
+                    gap: '16px',
+                    width: '100%',
+                    maxWidth: '680px',
+                  }}>
+                    {/* Detected agents */}
+                    <div className="panel" style={{ textAlign: 'left' }}>
+                      <div className="panel-tabs">
+                        <div className="tab active"><span>🤖</span> {t('Detected Agents')}</div>
+                      </div>
+                      <div className="panel-body" style={{ padding: '16px' }}>
+                        {localAgents ? (
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                            {Object.entries(localAgents).map(([name, info]) => (
+                              <div key={name} style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px' }}>
+                                <span style={{
+                                  width: '8px', height: '8px', borderRadius: '50%',
+                                  background: info.found ? 'var(--color-green)' : 'var(--text-muted)',
+                                  flexShrink: 0,
+                                }} />
+                                <span style={{ fontWeight: 600, minWidth: '80px' }}>{name}</span>
+                                <span style={{ color: info.found ? 'var(--color-green)' : 'var(--text-muted)' }}>
+                                  {info.found ? info.path : t('Not found')}
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        ) : sources.length > 0 ? (
+                          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+                            {sources.map(src => (
+                              <span key={src} style={{
+                                padding: '4px 12px',
+                                borderRadius: '6px',
+                                background: 'var(--icon-green-bg)',
+                                color: 'var(--color-green)',
+                                fontWeight: 600,
+                                fontSize: '13px',
+                              }}>{src}</span>
+                            ))}
+                          </div>
+                        ) : (
+                          <div style={{ fontSize: '13px', color: 'var(--text-muted)' }}>
+                            {t('No data yet — send your first event to get started')}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Verification */}
+                    <div className="panel" style={{ textAlign: 'left' }}>
+                      <div className="panel-tabs">
+                        <div className="tab active"><span>✅</span> {t('Verify Tracking')}</div>
+                      </div>
+                      <div className="panel-body" style={{ padding: '16px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                        {verificationResult ? (
+                          <>
+                            <div style={{
+                              padding: '8px 12px',
+                              borderRadius: '6px',
+                              background: 'var(--icon-green-bg)',
+                              color: 'var(--color-green)',
+                              fontWeight: 600,
+                              fontSize: '13px',
+                            }}>
+                              {t('Event received!')}
+                            </div>
+                            <div style={{ fontSize: '12px', display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                              <div><span style={{ color: 'var(--text-muted)' }}>{t('Source:')}</span> {verificationResult.client_source || '—'}</div>
+                              <div><span style={{ color: 'var(--text-muted)' }}>{t('Model:')}</span> {verificationResult.model}</div>
+                              <div><span style={{ color: 'var(--text-muted)' }}>{t('Tokens:')}</span> {formatNumber(verificationResult.prompt_tokens)} {t('In:')} / {formatNumber(verificationResult.completion_tokens)} {t('Out:')}</div>
+                              <div><span style={{ color: 'var(--text-muted)' }}>{t('Cost:')}</span> {formatCost(value(verificationResult.total_cost_usd))}</div>
+                              <div><span style={{ color: 'var(--text-muted)' }}>{t('Latency:')}</span> {formatLatency(verificationResult.latency_ms)}</div>
+                            </div>
+                            <button className="btn-ghost" onClick={() => { setVerificationResult(null); setSummary([]); }} style={{ fontSize: '12px', alignSelf: 'flex-start' }}>
+                              {t('Reset')}
+                            </button>
+                          </>
+                        ) : (
+                          <>
+                            <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
+                              {t('No event received yet — run a test command and click "Check for Event"')}
+                            </div>
+                            <button
+                              className="btn-primary"
+                              onClick={handleVerifyEvent}
+                              disabled={verifying}
+                              style={{ alignSelf: 'flex-start', fontSize: '13px', padding: '8px 16px' }}
+                            >
+                              {verifying ? `⌛ ${t('Checking...')}` : `🔍 ${t('Check for Event')}`}
+                            </button>
+                          </>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Test commands */}
+                  <div style={{ width: '100%', maxWidth: '680px', textAlign: 'left' }}>
+                    <div style={{ fontSize: '13px', fontWeight: 700, color: 'var(--text-muted)', marginBottom: '12px', textTransform: 'uppercase' }}>
+                      {t('Test Commands')}
+                    </div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                      {[
+                        { cmd: 'llm-tracker claude -p "hello"', label: 'Claude Code' },
+                        { cmd: 'llm-tracker codex exec "hello"', label: 'Codex' },
+                        { cmd: 'llm-tracker gemini -p "hello"', label: 'Gemini CLI' },
+                      ].map(({ cmd, label }) => (
+                        <div key={cmd} style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                          padding: '10px 16px',
+                          borderRadius: '8px',
+                          background: 'var(--surface-hover)',
+                          border: '1px solid var(--border-color)',
+                        }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                            <span style={{ fontSize: '11px', fontWeight: 700, color: 'var(--text-muted)', minWidth: '80px' }}>{label}</span>
+                            <code style={{ fontSize: '13px', fontFamily: 'var(--font-mono)', color: 'var(--text-primary)' }}>{cmd}</code>
+                          </div>
+                          <button
+                            className="btn-ghost"
+                            onClick={() => handleCopyCmd(cmd)}
+                            style={{ fontSize: '11px', padding: '4px 10px', whiteSpace: 'nowrap' }}
+                          >
+                            {copiedCmd === cmd ? `✓ ${t('Copied!')}` : `📋 ${t('Copy')}`}
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              ) : (
+              <>
               <div className="widgets-grid">
                 <div className="widget">
                   <div className="widget-body" style={{ flexDirection: 'column', alignItems: 'stretch', justifyContent: 'center' }}>
@@ -621,6 +819,8 @@ function App() {
               <div className="content-grid">
 
               </div>
+              </>
+              )}
             </>
           )}
 

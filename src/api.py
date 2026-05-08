@@ -393,6 +393,18 @@ async def test_connectivity(test: ConnectivityTest):
         }
 
 
+@app.get("/local/agents")
+async def detect_local_agents():
+    """Detect locally installed CLI agents. Only works when API has host access."""
+    import shutil
+
+    agents = {}
+    for name in ("claude", "codex", "gemini"):
+        path = shutil.which(name)
+        agents[name] = {"found": path is not None, "path": path}
+    return agents
+
+
 # Serve built frontend if available (must come after all API routes)
 _frontend_dist = Path(__file__).resolve().parent.parent / "frontend" / "dist"
 if _frontend_dist.is_dir():
