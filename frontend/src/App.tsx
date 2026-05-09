@@ -117,7 +117,8 @@ function App() {
   const [error, setError] = useState<string | null>(null)
   const [theme, setTheme] = useState<'light' | 'dark'>(getTheme)
   const { lang, setLang } = useLang()
-  const [dashboardLoading, setDashboardLoading] = useState(true)
+  const [dashboardInitialLoading, setDashboardInitialLoading] = useState(true)
+  const [dashboardRefreshing, setDashboardRefreshing] = useState(false)
   const [logsLoading, setLogsLoading] = useState(true)
   const [expandedRow, setExpandedRow] = useState<number | null>(null)
 
@@ -132,6 +133,7 @@ function App() {
   const [modelColWidth, setModelColWidth] = useState(180)
   const resizeRef = useRef<{ startX: number; startWidth: number } | null>(null)
   const dashboardRequestRef = useRef(0)
+  const dashboardHasLoadedRef = useRef(false)
 
   const handleResizeStart = (e: React.MouseEvent) => {
     e.preventDefault()
@@ -237,9 +239,10 @@ function App() {
     const sig = { signal: controller.signal }
 
     async function fetchDashboard() {
-      setDashboardLoading(true)
+      const isInitialDashboardLoad = !dashboardHasLoadedRef.current
       setError(null)
-      setDashboardLoading(true)
+      setDashboardInitialLoading(isInitialDashboardLoad)
+      setDashboardRefreshing(!isInitialDashboardLoad)
       try {
         const summaryUrl = applyFilterParams(new URL('/usage/summary', window.location.origin))
         const dailyUrl = applyFilterParams(new URL('/usage/daily', window.location.origin))
@@ -282,11 +285,15 @@ function App() {
         setSourceUsage(bySourceData)
         setProviderUsage(byProviderData)
         setTotalTrackedEvents(totalCountData.total)
+        dashboardHasLoadedRef.current = true
       } catch (err) {
         if (!isCurrentRequest()) return
         setError(err instanceof Error ? err.message : t('Unknown error'))
       } finally {
-        if (isCurrentRequest()) setDashboardLoading(false)
+        if (isCurrentRequest()) {
+          setDashboardInitialLoading(false)
+          setDashboardRefreshing(false)
+        }
       }
     }
 
@@ -387,11 +394,11 @@ function App() {
     }
   }, [activeFilter, summary, dateRange])
 
-  const animatedTotalTokens = useCountUp(dashboardLoading ? 0 : totals.totalTokens)
-  const animatedRequests = useCountUp(dashboardLoading ? 0 : totals.requests)
-  const animatedCost = useCountUp(dashboardLoading ? 0 : totals.totalCost)
-  const animatedRpm = useCountUp(dashboardLoading ? 0 : totals.rpm)
-  const animatedLatency = useCountUp(dashboardLoading ? 0 : totals.avgLatency)
+  const animatedTotalTokens = useCountUp(dashboardInitialLoading ? 0 : totals.totalTokens)
+  const animatedRequests = useCountUp(dashboardInitialLoading ? 0 : totals.requests)
+  const animatedCost = useCountUp(dashboardInitialLoading ? 0 : totals.totalCost)
+  const animatedRpm = useCountUp(dashboardInitialLoading ? 0 : totals.rpm)
+  const animatedLatency = useCountUp(dashboardInitialLoading ? 0 : totals.avgLatency)
 
   const totalPages = Math.ceil(totalLogs / limit)
 
@@ -556,7 +563,7 @@ function App() {
   -d '{"model": "${testModel || 'gpt-5.4'}", "messages": [{"role": "user", "content": "${(testMessage || 'What is 2 + 3?').replace(/"/g, '\\"')}"}], "max_tokens": 10}'`
   })()
 
-  const showFirstRunOnboarding = !dashboardLoading && totalTrackedEvents === 0
+  const showFirstRunOnboarding = !dashboardInitialLoading && totalTrackedEvents === 0
   const foundLocalAgents = localAgents
     ? Object.entries(localAgents).filter(([, info]) => info.found)
     : []
@@ -663,8 +670,9 @@ function App() {
                     ))}
                   </select>
                   <button
-                    className="btn-ghost btn-refresh"
+                    className={`btn-ghost btn-refresh ${dashboardRefreshing ? 'is-refreshing' : ''}`}
                     onClick={requestUsageRefresh}
+                    disabled={dashboardRefreshing}
                     aria-label={t('Refresh')}
                     title={t('Refresh')}
                   >
@@ -673,7 +681,7 @@ function App() {
                 </div>
               )}
 
-              {dashboardLoading ? (
+              {dashboardInitialLoading ? (
                 <div />
               ) : showFirstRunOnboarding ? (
                 <div style={{
@@ -897,9 +905,9 @@ function App() {
                   </div>
                 </div>
               ) : (
-              <>
+              <div className={`dashboard-refresh-surface ${dashboardRefreshing ? 'is-refreshing' : ''}`}>
               <div className="widgets-grid">
-                {dashboardLoading ? (
+                {dashboardInitialLoading ? (
                   Array.from({ length: 5 }, (_, i) => (
                     <div key={i} className="widget">
                       <div className="widget-body" style={{ flexDirection: 'column', alignItems: 'stretch', justifyContent: 'center', gap: '10px' }}>
@@ -1083,7 +1091,7 @@ function App() {
               <div className="content-grid">
 
               </div>
-              </>
+              </div>
               )}
             </>
           )}
