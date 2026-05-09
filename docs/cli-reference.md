@@ -7,40 +7,44 @@ The `llm-tracker` CLI wrapper runs an LLM agent (or any command), captures token
 ## Usage
 
 ```bash
-scripts/llm-tracker [options] -- <command> [args...]
+llm-tracker [options] <command> [args...]
+llm-tracker [options] -- <command> [args...]
 ```
 
-The `--` separator is optional when the first non-option argument is not a recognized flag.
+The `--` separator is optional for common agent commands. Use it after llm-tracker flags when the child command or its first argument could be parsed as a wrapper option.
 
 ## Examples
 
 ```bash
 # Track an interactive Codex session
-scripts/llm-tracker -- codex
+llm-tracker codex
 
 # Track Claude Code
-scripts/llm-tracker -- claude
+llm-tracker claude
+
+# Track Gemini CLI
+llm-tracker gemini
 
 # Track a single-shot Codex command
-scripts/llm-tracker -- codex exec "say hello in one sentence"
+llm-tracker codex exec "say hello in one sentence"
 
 # JSON summary
-scripts/llm-tracker --json -- codex
+llm-tracker --json -- codex
 
 # Machine-readable summary only (suppress child stdout/stderr)
-scripts/llm-tracker --usage-only --json -- codex exec "hello"
+llm-tracker --usage-only --json -- codex exec "hello"
 
 # Write summary to a file
-scripts/llm-tracker --summary-dest file --summary-file /tmp/llm-summary.json -- claude
+llm-tracker --summary-dest file --summary-file /tmp/llm-summary.json -- claude
 
 # Route through a temporary local proxy
-scripts/llm-tracker --proxy-env -- some-openai-compatible-cli
+llm-tracker --proxy-env -- some-openai-compatible-cli
 
 # Longer wait for late-arriving telemetry
-scripts/llm-tracker --wait-ms 5000 -- codex exec "hello"
+llm-tracker --wait-ms 5000 -- codex exec "hello"
 
 # No summary at all
-scripts/llm-tracker --no-summary -- gemini -p "say hello"
+llm-tracker --no-summary -- gemini -p "say hello"
 ```
 
 ## Flags

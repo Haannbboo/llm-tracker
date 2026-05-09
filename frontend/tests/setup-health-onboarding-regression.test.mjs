@@ -14,9 +14,9 @@ const settingsEnd = appSource.indexOf("{view === 'test' && (", settingsStart)
 assert.notEqual(settingsEnd, -1)
 const settingsBlock = appSource.slice(settingsStart, settingsEnd)
 
-const healthStart = appSource.indexOf('{/* Setup health */}')
+const healthStart = appSource.indexOf('{/* Setup health + Detected agents */}')
 assert.notEqual(healthStart, -1)
-const healthEnd = appSource.indexOf('{/* Step 1: Run a test command */}', healthStart)
+const healthEnd = appSource.indexOf('{/* Detected agents */}', healthStart)
 assert.notEqual(healthEnd, -1)
 const onboardingHealthBlock = appSource.slice(healthStart, healthEnd)
 
@@ -65,7 +65,7 @@ test('chinese translations include OTLP diagnostics strings', () => {
     'Configured endpoint',
     'Missing config',
     'Wrong endpoint',
-    'No local OTLP config found yet. Run a test command, then use Check for Event to verify tracking.',
+    'No local OTLP config found yet. Run bootstrap, then run a test command above. This page checks automatically.',
     'No local Agent',
   ]) {
     assert.match(zhSource, new RegExp(key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')))

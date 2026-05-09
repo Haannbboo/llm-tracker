@@ -39,12 +39,18 @@ type SetupDiagnostics = {
   agents: Record<string, SetupAgentHealth>
 }
 
+type OnboardingCopiedCommand = {
+  source: string
+  command: string
+}
+
 function CopyButton({
   text,
   className = 'btn-ghost',
   style,
   idleLabel,
   copiedLabel,
+  onCopied,
   timeoutMs = 1500,
 }: {
   text: string
@@ -52,14 +58,18 @@ function CopyButton({
   style?: CSSProperties
   idleLabel: ReactNode
   copiedLabel: ReactNode
+  onCopied?: () => void
   timeoutMs?: number
 }) {
   const [copied, setCopied] = useState(false)
 
   const handleCopy = () => {
-    navigator.clipboard.writeText(text)
-    setCopied(true)
-    setTimeout(() => setCopied(false), timeoutMs)
+    void navigator.clipboard.writeText(text)
+      .then(() => {
+        setCopied(true)
+        onCopied?.()
+        setTimeout(() => setCopied(false), timeoutMs)
+      })
   }
 
   return (
@@ -127,6 +137,8 @@ function App() {
   const [verificationResult, setVerificationResult] = useState<UsageRow | null>(null)
   const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const pollingStartRef = useRef<number>(0)
+  const autoVerifyStartedRef = useRef(false)
+  const [copiedOnboardingCommand, setCopiedOnboardingCommand] = useState<OnboardingCopiedCommand | null>(null)
   const [localAgents, setLocalAgents] = useState<Record<string, { found: boolean; path: string | null }> | null>(null)
   const [setupDiagnostics, setSetupDiagnostics] = useState<SetupDiagnostics | null>(null)
 
@@ -536,6 +548,11 @@ function App() {
     pollingRef.current = setInterval(checkForEvent, 2000)
   }
 
+  const armOnboardingVerification = (command: OnboardingCopiedCommand) => {
+    setCopiedOnboardingCommand(command)
+    handleVerifyEvent()
+  }
+
   const getAgentDisplayName = (name: string) => {
     const normalized = name.toLowerCase()
     if (normalized.includes('vectorengine') || normalized.includes('claude')) return 'Claude Code'
@@ -564,6 +581,12 @@ function App() {
   })()
 
   const showFirstRunOnboarding = !dashboardInitialLoading && totalTrackedEvents === 0
+
+  useEffect(() => {
+    if (!showFirstRunOnboarding || autoVerifyStartedRef.current) return
+    autoVerifyStartedRef.current = true
+    handleVerifyEvent()
+  }, [showFirstRunOnboarding])
   const foundLocalAgents = localAgents
     ? Object.entries(localAgents).filter(([, info]) => info.found)
     : []
@@ -702,57 +725,41 @@ function App() {
                     </div>
                   </div>
 
-                  {/* Setup health */}
-                  <div style={{ width: '100%', maxWidth: '680px', textAlign: 'left' }}>
-                    <div style={{ fontSize: '13px', fontWeight: 700, color: 'var(--text-muted)', marginBottom: '10px', textTransform: 'uppercase' }}>
-                      {t('Setup health')}
-                    </div>
-                    <div style={{
-                      display: 'grid',
-                      gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
-                      gap: '8px',
-                    }}>
-                      <div style={{
-                        padding: '10px 12px',
-                        borderRadius: '8px',
-                        background: 'var(--surface-hover)',
-                        border: '1px solid var(--border-color)',
-                      }}>
-                        <div style={{ fontSize: '11px', color: 'var(--text-muted)', fontWeight: 700, marginBottom: '4px' }}>{t('API server')}</div>
-                        <div style={{ fontSize: '13px', color: error ? 'var(--color-red)' : 'var(--color-green)', fontWeight: 700 }}>
-                          {error ? t('Broken') : t('Reachable')}
-                        </div>
-                      </div>
-                      <div style={{
-                        padding: '10px 12px',
-                        borderRadius: '8px',
-                        background: 'var(--surface-hover)',
-                        border: '1px solid var(--border-color)',
-                      }}>
-                        <div style={{ fontSize: '11px', color: 'var(--text-muted)', fontWeight: 700, marginBottom: '4px' }}>{t('OTLP configured')}</div>
-                        <div style={{ fontSize: '13px', color: setupSummaryColor, fontWeight: 700 }}>
-                          {setupSummaryText}
-                        </div>
-                      </div>
-                    </div>
-                    {setupDiagnostics && setupConfiguredAgents === 0 && (
-                      <div style={{ marginTop: '8px', fontSize: '12px', color: 'var(--text-secondary)' }}>
-                        {t('No local OTLP config found yet. Run a test command, then use Check for Event to verify tracking.')}
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Step 1: Run a test command */}
+                  {/* Step 1: Bootstrap */}
                   <div style={{ width: '100%', maxWidth: '680px', textAlign: 'left' }}>
                     <div style={{ fontSize: '13px', fontWeight: 700, color: 'var(--text-muted)', marginBottom: '12px', textTransform: 'uppercase' }}>
-                      {t('Step 1: Run a test command')}
+                      {t('Step 1: Bootstrap')}
+                    </div>
+                    <div style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      padding: '10px 16px',
+                      borderRadius: '8px',
+                      background: 'var(--surface-hover)',
+                      border: '1px solid var(--border-color)',
+                    }}>
+                      <code style={{ fontSize: '13px', fontFamily: 'var(--font-mono)', color: 'var(--text-primary)' }}>llm-tracker bootstrap</code>
+                      <CopyButton
+                        text="llm-tracker bootstrap"
+                        style={{ fontSize: '11px', padding: '4px 10px', whiteSpace: 'nowrap' }}
+                        idleLabel={`📋 ${t('Copy')}`}
+                        copiedLabel={`✓ ${t('Copied!')}`}
+                      />
+                    </div>
+                  </div>
+
+                  {/* Step 2: Run a test command */}
+                  <div style={{ width: '100%', maxWidth: '680px', textAlign: 'left' }}>
+                    <div style={{ fontSize: '13px', fontWeight: 700, color: 'var(--text-muted)', marginBottom: '12px', textTransform: 'uppercase' }}>
+                      {t('Step 2: Run a test command')}
                     </div>
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                       {[
-                        { cmd: 'llm-tracker claude', label: 'Claude Code' },
-                        { cmd: 'llm-tracker codex exec "hello"', label: 'Codex' },
-                        { cmd: 'llm-tracker gemini -p "hello"', label: 'Gemini CLI' },
-                      ].map(({ cmd, label }) => (
+                        { cmd: 'llm-tracker claude', source: 'Claude Code' },
+                        { cmd: 'llm-tracker codex exec "hello"', source: 'Codex' },
+                        { cmd: 'llm-tracker gemini -p "hello"', source: 'Gemini CLI' },
+                      ].map(({ cmd, source }) => (
                         <div key={cmd} style={{
                           display: 'flex',
                           alignItems: 'center',
@@ -763,7 +770,7 @@ function App() {
                           border: '1px solid var(--border-color)',
                         }}>
                           <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                            <span style={{ fontSize: '11px', fontWeight: 700, color: 'var(--text-muted)', minWidth: '80px' }}>{label}</span>
+                            <span style={{ fontSize: '11px', fontWeight: 700, color: 'var(--text-muted)', minWidth: '80px' }}>{source}</span>
                             <code style={{ fontSize: '13px', fontFamily: 'var(--font-mono)', color: 'var(--text-primary)' }}>{cmd}</code>
                           </div>
                           <CopyButton
@@ -771,12 +778,78 @@ function App() {
                             style={{ fontSize: '11px', padding: '4px 10px', whiteSpace: 'nowrap' }}
                             idleLabel={`📋 ${t('Copy')}`}
                             copiedLabel={`✓ ${t('Copied!')}`}
+                            onCopied={() => armOnboardingVerification({ source, command: cmd })}
                           />
                         </div>
                       ))}
                     </div>
                   </div>
 
+                  {/* Step 3: Wait for event */}
+                  <div style={{ width: '100%', maxWidth: '680px', textAlign: 'left' }}>
+                    <div style={{ fontSize: '13px', fontWeight: 700, color: 'var(--text-muted)', marginBottom: '12px', textTransform: 'uppercase' }}>
+                      {t('Step 3: Wait for event')}
+                    </div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                      {verificationResult ? (
+                        <>
+                          <div style={{
+                            padding: '8px 12px',
+                            borderRadius: '6px',
+                            background: 'var(--icon-green-bg)',
+                            color: 'var(--color-green)',
+                            fontWeight: 600,
+                            fontSize: '13px',
+                          }}>
+                            {t('Tracking works. Your first request is recorded.')}
+                          </div>
+                          <div style={{ fontSize: '12px', display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                            <div><span style={{ color: 'var(--text-muted)' }}>{t('Source:')}</span> {verificationResult.client_source || '—'}</div>
+                            <div><span style={{ color: 'var(--text-muted)' }}>{t('Model:')}</span> {verificationResult.model || '—'}</div>
+                            <div><span style={{ color: 'var(--text-muted)' }}>{t('Tokens:')}</span> {formatNumber(verificationResult.prompt_tokens)} {t('In:')} / {formatNumber(verificationResult.completion_tokens)} {t('Out:')}</div>
+                            <div><span style={{ color: 'var(--text-muted)' }}>{t('Cost:')}</span> {formatCost(value(verificationResult.total_cost_usd))}</div>
+                            <div><span style={{ color: 'var(--text-muted)' }}>{t('Latency:')}</span> {formatLatency(verificationResult.latency_ms)}</div>
+                          </div>
+                          <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                            <button className="btn-primary" onClick={() => setView('logs')} style={{ fontSize: '12px', alignSelf: 'flex-start' }}>
+                              {t('View request logs')}
+                            </button>
+                            <button className="btn-ghost" onClick={() => { setVerifyPhase('idle'); setVerificationResult(null); }} style={{ fontSize: '12px', alignSelf: 'flex-start' }}>
+                              {t('Reset')}
+                            </button>
+                          </div>
+                        </>
+                      ) : (
+                        <>
+                          <div
+                            aria-live="polite"
+                            title={copiedOnboardingCommand?.command}
+                            style={{
+                              fontSize: '12px',
+                              color: verifyPhase === 'timeout'
+                                ? 'var(--color-red)'
+                                : copiedOnboardingCommand && verifyPhase === 'idle'
+                                  ? 'var(--color-green)'
+                                  : 'var(--text-muted)',
+                              padding: copiedOnboardingCommand && verifyPhase === 'idle' ? '8px 10px' : undefined,
+                              borderRadius: copiedOnboardingCommand && verifyPhase === 'idle' ? '6px' : undefined,
+                              background: copiedOnboardingCommand && verifyPhase === 'idle' ? 'var(--icon-green-bg)' : undefined,
+                            }}
+                          >
+                            {verifyPhase === 'polling'
+                              ? t('Waiting for your first event...')
+                              : verifyPhase === 'timeout'
+                                ? t(verifyTimeoutGuidance)
+                                : copiedOnboardingCommand
+                                  ? <><span style={{ fontWeight: 700 }}>{copiedOnboardingCommand.source}</span>: {t('Agent command copied. Run it in your terminal — checking automatically.')}</>
+                                  : t('This page is checking automatically. Run a command above to generate your first event.')}
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Setup health + Detected agents */}
                   <div style={{
                     display: 'grid',
                     gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))',
@@ -784,58 +857,42 @@ function App() {
                     width: '100%',
                     maxWidth: '680px',
                   }}>
-                    {/* Step 2: Verify tracking */}
+                    {/* Setup health */}
                     <div className="panel" style={{ textAlign: 'left' }}>
                       <div className="panel-tabs">
-                        <div className="tab active"><span>✅</span> {t('Step 2: Verify tracking')}</div>
+                        <div className="tab active"><span>🏥</span> {t('Setup health')}</div>
                       </div>
-                      <div className="panel-body" style={{ padding: '16px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                        {verificationResult ? (
-                          <>
-                            <div style={{
-                              padding: '8px 12px',
-                              borderRadius: '6px',
-                              background: 'var(--icon-green-bg)',
-                              color: 'var(--color-green)',
-                              fontWeight: 600,
-                              fontSize: '13px',
-                            }}>
-                              {t('Tracking works. Your first request is recorded.')}
+                      <div className="panel-body" style={{ padding: '16px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                        <div style={{
+                          display: 'grid',
+                          gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
+                          gap: '8px',
+                        }}>
+                          <div style={{
+                            padding: '10px 12px',
+                            borderRadius: '8px',
+                            background: 'var(--bg-secondary)',
+                          }}>
+                            <div style={{ fontSize: '11px', color: 'var(--text-muted)', fontWeight: 700, marginBottom: '4px' }}>{t('API server')}</div>
+                            <div style={{ fontSize: '13px', color: error ? 'var(--color-red)' : 'var(--color-green)', fontWeight: 700 }}>
+                              {error ? t('Broken') : t('Reachable')}
                             </div>
-                            <div style={{ fontSize: '12px', display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                              <div><span style={{ color: 'var(--text-muted)' }}>{t('Source:')}</span> {verificationResult.client_source || '—'}</div>
-                              <div><span style={{ color: 'var(--text-muted)' }}>{t('Model:')}</span> {verificationResult.model || '—'}</div>
-                              <div><span style={{ color: 'var(--text-muted)' }}>{t('Tokens:')}</span> {formatNumber(verificationResult.prompt_tokens)} {t('In:')} / {formatNumber(verificationResult.completion_tokens)} {t('Out:')}</div>
-                              <div><span style={{ color: 'var(--text-muted)' }}>{t('Cost:')}</span> {formatCost(value(verificationResult.total_cost_usd))}</div>
-                              <div><span style={{ color: 'var(--text-muted)' }}>{t('Latency:')}</span> {formatLatency(verificationResult.latency_ms)}</div>
+                          </div>
+                          <div style={{
+                            padding: '10px 12px',
+                            borderRadius: '8px',
+                            background: 'var(--bg-secondary)',
+                          }}>
+                            <div style={{ fontSize: '11px', color: 'var(--text-muted)', fontWeight: 700, marginBottom: '4px' }}>{t('OTLP configured')}</div>
+                            <div style={{ fontSize: '13px', color: setupSummaryColor, fontWeight: 700 }}>
+                              {setupSummaryText}
                             </div>
-                            <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-                              <button className="btn-primary" onClick={() => setView('logs')} style={{ fontSize: '12px', alignSelf: 'flex-start' }}>
-                                {t('View request logs')}
-                              </button>
-                              <button className="btn-ghost" onClick={() => { setVerifyPhase('idle'); setVerificationResult(null); }} style={{ fontSize: '12px', alignSelf: 'flex-start' }}>
-                                {t('Reset')}
-                              </button>
-                            </div>
-                          </>
-                        ) : (
-                          <>
-                            <div style={{ fontSize: '12px', color: verifyPhase === 'timeout' ? 'var(--color-red)' : 'var(--text-muted)' }}>
-                              {verifyPhase === 'polling'
-                                ? t('Waiting for your first event...')
-                                : verifyPhase === 'timeout'
-                                  ? t(verifyTimeoutGuidance)
-                                  : t('After running a command above, click below to confirm tracking works.')}
-                            </div>
-                            <button
-                              className="btn-primary"
-                              onClick={handleVerifyEvent}
-                              disabled={verifyPhase === 'polling'}
-                              style={{ alignSelf: 'flex-start', fontSize: '13px', padding: '8px 16px' }}
-                            >
-                              {verifyPhase === 'polling' ? `⌛ ${t('Waiting...')}` : `🔍 ${t('Check for Event')}`}
-                            </button>
-                          </>
+                          </div>
+                        </div>
+                        {setupDiagnostics && setupConfiguredAgents === 0 && (
+                          <div style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
+                            {t('No local OTLP config found yet. Run bootstrap, then run a test command above. This page checks automatically.')}
+                          </div>
                         )}
                       </div>
                     </div>

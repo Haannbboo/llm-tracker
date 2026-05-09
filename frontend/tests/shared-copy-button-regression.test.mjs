@@ -21,7 +21,7 @@ test('onboarding and connectivity copy controls use one shared CopyButton compon
   assert.match(copyButtonComponent, /setCopied\(true\)/)
   assert.match(copyButtonComponent, /setTimeout\(\(\) => setCopied\(false\),/)
 
-  assert.equal((appComponent.match(/<CopyButton\b/g) || []).length, 2)
+  assert.equal((appComponent.match(/<CopyButton\b/g) || []).length, 3)
   assert.doesNotMatch(appComponent, /navigator\.clipboard\.writeText/)
   assert.doesNotMatch(appComponent, /btn\.textContent/)
   assert.doesNotMatch(appComponent, /classList\.add\('btn-copy-clicked'\)/)

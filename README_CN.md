@@ -2,44 +2,87 @@
 
 # llm-tracker
 
-本地优先的命令行 LLM 代理使用量追踪工具。
+**面向命令行 LLM Agent 的本地优先可观测性工具。**
 
-`llm-tracker` 记录 Codex、Claude Code、Gemini CLI 及 OpenAI/Anthropic 兼容客户端等工具的 token 使用量、费用估算、延迟、TTFT 和会话 ID。它适用于希望在每个项目中获得结构化的会话级使用数据，而无需在每个仓库中重新构建代理特定追踪逻辑的团队和个人项目。
+`llm-tracker` 用来查看你的 coding agents 到底在干什么：请求记录、token 使用量、费用估算、延迟、TTFT、模型、来源和 session ID。支持 **Claude Code**、**Codex**、**Gemini CLI**，也支持 OpenAI/Anthropic 兼容流量。
 
-它支持两种数据采集方式：
+它适合那些本地同时跑多个 LLM Agent、又想在一个地方回答这些问题的人：
 
-- OTLP 采集器接收编码代理发出的遥测数据。
-- 透明代理转发提供商请求，并从响应中记录使用量。
+- 哪个 Agent/模型花钱最多？
+- 我刚刚那条命令到底有没有被追踪到？
+- 这次 coding session 花了多少钱？
+- 哪些请求慢、走了流式、命中了缓存、用了 reasoning？
 
-llm-tracker 不管理凭证。使用代理时，API 密钥和授权头会原样转发。
+默认是本地部署：配置在 `~/.llm-tracker/config.yaml`，使用量数据默认存在 SQLite `~/.llm-tracker/usage.db`，服务绑定在本机 loopback 端口。
 
-## 功能特性
+## 它能做什么
 
-- 追踪 Codex、Claude Code、Gemini CLI 和直接代理流量。
-- 保留会话 ID，用于按次运行和按代理的汇总统计。
-- 通过 `scripts/llm-tracker` 打印命令级摘要。
-- 默认支持 SQLite，通过 SQLAlchemy URL 支持 SQL 数据库。
-- 根据 `~/.llm-tracker/config.yaml` 中的模型定价估算费用。
-- 包含 React 仪表盘，展示使用量、费用、延迟和模型趋势。
-- 通过 `scripts/start.sh` 和 `scripts/restart.sh` 保持代理遥测配置同步。
+- **追踪常见 coding agents**：通过本地 OTLP telemetry 追踪 Claude Code、Codex 和 Gemini CLI。
+- **追踪 OpenAI/Anthropic 兼容客户端**：通过可选的本地 proxy 转发并记录请求。
+- **提供 Dashboard**：查看使用量、费用、延迟、模型、来源、请求日志、setup health 和 first-event onboarding。
+- **输出命令级摘要**：用 `llm-tracker` 跑 agent，结束后打印这次运行的使用量。
+- **保持可检查**：纯 YAML 配置，默认 SQLite，日志在 `logs/`，不依赖 hosted backend。
+- **支持 SQL 数据库**：默认本地 SQLite，也可以通过 SQLAlchemy `db.url` 指向 PostgreSQL/MySQL。
+
+## 采集方式
+
+`llm-tracker` 有两条互补的数据采集路径：
+
+```text
+Claude Code / Codex / Gemini CLI
+        │
+        │ OTLP telemetry
+        ▼
+llm-tracker OTLP collector ──► database ──► dashboard / API / summaries
+```
+
+```text
+OpenAI-compatible or Anthropic-compatible client
+        │
+        │ HTTP
+        ▼
+llm-tracker proxy ──► upstream provider
+        │
+        ▼
+     database
+```
+
+Agent telemetry 更适合拿到 session、tool/reasoning metadata 等 agent-specific 字段。Proxy 更适合支持自定义 base URL 的客户端。
 
 ## 快速开始
 
-前置条件：
+### 前置条件
 
 - macOS 或 Linux shell 环境
-- Python 3.13，或可用的 `uv`（启动脚本会自动创建环境）
-- Node.js 18+（可选，用于仪表盘）
+- Python 3.13，或者可用的 `uv` 让安装脚本创建环境
+- Node.js 18+，用于构建和提供 Dashboard
+- 可选：本地已安装 `claude`、`codex` 或 `gemini`
 
-一键本地启动：
+### 1. 一键 Bootstrap
 
 ```bash
 bash scripts/bootstrap.sh
 ```
 
-Bootstrap 会依次调用 `scripts/install.sh`（创建 `.venv`、安装依赖、设置 CLI 符号链接）和 `scripts/start.sh`（按需创建配置、执行数据库迁移、配置代理遥测、通过 Supervisor 启动服务），最后对所有服务端口进行健康检查。
+Bootstrap 会帮你处理这些烦人的东西：
 
-仪表盘需要单独启动：
+1. 把 Python 依赖安装到 `.venv`
+2. Node/npm 可用时构建 Dashboard
+3. 按需创建 `~/.llm-tracker/config.yaml`
+4. 为检测到的 Agent 配置本地 OTLP tracking
+5. 用 Supervisor 启动 proxy、API 和 OTLP 服务
+6. 检查服务端口和 Agent setup health
+7. 在 `~/.local/bin/llm-tracker` 创建 CLI symlink
+
+如果 `~/.local/bin` 不在 `PATH` 里，安装脚本会打印该加到 shell profile 的命令。
+
+### 2. 打开 Dashboard
+
+```bash
+open http://localhost:4001
+```
+
+如果你在开发前端，想用 Vite dev server：
 
 ```bash
 cd frontend
@@ -47,59 +90,107 @@ npm install
 npm run dev
 ```
 
-仪表盘通常可在 [http://localhost:5173](http://localhost:5173) 访问。
+然后打开 [http://localhost:5173](http://localhost:5173)。
 
-默认后端端口：
+### 3. 生成第一条 tracked event
 
-| 服务 | 默认 URL |
-| --- | --- |
-| 代理 | `http://127.0.0.1:4000` |
-| API | `http://127.0.0.1:4001` |
-| OTLP | `http://127.0.0.1:4002` |
+Bootstrap 之后，运行 Dashboard 里展示的命令，或者直接用下面这些：
 
-检查服务状态：
+```bash
+llm-tracker codex exec "hello"
+llm-tracker claude
+llm-tracker gemini -p "hello"
+```
+
+如果 symlink 还没进 `PATH`，可以用 repo-local fallback：
+
+```bash
+llm-tracker codex exec "hello"
+llm-tracker claude
+llm-tracker gemini -p "hello"
+```
+
+空 Dashboard 会自动检查第一条 event。没有假 demo 数据，也不用手动 seed。
+
+## CLI 示例
+
+Wrapper 会运行子命令，捕获运行期间的使用量，然后打印摘要。
+
+```bash
+# 交互式 agents
+llm-tracker codex
+llm-tracker claude
+llm-tracker gemini
+
+# 一次性命令
+llm-tracker codex exec "say hello in one sentence"
+llm-tracker gemini -p "say hello in one sentence"
+
+# 安装后的 CLI
+llm-tracker codex exec "say hello in one sentence"
+```
+
+只有在传 `llm-tracker` 自己的 flags 时才需要 `--`：
+
+```bash
+llm-tracker --json -- codex
+llm-tracker --usage-only -- codex exec "say hello in one sentence"
+llm-tracker --wait-ms 5000 -- codex exec "say hello in one sentence"
+llm-tracker --summary-dest file --summary-file /tmp/llm-summary.json -- claude
+llm-tracker --proxy-env -- some-openai-compatible-cli
+llm-tracker --no-summary -- gemini -p "say hello"
+```
+
+完整 CLI 参考见 [docs/cli-reference.md](docs/cli-reference.md)，包括所有 flags、tracking modes、退出码、服务命令、API endpoints 和环境变量。
+
+## Dashboard
+
+Dashboard 提供：
+
+- 无数据时的 first-event onboarding
+- 使用量和费用概览
+- 模型/来源拆分
+- latency 和 TTFT 趋势
+- 请求日志
+- 已检测到的 Agent 和 setup health
+- connectivity test
+
+默认情况下，后端 API 会在 `http://localhost:4001` 提供构建后的 Dashboard。前端 dev server 按下面顺序解析 API URL：
+
+1. `LLM_TRACKER_API_URL`
+2. `LLM_TRACKER_BACKEND_URL`
+3. `~/.llm-tracker/config.yaml` 中的 `server.host` 和 `server.api_port`
+4. `http://localhost:4001`
+
+前端相关说明见 [frontend/README.md](frontend/README.md)。
+
+## 默认本地服务
+
+| 服务 | 默认 URL | 用途 |
+| --- | --- | --- |
+| Proxy | `http://127.0.0.1:4000` | 转发 OpenAI/Anthropic 兼容请求并记录使用量 |
+| API + Dashboard | `http://127.0.0.1:4001` | REST API 和构建后的 Dashboard |
+| OTLP collector | `http://127.0.0.1:4002` | 本地 Agent telemetry ingestion |
+
+服务命令：
 
 ```bash
 bash scripts/status.sh
+bash scripts/restart.sh
+bash scripts/stop.sh
 ```
 
-## 命令摘要
-
-完整 CLI 参考请见 [docs/cli-reference.md](docs/cli-reference.md)，包含所有标志、退出码、追踪模式和服务管理命令。
-
-使用仓库本地包装器运行代理或命令，并打印运行期间捕获的使用量：
-
-```bash
-scripts/llm-tracker -- codex
-scripts/llm-tracker -- claude
-scripts/llm-tracker -- gemini
-scripts/llm-tracker -- codex exec "say hello in one sentence"
-```
-
-常用选项：
-
-```bash
-scripts/llm-tracker --json -- codex
-scripts/llm-tracker --usage-only -- codex exec "say hello in one sentence"
-scripts/llm-tracker --wait-ms 5000 -- codex exec "say hello in one sentence"
-scripts/llm-tracker --summary-dest file --summary-file /tmp/llm-summary.json -- claude
-scripts/llm-tracker --proxy-env -- some-openai-compatible-cli
-scripts/llm-tracker --no-summary -- gemini -p "say hello"
-```
-
-使用 `--proxy-env` 时，命令会在运行期间指向一个临时本地代理，从而在合并到主数据库之前隔离代理记录的使用量。
-
-默认情况下，摘要输出到 stderr，以保持子命令的 stdout 可用。当另一个程序需要 stdout 仅包含 llm-tracker 摘要时，使用 `--usage-only`；当需要机器可读的 JSON 格式时，结合 `--json` 使用。包装器为每个命令启动一个临时本地 OTLP 采集器，在每次运行的 SQLite 数据库中记录使用量，然后在命令退出后将这些记录合并回主配置的数据库。
+运行时文件在 `~/.llm-tracker/run/`。日志写入 `logs/`。
 
 ## 配置
 
-主配置文件位于：
+主配置文件：
 
 ```text
 ~/.llm-tracker/config.yaml
 ```
 
-最小提供商配置：
+最小 provider 和数据库配置：
 
 ```yaml
 models:
@@ -119,157 +210,134 @@ server:
   host: 127.0.0.1
   port: 4000
   api_port: 4001
+  otlp_port: 4002
 
 db:
   path: ~/.llm-tracker/usage.db
 ```
 
-代理通过匹配请求中的 `model` 与已配置的提供商模型来路由请求，然后将请求转发到该提供商的 `base_url`。
-
-如需使用 PostgreSQL 或 MySQL 代替 SQLite，请设置 `db.url`：
+如果要用 PostgreSQL 或 MySQL 替代 SQLite，设置 `db.url`：
 
 ```yaml
 db:
   url: postgresql+psycopg://user:password@db-host:5432/llm_tracker?sslmode=require
 ```
 
-运行 `bash scripts/start.sh` 或 `bash scripts/restart.sh` 会将 `config.example.yaml` 中缺失的默认值合并到用户配置中，但不会覆盖现有值。
+`bash scripts/start.sh` 和 `bash scripts/restart.sh` 会把 `config.example.yaml` 里缺失的默认值合并进用户配置，但不会覆盖已有值。
 
-## 数据采集方式
+## 把客户端指向 Proxy
 
-### OTLP 采集器
-
-Codex、Claude Code 和 Gemini CLI 可以发出 OpenTelemetry 日志。llm-tracker 在本地接收这些日志，并解析在 HTTP 代理层不可见的代理特定字段。
-
-```text
-Agent telemetry
-      |
-      v
-llm-tracker OTLP collector
-      |
-      v
-SQLite/Postgres/MySQL
-```
-
-启动脚本会配置：
-
-- `~/.codex/config.toml` 用于 Codex OTLP 日志
-- `~/.claude/settings.json` 用于 Claude Code OTLP 日志
-- `~/.gemini/settings.json` 加 shell hook 用于 Gemini CLI 计时数据
-
-### 透明代理
-
-对于支持自定义 base URL 的工具，llm-tracker 可以位于客户端和上游提供商之间：
-
-```text
-LLM client
-      |
-      v
-llm-tracker proxy
-      |
-      v
-Upstream provider
-```
-
-支持的代理路径包括：
-
-- `/v1/chat/completions`
-- `/v1/responses`
-- `/v1/messages`
-
-对于流式响应，代理将 TTFT 记录为直到第一个上游数据块到达的时间。
-
-## 将客户端指向代理
-
-对于 OpenAI 兼容客户端：
+OpenAI 兼容客户端：
 
 ```bash
 export OPENAI_BASE_URL=http://127.0.0.1:4000/v1
 ```
 
-对于 Anthropic 兼容客户端：
+Anthropic 兼容客户端：
 
 ```bash
 export ANTHROPIC_BASE_URL=http://127.0.0.1:4000
 ```
 
-命令包装器可以为子进程设置这些环境变量：
+也可以让 wrapper 只为某个子进程设置这些环境变量：
 
 ```bash
-scripts/llm-tracker --proxy-env -- some-openai-compatible-cli
+llm-tracker --proxy-env -- some-openai-compatible-cli
 ```
 
-## 仪表盘
+支持的 proxy paths：
 
-仪表盘位于 `frontend/` 目录，与 API 服务通信。它按以下顺序解析后端 API URL：
+- `/v1/chat/completions`
+- `/v1/responses`
+- `/v1/messages`
 
-1. `LLM_TRACKER_API_URL`
-2. `LLM_TRACKER_BACKEND_URL`
-3. `~/.llm-tracker/config.yaml` 中的 `server.host` 和 `server.api_port`
-4. `http://localhost:4001`
+对于 streaming response，proxy 会把 TTFT 记录为第一个 upstream chunk 到达前的时间。
 
-前端特定的配置请参见 [frontend/README.md](frontend/README.md)。
+## Tracking 覆盖范围
 
-## 跟踪覆盖范围
-
-| 指标 | Gemini CLI | Claude Code | Codex | 直接代理 |
+| 指标 | Gemini CLI | Claude Code | Codex | Direct proxy |
 | --- | --- | --- | --- | --- |
-| 输入 token | OTLP | OTLP | OTLP | 响应 usage |
-| 输出 token | OTLP | OTLP | OTLP | 响应 usage |
-| 缓存读取 token | OTLP | OTLP | OTLP | 响应 usage |
-| 缓存写入 token | 不可用 | OTLP | 不可用 | 不可用 |
-| 推理 token | OTLP | 不可用 | OTLP | 响应 usage |
-| 工具 token | OTLP | 不可用 | OTLP | 不可用 |
-| 提示词长度 | OTLP | OTLP | OTLP | 不可用 |
-| 延迟 | Hook/OTLP | OTLP | OTLP | 代理计时 |
-| TTFT | Hook | 不可用 | OTLP | 仅流式 |
-| 会话 ID | OTLP | OTLP | OTLP | 不可用 |
+| Input tokens | OTLP | OTLP | OTLP | Response usage |
+| Output tokens | OTLP | OTLP | OTLP | Response usage |
+| Cached tokens read | OTLP | OTLP | OTLP | Response usage |
+| Cached tokens write | 不可用 | OTLP | 不可用 | 不可用 |
+| Reasoning tokens | OTLP | 不可用 | OTLP | Response usage |
+| Tool tokens | OTLP | 不可用 | OTLP | 不可用 |
+| Prompt length | OTLP | OTLP | OTLP | 不可用 |
+| Latency | Hook/OTLP | OTLP | OTLP | Proxy timing |
+| TTFT | Hook | 不可用 | OTLP | Streaming only |
+| Session ID | OTLP | OTLP | OTLP | 不可用 |
 
-TTFT 应作为运维参考指标，而非计费级精确指标。每个代理暴露的计时数据各不相同。
+TTFT 是运维参考指标，不是 billing-grade 指标。每个 Agent 暴露的 timing 数据不一样。
 
-## API 接口
+## API
 
-常用本地端点：
+常用本地 endpoints：
 
 ```bash
 curl http://127.0.0.1:4001/usage?limit=20
 curl http://127.0.0.1:4001/usage/summary
 curl http://127.0.0.1:4001/usage/daily
 curl http://127.0.0.1:4001/usage/high-watermark
+curl http://127.0.0.1:4001/config
+curl http://127.0.0.1:4001/local/setup-health
 ```
 
-仪表盘使用相同的 API。
+`/usage` query params：`limit`、`offset`、`provider`、`model`、`since`、`until`。
+
+`/usage/daily` query params：`since`、`until`、`provider`、`model`、`granularity`、`tz_offset`。
 
 ## 开发
 
-安装并启动后端服务：
+安装/启动后端服务：
 
 ```bash
 bash scripts/start.sh
 ```
 
-运行测试：
+运行后端测试：
 
 ```bash
 ./.venv/bin/python -m pytest -q
 ```
 
-管理服务：
+运行前端测试和构建：
 
 ```bash
-bash scripts/restart.sh
-bash scripts/stop.sh
-bash scripts/status.sh
+cd frontend
+npm test
+npm run build
 ```
 
-日志写入 `logs/` 目录。Supervisor 运行时文件位于 `~/.llm-tracker/run/`。
+维护者专用 bootstrap smoke test：
 
-## 隐私说明
+```bash
+bash scripts/dev/smoke-bootstrap-container.sh
+```
 
-llm-tracker 设计为在本地运行。默认情况下，使用量存储在 `~/.llm-tracker/usage.db`。如果配置了 `db.url`，使用量数据将写入该数据库。
+这个检查会在全新的 Docker 或 Apple `container` 环境里运行 `scripts/bootstrap.sh`。它不是普通用户 setup 的一部分。
 
-代理原样转发认证头。OTLP 负载由代理自身发出；如需严格控制收集的元数据，请检查代理的遥测设置。
+## 隐私和安全说明
+
+- `llm-tracker` 设计为本地运行。
+- 使用量默认存储在 `~/.llm-tracker/usage.db`。
+- 如果配置了 `db.url`，使用量数据会写入该数据库。
+- Proxy 会原样转发 auth headers。
+- `llm-tracker` 不管理 API keys。
+- OTLP payload 由 Agent 自己发出；如果你需要严格控制 metadata，请检查 Agent telemetry settings。
+
+## 贡献
+
+欢迎 issues 和 PR。好的贡献通常包含：
+
+- 清晰的 bug report 或产品问题
+- 小而可测试的改动
+- 改 Python 行为时配 backend tests（`pytest`）
+- 改 Dashboard 行为时把 frontend tests 放到 `frontend/tests/`
+- 改命令、setup 或行为时同步更新 docs
+
+请保持示例一致：plain agent invocation 使用 `llm-tracker codex`、`llm-tracker claude` 或 `llm-tracker gemini`；只有传 `llm-tracker` 自己的 flags 时才保留 `--`。
 
 ## 开源协议
 
-MIT 许可证。详见 [LICENSE](LICENSE)。
+MIT。详见 [LICENSE](LICENSE)。
