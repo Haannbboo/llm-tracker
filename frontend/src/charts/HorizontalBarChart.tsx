@@ -1,4 +1,3 @@
-import { useState } from 'react'
 import { formatCompact, formatCost, formatRate, formatThroughput } from '../utils'
 import { t } from '../i18n/index.ts'
 
@@ -16,22 +15,23 @@ export type BarItem = {
   badgeText: string
 }
 
-type Metric = 'tokens' | 'cost' | 'throughput' | 'successRate' | 'cacheHitRate'
+export type Metric = 'tokens' | 'cost' | 'throughput' | 'successRate' | 'cacheHitRate'
 
 export function HorizontalBarChart({
   title,
   icon,
   items,
+  metric,
   maxCount = 6,
   children,
 }: {
   title: string
   icon: string
   items: BarItem[]
+  metric: Metric
   maxCount?: number
   children?: React.ReactNode
 }) {
-  const [metric, setMetric] = useState<Metric>('tokens')
   const getMetricValue = (item: BarItem) => {
     if (metric === 'tokens') return item.tokens
     if (metric === 'cost') return item.cost
@@ -51,30 +51,8 @@ export function HorizontalBarChart({
 
   return (
     <div className="widget" style={{ flex: 1 }}>
-      <div className="widget-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+      <div className="widget-header">
         <span>{icon} {title}</span>
-        <div className="tab-toggle">
-          <button
-            className={`tab-toggle-btn ${metric === 'tokens' ? 'active' : ''}`}
-            onClick={() => setMetric('tokens')}
-          >{t('Tokens')}</button>
-          <button
-            className={`tab-toggle-btn ${metric === 'cost' ? 'active' : ''}`}
-            onClick={() => setMetric('cost')}
-          >{t('Cost')}</button>
-          <button
-            className={`tab-toggle-btn ${metric === 'throughput' ? 'active' : ''}`}
-            onClick={() => setMetric('throughput')}
-          >{t('Speed')}</button>
-          <button
-            className={`tab-toggle-btn ${metric === 'successRate' ? 'active' : ''}`}
-            onClick={() => setMetric('successRate')}
-          >{t('Success')}</button>
-          <button
-            className={`tab-toggle-btn ${metric === 'cacheHitRate' ? 'active' : ''}`}
-            onClick={() => setMetric('cacheHitRate')}
-          >{t('Cache')}</button>
-        </div>
       </div>
       <div style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
         {sorted.length === 0 ? (
@@ -111,7 +89,7 @@ export function HorizontalBarChart({
                 </div>
                 <div className="progress-track" style={{ width: '100%', display: 'flex' }}>
                   <div
-                    style={{ width: `${percentage}%`, height: '100%', background: s.color }}
+                    style={{ width: `${percentage}%`, height: '100%', background: s.color, transition: 'width 0.5s cubic-bezier(0.4, 0, 0.2, 1)' }}
                   />
                 </div>
               </div>

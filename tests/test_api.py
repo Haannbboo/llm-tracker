@@ -529,3 +529,77 @@ def test_connectivity_endpoint_deduplicates_url(api_module, monkeypatch):
     )
 
     assert captured["url"] == "https://api.openai.com/v1/chat/completions"
+
+
+def test_daily_by_dimension_returns_per_model_data(api_module, monkeypatch):
+    """GET /usage/daily-by-dimension returns daily data grouped by model."""
+    captured = {}
+
+    def fake_daily_by_dimension(**kwargs):
+        captured.update(kwargs)
+        return [
+            {
+                "dimension": "claude-sonnet-4-6",
+                "period": "2026-05-07",
+                "total_tokens": 1000,
+                "total_cost_usd": 0.01,
+                "requests": 1,
+                "completion_tokens": 400,
+                "latency_sum_ms": 500,
+                "successful_requests": 1,
+                "failed_requests": 0,
+            }
+        ]
+
+    monkeypatch.setattr(
+        api_module, "aggregate_daily_by_dimension", fake_daily_by_dimension
+    )
+
+    response = TestClient(api_module.app).get(
+        "/usage/daily-by-dimension",
+        params={
+            "dimension": "model",
+            "since": "2026-05-07T00:00:00Z",
+            "until": "2026-05-08T00:00:00Z",
+        },
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert len(data) >= 1
+    assert data[0]["dimension"] == "claude-sonnet-4-6"
+    assert "period" in data[0]
+    assert "total_tokens" in data[0]
+
+
+def test_daily_by_dimension_endpoint_passes_all_filters(api_module, monkeypatch):
+    """GET /usage/daily-by-dimension passes all filter params to the database function."""
+    captured = {}
+
+    def fake_daily_by_dimension(**kwargs):
+        captured.update(kwargs)
+        return []
+
+    monkeypatch.setattr(
+        api_module, "aggregate_daily_by_dimension", fake_daily_by_dimension
+    )
+
+    response = TestClient(api_module.app).get(
+        "/usage/daily-by-dimension",
+        params={
+            "dimension": "provider",
+            "since": "2026-05-01T00:00:00Z",
+            "until": "2026-05-08T00:00:00Z",
+            "provider": "anthropic",
+            "model": "claude-sonnet-4-6",
+            "client_source": "claude-code",
+        },
+    )
+    assert response.status_code == 200
+    assert captured == {
+        "dimension": "provider",
+        "since": "2026-05-01T00:00:00Z",
+        "until": "2026-05-08T00:00:00Z",
+        "provider": "anthropic",
+        "model": "claude-sonnet-4-6",
+        "client_source": "claude-code",
+    }

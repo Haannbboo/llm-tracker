@@ -16,6 +16,7 @@ from config.app import (
 from .costs import calculate_costs
 from .database import (
     Usage,
+    aggregate_daily_by_dimension,
     aggregate_daily_by_period,
     aggregate_usage_by_period,
     count_usage,
@@ -280,6 +281,25 @@ async def usage_daily(
             tz_offset=tz_offset,
         )
     return aggregate_daily_by_period(
+        since=since,
+        until=until,
+        provider=provider,
+        model=model,
+        client_source=client_source,
+    )
+
+
+@app.get("/usage/daily-by-dimension")
+async def usage_daily_by_dimension(
+    dimension: str = "model",
+    since: str | None = None,
+    until: str | None = None,
+    provider: str | None = None,
+    model: str | None = None,
+    client_source: str | None = None,
+):
+    return aggregate_daily_by_dimension(
+        dimension=dimension,
         since=since,
         until=until,
         provider=provider,

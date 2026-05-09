@@ -4,15 +4,13 @@ import yaml from 'js-yaml'
 import './App.css'
 import { toggleTheme, getTheme } from './theme'
 import { getModelBadgeBackgroundColor, getModelTextColor } from './model-badge'
-import type { ActiveFilter, DailyUsage, DateRangeOption, ProviderUsage, SourceUsage, UsageRow, UsageSummary } from './types'
+import type { ActiveFilter, DailyUsage, DateRangeOption, UsageRow, UsageSummary } from './types'
 import { formatCompact, formatCost, formatLatency, formatNumber, formatRate, formatTime, FIXED_PROVIDER_COLORS, getProviderColor, getSinceDate, getTimezoneOffset, getModelIcon, PALETTE, value } from './utils'
 import { Sparkline } from './Sparkline'
 import { ModelSelector } from './ModelSelector'
 import { TrendChart } from './charts/TrendChart'
 import { CacheHitRateChart } from './charts/CacheHitRateChart'
-import { ModelTokenChart } from './charts/ModelTokenChart'
-import { ProviderTokenChart } from './charts/ProviderTokenChart'
-import { SourceTokenChart } from './charts/SourceTokenChart'
+import { TopUsageChart } from './charts/TopUsageChart'
 import { DailyHeatmap } from './charts/DailyHeatmap'
 import { t, useLang } from './i18n/index.ts'
 import { useCountUp } from './useCountUp'
@@ -112,8 +110,6 @@ function App() {
   const [activeFilter, setActiveFilter] = useState<ActiveFilter>(null)
   const [activeSource, setActiveSource] = useState<string | null>(null)
   const [sources, setSources] = useState<string[]>([])
-  const [sourceUsage, setSourceUsage] = useState<SourceUsage[]>([])
-  const [providerUsage, setProviderUsage] = useState<ProviderUsage[]>([])
   const [heatmapData, setHeatmapData] = useState<DailyUsage[]>([])
   const [dateRange, setDateRange] = useState<DateRangeOption>('24h')
   const [customSince, setCustomSince] = useState('')
@@ -272,30 +268,24 @@ function App() {
         }
         if (activeSource) heatmapUrl.searchParams.set('client_source', activeSource)
 
-        const bySourceUrl = applyFilterParams(new URL('/usage/by-source', window.location.origin))
-        const byProviderUrl = applyFilterParams(new URL('/usage/by-provider', window.location.origin))
         const totalCountUrl = new URL('/usage/count', window.location.origin)
 
         const responses = await Promise.all([
           fetch(summaryUrl.toString(), sig),
           fetch(dailyUrl.toString(), sig),
           fetch(heatmapUrl.toString(), sig),
-          fetch(bySourceUrl.toString(), sig),
-          fetch(byProviderUrl.toString(), sig),
           fetch(totalCountUrl.toString(), sig),
         ])
 
         if (responses.some(r => !r.ok)) throw new Error(t('Failed to fetch dashboard data'))
-        const [summaryData, dailyData, heatmapRaw, bySourceData, byProviderData, totalCountData] =
-          await Promise.all(responses.map(r => r.json())) as [UsageSummary[], DailyUsage[], DailyUsage[], SourceUsage[], ProviderUsage[], { total: number }]
+        const [summaryData, dailyData, heatmapRaw, totalCountData] =
+          await Promise.all(responses.map(r => r.json())) as [UsageSummary[], DailyUsage[], DailyUsage[], { total: number }]
 
         if (!isCurrentRequest()) return
 
         setSummary(summaryData)
         setDailyUsage(dailyData)
         setHeatmapData(heatmapRaw)
-        setSourceUsage(bySourceData)
-        setProviderUsage(byProviderData)
         setTotalTrackedEvents(totalCountData.total)
         dashboardHasLoadedRef.current = true
       } catch (err) {
@@ -1121,29 +1111,7 @@ function App() {
                 </div>
               </div>
 
-              <div style={{ display: 'flex', gap: '24px', alignItems: 'stretch' }}>
-                <div style={{ flex: 1 }}>
-                  <ModelTokenChart
-                    summary={summary}
-                    title={t('Top Models')}
-                    theme={theme}
-                  />
-                </div>
-                <div style={{ flex: 1 }}>
-                  <ProviderTokenChart
-                    data={providerUsage}
-                    title={t('Top Providers')}
-                    theme={theme}
-                  />
-                </div>
-                <div style={{ flex: 1 }}>
-                  <SourceTokenChart
-                    data={sourceUsage}
-                    title={t('Top Sources')}
-                    theme={theme}
-                  />
-                </div>
-              </div>
+              <TopUsageChart summary={summary} theme={theme} />
 
               <div className="content-grid">
 

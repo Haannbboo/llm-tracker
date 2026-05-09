@@ -1893,3 +1893,107 @@ def test_aggregate_usage_by_period_hourly_negative_tz_offset(
     assert result[0]["period"] == "2026-05-04 22:00"
     assert result[0]["requests"] == 1
     assert result[0]["total_tokens"] == 20
+
+
+def test_aggregate_daily_by_dimension_groups_by_model(database_module, isolated_home):
+    """aggregate_daily_by_dimension returns daily data grouped by model."""
+    db_path = str(isolated_home / "usage.db")
+    database_module.init_db(db_path)
+
+    # Insert test data across 2 days for 2 models
+    for ts, provider, model, tokens, cost in [
+        ("2026-05-07T10:00:00+00:00", "anthropic", "claude-sonnet-4-6", 1000, 0.01),
+        ("2026-05-08T10:00:00+00:00", "anthropic", "claude-sonnet-4-6", 2000, 0.02),
+        ("2026-05-07T10:00:00+00:00", "openai", "gpt-4o", 500, 0.005),
+    ]:
+        database_module.log_usage(
+            database_module.Usage(
+                ts=ts,
+                provider=provider,
+                model=model,
+                client_source=None,
+                session_id=None,
+                endpoint="/v1/messages",
+                prompt_tokens=tokens // 2,
+                completion_tokens=tokens // 2,
+                reasoning_tokens=None,
+                cached_tokens=None,
+                total_tokens=tokens,
+                latency_ms=500,
+                ttft_ms=None,
+                tool_tokens=None,
+                cache_creation_tokens=None,
+                input_cost_usd=cost / 2,
+                output_cost_usd=cost / 2,
+                total_cost_usd=cost,
+                status=200,
+                base_url_id=None,
+            ),
+            db_path=db_path,
+        )
+
+    result = database_module.aggregate_daily_by_dimension(
+        dimension="model",
+        since="2026-05-07T00:00:00Z",
+        until="2026-05-09T00:00:00Z",
+    )
+
+    # Should have 3 entries: claude-sonnet-4-6 on 05-07, claude-sonnet-4-6 on 05-08, gpt-4o on 05-07
+    assert len(result) == 3
+    by_model_and_date = {(r["dimension"], r["period"]): r for r in result}
+    assert (
+        by_model_and_date[("claude-sonnet-4-6", "2026-05-07")]["total_tokens"] == 1000
+    )
+    assert (
+        by_model_and_date[("claude-sonnet-4-6", "2026-05-08")]["total_tokens"] == 2000
+    )
+    assert by_model_and_date[("gpt-4o", "2026-05-07")]["total_tokens"] == 500
+
+
+def test_aggregate_daily_by_dimension_groups_by_provider(
+    database_module, isolated_home
+):
+    """aggregate_daily_by_dimension returns daily data grouped by provider."""
+    db_path = str(isolated_home / "usage.db")
+    database_module.init_db(db_path)
+
+    for ts, provider, model, tokens, cost in [
+        ("2026-05-07T10:00:00+00:00", "anthropic", "claude-sonnet-4-6", 1000, 0.01),
+        ("2026-05-07T10:00:00+00:00", "openai", "gpt-4o", 500, 0.005),
+    ]:
+        database_module.log_usage(
+            database_module.Usage(
+                ts=ts,
+                provider=provider,
+                model=model,
+                client_source=None,
+                session_id=None,
+                endpoint="/v1/messages",
+                prompt_tokens=tokens // 2,
+                completion_tokens=tokens // 2,
+                reasoning_tokens=None,
+                cached_tokens=None,
+                total_tokens=tokens,
+                latency_ms=300,
+                ttft_ms=None,
+                tool_tokens=None,
+                cache_creation_tokens=None,
+                input_cost_usd=cost / 2,
+                output_cost_usd=cost / 2,
+                total_cost_usd=cost,
+                status=200,
+                base_url_id=None,
+            ),
+            db_path=db_path,
+        )
+
+    result = database_module.aggregate_daily_by_dimension(
+        dimension="provider",
+        since="2026-05-07T00:00:00Z",
+        until="2026-05-08T00:00:00Z",
+    )
+
+    assert len(result) == 2
+    by_provider = {r["dimension"]: r for r in result}
+    assert by_provider["anthropic"]["total_tokens"] == 1000
+    assert by_provider["openai"]["total_tokens"] == 500

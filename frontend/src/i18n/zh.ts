@@ -48,6 +48,11 @@ export const zh: Record<string, string> = {
   'Top Providers': '热门供应商',
   'Top Sources': '热门来源',
 
+  // Chart labels
+  'Top': '热门',
+  'Trend': '趋势',
+  'Insufficient data': '数据不足',
+
   // Chart legend labels
   'Input': '输入',
   'Cached': '缓存',

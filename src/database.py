@@ -1202,3 +1202,53 @@ def aggregate_daily_by_period(
         query = query.where(and_(*filters))
     with get_engine().connect() as connection:
         return [_row_to_dict(row) for row in connection.execute(query)]
+
+
+def aggregate_daily_by_dimension(
+    *,
+    dimension: str,
+    since: str | None = None,
+    until: str | None = None,
+    provider: str | None = None,
+    model: str | None = None,
+    client_source: str | None = None,
+) -> list[dict[str, Any]]:
+    """Read daily-bucketed usage grouped by a dimension (model/provider/client_source)."""
+    filters: list[Any] = []
+    if since:
+        filters.append(UsageDaily.date >= since[:10])
+    if until:
+        filters.append(UsageDaily.date <= until[:10])
+    if provider:
+        filters.append(UsageDaily.provider == provider)
+    if model:
+        filters.append(UsageDaily.model == model)
+    if client_source:
+        filters.append(UsageDaily.client_source == (client_source or ""))
+
+    if dimension == "provider":
+        dim_col = UsageDaily.provider
+    elif dimension == "client_source":
+        dim_col = UsageDaily.client_source
+    else:
+        dim_col = UsageDaily.model
+
+    query = (
+        select(
+            dim_col.label("dimension"),
+            UsageDaily.date.label("period"),
+            func.sum(UsageDaily.request_count).label("requests"),
+            func.sum(UsageDaily.total_tokens).label("total_tokens"),
+            func.sum(UsageDaily.total_cost_usd).label("total_cost_usd"),
+            func.sum(UsageDaily.completion_tokens).label("completion_tokens"),
+            func.sum(UsageDaily.latency_sum_ms).label("latency_sum_ms"),
+            func.sum(UsageDaily.successful_requests).label("successful_requests"),
+            func.sum(UsageDaily.failed_requests).label("failed_requests"),
+        )
+        .group_by(dim_col, UsageDaily.date)
+        .order_by(UsageDaily.date)
+    )
+    if filters:
+        query = query.where(and_(*filters))
+    with get_engine().connect() as connection:
+        return [_row_to_dict(row) for row in connection.execute(query)]
