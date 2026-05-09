@@ -10,12 +10,13 @@ export type BarItem = {
   throughput?: number | null
   pricePerMillion?: number | null
   successRate?: number | null
+  cacheHitRate?: number | null
   color: string
   badgeBg: string
   badgeText: string
 }
 
-type Metric = 'tokens' | 'cost' | 'throughput' | 'successRate'
+type Metric = 'tokens' | 'cost' | 'throughput' | 'successRate' | 'cacheHitRate'
 
 export function HorizontalBarChart({
   title,
@@ -35,6 +36,7 @@ export function HorizontalBarChart({
     if (metric === 'tokens') return item.tokens
     if (metric === 'cost') return item.cost
     if (metric === 'successRate') return item.successRate ?? 100
+    if (metric === 'cacheHitRate') return item.cacheHitRate ?? 0
     return item.throughput ?? 0
   }
 
@@ -68,6 +70,10 @@ export function HorizontalBarChart({
             className={`tab-toggle-btn ${metric === 'successRate' ? 'active' : ''}`}
             onClick={() => setMetric('successRate')}
           >{t('Success')}</button>
+          <button
+            className={`tab-toggle-btn ${metric === 'cacheHitRate' ? 'active' : ''}`}
+            onClick={() => setMetric('cacheHitRate')}
+          >{t('Cache')}</button>
         </div>
       </div>
       <div style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
@@ -94,7 +100,7 @@ export function HorizontalBarChart({
                   </div>
                   <div style={{ display: 'flex', alignItems: 'baseline', gap: '6px' }}>
                     <span style={{ color: 'var(--text-secondary)', fontWeight: 700 }}>
-                      {metric === 'tokens' ? formatCompact(currentVal) : metric === 'cost' ? formatCost(currentVal, 2) : metric === 'successRate' ? `${currentVal.toFixed(1)}%` : formatThroughput(currentVal)}
+                      {metric === 'tokens' ? formatCompact(currentVal) : metric === 'cost' ? formatCost(currentVal, 2) : metric === 'successRate' || metric === 'cacheHitRate' ? `${currentVal.toFixed(1)}%` : formatThroughput(currentVal)}
                     </span>
                     {metric === 'cost' && s.pricePerMillion != null && (
                       <span style={{ fontSize: '10px', color: 'var(--text-muted)' }}>

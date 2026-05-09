@@ -59,6 +59,7 @@ export const zh: Record<string, string> = {
   'Throughput': '吞吐量',
   'Speed': '速度',
   'Success': '成功率',
+  'Cache': '缓存',
 
   // Chart messages
   'No trend data available': '暂无趋势数据',

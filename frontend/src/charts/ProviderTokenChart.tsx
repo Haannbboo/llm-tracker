@@ -29,6 +29,8 @@ export function ProviderTokenChart({
       const latency = s.latency_sum_ms ?? 0
       const successful = s.successful_requests ?? 0
       const total = successful + (s.failed_requests ?? 0)
+      const cached = s.cached_tokens ?? 0
+      const prompt = s.prompt_tokens ?? 0
       return {
         name: s.provider,
         icon: getProviderIcon(s.provider, theme),
@@ -38,6 +40,7 @@ export function ProviderTokenChart({
         pricePerMillion: s.avg_effective_price_per_million_usd
           ?? (tokens > 0 ? (cost / tokens) * 1_000_000 : null),
         successRate: total > 0 ? (successful / total) * 100 : 100,
+        cacheHitRate: prompt > 0 ? (cached / prompt) * 100 : 0,
         color: providerColors[s.provider.toLowerCase()] || PALETTE[i % PALETTE.length],
         badgeBg: getProviderBadgeBg(s.provider, theme),
         badgeText: getProviderBadgeText(s.provider, theme),
