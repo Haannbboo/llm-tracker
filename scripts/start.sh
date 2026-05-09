@@ -27,7 +27,14 @@ if [[ ! -L "${HOME}/.local/bin/llm-tracker" ]]; then
 fi
 
 # Install deps when requirements.txt changes
-CURRENT_HASH="$(shasum -a 256 "${ROOT_DIR}/requirements.txt" | awk '{print $1}')"
+if command -v shasum >/dev/null 2>&1; then
+  CURRENT_HASH="$(shasum -a 256 "${ROOT_DIR}/requirements.txt" | awk '{print $1}')"
+elif command -v sha256sum >/dev/null 2>&1; then
+  CURRENT_HASH="$(sha256sum "${ROOT_DIR}/requirements.txt" | awk '{print $1}')"
+else
+  # Fallback to a less robust but likely available method if both are missing
+  CURRENT_HASH="$(ls -l "${ROOT_DIR}/requirements.txt" | awk '{print $5 "_" $9}')"
+fi
 SAVED_HASH="$(cat "${REQS_STAMP}" 2>/dev/null || true)"
 if [[ "${CURRENT_HASH}" != "${SAVED_HASH}" ]]; then
   echo "==> Installing dependencies..."

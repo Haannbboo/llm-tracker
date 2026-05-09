@@ -31,9 +31,24 @@ uv pip install --python "${VENV_DIR}/bin/python" -r "${ROOT_DIR}/requirements.tx
 # 4. Build frontend
 FRONTEND_DIR="${ROOT_DIR}/frontend"
 if command -v node >/dev/null 2>&1 && command -v npm >/dev/null 2>&1; then
-  if [[ -d "${FRONTEND_DIR}" ]]; then
-    echo "==> Building frontend..."
-    (cd "${FRONTEND_DIR}" && npm install --ignore-scripts 2>&1 | tail -1 && npm run build 2>&1 | tail -3)
+  NODE_VERSION=$(node -v | cut -d'v' -f2)
+  NODE_MAJOR=$(echo "$NODE_VERSION" | cut -d'.' -f1)
+  
+  if [[ "$NODE_MAJOR" -lt 18 ]]; then
+    echo ""
+    echo "⚠️  Node.js version $NODE_VERSION is too old (minimum v18 required)."
+    echo "   Skipping frontend build. Dashboard will not be available."
+    echo ""
+  elif [[ -d "${FRONTEND_DIR}" ]]; then
+    echo "==> Building frontend (Node $NODE_VERSION)..."
+    if ! (cd "${FRONTEND_DIR}" && npm install --ignore-scripts && npm run build); then
+      echo ""
+      echo "❌ Frontend build failed."
+      echo "   If you see 'Cannot find native binding', try cleaning the frontend directory and retrying:"
+      echo "     rm -rf frontend/node_modules frontend/package-lock.json && bash scripts/bootstrap.sh"
+      echo ""
+      exit 1
+    fi
     echo "==> Frontend built: ${FRONTEND_DIR}/dist"
   fi
 else
