@@ -15,35 +15,69 @@ def resolve_otlp_logs_endpoint(otlp_port: str) -> str:
 
 def update_existing_otel_config(content: str, endpoint: str) -> str:
     """Update Codex OTLP endpoint in inline or nested TOML config shapes."""
-    inline_content = re.sub(
-        r"(exporter\s*=\s*\{\s*otlp-http\s*=\s*\{\s*)[^\}]+(\}\s*\})",
-        rf'\g<1>endpoint = "{endpoint}", protocol = "json" \g<2>',
-        content,
-    )
-    if inline_content != content:
-        return inline_content
-
+    # 1. Look for explicit [otel.exporter.otlp-http] block first
+    # This is more specific and should be prioritized if it exists.
     section = re.search(
         r"(?ms)(^\[otel\.exporter\.otlp-http\]\s*)(.*?)(?=^\[|\Z)",
         content,
     )
-    if section is None:
-        return (
-            content.rstrip()
-            + f'\n\n[otel.exporter.otlp-http]\nendpoint = "{endpoint}"\nprotocol = "json"\n'
-        )
+    if section:
+        body = section.group(2)
+        if re.search(r"(?m)^endpoint\s*=", body):
+            updated_body = re.sub(
+                r"(?m)^endpoint\s*=.*$",
+                f'endpoint = "{endpoint}"',
+                body,
+                count=1,
+            )
+        else:
+            updated_body = f'endpoint = "{endpoint}"\n' + body
+        return content[: section.start(2)] + updated_body + content[section.end(2) :]
 
-    body = section.group(2)
-    if re.search(r"(?m)^endpoint\s*=", body):
-        updated_body = re.sub(
-            r"(?m)^endpoint\s*=.*$",
-            f'endpoint = "{endpoint}"',
-            body,
-            count=1,
-        )
-    else:
-        updated_body = f'endpoint = "{endpoint}"\n' + body
-    return content[: section.start(2)] + updated_body + content[section.end(2) :]
+    # 2. Look for a block starting with [otel]
+    otel_match = re.search(r"(?ms)^\[otel\](.*?)(?=^\[|\Z)", content)
+    if otel_match:
+        otel_block = otel_match.group(1)
+        # Check if exporter is defined within this [otel] block
+        exporter_match = re.search(r"(?m)^\s*exporter\s*=\s*(.*)", otel_block)
+        if exporter_match:
+            exporter_line = exporter_match.group(0)
+            # Update endpoint in the exporter line (handles both inline and complex values)
+            if "endpoint" in exporter_line:
+                new_exporter_line = re.sub(
+                    r'(endpoint\s*=\s*")[^"]+(")',
+                    rf"\g<1>{endpoint}\g<2>",
+                    exporter_line,
+                )
+                if new_exporter_line != exporter_line:
+                    return content.replace(exporter_line, new_exporter_line)
+                return content
+            else:
+                # Exporter exists but no endpoint key (e.g. inline table)
+                if exporter_match.group(1).strip().startswith("{"):
+                    new_exporter_val = exporter_match.group(1).strip()
+                    # Add endpoint before the last closing brace
+                    new_exporter_val = re.sub(
+                        r"\}\s*\}$",
+                        rf', endpoint = "{endpoint}", protocol = "json" }} }}',
+                        new_exporter_val,
+                    )
+                    return content.replace(exporter_match.group(1), new_exporter_val)
+
+        # If [otel] exists but no exporter found so far, check if we have any other [otel.exporter...] sections
+        if not re.search(r"^\[otel\.exporter", content, re.M):
+            # No existing exporter anywhere, add it safely inside the [otel] block
+            new_otel_block = (
+                otel_match.group(0).rstrip()
+                + f'\nexporter = {{ otlp-http = {{ endpoint = "{endpoint}", protocol = "json" }} }}\n'
+            )
+            return content.replace(otel_match.group(0), new_otel_block)
+
+    # 3. Nothing found, append new section
+    return (
+        content.rstrip()
+        + f'\n\n[otel]\nenvironment = "dev"\nexporter = {{ otlp-http = {{ endpoint = "{endpoint}", protocol = "json" }} }}\n'
+    )
 
 
 def main():
@@ -66,20 +100,12 @@ def main():
 
     endpoint = resolve_otlp_logs_endpoint(otlp_port)
 
-    if "[otel]" not in content:
-        new_section = f'\n[otel]\nenvironment = "dev"\nexporter = {{ otlp-http = {{ endpoint = "{endpoint}", protocol = "json" }} }}\n'
-        with open(config_path, "a", encoding="utf-8") as f:
-            f.write(new_section)
-        print(f"==> Codex OTLP telemetry configured in {config_path}")
+    new_content = update_existing_otel_config(content, endpoint)
+    if new_content != content:
+        config_path.write_text(new_content, encoding="utf-8")
+        print(f"==> Codex OTLP telemetry updated to {endpoint} in {config_path}")
     else:
-        new_content = update_existing_otel_config(content, endpoint)
-        if new_content != content:
-            config_path.write_text(new_content, encoding="utf-8")
-            print(
-                f"==> Codex OTLP telemetry endpoint updated to {endpoint} in {config_path}"
-            )
-        else:
-            print(f"==> Codex OTLP telemetry already up-to-date in {config_path}")
+        print(f"==> Codex OTLP telemetry already up-to-date in {config_path}")
 
     return 0
 
