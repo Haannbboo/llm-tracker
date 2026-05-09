@@ -1,11 +1,14 @@
 import { useMemo } from 'react'
 import type { Metric } from './HorizontalBarChart'
 import { t } from '../i18n/index.ts'
+import { Sparkline } from '../Sparkline'
 
 type DailyDimensionData = {
   dimension: string
   period: string
   total_tokens: number | null
+  prompt_tokens: number | null
+  cached_tokens: number | null
   total_cost_usd: number | null
   completion_tokens: number | null
   latency_sum_ms: number | null
@@ -26,6 +29,10 @@ function getMetricValue(row: DailyDimensionData, metric: Metric): number {
   if (metric === 'throughput') {
     const latency = row.latency_sum_ms ?? 0
     return latency > 0 ? ((row.completion_tokens ?? 0) * 1000) / latency : 0
+  }
+  if (metric === 'cacheHitRate') {
+    const prompt = row.prompt_tokens ?? 0
+    return prompt > 0 ? ((row.cached_tokens ?? 0) / prompt) * 100 : 0
   }
   // successRate
   const total = (row.successful_requests ?? 0) + (row.failed_requests ?? 0)
@@ -90,7 +97,7 @@ function SparklineRow({ item }: { item: SparklineItem }) {
 
   if (data.length < 2) {
     return (
-      <div>
+      <div style={{ padding: '4px 0' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
           <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{name}</span>
           <span style={{ fontSize: '10px', color: 'var(--text-muted)' }}>—</span>
@@ -101,18 +108,6 @@ function SparklineRow({ item }: { item: SparklineItem }) {
       </div>
     )
   }
-
-  const height = 24
-  const w = 100
-  const max = Math.max(...data, 0.001)
-  const min = Math.min(...data, 0)
-  const range = max - min || 1
-
-  const points = data.map((v, i) => {
-    const x = (i / (data.length - 1)) * w
-    const y = height - ((v - min) / range) * (height - 4) - 2
-    return `${x},${y}`
-  }).join(' ')
 
   const changeColor = Math.abs(changePercent) < 1
     ? 'var(--text-muted)'
@@ -125,31 +120,12 @@ function SparklineRow({ item }: { item: SparklineItem }) {
     : `${changePercent > 0 ? '+' : ''}${changePercent.toFixed(0)}%`
 
   return (
-    <div>
+    <div style={{ padding: '4px 0' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
         <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{name}</span>
         <span style={{ fontSize: '10px', color: changeColor, fontWeight: 600 }}>{changeText}</span>
       </div>
-      <svg viewBox={`0 0 ${w} ${height}`} style={{ width: '100%', height, display: 'block' }} preserveAspectRatio="none">
-        <defs>
-          <linearGradient id={`gradient-${name}`} x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor={color} stopOpacity={0.15} />
-            <stop offset="100%" stopColor={color} stopOpacity={0} />
-          </linearGradient>
-        </defs>
-        <polygon
-          fill={`url(#gradient-${name})`}
-          points={`${points} ${w},${height} 0,${height}`}
-        />
-        <polyline
-          points={points}
-          fill="none"
-          stroke={color}
-          strokeWidth="1.5"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        />
-      </svg>
+      <Sparkline data={data} color={color} height={24} />
     </div>
   )
 }

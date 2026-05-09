@@ -1238,6 +1238,8 @@ def aggregate_daily_by_dimension(
             dim_col.label("dimension"),
             UsageDaily.date.label("period"),
             func.sum(UsageDaily.request_count).label("requests"),
+            func.sum(UsageDaily.prompt_tokens).label("prompt_tokens"),
+            func.sum(UsageDaily.cached_tokens).label("cached_tokens"),
             func.sum(UsageDaily.total_tokens).label("total_tokens"),
             func.sum(UsageDaily.total_cost_usd).label("total_cost_usd"),
             func.sum(UsageDaily.completion_tokens).label("completion_tokens"),
