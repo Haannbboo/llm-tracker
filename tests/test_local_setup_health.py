@@ -73,6 +73,134 @@ api_key = "super-secret"
     assert "token" not in response.text.lower()
 
 
+def test_local_setup_health_accepts_codex_otlp_http_enabled(api_module, isolated_home):
+    codex_dir = isolated_home / ".codex"
+    codex_dir.mkdir()
+    codex_dir.joinpath("config.toml").write_text(
+        """[otel]
+environment = "dev"
+[otel.exporter]
+[otel.exporter.otlp-http]
+endpoint = "http://localhost:4002/v1/logs"
+enabled = true
+api_key = "super-secret"
+""",
+        encoding="utf-8",
+    )
+
+    response = TestClient(api_module.app).get("/local/setup-health")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["summary"]["configured_agents"] == 1
+    assert data["summary"]["matching_agents"] == 1
+    assert data["agents"]["codex"]["configured"] is True
+    assert data["agents"]["codex"]["endpoint_matches"] is True
+    assert (
+        data["agents"]["codex"]["configured_endpoint"]
+        == "http://localhost:4002/v1/logs"
+    )
+    assert "super-secret" not in response.text
+    assert "api_key" not in response.text.lower()
+
+
+def test_local_setup_health_accepts_codex_endpoint_only_otlp_http_config(
+    api_module, isolated_home
+):
+    codex_dir = isolated_home / ".codex"
+    codex_dir.mkdir()
+    codex_dir.joinpath("config.toml").write_text(
+        """[otel]
+environment = "dev"
+
+[otel.exporter]
+[otel.exporter.otlp-http]
+endpoint = "http://localhost:4002/v1/logs"
+protocol = "json"
+
+[plugins."superpowers@openai-curated"]
+enabled = true
+""",
+        encoding="utf-8",
+    )
+
+    response = TestClient(api_module.app).get("/local/setup-health")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["summary"]["configured_agents"] == 1
+    assert data["summary"]["matching_agents"] == 1
+    assert data["agents"]["codex"]["configured"] is True
+    assert data["agents"]["codex"]["endpoint_matches"] is True
+    assert (
+        data["agents"]["codex"]["configured_endpoint"]
+        == "http://localhost:4002/v1/logs"
+    )
+
+
+def test_local_setup_health_rejects_codex_otel_explicit_false(
+    api_module, isolated_home
+):
+    codex_dir = isolated_home / ".codex"
+    codex_dir.mkdir()
+    codex_dir.joinpath("config.toml").write_text(
+        """[otel]
+enabled = false
+
+[otel.exporter.otlp-http]
+endpoint = "http://localhost:4002/v1/logs"
+protocol = "json"
+""",
+        encoding="utf-8",
+    )
+
+    response = TestClient(api_module.app).get("/local/setup-health")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["summary"]["configured_agents"] == 0
+    assert data["summary"]["matching_agents"] == 0
+    assert data["agents"]["codex"]["configured"] is False
+    assert data["agents"]["codex"]["endpoint_matches"] is False
+    assert (
+        data["agents"]["codex"]["configured_endpoint"]
+        == "http://localhost:4002/v1/logs"
+    )
+    assert data["agents"]["codex"]["status"] == "missing_config"
+
+
+def test_local_setup_health_rejects_codex_otlp_http_explicit_false(
+    api_module, isolated_home
+):
+    codex_dir = isolated_home / ".codex"
+    codex_dir.mkdir()
+    codex_dir.joinpath("config.toml").write_text(
+        """[otel]
+environment = "dev"
+
+[otel.exporter.otlp-http]
+enabled = false
+endpoint = "http://localhost:4002/v1/logs"
+protocol = "json"
+""",
+        encoding="utf-8",
+    )
+
+    response = TestClient(api_module.app).get("/local/setup-health")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["summary"]["configured_agents"] == 0
+    assert data["summary"]["matching_agents"] == 0
+    assert data["agents"]["codex"]["configured"] is False
+    assert data["agents"]["codex"]["endpoint_matches"] is False
+    assert (
+        data["agents"]["codex"]["configured_endpoint"]
+        == "http://localhost:4002/v1/logs"
+    )
+    assert data["agents"]["codex"]["status"] == "missing_config"
+
+
 def test_local_setup_health_handles_missing_agent_configs(api_module):
     response = TestClient(api_module.app).get("/local/setup-health")
 

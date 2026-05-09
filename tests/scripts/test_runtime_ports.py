@@ -256,6 +256,280 @@ def test_check_service_ports_strict_mode_reports_only_blocking_issues():
     assert "if not output_issues:" in source
 
 
+def test_start_and_restart_configure_agent_otlp_only_when_cli_is_installed():
+    repo_root = __import__("pathlib").Path(__file__).resolve().parents[2]
+    start_script = (repo_root / "scripts" / "start.sh").read_text(encoding="utf-8")
+    restart_script = (repo_root / "scripts" / "restart.sh").read_text(encoding="utf-8")
+
+    for script in (start_script, restart_script):
+        assert "command -v codex >/dev/null 2>&1" in script
+        assert "command -v gemini >/dev/null 2>&1" in script
+        assert "command -v claude >/dev/null 2>&1" in script
+        assert 'if [[ -f "${CODEX_CONFIG}" ]]' not in script
+        assert 'if [[ -d "${HOME}/.claude" ]]' not in script
+        assert (
+            'if command -v gemini >/dev/null 2>&1; then\n  bash "${ROOT_DIR}/scripts/setup-gemini.sh" "${OTLP_PORT}"'
+            in script
+        )
+
+
+def test_start_configures_only_installed_agent_clis_under_isolated_home(tmp_path):
+    """Regression: start.sh must configure only installed agent CLIs under HOME.
+
+    This simulates a fresh user HOME with fake Codex/Claude on PATH but no Gemini,
+    proving bootstrap/start won't pollute the real HOME or create configs for
+    agents that are not installed.
+    """
+    import os
+    import shutil
+    import subprocess
+    import sys
+    import textwrap
+
+    repo_root = __import__("pathlib").Path(__file__).resolve().parents[2]
+    fake_repo = tmp_path / "repo"
+    shutil.copytree(
+        repo_root,
+        fake_repo,
+        ignore=shutil.ignore_patterns(
+            ".git",
+            ".venv",
+            "logs",
+            "frontend/node_modules",
+            ".pytest_cache",
+            "__pycache__",
+        ),
+    )
+
+    home = tmp_path / "home"
+    fake_bin = tmp_path / "fake-bin"
+    venv_bin = fake_repo / ".venv" / "bin"
+    home.mkdir()
+    fake_bin.mkdir()
+    venv_bin.mkdir(parents=True)
+    (home / ".local" / "bin").mkdir(parents=True)
+    (home / ".local" / "bin" / "llm-tracker").symlink_to(
+        fake_repo / "scripts" / "start.sh"
+    )
+    (home / ".codex").mkdir()
+
+    for agent in ("codex", "claude"):
+        agent_path = fake_bin / agent
+        agent_path.write_text("#!/usr/bin/env sh\nexit 0\n", encoding="utf-8")
+        agent_path.chmod(0o755)
+
+    python_wrapper = venv_bin / "python"
+    python_wrapper.write_text(
+        textwrap.dedent(
+            f"""
+            #!/usr/bin/env bash
+            set -euo pipefail
+            case "${{1:-}}" in
+              */sync-config.py|*/check-service-ports.py|*/migrate_schema.py)
+                exit 0
+                ;;
+              */auto-assign-ports.py)
+                exit 0
+                ;;
+              -c)
+                printf '4002\\n'
+                exit 0
+                ;;
+            esac
+            exec {sys.executable!s} "$@"
+            """
+        ).strip()
+        + "\n",
+        encoding="utf-8",
+    )
+    python_wrapper.chmod(0o755)
+
+    for name in ("supervisord", "supervisorctl"):
+        stub = venv_bin / name
+        stub.write_text("#!/usr/bin/env sh\nexit 0\n", encoding="utf-8")
+        stub.chmod(0o755)
+
+    (fake_repo / ".venv" / ".requirements.sha256").write_text(
+        __import__("hashlib")
+        .sha256((fake_repo / "requirements.txt").read_bytes())
+        .hexdigest()
+        + "\n",
+        encoding="utf-8",
+    )
+
+    env = {
+        **os.environ,
+        "HOME": str(home),
+        "PATH": f"{fake_bin}{os.pathsep}/bin{os.pathsep}/usr/bin",
+        "PYTHONPATH": str(fake_repo),
+    }
+    result = subprocess.run(
+        ["/bin/bash", str(fake_repo / "scripts" / "start.sh")],
+        cwd=fake_repo,
+        env=env,
+        text=True,
+        capture_output=True,
+        timeout=20,
+    )
+
+    output = result.stdout + result.stderr
+    assert result.returncode == 0, output
+
+    codex_config = home / ".codex" / "config.toml"
+    claude_settings = home / ".claude" / "settings.json"
+    gemini_settings = home / ".gemini" / "settings.json"
+    assert codex_config.is_file()
+    assert 'endpoint = "http://localhost:4002/v1/logs"' in codex_config.read_text(
+        encoding="utf-8"
+    )
+    assert claude_settings.is_file()
+    assert "http://localhost:4002/v1/logs" in claude_settings.read_text(
+        encoding="utf-8"
+    )
+    assert not gemini_settings.exists()
+
+    real_home = __import__("pathlib").Path(os.environ["HOME"]).resolve()
+    created_agent_configs = [codex_config.resolve(), claude_settings.resolve()]
+    for config_path in created_agent_configs:
+        assert home.resolve() in config_path.parents
+        assert real_home not in config_path.parents
+
+    assert not (home / ".gemini").exists()
+
+
+def test_start_configures_agents_with_reassigned_otlp_port_after_auto_assign(tmp_path):
+    """Regression: fresh-config auto-port assignment must feed agent OTLP config."""
+    import os
+    import shutil
+    import subprocess
+    import sys
+    import textwrap
+
+    repo_root = __import__("pathlib").Path(__file__).resolve().parents[2]
+    fake_repo = tmp_path / "repo"
+    shutil.copytree(
+        repo_root,
+        fake_repo,
+        ignore=shutil.ignore_patterns(
+            ".git",
+            ".venv",
+            "logs",
+            "frontend/node_modules",
+            ".pytest_cache",
+            "__pycache__",
+        ),
+    )
+
+    home = tmp_path / "home"
+    fake_bin = tmp_path / "fake-bin"
+    venv_bin = fake_repo / ".venv" / "bin"
+    home.mkdir()
+    fake_bin.mkdir()
+    venv_bin.mkdir(parents=True)
+    (home / ".local" / "bin").mkdir(parents=True)
+    (home / ".local" / "bin" / "llm-tracker").symlink_to(
+        fake_repo / "scripts" / "start.sh"
+    )
+
+    (home / ".codex").mkdir()
+
+    for agent in ("codex", "claude", "gemini"):
+        agent_path = fake_bin / agent
+        agent_path.write_text("#!/usr/bin/env sh\nexit 0\n", encoding="utf-8")
+        agent_path.chmod(0o755)
+
+    python_wrapper = venv_bin / "python"
+    python_wrapper.write_text(
+        textwrap.dedent(
+            f"""
+            #!/usr/bin/env bash
+            set -euo pipefail
+            case "${{1:-}}" in
+              */sync-config.py|*/migrate_schema.py)
+                exit 0
+                ;;
+              */check-service-ports.py)
+                if [[ ! -f "${{HOME}}/.llm-tracker/.port-check-failed" ]]; then
+                  mkdir -p "${{HOME}}/.llm-tracker"
+                  touch "${{HOME}}/.llm-tracker/.port-check-failed"
+                  echo "defaults busy" >&2
+                  exit 1
+                fi
+                exit 0
+                ;;
+              */auto-assign-ports.py)
+                exec {sys.executable!s} - "$@" <<'PY'
+import pathlib
+import sys
+import yaml
+config = pathlib.Path(sys.argv[sys.argv.index("--config") + 1])
+data = yaml.safe_load(config.read_text(encoding="utf-8")) or {{}}
+data.setdefault("server", {{}})["otlp_port"] = 49153
+config.write_text(yaml.safe_dump(data), encoding="utf-8")
+PY
+                ;;
+              -c)
+                exec {sys.executable!s} "$@"
+                ;;
+            esac
+            exec {sys.executable!s} "$@"
+            """
+        ).strip()
+        + "\n",
+        encoding="utf-8",
+    )
+    python_wrapper.chmod(0o755)
+
+    for name in ("supervisord", "supervisorctl"):
+        stub = venv_bin / name
+        stub.write_text("#!/usr/bin/env sh\nexit 0\n", encoding="utf-8")
+        stub.chmod(0o755)
+
+    (fake_repo / ".venv" / ".requirements.sha256").write_text(
+        __import__("hashlib")
+        .sha256((fake_repo / "requirements.txt").read_bytes())
+        .hexdigest()
+        + "\n",
+        encoding="utf-8",
+    )
+
+    env = {
+        **os.environ,
+        "HOME": str(home),
+        "PATH": f"{fake_bin}{os.pathsep}/bin{os.pathsep}/usr/bin",
+        "PYTHONPATH": str(fake_repo),
+    }
+    result = subprocess.run(
+        ["/bin/bash", str(fake_repo / "scripts" / "start.sh")],
+        cwd=fake_repo,
+        env=env,
+        text=True,
+        capture_output=True,
+        timeout=20,
+    )
+
+    output = result.stdout + result.stderr
+    assert result.returncode == 0, output
+
+    codex_config = home / ".codex" / "config.toml"
+    assert codex_config.is_file()
+    assert 'endpoint = "http://localhost:49153/v1/logs"' in codex_config.read_text(
+        encoding="utf-8"
+    )
+    assert 'endpoint = "http://localhost:4002/v1/logs"' not in codex_config.read_text(
+        encoding="utf-8"
+    )
+
+    claude_settings = home / ".claude" / "settings.json"
+    gemini_settings = home / ".gemini" / "settings.json"
+    assert claude_settings.is_file()
+    assert "http://localhost:49153/v1/logs" in claude_settings.read_text(
+        encoding="utf-8"
+    )
+    assert gemini_settings.is_file()
+    assert "http://localhost:49153" in gemini_settings.read_text(encoding="utf-8")
+
+
 def test_start_and_restart_check_port_conflicts_before_migrations():
     repo_root = __import__("pathlib").Path(__file__).resolve().parents[2]
     start_script = (repo_root / "scripts" / "start.sh").read_text(encoding="utf-8")

@@ -3,11 +3,11 @@
 # Each invocation gets its own ephemeral DB (copied from main), free ports, and
 # independent processes. Multiple worktrees can run concurrently.
 #
-# Usage: ./scripts/dev-start.sh
-# Stop:  ./scripts/dev-stop.sh
+# Usage: ./scripts/dev/dev-start.sh
+# Stop:  ./scripts/dev/dev-stop.sh
 set -euo pipefail
 
-ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 STATE_FILE="${ROOT_DIR}/.dev-env.json"
 MAIN_DB="${HOME}/.llm-tracker/usage.db"
 VENV_DIR="${ROOT_DIR}/.venv"
@@ -135,7 +135,7 @@ echo "    API:      http://127.0.0.1:${API_PORT}"
 echo "    Frontend: http://localhost:${VITE_PORT}"
 echo "    DB copy:  ${DB_PATH}"
 echo ""
-echo "    Stop with: ./scripts/dev-stop.sh"
+echo "    Stop with: ./scripts/dev/dev-stop.sh"
 echo ""
 
 # Wait for background processes (trap handles cleanup)

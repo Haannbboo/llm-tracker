@@ -886,6 +886,17 @@ def test_run_command_maps_signal_return_code(cli_module, monkeypatch):
     assert code == 143
 
 
+def test_dev_scripts_live_under_scripts_dev():
+    from pathlib import Path
+
+    scripts_dir = Path(__file__).resolve().parents[1] / "scripts"
+
+    assert not (scripts_dir / "dev-start.sh").exists()
+    assert not (scripts_dir / "dev-stop.sh").exists()
+    assert (scripts_dir / "dev" / "dev-start.sh").exists()
+    assert (scripts_dir / "dev" / "dev-stop.sh").exists()
+
+
 def test_llm_tracker_script_exists_and_invokes_cli():
     from pathlib import Path
 
@@ -896,6 +907,28 @@ def test_llm_tracker_script_exists_and_invokes_cli():
     assert "python" in content
     assert "-m" in content
     assert "src.cli" in content
+
+
+def test_llm_tracker_script_supports_bootstrap_subcommand():
+    from pathlib import Path
+
+    script = Path(__file__).resolve().parents[1] / "scripts" / "llm-tracker"
+    content = script.read_text(encoding="utf-8")
+
+    assert "bootstrap)" in content
+    assert 'exec bash "${SCRIPTS_DIR}/bootstrap.sh" "$@"' in content
+
+
+def test_install_symlinks_llm_tracker_cli_into_user_local_bin():
+    from pathlib import Path
+
+    install_script = Path(__file__).resolve().parents[1] / "scripts" / "install.sh"
+    content = install_script.read_text(encoding="utf-8")
+
+    assert 'BIN_DIR="${HOME}/.local/bin"' in content
+    assert 'CLI_LINK="${BIN_DIR}/llm-tracker"' in content
+    assert 'CLI_SOURCE="${ROOT_DIR}/scripts/llm-tracker"' in content
+    assert 'ln -sf "${CLI_SOURCE}" "${CLI_LINK}"' in content
 
 
 def test_llm_tracker_script_invokes_cli_outside_repo_root(tmp_path):

@@ -436,7 +436,7 @@ def _read_toml_file(path: Path) -> dict:
 def _agent_health(
     configured: bool, configured_endpoint: str | None, expected_endpoint: str
 ) -> dict:
-    endpoint_matches = configured_endpoint == expected_endpoint
+    endpoint_matches = configured and configured_endpoint == expected_endpoint
     if not configured:
         status = "missing_config"
     elif endpoint_matches:
@@ -486,9 +486,10 @@ async def get_local_setup_health():
         else {}
     )
     codex_endpoint = codex_otlp_http.get("endpoint")
-    codex_configured = codex_otel.get("enabled") is True and isinstance(
-        codex_endpoint, str
+    codex_disabled = (
+        codex_otel.get("enabled") is False or codex_otlp_http.get("enabled") is False
     )
+    codex_configured = not codex_disabled and isinstance(codex_endpoint, str)
 
     gemini_settings = _read_json_file(home / ".gemini" / "settings.json")
     gemini_telemetry = (

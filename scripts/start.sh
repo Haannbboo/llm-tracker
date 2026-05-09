@@ -50,6 +50,8 @@ fi
 
 "${PYTHON}" "${ROOT_DIR}/scripts/sync-config.py" "${CONFIG_PATH}" "${ROOT_DIR}/config.example.yaml"
 
+OTLP_PORT=$("${PYTHON}" -c "import yaml; from pathlib import Path; p = Path('${CONFIG_PATH}'); c = yaml.safe_load(p.read_text()) or {}; print(c.get('server', {}).get('otlp_port', 4002))" 2>/dev/null || echo "4002")
+
 if ! PORT_CHECK_OUTPUT="$("${PYTHON}" "${PORT_CHECKER}" \
   --strict \
   --config "${CONFIG_PATH}" \
@@ -68,20 +70,21 @@ if ! PORT_CHECK_OUTPUT="$("${PYTHON}" "${PORT_CHECKER}" \
   fi
 fi
 
-# Configure Codex OTLP telemetry if Codex is installed
 OTLP_PORT=$("${PYTHON}" -c "import yaml; from pathlib import Path; p = Path('${CONFIG_PATH}'); c = yaml.safe_load(p.read_text()) or {}; print(c.get('server', {}).get('otlp_port', 4002))" 2>/dev/null || echo "4002")
 
-CODEX_CONFIG="${HOME}/.codex/config.toml"
-if [[ -f "${CODEX_CONFIG}" ]]; then
+# Configure agent OTLP telemetry only for locally installed CLIs.
+# Re-running bootstrap after installing a new agent configures that agent then.
+if command -v codex >/dev/null 2>&1; then
+  CODEX_CONFIG="${HOME}/.codex/config.toml"
   "${PYTHON}" "${ROOT_DIR}/scripts/configure-codex-settings.py" "${CODEX_CONFIG}" "${OTLP_PORT}"
 fi
 
-# Install Gemini CLI hook and configure OTLP telemetry
-bash "${ROOT_DIR}/scripts/setup-gemini.sh" "${OTLP_PORT}"
+if command -v gemini >/dev/null 2>&1; then
+  bash "${ROOT_DIR}/scripts/setup-gemini.sh" "${OTLP_PORT}"
+fi
 
-# Configure Claude Code telemetry if Claude is installed
-CLAUDE_SETTINGS="${HOME}/.claude/settings.json"
-if [[ -d "${HOME}/.claude" ]]; then
+if command -v claude >/dev/null 2>&1; then
+  CLAUDE_SETTINGS="${HOME}/.claude/settings.json"
   "${PYTHON}" "${ROOT_DIR}/scripts/configure-claude-settings.py" "${CLAUDE_SETTINGS}" "${OTLP_PORT}"
 fi
 

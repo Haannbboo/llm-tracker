@@ -10,6 +10,7 @@ ROOT_DIR="$(cd "$(dirname "$SCRIPT_PATH")/.." && pwd)"
 SCRIPTS_DIR="${ROOT_DIR}/scripts"
 
 case "${1:-}" in
+  bootstrap) shift; exec bash "${SCRIPTS_DIR}/bootstrap.sh" "$@" ;;
   start)   shift; exec bash "${SCRIPTS_DIR}/start.sh" "$@" ;;
   stop)    shift; exec bash "${SCRIPTS_DIR}/stop.sh" "$@" ;;
   restart) shift; exec bash "${SCRIPTS_DIR}/restart.sh" "$@" ;;

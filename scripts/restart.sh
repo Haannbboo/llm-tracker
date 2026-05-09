@@ -66,17 +66,18 @@ if ! "${PYTHON}" "${PORT_CHECKER}" \
   exit 1
 fi
 
-# Update Codex OTLP telemetry if Codex is installed
-CODEX_CONFIG="${HOME}/.codex/config.toml"
-if [[ -f "${CODEX_CONFIG}" ]]; then
+# Configure agent OTLP telemetry only for locally installed CLIs.
+# Re-running restart/bootstrap after installing a new agent configures that agent then.
+if command -v codex >/dev/null 2>&1; then
+  CODEX_CONFIG="${HOME}/.codex/config.toml"
   "${PYTHON}" "${ROOT_DIR}/scripts/configure-codex-settings.py" "${CODEX_CONFIG}" "${OTLP_PORT}"
 fi
 
-# Refresh Gemini CLI hook and configure OTLP telemetry
-bash "${ROOT_DIR}/scripts/setup-gemini.sh" "${OTLP_PORT}"
+if command -v gemini >/dev/null 2>&1; then
+  bash "${ROOT_DIR}/scripts/setup-gemini.sh" "${OTLP_PORT}"
+fi
 
-# Configure Claude Code telemetry if Claude is installed
-if [[ -d "${HOME}/.claude" ]]; then
+if command -v claude >/dev/null 2>&1; then
   "${PYTHON}" "${ROOT_DIR}/scripts/configure-claude-settings.py" "${HOME}/.claude/settings.json" "${OTLP_PORT}"
 fi
 

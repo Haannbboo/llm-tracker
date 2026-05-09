@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# Stop an isolated dev environment started by dev-start.sh.
-# Usage: ./scripts/dev-stop.sh
+# Stop an isolated dev environment started by scripts/dev/dev-start.sh.
+# Usage: ./scripts/dev/dev-stop.sh
 set -euo pipefail
 
-ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 STATE_FILE="${ROOT_DIR}/.dev-env.json"
 
 if [[ ! -f "${STATE_FILE}" ]]; then
