@@ -603,3 +603,105 @@ def test_daily_by_dimension_endpoint_passes_all_filters(api_module, monkeypatch)
         "model": "claude-sonnet-4-6",
         "client_source": "claude-code",
     }
+
+
+def test_sessions_endpoint_exists(api_module):
+    assert hasattr(api_module, "get_sessions")
+    assert callable(api_module.get_sessions)
+
+
+def test_sessions_endpoint_passes_filters(api_module, monkeypatch):
+    captured = {}
+
+    def fake_fetch(**kwargs):
+        captured.update(kwargs)
+        return []
+
+    def fake_count(**kwargs):
+        return 0
+
+    monkeypatch.setattr(api_module, "fetch_sessions", fake_fetch)
+    monkeypatch.setattr(api_module, "count_sessions", fake_count)
+
+    response = TestClient(api_module.app).get(
+        "/sessions",
+        params={
+            "client_source": "claude-code",
+            "since": "2026-05-01T00:00:00Z",
+            "until": "2026-05-10T00:00:00Z",
+            "sort_by": "total_cost_usd",
+            "sort_order": "asc",
+            "limit": "25",
+            "offset": "10",
+        },
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert "sessions" in data
+    assert "total" in data
+    assert captured["client_source"] == "claude-code"
+    assert captured["since"] == "2026-05-01T00:00:00Z"
+    assert captured["sort_by"] == "total_cost_usd"
+    assert captured["sort_order"] == "asc"
+    assert captured["limit"] == 25
+    assert captured["offset"] == 10
+
+
+def test_sessions_summary_endpoint_passes_filters(api_module, monkeypatch):
+    captured = {}
+
+    def fake_summary(**kwargs):
+        captured.update(kwargs)
+        return {
+            "session_count": 3,
+            "avg_duration_s": 120,
+            "total_tokens": 5000,
+            "total_cost_usd": 0.05,
+            "avg_latency_ms": 250.0,
+        }
+
+    monkeypatch.setattr(api_module, "summarize_sessions", fake_summary)
+
+    response = TestClient(api_module.app).get(
+        "/sessions/summary",
+        params={"client_source": "gemini-cli"},
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["session_count"] == 3
+    assert data["total_tokens"] == 5000
+    assert captured["client_source"] == "gemini-cli"
+
+
+def test_usage_endpoint_passes_session_id(api_module, monkeypatch):
+    captured = {}
+
+    def fake_fetch(**kwargs):
+        captured.update(kwargs)
+        return []
+
+    monkeypatch.setattr(api_module, "fetch_recent_usage", fake_fetch)
+
+    response = TestClient(api_module.app).get(
+        "/usage", params={"session_id": "sess-123", "limit": "10"}
+    )
+    assert response.status_code == 200
+    assert captured["session_id"] == "sess-123"
+
+
+def test_usage_count_endpoint_passes_session_id(api_module, monkeypatch):
+    captured = {}
+
+    def fake_count(**kwargs):
+        captured.update(kwargs)
+        return 3
+
+    monkeypatch.setattr(api_module, "count_usage", fake_count)
+
+    response = TestClient(api_module.app).get(
+        "/usage/count", params={"session_id": "sess-123"}
+    )
+    assert response.status_code == 200
+    assert captured["session_id"] == "sess-123"

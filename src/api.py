@@ -19,13 +19,16 @@ from .database import (
     aggregate_daily_by_dimension,
     aggregate_daily_by_period,
     aggregate_usage_by_period,
+    count_sessions,
     count_usage,
     distinct_client_sources,
     fetch_recent_usage,
+    fetch_sessions,
     get_usage_high_watermark,
     init_db,
     log_usage,
     resolve_base_url_id,
+    summarize_sessions,
     summarize_usage_by_provider,
     summarize_usage_by_source,
     summarize_usage_daily,
@@ -89,6 +92,7 @@ async def get_usage(
     provider: str | None = None,
     model: str | None = None,
     client_source: str | None = None,
+    session_id: str | None = None,
     since: str | None = None,
     until: str | None = None,
 ):
@@ -98,6 +102,7 @@ async def get_usage(
         provider=provider,
         model=model,
         client_source=client_source,
+        session_id=session_id,
         since=since,
         until=until,
     )
@@ -157,6 +162,7 @@ async def get_usage_count(
     provider: str | None = None,
     model: str | None = None,
     client_source: str | None = None,
+    session_id: str | None = None,
     since: str | None = None,
     until: str | None = None,
 ):
@@ -165,6 +171,7 @@ async def get_usage_count(
             provider=provider,
             model=model,
             client_source=client_source,
+            session_id=session_id,
             since=since,
             until=until,
         )
@@ -305,6 +312,46 @@ async def usage_daily_by_dimension(
         provider=provider,
         model=model,
         client_source=client_source,
+    )
+
+
+@app.get("/sessions")
+async def get_sessions(
+    client_source: str | None = None,
+    since: str | None = None,
+    until: str | None = None,
+    sort_by: str = "ended",
+    sort_order: str = "desc",
+    limit: int = 50,
+    offset: int = 0,
+):
+    sessions = fetch_sessions(
+        client_source=client_source,
+        since=since,
+        until=until,
+        sort_by=sort_by,
+        sort_order=sort_order,
+        limit=limit,
+        offset=offset,
+    )
+    total = count_sessions(
+        client_source=client_source,
+        since=since,
+        until=until,
+    )
+    return {"sessions": sessions, "total": total}
+
+
+@app.get("/sessions/summary")
+async def get_sessions_summary(
+    client_source: str | None = None,
+    since: str | None = None,
+    until: str | None = None,
+):
+    return summarize_sessions(
+        client_source=client_source,
+        since=since,
+        until=until,
     )
 
 

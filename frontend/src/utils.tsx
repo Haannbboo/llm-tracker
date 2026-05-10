@@ -25,6 +25,17 @@ export function value(input: number | null | undefined) {
   return input ?? 0
 }
 
+export function timeAgo(iso: string): string {
+  const seconds = Math.floor((Date.now() - new Date(iso).getTime()) / 1000)
+  if (seconds < 60) return 'just now'
+  const minutes = Math.floor(seconds / 60)
+  if (minutes < 60) return `${minutes}m ago`
+  const hours = Math.floor(minutes / 60)
+  if (hours < 24) return `${hours}h ago`
+  const days = Math.floor(hours / 24)
+  return `${days}d ago`
+}
+
 export function formatNumber(input: number | null | undefined) {
   return numberFormatter.format(value(input))
 }
@@ -49,6 +60,17 @@ export function formatRate(input: number | null | undefined) {
 export function formatLatency(input: number | null | undefined) {
   const latency = value(input)
   return latency >= 1000 ? `${(latency / 1000).toFixed(2)}s` : `${Math.round(latency)}ms`
+}
+
+export function formatDuration(seconds: number | null | undefined): string {
+  const s = value(seconds)
+  if (s < 60) return `${s}s`
+  const m = Math.floor(s / 60)
+  const rem = s % 60
+  if (m < 60) return rem > 0 ? `${m}m ${rem}s` : `${m}m`
+  const h = Math.floor(m / 60)
+  const remM = m % 60
+  return remM > 0 ? `${h}h ${remM}m` : `${h}h`
 }
 
 export function formatThroughput(val: number | null | undefined): string {

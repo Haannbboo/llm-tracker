@@ -520,6 +520,7 @@ def _usage_filters(
     provider: str | None = None,
     model: str | None = None,
     client_source: str | None = None,
+    session_id: str | None = None,
     since: str | None = None,
     until: str | None = None,
 ) -> list[Any]:
@@ -530,6 +531,8 @@ def _usage_filters(
         filters.append(Usage.model == model)
     if client_source:
         filters.append(Usage.client_source == client_source)
+    if session_id:
+        filters.append(Usage.session_id == session_id)
     if since:
         filters.append(Usage.ts >= since)
     if until:
@@ -544,6 +547,7 @@ def fetch_recent_usage(
     provider: str | None = None,
     model: str | None = None,
     client_source: str | None = None,
+    session_id: str | None = None,
     since: str | None = None,
     until: str | None = None,
     db_path: str | None = None,
@@ -553,6 +557,7 @@ def fetch_recent_usage(
         provider=provider,
         model=model,
         client_source=client_source,
+        session_id=session_id,
         since=since,
         until=until,
     )
@@ -622,10 +627,33 @@ def count_usage(
     provider: str | None = None,
     model: str | None = None,
     client_source: str | None = None,
+    session_id: str | None = None,
     since: str | None = None,
     until: str | None = None,
+    db_path: str | None = None,
 ) -> int:
-    """Sum request_count from usage_daily matching the optional filters."""
+    """Sum request_count from usage_daily matching the optional filters.
+
+    When *session_id* is set the daily-aggregate table cannot help (it has no
+    session_id column), so we fall back to counting rows in the raw ``usage``
+    table instead.
+    """
+    if session_id is not None:
+        filters = _usage_filters(
+            provider=provider,
+            model=model,
+            client_source=client_source,
+            session_id=session_id,
+            since=since,
+            until=until,
+        )
+        query = select(func.count()).select_from(Usage)
+        if filters:
+            query = query.where(and_(*filters))
+        with get_engine(db_path).connect() as connection:
+            result = connection.execute(query).scalar_one()
+            return int(result or 0)
+
     filters: list[Any] = []
     if since:
         filters.append(UsageDaily.date >= since[:10])
@@ -640,9 +668,256 @@ def count_usage(
     query = select(func.sum(UsageDaily.request_count))
     if filters:
         query = query.where(and_(*filters))
-    with get_engine().connect() as connection:
+    with get_engine(db_path).connect() as connection:
         result = connection.execute(query).scalar_one()
         return int(result or 0)
+
+
+# Allowed sort columns for fetch_sessions (maps frontend names to SQL expressions)
+# SQL-sortable columns. duration_s is excluded because date arithmetic
+# is vendor-specific; it is sorted in Python after the query.
+_SESSION_SORT_COLUMNS = {
+    "session_id": Usage.session_id,
+    "client_source": Usage.client_source,
+    "started": func.min(Usage.ts),
+    "ended": func.max(Usage.ts),
+    "request_count": func.count(),
+    "total_tokens": func.sum(Usage.total_tokens),
+    "total_cost_usd": func.sum(Usage.total_cost_usd),
+    "avg_latency_ms": func.avg(Usage.latency_ms),
+    "avg_ttft_ms": func.avg(Usage.ttft_ms),
+}
+
+
+def _compute_duration_s(started: str | None, ended: str | None) -> int:
+    """Compute duration in seconds from ISO timestamps."""
+    if not started or not ended:
+        return 0
+    try:
+        fmt = "%Y-%m-%dT%H:%M:%S"
+        start = datetime.strptime(started[:19], fmt)
+        end = datetime.strptime(ended[:19], fmt)
+        return max(0, int((end - start).total_seconds()))
+    except (ValueError, TypeError):
+        return 0
+
+
+def fetch_sessions(
+    *,
+    client_source: str | None = None,
+    since: str | None = None,
+    until: str | None = None,
+    sort_by: str = "ended",
+    sort_order: str = "desc",
+    limit: int = 50,
+    offset: int = 0,
+    db_path: str | None = None,
+) -> list[dict[str, Any]]:
+    """Return sessions aggregated from the usage table."""
+    filters: list[Any] = [
+        Usage.session_id.isnot(None),
+        Usage.session_id != "",
+    ]
+    if client_source:
+        filters.append(Usage.client_source == client_source)
+    if since:
+        filters.append(Usage.ts >= since)
+    if until:
+        filters.append(Usage.ts <= until)
+
+    sort_col = _SESSION_SORT_COLUMNS.get(sort_by)
+    # duration_s is sorted in Python after the query (vendor-specific date math)
+    python_sort = sort_by == "duration_s"
+    if sort_col is not None:
+        order = sort_col.asc() if sort_order == "asc" else sort_col.desc()
+    else:
+        order = func.max(Usage.ts).desc()  # default fallback
+
+    # For duration_s sorting we need all rows first, then sort+paginate in Python.
+    # For SQL-sortable columns we can sort+paginate in SQL.
+    if python_sort:
+        query = (
+            select(
+                Usage.session_id,
+                func.min(Usage.client_source).label("client_source"),
+                func.min(Usage.ts).label("started"),
+                func.max(Usage.ts).label("ended"),
+                func.count().label("request_count"),
+                func.sum(Usage.total_tokens).label("total_tokens"),
+                func.sum(Usage.prompt_tokens).label("prompt_tokens"),
+                func.sum(Usage.completion_tokens).label("completion_tokens"),
+                func.sum(Usage.cached_tokens).label("cached_tokens"),
+                func.sum(Usage.total_cost_usd).label("total_cost_usd"),
+                func.avg(Usage.latency_ms).label("avg_latency_ms"),
+                func.sum(Usage.latency_ms).label("latency_sum_ms"),
+                func.avg(Usage.ttft_ms).label("avg_ttft_ms"),
+                func.count(
+                    case((and_(Usage.status.isnot(None), Usage.status >= 400), 1))
+                ).label("failed_requests"),
+                func.count(
+                    case((and_(Usage.status.isnot(None), Usage.status < 400), 1))
+                ).label("successful_requests"),
+            )
+            .where(and_(*filters))
+            .group_by(Usage.session_id)
+        )
+    else:
+        query = (
+            select(
+                Usage.session_id,
+                func.min(Usage.client_source).label("client_source"),
+                func.min(Usage.ts).label("started"),
+                func.max(Usage.ts).label("ended"),
+                func.count().label("request_count"),
+                func.sum(Usage.total_tokens).label("total_tokens"),
+                func.sum(Usage.prompt_tokens).label("prompt_tokens"),
+                func.sum(Usage.completion_tokens).label("completion_tokens"),
+                func.sum(Usage.cached_tokens).label("cached_tokens"),
+                func.sum(Usage.total_cost_usd).label("total_cost_usd"),
+                func.avg(Usage.latency_ms).label("avg_latency_ms"),
+                func.sum(Usage.latency_ms).label("latency_sum_ms"),
+                func.avg(Usage.ttft_ms).label("avg_ttft_ms"),
+                func.count(
+                    case((and_(Usage.status.isnot(None), Usage.status >= 400), 1))
+                ).label("failed_requests"),
+                func.count(
+                    case((and_(Usage.status.isnot(None), Usage.status < 400), 1))
+                ).label("successful_requests"),
+            )
+            .where(and_(*filters))
+            .group_by(Usage.session_id)
+            .order_by(order)
+            .limit(limit)
+            .offset(offset)
+        )
+
+    with get_engine(db_path).connect() as connection:
+        rows = connection.execute(query).fetchall()
+
+    result = []
+    for row in rows:
+        started = row.started
+        ended = row.ended
+        result.append(
+            {
+                "session_id": row.session_id,
+                "client_source": row.client_source or "",
+                "started": started,
+                "ended": ended,
+                "duration_s": _compute_duration_s(started, ended),
+                "request_count": row.request_count,
+                "total_tokens": int(row.total_tokens or 0),
+                "prompt_tokens": int(row.prompt_tokens or 0),
+                "completion_tokens": int(row.completion_tokens or 0),
+                "cached_tokens": int(row.cached_tokens or 0),
+                "total_cost_usd": float(row.total_cost_usd or 0),
+                "avg_latency_ms": round(float(row.avg_latency_ms or 0), 1),
+                "latency_sum_ms": float(row.latency_sum_ms or 0),
+                "avg_ttft_ms": round(float(row.avg_ttft_ms or 0), 1),
+                "successful_requests": int(row.successful_requests or 0),
+                "failed_requests": int(row.failed_requests or 0),
+            }
+        )
+
+    # Python-side sort+paginate for duration_s (vendor-specific date arithmetic)
+    if python_sort:
+        result.sort(key=lambda r: r["duration_s"], reverse=(sort_order == "desc"))
+        result = result[offset : offset + limit]
+
+    return result
+
+
+def count_sessions(
+    *,
+    client_source: str | None = None,
+    since: str | None = None,
+    until: str | None = None,
+    db_path: str | None = None,
+) -> int:
+    """Count distinct sessions matching the filters."""
+    filters: list[Any] = [
+        Usage.session_id.isnot(None),
+        Usage.session_id != "",
+    ]
+    if client_source:
+        filters.append(Usage.client_source == client_source)
+    if since:
+        filters.append(Usage.ts >= since)
+    if until:
+        filters.append(Usage.ts <= until)
+
+    query = select(func.count(func.distinct(Usage.session_id))).where(and_(*filters))
+    with get_engine(db_path).connect() as connection:
+        result = connection.execute(query).scalar_one()
+        return int(result or 0)
+
+
+def summarize_sessions(
+    *,
+    client_source: str | None = None,
+    since: str | None = None,
+    until: str | None = None,
+    db_path: str | None = None,
+) -> dict[str, Any]:
+    """Return aggregate stats across all sessions matching the filters."""
+    filters: list[Any] = [
+        Usage.session_id.isnot(None),
+        Usage.session_id != "",
+    ]
+    if client_source:
+        filters.append(Usage.client_source == client_source)
+    if since:
+        filters.append(Usage.ts >= since)
+    if until:
+        filters.append(Usage.ts <= until)
+
+    # Subquery: per-session aggregates (GROUP BY session_id only --
+    # min(client_source) picks the primary source; in practice all rows
+    # in a session share the same client_source.)
+    subq = (
+        select(
+            Usage.session_id,
+            func.min(Usage.ts).label("started"),
+            func.max(Usage.ts).label("ended"),
+            func.sum(Usage.total_tokens).label("session_tokens"),
+            func.sum(Usage.total_cost_usd).label("session_cost"),
+            func.avg(Usage.latency_ms).label("session_avg_latency"),
+        )
+        .where(and_(*filters))
+        .group_by(Usage.session_id)
+        .subquery()
+    )
+
+    # Outer query computes cross-session aggregates.
+    # avg_duration_s is derived from per-session started/ended in Python
+    # because SQL date arithmetic is vendor-specific.
+    inner_query = select(subq)
+    with get_engine(db_path).connect() as connection:
+        rows = connection.execute(inner_query).fetchall()
+
+    if not rows:
+        return {
+            "session_count": 0,
+            "avg_duration_s": 0,
+            "total_tokens": 0,
+            "total_cost_usd": 0.0,
+            "avg_latency_ms": 0.0,
+        }
+
+    durations = [_compute_duration_s(r.started, r.ended) for r in rows]
+    total_tokens = sum(int(r.session_tokens or 0) for r in rows)
+    total_cost = sum(float(r.session_cost or 0) for r in rows)
+    latencies = [float(r.session_avg_latency or 0) for r in rows]
+
+    return {
+        "session_count": len(rows),
+        "avg_duration_s": round(sum(durations) / len(durations)) if durations else 0,
+        "total_tokens": total_tokens,
+        "total_cost_usd": total_cost,
+        "avg_latency_ms": round(sum(latencies) / len(latencies), 1)
+        if latencies
+        else 0.0,
+    }
 
 
 def get_usage_high_watermark(*, db_path: str | None = None) -> int:

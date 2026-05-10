@@ -294,4 +294,21 @@ export const zh: Record<string, string> = {
   'Prompt Length': '提示词长度',
   'chars': '字符',
   'Total Tokens': '总 Token',
+
+  // Sessions tab
+  'Sessions': '会话',
+  'Total Sessions': '总会话数',
+  'Avg Duration': '平均时长',
+  'Session': '会话',
+  'Session ID': '会话 ID',
+  'All Sessions': '全部会话',
+  'Started': '开始时间',
+  'Duration': '时长',
+  'Avg TTFT': '平均 TTFT',
+  'No sessions found for the selected filters.': '未找到符合筛选条件的会话。',
+  'sessions': '条会话',
+  'Session Details': '会话详情',
+  'Models Used': '使用模型',
+  'View in Logs': '在日志中查看',
+  'Failed to fetch session data': '获取会话数据失败',
 }

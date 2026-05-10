@@ -63,6 +63,7 @@ export type UsageRow = {
   provider: string
   model: string
   client_source: string | null
+  session_id: string | null
   endpoint: string
   prompt_tokens: number | null
   prompt_length: number | null
@@ -98,3 +99,30 @@ export type DailyUsage = {
 
 export type ActiveFilter = { provider: string; model: string | null } | null
 export type DateRangeOption = '24h' | '7d' | '30d' | 'all' | 'custom'
+
+export type SessionSummary = {
+  session_id: string
+  client_source: string
+  started: string
+  ended: string
+  duration_s: number
+  request_count: number
+  total_tokens: number
+  prompt_tokens: number
+  completion_tokens: number
+  cached_tokens: number
+  total_cost_usd: number
+  avg_latency_ms: number
+  latency_sum_ms: number
+  avg_ttft_ms: number
+  successful_requests: number
+  failed_requests: number
+}
+
+export type SessionsSummary = {
+  session_count: number
+  avg_duration_s: number
+  total_tokens: number
+  total_cost_usd: number
+  avg_latency_ms: number
+}

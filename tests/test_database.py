@@ -1997,3 +1997,371 @@ def test_aggregate_daily_by_dimension_groups_by_provider(
     by_provider = {r["dimension"]: r for r in result}
     assert by_provider["anthropic"]["total_tokens"] == 1000
     assert by_provider["openai"]["total_tokens"] == 500
+
+
+def test_fetch_sessions_groups_by_session_id(database_module, isolated_home):
+    db_path = str(isolated_home / "usage.db")
+    database_module.init_db(db_path)
+
+    for i in range(3):
+        database_module.log_usage(
+            database_module.Usage(
+                ts=f"2026-05-09T10:0{i}:00+00:00",
+                provider="anthropic",
+                model="claude-sonnet-4-6",
+                client_source="claude-code",
+                session_id="sess-1",
+                endpoint="/v1/messages",
+                prompt_tokens=100,
+                completion_tokens=50,
+                total_tokens=150,
+                latency_ms=200,
+                ttft_ms=100,
+                input_cost_usd=0.001,
+                output_cost_usd=0.002,
+                total_cost_usd=0.003,
+                status=200,
+            ),
+            db_path=db_path,
+        )
+
+    database_module.log_usage(
+        database_module.Usage(
+            ts="2026-05-09T11:00:00+00:00",
+            provider="openai",
+            model="gpt-4o",
+            client_source="codex",
+            session_id="sess-2",
+            endpoint="/v1/chat/completions",
+            prompt_tokens=200,
+            completion_tokens=100,
+            total_tokens=300,
+            latency_ms=300,
+            ttft_ms=150,
+            input_cost_usd=0.005,
+            output_cost_usd=0.01,
+            total_cost_usd=0.015,
+            status=200,
+        ),
+        db_path=db_path,
+    )
+
+    result = database_module.fetch_sessions(db_path=db_path)
+    assert len(result) == 2
+    assert result[0]["session_id"] == "sess-2"
+    assert result[0]["request_count"] == 1
+    assert result[0]["total_tokens"] == 300
+    assert result[1]["session_id"] == "sess-1"
+    assert result[1]["request_count"] == 3
+    assert result[1]["total_tokens"] == 450
+
+
+def test_fetch_sessions_excludes_null_session_id(database_module, isolated_home):
+    db_path = str(isolated_home / "usage.db")
+    database_module.init_db(db_path)
+
+    database_module.log_usage(
+        database_module.Usage(
+            ts="2026-05-09T10:00:00+00:00",
+            provider="anthropic",
+            model="claude-sonnet-4-6",
+            client_source="claude-code",
+            session_id=None,
+            endpoint="/v1/messages",
+            prompt_tokens=100,
+            total_tokens=100,
+            input_cost_usd=0.001,
+            output_cost_usd=0.001,
+            total_cost_usd=0.002,
+            status=200,
+        ),
+        db_path=db_path,
+    )
+
+    result = database_module.fetch_sessions(db_path=db_path)
+    assert len(result) == 0
+
+
+def test_fetch_sessions_filters_by_client_source(database_module, isolated_home):
+    db_path = str(isolated_home / "usage.db")
+    database_module.init_db(db_path)
+
+    for source, sid in [("claude-code", "s1"), ("codex", "s2")]:
+        database_module.log_usage(
+            database_module.Usage(
+                ts="2026-05-09T10:00:00+00:00",
+                provider="anthropic",
+                model="claude-sonnet-4-6",
+                client_source=source,
+                session_id=sid,
+                endpoint="/v1/messages",
+                prompt_tokens=100,
+                total_tokens=100,
+                input_cost_usd=0.001,
+                output_cost_usd=0.001,
+                total_cost_usd=0.002,
+                status=200,
+            ),
+            db_path=db_path,
+        )
+
+    result = database_module.fetch_sessions(client_source="codex", db_path=db_path)
+    assert len(result) == 1
+    assert result[0]["session_id"] == "s2"
+
+
+def test_fetch_sessions_sorting(database_module, isolated_home):
+    db_path = str(isolated_home / "usage.db")
+    database_module.init_db(db_path)
+
+    for i, sid in enumerate(["s-low", "s-high"]):
+        database_module.log_usage(
+            database_module.Usage(
+                ts=f"2026-05-09T1{i}:00:00+00:00",
+                provider="anthropic",
+                model="claude-sonnet-4-6",
+                client_source="claude-code",
+                session_id=sid,
+                endpoint="/v1/messages",
+                prompt_tokens=100 * (i + 1),
+                total_tokens=100 * (i + 1),
+                input_cost_usd=0.001,
+                output_cost_usd=0.001,
+                total_cost_usd=0.002,
+                status=200,
+            ),
+            db_path=db_path,
+        )
+
+    result = database_module.fetch_sessions(
+        sort_by="total_tokens", sort_order="asc", db_path=db_path
+    )
+    assert result[0]["session_id"] == "s-low"
+    assert result[1]["session_id"] == "s-high"
+
+
+def test_fetch_sessions_sort_by_duration(database_module, isolated_home):
+    db_path = str(isolated_home / "usage.db")
+    database_module.init_db(db_path)
+
+    # Short session: single request
+    database_module.log_usage(
+        database_module.Usage(
+            ts="2026-05-09T10:00:00+00:00",
+            provider="anthropic",
+            model="claude-sonnet-4-6",
+            client_source="claude-code",
+            session_id="short",
+            endpoint="/v1/messages",
+            prompt_tokens=100,
+            total_tokens=100,
+            input_cost_usd=0.001,
+            output_cost_usd=0.001,
+            total_cost_usd=0.002,
+            status=200,
+        ),
+        db_path=db_path,
+    )
+
+    # Long session: spans 10 minutes
+    for i in range(2):
+        database_module.log_usage(
+            database_module.Usage(
+                ts=f"2026-05-09T10:0{i * 5}:00+00:00",
+                provider="anthropic",
+                model="claude-sonnet-4-6",
+                client_source="claude-code",
+                session_id="long",
+                endpoint="/v1/messages",
+                prompt_tokens=100,
+                total_tokens=100,
+                input_cost_usd=0.001,
+                output_cost_usd=0.001,
+                total_cost_usd=0.002,
+                status=200,
+            ),
+            db_path=db_path,
+        )
+
+    result = database_module.fetch_sessions(
+        sort_by="duration_s", sort_order="desc", db_path=db_path
+    )
+    assert result[0]["session_id"] == "long"
+    assert result[1]["session_id"] == "short"
+
+
+def test_fetch_sessions_pagination(database_module, isolated_home):
+    db_path = str(isolated_home / "usage.db")
+    database_module.init_db(db_path)
+
+    for i in range(5):
+        database_module.log_usage(
+            database_module.Usage(
+                ts=f"2026-05-09T1{i}:00:00+00:00",
+                provider="anthropic",
+                model="claude-sonnet-4-6",
+                client_source="claude-code",
+                session_id=f"s{i}",
+                endpoint="/v1/messages",
+                prompt_tokens=100,
+                total_tokens=100,
+                input_cost_usd=0.001,
+                output_cost_usd=0.001,
+                total_cost_usd=0.002,
+                status=200,
+            ),
+            db_path=db_path,
+        )
+
+    result = database_module.fetch_sessions(limit=2, offset=1, db_path=db_path)
+    assert len(result) == 2
+
+
+def test_count_sessions(database_module, isolated_home):
+    db_path = str(isolated_home / "usage.db")
+    database_module.init_db(db_path)
+
+    for sid in ["s1", "s2", "s1"]:
+        database_module.log_usage(
+            database_module.Usage(
+                ts="2026-05-09T10:00:00+00:00",
+                provider="anthropic",
+                model="claude-sonnet-4-6",
+                client_source="claude-code",
+                session_id=sid,
+                endpoint="/v1/messages",
+                prompt_tokens=100,
+                total_tokens=100,
+                input_cost_usd=0.001,
+                output_cost_usd=0.001,
+                total_cost_usd=0.002,
+                status=200,
+            ),
+            db_path=db_path,
+        )
+
+    assert database_module.count_sessions(db_path=db_path) == 2
+
+
+def test_count_usage_with_session_id(database_module, isolated_home):
+    db_path = str(isolated_home / "usage.db")
+    database_module.init_db(db_path)
+
+    for sid in ["s1", "s1", "s2"]:
+        database_module.log_usage(
+            database_module.Usage(
+                ts="2026-05-09T10:00:00+00:00",
+                provider="anthropic",
+                model="claude-sonnet-4-6",
+                client_source="claude-code",
+                session_id=sid,
+                endpoint="/v1/messages",
+                prompt_tokens=100,
+                total_tokens=100,
+                input_cost_usd=0.001,
+                output_cost_usd=0.001,
+                total_cost_usd=0.002,
+                status=200,
+            ),
+            db_path=db_path,
+        )
+
+    assert database_module.count_usage(session_id="s1", db_path=db_path) == 2
+    assert database_module.count_usage(session_id="s2", db_path=db_path) == 1
+    assert database_module.count_usage(session_id="nonexistent", db_path=db_path) == 0
+
+
+def test_count_usage_with_session_id_and_other_filters(database_module, isolated_home):
+    db_path = str(isolated_home / "usage.db")
+    database_module.init_db(db_path)
+
+    # Same session, two different providers
+    for provider in ["anthropic", "openai"]:
+        database_module.log_usage(
+            database_module.Usage(
+                ts="2026-05-09T10:00:00+00:00",
+                provider=provider,
+                model="test-model",
+                client_source="claude-code",
+                session_id="s1",
+                endpoint="/v1/messages",
+                prompt_tokens=100,
+                total_tokens=100,
+                input_cost_usd=0.001,
+                output_cost_usd=0.001,
+                total_cost_usd=0.002,
+                status=200,
+            ),
+            db_path=db_path,
+        )
+
+    # session_id + provider filter should narrow to 1
+    assert (
+        database_module.count_usage(
+            session_id="s1", provider="anthropic", db_path=db_path
+        )
+        == 1
+    )
+    # session_id + client_source filter
+    assert (
+        database_module.count_usage(
+            session_id="s1", client_source="claude-code", db_path=db_path
+        )
+        == 2
+    )
+    # session_id + mismatched provider
+    assert (
+        database_module.count_usage(session_id="s1", provider="google", db_path=db_path)
+        == 0
+    )
+
+
+def test_summarize_sessions(database_module, isolated_home):
+    db_path = str(isolated_home / "usage.db")
+    database_module.init_db(db_path)
+
+    for i in range(3):
+        database_module.log_usage(
+            database_module.Usage(
+                ts=f"2026-05-09T10:0{i}:00+00:00",
+                provider="anthropic",
+                model="claude-sonnet-4-6",
+                client_source="claude-code",
+                session_id="s1",
+                endpoint="/v1/messages",
+                prompt_tokens=100,
+                total_tokens=100,
+                latency_ms=200,
+                input_cost_usd=0.001,
+                output_cost_usd=0.001,
+                total_cost_usd=0.002,
+                status=200,
+            ),
+            db_path=db_path,
+        )
+
+    database_module.log_usage(
+        database_module.Usage(
+            ts="2026-05-09T11:00:00+00:00",
+            provider="openai",
+            model="gpt-4o",
+            client_source="codex",
+            session_id="s2",
+            endpoint="/v1/chat/completions",
+            prompt_tokens=200,
+            total_tokens=200,
+            latency_ms=300,
+            input_cost_usd=0.005,
+            output_cost_usd=0.005,
+            total_cost_usd=0.01,
+            status=200,
+        ),
+        db_path=db_path,
+    )
+
+    result = database_module.summarize_sessions(db_path=db_path)
+    assert result["session_count"] == 2
+    assert result["total_tokens"] == 500
+    assert result["total_cost_usd"] == pytest.approx(0.016)
+    # s1 spans 10:00-10:02 (120s), s2 is a single request (0s), avg = 60s
+    assert result["avg_duration_s"] == 60
