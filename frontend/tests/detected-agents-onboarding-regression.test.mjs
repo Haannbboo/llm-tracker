@@ -16,7 +16,7 @@ const detectedAgentsBlock = appSource.slice(detectedAgentsStart, detectedAgentsE
 
 const settingsStart = appSource.indexOf("{view === 'settings' && (")
 assert.notEqual(settingsStart, -1)
-const settingsEnd = appSource.indexOf("{view === 'test' && (", settingsStart)
+const settingsEnd = appSource.indexOf("</div>\n          )}", settingsStart)
 assert.notEqual(settingsEnd, -1)
 const settingsBlock = appSource.slice(settingsStart, settingsEnd)
 const settingsDetectedAgentsStart = settingsBlock.indexOf("{/* Settings detected local agents */}")

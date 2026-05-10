@@ -61,7 +61,8 @@ function CopyButton({
 }) {
   const [copied, setCopied] = useState(false)
 
-  const handleCopy = () => {
+  const handleCopy = (e: React.MouseEvent<HTMLButtonElement>) => {
+    e.stopPropagation()
     void navigator.clipboard.writeText(text)
       .then(() => {
         setCopied(true)
@@ -81,12 +82,16 @@ function CopyButton({
   )
 }
 
+function copyTextToClipboard(text: string, onCopy?: (msg: string) => void) {
+  void navigator.clipboard.writeText(text).then(() => {
+    onCopy?.('✓ Copied to clipboard')
+  })
+}
+
 function ClickToCopy({ text, children, onCopy }: { text: string, children: React.ReactNode, onCopy?: (msg: string) => void }) {
   const handleCopy = (e: React.MouseEvent) => {
     e.stopPropagation();
-    void navigator.clipboard.writeText(text).then(() => {
-      onCopy?.('✓ Copied to clipboard');
-    });
+    copyTextToClipboard(text, onCopy);
   };
 
   return (
@@ -96,8 +101,103 @@ function ClickToCopy({ text, children, onCopy }: { text: string, children: React
   );
 }
 
+function shortSessionId(id: string) {
+  return id.length > 8 ? `${id.slice(0, 8)}…` : id
+}
+
+function sessionAgentName(source: string | null | undefined) {
+  const raw = source || 'unknown'
+  return raw
+    .split(/[-_\s]+/)
+    .filter(Boolean)
+    .map(part => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(' ') || 'Unknown'
+}
+
+function sessionDisplayName(session: SessionSummary) {
+  return `${sessionAgentName(session.client_source)} session`
+}
+
+type SessionInsight = {
+  key: string
+  title: string
+  session: SessionSummary
+  value: string
+  detail: string
+  tone?: 'warning' | 'danger' | 'success'
+}
+
+function buildSessionInsights(sessions: SessionSummary[]): SessionInsight[] {
+  if (sessions.length === 0) return []
+
+  const insightSessions = [...sessions]
+  const mostExpensive = [...insightSessions].sort((a, b) => b.total_cost_usd - a.total_cost_usd)[0]
+  const slowest = [...insightSessions].sort((a, b) => b.avg_latency_ms - a.avg_latency_ms)[0]
+  const tokenBurner = [...insightSessions].sort((a, b) => b.total_tokens - a.total_tokens)[0]
+  const cacheSaver = [...insightSessions].filter(session => session.cached_tokens > 0).sort((a, b) => b.cached_tokens - a.cached_tokens)[0]
+  const reliabilityWatch = [...insightSessions].filter(session => session.failed_requests > 0).sort((a, b) => b.failed_requests - a.failed_requests)[0]
+
+  const insights: SessionInsight[] = []
+
+  if (mostExpensive && mostExpensive.total_cost_usd > 0) {
+    insights.push({
+      key: 'most-expensive',
+      title: 'Most Expensive Session',
+      session: mostExpensive,
+      value: formatCost(mostExpensive.total_cost_usd),
+      detail: `${formatNumber(mostExpensive.request_count)} requests · ${formatCompact(mostExpensive.total_tokens)} tokens`,
+    })
+  }
+
+  if (slowest && slowest.avg_latency_ms > 0) {
+    insights.push({
+      key: 'slowest',
+      title: 'Slowest Session',
+      session: slowest,
+      value: formatLatency(slowest.avg_latency_ms),
+      detail: `${formatNumber(slowest.request_count)} requests · ${formatDuration(slowest.duration_s)}`,
+      tone: slowest.avg_latency_ms >= 5000 ? 'warning' : undefined,
+    })
+  }
+
+  if (tokenBurner && tokenBurner.total_tokens > 0) {
+    insights.push({
+      key: 'token-burner',
+      title: 'Biggest Token Burner',
+      session: tokenBurner,
+      value: formatCompact(tokenBurner.total_tokens),
+      detail: `${formatCompact(tokenBurner.prompt_tokens)} in · ${formatCompact(tokenBurner.completion_tokens)} out`,
+    })
+  }
+
+  if (cacheSaver) {
+    insights.push({
+      key: 'cache-saver',
+      title: 'Best Cache Saver',
+      session: cacheSaver,
+      value: formatCompact(cacheSaver.cached_tokens),
+      detail: `${cacheSaver.prompt_tokens > 0 ? Math.round((cacheSaver.cached_tokens / cacheSaver.prompt_tokens) * 100) : 0}% cache hit estimate`,
+      tone: 'success',
+    })
+  }
+
+  if (reliabilityWatch) {
+    insights.push({
+      key: 'reliability-watch',
+      title: 'Reliability Watch',
+      session: reliabilityWatch,
+      value: `${formatNumber(reliabilityWatch.failed_requests)} ${t('failed')}`,
+      detail: `${reliabilityWatch.request_count > 0 ? Math.round((reliabilityWatch.successful_requests / reliabilityWatch.request_count) * 100) : 0}% success rate`,
+      tone: 'danger',
+    })
+  }
+
+  return insights
+}
+
 function App() {
-  const [view, setView] = useState<'dashboard' | 'logs' | 'sessions' | 'settings' | 'test'>('dashboard')
+  const [view, setView] = useState<'dashboard' | 'logs' | 'settings'>('dashboard')
+  const [dashboardTab, setDashboardTab] = useState<'overview' | 'sessions'>('overview')
   const [refreshTrigger, setRefreshTrigger] = useState(0)
   const [summary, setSummary] = useState<UsageSummary[]>([])
   const [usageRows, setUsageRows] = useState<UsageRow[]>([])
@@ -289,6 +389,10 @@ function App() {
     resetPage()
   }, [resetPage])
 
+  const sessionInsights = useMemo(() => {
+    return buildSessionInsights(sessions)
+  }, [sessions])
+
   // Dashboard: summary, daily, heatmap, by-source, by-provider (no paginated logs)
   useEffect(() => {
     if (view !== 'dashboard') return
@@ -392,7 +496,7 @@ function App() {
 
   // Sessions: aggregated session data
   useEffect(() => {
-    if (view !== 'sessions' && view !== 'logs') return
+    if (!(view === 'logs' || (view === 'dashboard' && dashboardTab === 'sessions'))) return
     const controller = new AbortController()
     const sig = { signal: controller.signal }
 
@@ -439,7 +543,7 @@ function App() {
 
     void fetchSessionsData()
     return () => controller.abort()
-  }, [view, activeSource, dateRange, customSince, customUntil, refreshTrigger, sessionSortBy, sessionSortOrder, sessionPage])
+  }, [view, dashboardTab, activeSource, dateRange, customSince, customUntil, refreshTrigger, sessionSortBy, sessionSortOrder, sessionPage])
 
   useEffect(() => {
     if (view !== 'dashboard' && view !== 'logs') return
@@ -727,14 +831,8 @@ function App() {
             <button className={`nav-item ${view === 'logs' ? 'active' : ''}`} onClick={() => setView('logs')}>
               📜 {t('Request Logs')}
             </button>
-            <button className={`nav-item ${view === 'sessions' ? 'active' : ''}`} onClick={() => setView('sessions')}>
-              🔗 {t('Sessions')}
-            </button>
             <button className={`nav-item ${view === 'settings' ? 'active' : ''}`} onClick={() => setView('settings')}>
               ⚙️ {t('Settings')}
-            </button>
-            <button className={`nav-item ${view === 'test' ? 'active' : ''}`} onClick={() => setView('test')}>
-              🔌 {t('Connectivity Test')}
             </button>
           </nav>
           <button
@@ -758,6 +856,11 @@ function App() {
         <div className="content-body">
           {view === 'dashboard' && (
             <>
+              <div className="dashboard-tabs" style={{ display: 'flex', gap: '4px', borderBottom: '1px solid var(--border-color)', marginBottom: '16px' }}>
+                <button className={`dashboard-tab ${dashboardTab === 'overview' ? 'active' : ''}`} onClick={() => setDashboardTab('overview')}>{t('Overview')}</button>
+                <button className={`dashboard-tab ${dashboardTab === 'sessions' ? 'active' : ''}`} onClick={() => setDashboardTab('sessions')}>{t('Sessions')}</button>
+              </div>
+              {dashboardTab === 'overview' && (<>
               {totalTrackedEvents !== 0 && (
               <div className="dashboard-filter-row" style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: '8px' }}>
                   <select
@@ -1223,6 +1326,456 @@ function App() {
               </div>
               </div>
               )}
+              </>
+              )}
+              {dashboardTab === 'sessions' && (
+              <div className="sessions-page">
+                {/* Summary stat cards */}
+                <div className="widgets-grid" style={{ marginBottom: '24px' }}>
+                  <div className="widget-card">
+                    <div className="widget-title">{t('Total Sessions')}</div>
+                    <div className="widget-value">{sessionsSummary ? formatNumber(sessionsSummary.session_count) : '—'}</div>
+                  </div>
+                  <div className="widget-card">
+                    <div className="widget-title">{t('Avg Duration')}</div>
+                    <div className="widget-value">{sessionsSummary ? formatDuration(sessionsSummary.avg_duration_s) : '—'}</div>
+                  </div>
+                  <div className="widget-card">
+                    <div className="widget-title">{t('Total Tokens')}</div>
+                    <div className="widget-value">{sessionsSummary ? formatCompact(sessionsSummary.total_tokens) : '—'}</div>
+                  </div>
+                  <div className="widget-card">
+                    <div className="widget-title">{t('Estimated Cost')}</div>
+                    <div className="widget-value">{sessionsSummary ? formatCost(sessionsSummary.total_cost_usd) : '—'}</div>
+                  </div>
+                  <div className="widget-card">
+                    <div className="widget-title">{t('Average Response')}</div>
+                    <div className="widget-value">{sessionsSummary ? formatLatency(sessionsSummary.avg_latency_ms) : '—'}</div>
+                  </div>
+                </div>
+
+                {sessionInsights.length > 0 && (
+                  <div className="session-insights-grid" aria-label="Session insights">
+                    {sessionInsights.map(insight => (
+                      <div key={insight.key} className={`session-insight-card${insight.tone ? ` session-insight-${insight.tone}` : ''}`}>
+                        <div className="session-insight-header">
+                          <div className="session-insight-title">{t(insight.title)}</div>
+                          <ClickToCopy text={insight.session.session_id} onCopy={showToast}>
+                            <span className="session-insight-id">{shortSessionId(insight.session.session_id)}</span>
+                          </ClickToCopy>
+                        </div>
+                        <div className="session-insight-session">{sessionDisplayName(insight.session)}</div>
+                        <div className="session-insight-value">{insight.value}</div>
+                        <div className="session-insight-detail">{insight.detail}</div>
+                        <button
+                          type="button"
+                          className="btn-ghost session-insight-action"
+                          onClick={() => handleViewInLogs(insight.session)}
+                        >
+                          {t('View in Logs')}
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {sessions.length === 0 && !sessionsLoading && (
+                  <div className="sessions-empty-state panel">
+                    <div className="sessions-empty-title">{t('No sessions yet.')}</div>
+                    <div className="sessions-empty-copy">
+                      {t('Run llm-tracker codex, llm-tracker claude, or llm-tracker gemini to create your first tracked session.')}
+                    </div>
+                  </div>
+                )}
+
+                {/* Sessions table */}
+                {(sessions.length > 0 || sessionsLoading) && (
+                <div className="panel">
+                  <div className="panel-body" style={{ padding: 0 }}>
+                    <table className="table sessions-table">
+                      <thead>
+                        <tr>
+                          <th className="sessions-col-session">
+                            {t('Session')}
+                          </th>
+                          <th>
+                            {t('Agent')}
+                          </th>
+                          <th style={{ cursor: 'pointer' }} onClick={() => handleSessionSort('started')}>
+                            {t('Started')} {sessionSortBy === 'started' ? (sessionSortOrder === 'asc' ? '↑' : '↓') : ''}
+                          </th>
+                          <th style={{ cursor: 'pointer' }} onClick={() => handleSessionSort('duration_s')}>
+                            {t('Duration')} {sessionSortBy === 'duration_s' ? (sessionSortOrder === 'asc' ? '↑' : '↓') : ''}
+                          </th>
+                          <th style={{ cursor: 'pointer' }} onClick={() => handleSessionSort('request_count')}>
+                            {t('Requests')} {sessionSortBy === 'request_count' ? (sessionSortOrder === 'asc' ? '↑' : '↓') : ''}
+                          </th>
+                          <th style={{ cursor: 'pointer' }} onClick={() => handleSessionSort('total_tokens')}>
+                            {t('Tokens')} {sessionSortBy === 'total_tokens' ? (sessionSortOrder === 'asc' ? '↑' : '↓') : ''}
+                          </th>
+                          <th style={{ cursor: 'pointer' }} onClick={() => handleSessionSort('total_cost_usd')}>
+                            {t('Cost')} {sessionSortBy === 'total_cost_usd' ? (sessionSortOrder === 'asc' ? '↑' : '↓') : ''}
+                          </th>
+                          <th style={{ cursor: 'pointer' }} onClick={() => handleSessionSort('avg_latency_ms')}>
+                            {t('Health')} {sessionSortBy === 'avg_latency_ms' ? (sessionSortOrder === 'asc' ? '↑' : '↓') : ''}
+                          </th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {sessions.map(session => (
+                          <Fragment key={session.session_id}>
+                          <tr
+                            style={{ cursor: 'pointer', background: selectedSession?.session_id === session.session_id ? 'var(--surface-hover)' : undefined }}
+                            onClick={() => setSelectedSession(selectedSession?.session_id === session.session_id ? null : session)}
+                          >
+                            <td className="sessions-session-cell" title={session.session_id}>
+                              <div className="session-primary">{sessionDisplayName(session)} · {formatTime(session.started)}</div>
+                              <div className="session-secondary">
+                                {formatNumber(session.request_count)} {t('requests')} · {formatDuration(session.duration_s)} · <ClickToCopy text={session.session_id} onCopy={showToast}>
+                                  <span className="session-short-id">{shortSessionId(session.session_id)}</span>
+                                </ClickToCopy>
+                              </div>
+                            </td>
+                            <td>
+                              <span style={{
+                                padding: '2px 8px',
+                                borderRadius: '4px',
+                                fontSize: '11px',
+                                fontWeight: 600,
+                                background: getSourceBadgeBg(session.client_source),
+                                color: getSourceBadgeText(session.client_source),
+                              }}>
+                                {sessionAgentName(session.client_source)}
+                              </span>
+                            </td>
+                            <td style={{ fontSize: '12px' }}>{formatTime(session.started)}</td>
+                            <td style={{ fontSize: '12px' }}>{formatDuration(session.duration_s)}</td>
+                            <td style={{ fontSize: '12px' }}>{formatNumber(session.request_count)}</td>
+                            <td style={{ fontSize: '12px' }}>{formatCompact(session.total_tokens)}</td>
+                            <td style={{ fontSize: '12px' }}>{formatCost(session.total_cost_usd)}</td>
+                            <td className="session-health-cell">
+                              <span className="session-health-badge session-health-latency">{t('Resp')} {formatLatency(session.avg_latency_ms)}</span>
+                              <span className="session-health-badge session-health-ttft">TTFT {formatLatency(session.avg_ttft_ms)}</span>
+                            </td>
+                          </tr>
+                          {selectedSession?.session_id === session.session_id && (
+                            <tr key={session.session_id + '-detail'}>
+                              <td colSpan={8} className="session-detail-cell">
+                                <div className="session-detail-expanded" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '16px 24px', flexWrap: 'wrap', gap: '20px' }}>
+                                  <div style={{ display: 'flex', gap: '32px', flexWrap: 'wrap', alignItems: 'flex-start' }}>
+                                    <div style={{ minWidth: '140px' }}>
+                                      <div style={{ fontSize: '10px', color: 'var(--text-muted)', marginBottom: '4px', textTransform: 'uppercase', letterSpacing: '0.5px', fontWeight: 700 }}>{t('Session ID')}</div>
+                                      <div style={{ fontFamily: 'monospace', fontSize: '12px', wordBreak: 'break-all', maxWidth: '320px', color: 'var(--text-primary)' }}>
+                                        <ClickToCopy text={session.session_id} onCopy={showToast}>
+                                          {session.session_id}
+                                        </ClickToCopy>
+                                      </div>
+                                    </div>
+
+                                    <div>
+                                      <div style={{ fontSize: '10px', color: 'var(--text-muted)', marginBottom: '4px', textTransform: 'uppercase', letterSpacing: '0.5px', fontWeight: 700 }}>{t('Timeline')}</div>
+                                      <div style={{ fontSize: '12px', color: 'var(--text-primary)' }}>
+                                        <div style={{ fontWeight: 600 }}>{formatTime(session.started)}</div>
+                                        <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '2px' }}>{formatDuration(session.duration_s)} {t('duration')}</div>
+                                      </div>
+                                    </div>
+
+                                    <div>
+                                      <div style={{ fontSize: '10px', color: 'var(--text-muted)', marginBottom: '6px', textTransform: 'uppercase', letterSpacing: '0.5px', fontWeight: 700 }}>{t('Cache Hit Rate')}</div>
+                                      <div style={{ width: '120px' }}>
+                                        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', marginBottom: '4px' }}>
+                                          <span style={{ fontWeight: 700, color: 'var(--color-green)' }}>{session.prompt_tokens > 0 ? Math.round((session.cached_tokens / session.prompt_tokens) * 100) : 0}%</span>
+                                          <span style={{ color: 'var(--text-muted)' }}>{formatCompact(session.cached_tokens)} {t('tokens')}</span>
+                                        </div>
+                                        <div style={{ height: '6px', background: 'var(--progress-bg)', borderRadius: '3px', overflow: 'hidden', border: '1px solid var(--border-color)' }}>
+                                          <div style={{ height: '100%', background: 'var(--color-green)', width: `${session.prompt_tokens > 0 ? (session.cached_tokens / session.prompt_tokens) * 100 : 0}%` }} />
+                                        </div>
+                                      </div>
+                                    </div>
+
+                                    <div>
+                                      <div style={{ fontSize: '10px', color: 'var(--text-muted)', marginBottom: '4px', textTransform: 'uppercase', letterSpacing: '0.5px', fontWeight: 700 }}>{t('Avg Throughput')}</div>
+                                      <div style={{ display: 'flex', alignItems: 'baseline', gap: '4px' }}>
+                                        <span style={{ fontSize: '18px', fontWeight: 800, color: 'var(--text-primary)' }}>
+                                          {session.latency_sum_ms > 0 ? ((session.completion_tokens * 1000) / session.latency_sum_ms).toFixed(1) : '0.0'}
+                                        </span>
+                                        <span style={{ fontSize: '10px', color: 'var(--text-muted)', fontWeight: 600 }}>t/s</span>
+                                      </div>
+                                    </div>
+
+                                    <div style={{ display: 'flex', gap: '20px' }}>
+                                      <div>
+                                        <div style={{ fontSize: '10px', color: 'var(--text-muted)', marginBottom: '4px', textTransform: 'uppercase', letterSpacing: '0.5px', fontWeight: 700 }}>{t('Requests')}</div>
+                                        <div style={{ fontSize: '14px', fontWeight: 700, color: 'var(--text-primary)' }}>{formatNumber(session.request_count)}</div>
+                                        {session.failed_requests > 0 && (
+                                          <div style={{ fontSize: '10px', color: 'var(--color-red)', marginTop: '2px', fontWeight: 600 }}>
+                                            {session.failed_requests} {t('failed')}
+                                          </div>
+                                        )}
+                                      </div>
+                                      <div>
+                                        <div style={{ fontSize: '10px', color: 'var(--text-muted)', marginBottom: '4px', textTransform: 'uppercase', letterSpacing: '0.5px', fontWeight: 700 }}>{t('Success Rate')}</div>
+                                        <div style={{ fontSize: '14px', fontWeight: 700, color: session.failed_requests === 0 ? 'var(--color-green)' : 'var(--color-orange)' }}>
+                                          {session.request_count > 0 ? Math.round((session.successful_requests / session.request_count) * 100) : 0}%
+                                        </div>
+                                      </div>
+                                      <div>
+                                        <div style={{ fontSize: '10px', color: 'var(--text-muted)', marginBottom: '4px', textTransform: 'uppercase', letterSpacing: '0.5px', fontWeight: 700 }}>{t('Cost')}</div>
+                                        <div style={{ fontSize: '14px', fontWeight: 700, color: 'var(--color-green)' }}>{formatCost(session.total_cost_usd)}</div>
+                                      </div>
+                                    </div>
+
+                                    <div>
+                                      <div style={{ fontSize: '10px', color: 'var(--text-muted)', marginBottom: '6px', textTransform: 'uppercase', letterSpacing: '0.5px', fontWeight: 700 }}>{t('Performance')}</div>
+                                      <div style={{ display: 'flex', gap: '8px' }}>
+                                        <div style={{ background: 'var(--badge-success-bg)', color: 'var(--badge-success-text)', padding: '2px 10px', borderRadius: '4px', fontSize: '11px', fontWeight: 600 }}>
+                                          {formatLatency(session.avg_ttft_ms)} TTFT
+                                        </div>
+                                        <div style={{ background: 'var(--badge-error-bg)', color: 'var(--badge-error-text)', padding: '2px 10px', borderRadius: '4px', fontSize: '11px', fontWeight: 600 }}>
+                                          {formatLatency(session.avg_latency_ms)} Latency
+                                        </div>
+                                      </div>
+                                    </div>
+
+                                    <div>
+                                      <div style={{ fontSize: '10px', color: 'var(--text-muted)', marginBottom: '6px', textTransform: 'uppercase', letterSpacing: '0.5px', fontWeight: 700 }}>{t('Token Usage')}</div>
+                                      <div style={{ width: '160px' }}>
+                                        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', marginBottom: '4px' }}>
+                                          <span style={{ fontWeight: 700, color: 'var(--text-primary)' }}>{formatCompact(session.total_tokens)}</span>
+                                          <span style={{ color: 'var(--text-muted)' }}>{t('total')}</span>
+                                        </div>
+                                        <div className="has-tooltip" style={{ borderBottom: 'none', display: 'block', width: '100%' }}>
+                                          {(() => {
+                                            const promptUncached = Math.max(0, value(session.prompt_tokens) - value(session.cached_tokens));
+                                            const barTotal = value(session.total_tokens) || 1;
+                                            return (
+                                              <>
+                                                <div style={{ height: '6px', background: 'var(--progress-bg)', borderRadius: '3px', overflow: 'hidden', border: '1px solid var(--border-color)', display: 'flex', width: '100%' }}>
+                                                  <div style={{ height: '100%', background: 'var(--color-green)', width: `${(value(session.cached_tokens) / barTotal) * 100}%` }} />
+                                                  <div style={{ height: '100%', background: 'var(--color-blue)', width: `${(promptUncached / barTotal) * 100}%`, opacity: 0.7 }} />
+                                                  <div style={{ height: '100%', background: 'var(--color-purple)', width: `${(value(session.completion_tokens) / barTotal) * 100}%` }} />
+                                                </div>
+                                                <div className="tooltip-text" style={{ width: '180px', marginLeft: '-90px' }}>
+                                                  <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                                                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                                                      <span style={{ color: 'var(--color-green)' }}>● {t('Cached')}:</span>
+                                                      <span>{formatNumber(session.cached_tokens)}</span>
+                                                    </div>
+                                                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                                                      <span style={{ color: 'var(--color-blue)' }}>● {t('Input')}:</span>
+                                                      <span>{formatNumber(promptUncached)}</span>
+                                                    </div>
+                                                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                                                      <span style={{ color: 'var(--color-purple)' }}>● {t('Output')}:</span>
+                                                      <span>{formatNumber(session.completion_tokens)}</span>
+                                                    </div>
+                                                  </div>
+                                                </div>
+                                              </>
+                                            );
+                                          })()}
+                                        </div>
+                                        <div style={{ display: 'flex', gap: '8px', marginTop: '6px', fontSize: '9px', fontWeight: 600 }}>
+                                          <span style={{ color: 'var(--color-green)' }}>● {t('Cache')}</span>
+                                          <span style={{ color: 'var(--color-blue)' }}>● {t('In')}</span>
+                                          <span style={{ color: 'var(--color-purple)' }}>● {t('Out')}</span>
+                                        </div>
+                                      </div>
+                                    </div>
+                                  </div>
+                                  <div style={{ display: 'flex', gap: '8px' }}>
+                                    <button
+                                      style={{ padding: '8px 18px', background: 'var(--color-blue)', color: 'white', borderRadius: '8px', fontSize: '13px', fontWeight: 700, cursor: 'pointer', border: 'none', boxShadow: '0 2px 4px rgba(59, 130, 246, 0.3)', display: 'flex', alignItems: 'center', gap: '6px' }}
+                                      onClick={(e) => { e.stopPropagation(); handleViewInLogs(session); }}
+                                    >
+                                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                                        <circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/>
+                                      </svg>
+                                      {t('View in Logs')}
+                                    </button>
+                                  </div>
+                                </div>
+                              </td>
+                            </tr>
+                          )}
+                          </Fragment>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  {/* Pagination */}
+                  {sessionCount > 50 && (
+                    <div style={{
+                      padding: '16px 24px',
+                      borderTop: '1px solid var(--border-color)',
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
+                      background: 'var(--surface-hover)',
+                    }}>
+                      <div style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>
+                        {t('Showing')} <span style={{ fontWeight: 700, color: 'var(--text-primary)' }}>
+                          {Math.min(sessionCount, (sessionPage - 1) * 50 + 1)}-{Math.min(sessionCount, sessionPage * 50)}
+                        </span> {t('of')} <span style={{ fontWeight: 700, color: 'var(--text-primary)' }}>{sessionCount}</span> {t('sessions')}
+                      </div>
+                      <div style={{ display: 'flex', gap: '8px' }}>
+                        <button disabled={sessionPage === 1} onClick={() => setSessionPage(p => p - 1)} className="pagination-btn">
+                          ◀ {t('Prev')}
+                        </button>
+                        <button disabled={sessionPage * 50 >= sessionCount} onClick={() => setSessionPage(p => p + 1)} className="pagination-btn">
+                          {t('Next')} ▶
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+                )}
+
+                {/* Session detail panel */}
+                {selectedSession && (
+                  <div className="session-detail-panel panel" style={{ marginTop: '16px' }}>
+                    <div className="panel-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <span>{t('Session Details')}</span>
+                      <button className="btn-ghost" onClick={() => setSelectedSession(null)} style={{ fontSize: '12px' }}>✕</button>
+                    </div>
+                    <div className="panel-body" style={{ padding: '20px 24px' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '20px' }}>
+                        <div style={{ display: 'flex', gap: '32px', flexWrap: 'wrap', alignItems: 'flex-start' }}>
+                          <div style={{ minWidth: '140px' }}>
+                            <div style={{ fontSize: '10px', color: 'var(--text-muted)', marginBottom: '4px', textTransform: 'uppercase', letterSpacing: '0.5px', fontWeight: 700 }}>{t('Session ID')}</div>
+                            <div style={{ fontFamily: 'monospace', fontSize: '12px', wordBreak: 'break-all', userSelect: 'all', color: 'var(--text-primary)' }}>
+                              {selectedSession.session_id}
+                            </div>
+                          </div>
+
+                          <div>
+                            <div style={{ fontSize: '10px', color: 'var(--text-muted)', marginBottom: '4px', textTransform: 'uppercase', letterSpacing: '0.5px', fontWeight: 700 }}>{t('Timeline')}</div>
+                            <div style={{ fontSize: '12px', color: 'var(--text-primary)' }}>
+                              <div style={{ fontWeight: 600 }}>{formatTime(selectedSession.started)}</div>
+                              <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '2px' }}>{formatDuration(selectedSession.duration_s)} {t('duration')}</div>
+                            </div>
+                          </div>
+
+                          <div>
+                            <div style={{ fontSize: '10px', color: 'var(--text-muted)', marginBottom: '6px', textTransform: 'uppercase', letterSpacing: '0.5px', fontWeight: 700 }}>{t('Cache Hit Rate')}</div>
+                            <div style={{ width: '120px' }}>
+                              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', marginBottom: '4px' }}>
+                                <span style={{ fontWeight: 700, color: 'var(--color-green)' }}>{selectedSession.prompt_tokens > 0 ? Math.round((selectedSession.cached_tokens / selectedSession.prompt_tokens) * 100) : 0}%</span>
+                                <span style={{ color: 'var(--text-muted)' }}>{formatCompact(selectedSession.cached_tokens)} {t('tokens')}</span>
+                              </div>
+                              <div style={{ height: '6px', background: 'var(--progress-bg)', borderRadius: '3px', overflow: 'hidden', border: '1px solid var(--border-color)' }}>
+                                <div style={{ height: '100%', background: 'var(--color-green)', width: `${selectedSession.prompt_tokens > 0 ? (selectedSession.cached_tokens / selectedSession.prompt_tokens) * 100 : 0}%` }} />
+                              </div>
+                            </div>
+                          </div>
+
+                          <div>
+                            <div style={{ fontSize: '10px', color: 'var(--text-muted)', marginBottom: '4px', textTransform: 'uppercase', letterSpacing: '0.5px', fontWeight: 700 }}>{t('Avg Throughput')}</div>
+                            <div style={{ display: 'flex', alignItems: 'baseline', gap: '4px' }}>
+                              <span style={{ fontSize: '18px', fontWeight: 800, color: 'var(--text-primary)' }}>
+                                {selectedSession.latency_sum_ms > 0 ? ((selectedSession.completion_tokens * 1000) / selectedSession.latency_sum_ms).toFixed(1) : '0.0'}
+                              </span>
+                              <span style={{ fontSize: '10px', color: 'var(--text-muted)', fontWeight: 600 }}>t/s</span>
+                            </div>
+                          </div>
+
+                          <div style={{ display: 'flex', gap: '20px' }}>
+                            <div>
+                              <div style={{ fontSize: '10px', color: 'var(--text-muted)', marginBottom: '4px', textTransform: 'uppercase', letterSpacing: '0.5px', fontWeight: 700 }}>{t('Requests')}</div>
+                              <div style={{ fontSize: '14px', fontWeight: 700, color: 'var(--text-primary)' }}>{formatNumber(selectedSession.request_count)}</div>
+                              {selectedSession.failed_requests > 0 && (
+                                <div style={{ fontSize: '10px', color: 'var(--color-red)', marginTop: '2px', fontWeight: 600 }}>
+                                  {selectedSession.failed_requests} {t('failed')}
+                                </div>
+                              )}
+                            </div>
+                            <div>
+                              <div style={{ fontSize: '10px', color: 'var(--text-muted)', marginBottom: '4px', textTransform: 'uppercase', letterSpacing: '0.5px', fontWeight: 700 }}>{t('Success Rate')}</div>
+                              <div style={{ fontSize: '14px', fontWeight: 700, color: selectedSession.failed_requests === 0 ? 'var(--color-green)' : 'var(--color-orange)' }}>
+                                {selectedSession.request_count > 0 ? Math.round((selectedSession.successful_requests / selectedSession.request_count) * 100) : 0}%
+                              </div>
+                            </div>
+                            <div>
+                              <div style={{ fontSize: '10px', color: 'var(--text-muted)', marginBottom: '4px', textTransform: 'uppercase', letterSpacing: '0.5px', fontWeight: 700 }}>{t('Cost')}</div>
+                              <div style={{ fontSize: '14px', fontWeight: 700, color: 'var(--color-green)' }}>{formatCost(selectedSession.total_cost_usd)}</div>
+                            </div>
+                          </div>
+
+                          <div>
+                            <div style={{ fontSize: '10px', color: 'var(--text-muted)', marginBottom: '6px', textTransform: 'uppercase', letterSpacing: '0.5px', fontWeight: 700 }}>{t('Performance')}</div>
+                            <div style={{ display: 'flex', gap: '8px' }}>
+                              <div style={{ background: 'var(--badge-success-bg)', color: 'var(--badge-success-text)', padding: '2px 10px', borderRadius: '4px', fontSize: '11px', fontWeight: 600 }}>
+                                {formatLatency(selectedSession.avg_ttft_ms)} TTFT
+                              </div>
+                              <div style={{ background: 'var(--badge-error-bg)', color: 'var(--badge-error-text)', padding: '2px 10px', borderRadius: '4px', fontSize: '11px', fontWeight: 600 }}>
+                                {formatLatency(selectedSession.avg_latency_ms)} Latency
+                              </div>
+                            </div>
+                          </div>
+
+                          <div>
+                            <div style={{ fontSize: '10px', color: 'var(--text-muted)', marginBottom: '6px', textTransform: 'uppercase', letterSpacing: '0.5px', fontWeight: 700 }}>{t('Token Usage')}</div>
+                            <div style={{ width: '160px' }}>
+                              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', marginBottom: '4px' }}>
+                                <span style={{ fontWeight: 700, color: 'var(--text-primary)' }}>{formatCompact(selectedSession.total_tokens)}</span>
+                                <span style={{ color: 'var(--text-muted)' }}>{t('total')}</span>
+                              </div>
+                              <div className="has-tooltip" style={{ borderBottom: 'none', display: 'block', width: '100%' }}>
+                                {(() => {
+                                  const promptUncached = Math.max(0, value(selectedSession.prompt_tokens) - value(selectedSession.cached_tokens));
+                                  const barTotal = value(selectedSession.total_tokens) || 1;
+                                  return (
+                                    <>
+                                      <div style={{ height: '6px', background: 'var(--progress-bg)', borderRadius: '3px', overflow: 'hidden', border: '1px solid var(--border-color)', display: 'flex', width: '100%' }}>
+                                        <div style={{ height: '100%', background: 'var(--color-green)', width: `${(value(selectedSession.cached_tokens) / barTotal) * 100}%` }} />
+                                        <div style={{ height: '100%', background: 'var(--color-blue)', width: `${(promptUncached / barTotal) * 100}%`, opacity: 0.7 }} />
+                                        <div style={{ height: '100%', background: 'var(--color-purple)', width: `${(value(selectedSession.completion_tokens) / barTotal) * 100}%` }} />
+                                      </div>
+                                      <div className="tooltip-text" style={{ width: '180px', marginLeft: '-90px' }}>
+                                        <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                                          <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                                            <span style={{ color: 'var(--color-green)' }}>● {t('Cached')}:</span>
+                                            <span>{formatNumber(selectedSession.cached_tokens)}</span>
+                                          </div>
+                                          <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                                            <span style={{ color: 'var(--color-blue)' }}>● {t('Input')}:</span>
+                                            <span>{formatNumber(promptUncached)}</span>
+                                          </div>
+                                          <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                                            <span style={{ color: 'var(--color-purple)' }}>● {t('Output')}:</span>
+                                            <span>{formatNumber(selectedSession.completion_tokens)}</span>
+                                          </div>
+                                        </div>
+                                      </div>
+                                    </>
+                                  );
+                                })()}
+                              </div>
+                              <div style={{ display: 'flex', gap: '8px', marginTop: '6px', fontSize: '9px', fontWeight: 600 }}>
+                                <span style={{ color: 'var(--color-green)' }}>● {t('Cache')}</span>
+                                <span style={{ color: 'var(--color-blue)' }}>● {t('In')}</span>
+                                <span style={{ color: 'var(--color-purple)' }}>● {t('Out')}</span>
+                              </div>
+                            </div>
+                          </div>                        </div>
+                        <div style={{ display: 'flex', gap: '8px' }}>
+                          <button
+                            style={{ padding: '8px 18px', background: 'var(--color-blue)', color: 'white', borderRadius: '8px', fontSize: '13px', fontWeight: 700, cursor: 'pointer', border: 'none', boxShadow: '0 2px 4px rgba(59, 130, 246, 0.3)', display: 'flex', alignItems: 'center', gap: '6px' }}
+                            onClick={() => handleViewInLogs(selectedSession)}
+                          >
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                              <circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/>
+                            </svg>
+                            {t('View in Logs')}
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+              )}
             </>
           )}
 
@@ -1270,7 +1823,7 @@ function App() {
                       <optgroup key={source} label={source}>
                         {group.map(s => (
                           <option key={s.session_id} value={s.session_id}>
-                            {s.session_id.slice(0, 8)}… {s.request_count} req {timeAgo(s.started)}
+                            {shortSessionId(s.session_id)} {s.request_count} req {timeAgo(s.started)}
                           </option>
                         ))}
                       </optgroup>
@@ -1335,6 +1888,22 @@ function App() {
                 </div>
               </div>
 
+              {sessionFilter && (
+                <div style={{ marginBottom: '12px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <span className="badge request-log-session-filter-badge" title={sessionFilter}>
+                    {t('Session')}: {shortSessionId(sessionFilter)}
+                    <button
+                      className="btn-ghost"
+                      aria-label={t('Clear session filter')}
+                      onClick={() => { setSessionFilter(null); resetPage() }}
+                      style={{ padding: '2px 6px', fontSize: '11px' }}
+                    >
+                      ×
+                    </button>
+                  </span>
+                </div>
+              )}
+
               <div className="panel">
                 <div className="panel-body" style={{ padding: 0 }}>
                   <table className="table">
@@ -1361,6 +1930,7 @@ function App() {
                         </th>
                         <th style={{ width: '120px', padding: '12px 8px' }}>{t('Provider')}</th>
                         <th style={{ width: '110px', padding: '12px 8px' }}>{t('Source')}</th>
+                        <th style={{ width: '120px', padding: '12px 8px' }}>{t('Session')}</th>
                         <th style={{ minWidth: '140px' }}>{t('Input (Prompt)')}</th>
                         <th style={{ minWidth: '120px' }}>{t('Output')}</th>
                         <th style={{ minWidth: '100px' }}>{t('Cost')}</th>
@@ -1386,6 +1956,7 @@ function App() {
                             <td><div className="skeleton" style={{ width: 120, height: 24, borderRadius: 6 }} /></td>
                             <td><div className="skeleton" style={{ width: 70, height: 20, borderRadius: 4 }} /></td>
                             <td><div className="skeleton" style={{ width: 60, height: 20, borderRadius: 4 }} /></td>
+                            <td><div className="skeleton" style={{ width: 80, height: 20, borderRadius: 999 }} /></td>
                             <td><div className="skeleton" style={{ width: 80, height: 14 }} /></td>
                             <td><div className="skeleton" style={{ width: 60, height: 14 }} /></td>
                             <td><div className="skeleton" style={{ width: 50, height: 14 }} /></td>
@@ -1455,7 +2026,26 @@ function App() {
                               {row.client_source || '—'}
                             </div>
                           </td>
-                          <td style={{ verticalAlign: 'top' }}>
+                          <td className="request-log-session-cell">
+                            {row.session_id ? (() => {
+                              const sessionId = row.session_id
+                              return (
+                                <div className="request-log-session-actions">
+                                  <button
+                                    type="button"
+                                    className="request-log-session-filter"
+                                    title={sessionId}
+                                    aria-label={`${t('Filter logs by session')}: ${sessionId}`}
+                                    onClick={(e) => { e.stopPropagation(); setSessionFilter(sessionId); resetPage() }}
+                                  >
+                                    {shortSessionId(sessionId)}
+                                  </button>
+                                </div>
+                              )
+                            })() : (
+                              <span className="request-log-session-empty">—</span>
+                            )}
+                          </td>                          <td style={{ verticalAlign: 'top' }}>
                             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
                               <div style={{ color: 'var(--text-secondary)', fontWeight: 600 }}>
                                 {formatNumber(row.prompt_tokens)}
@@ -1472,26 +2062,46 @@ function App() {
                                 </div>
                               )}
                             </div>
-                            {value(row.cached_tokens) > 0 && (
-                              <div
-                                title={`Cache read: ${formatNumber(row.cached_tokens)} tokens`}
-                                style={{
-                                  width: '100%',
-                                  height: '3px',
-                                  background: 'var(--progress-bg)',
-                                  borderRadius: '2px',
-                                  marginTop: '4px',
-                                  overflow: 'hidden',
-                                  border: '1px solid var(--border-color)'
-                                }}
-                              >
-                                <div style={{
-                                  width: `${(value(row.cached_tokens) / (value(row.prompt_tokens) || 1)) * 100}%`,
-                                  height: '100%',
-                                  background: 'var(--color-green)'
-                                }} />
-                              </div>
-                            )}
+                            <div className="has-tooltip" style={{ width: '100%', borderBottom: 'none' }}>
+                              {(() => {
+                                const promptUncached = Math.max(0, value(row.prompt_tokens) - value(row.cached_tokens));
+                                const total = value(row.total_tokens) || 1;
+                                return (
+                                  <>
+                                    <div style={{
+                                      width: '100%',
+                                      height: '3px',
+                                      background: 'var(--progress-bg)',
+                                      borderRadius: '2px',
+                                      marginTop: '4px',
+                                      overflow: 'hidden',
+                                      border: '1px solid var(--border-color)',
+                                      display: 'flex'
+                                    }}>
+                                      <div style={{ height: '100%', background: 'var(--color-green)', width: `${(value(row.cached_tokens) / total) * 100}%` }} />
+                                      <div style={{ height: '100%', background: 'var(--color-blue)', width: `${(promptUncached / total) * 100}%`, opacity: 0.7 }} />
+                                      <div style={{ height: '100%', background: 'var(--color-purple)', width: `${(value(row.completion_tokens) / total) * 100}%` }} />
+                                    </div>
+                                    <div className="tooltip-text">
+                                      <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                                        <div style={{ display: 'flex', justifyContent: 'space-between', gap: '12px' }}>
+                                          <span style={{ color: 'var(--color-green)' }}>● {t('Cached')}:</span>
+                                          <span style={{ fontWeight: 600 }}>{formatNumber(row.cached_tokens)}</span>
+                                        </div>
+                                        <div style={{ display: 'flex', justifyContent: 'space-between', gap: '12px' }}>
+                                          <span style={{ color: 'var(--color-blue)' }}>● {t('Input')}:</span>
+                                          <span style={{ fontWeight: 600 }}>{formatNumber(promptUncached)}</span>
+                                        </div>
+                                        <div style={{ display: 'flex', justifyContent: 'space-between', gap: '12px' }}>
+                                          <span style={{ color: 'var(--color-purple)' }}>● {t('Output')}:</span>
+                                          <span style={{ fontWeight: 600 }}>{formatNumber(row.completion_tokens)}</span>
+                                        </div>
+                                      </div>
+                                    </div>
+                                  </>
+                                );
+                              })()}
+                            </div>
                           </td>
                           <td style={{ fontWeight: 600, color: 'var(--color-blue)', verticalAlign: 'top' }}>
                             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
@@ -1627,7 +2237,7 @@ function App() {
                         </tr>
                         {expandedRow === row.id && (
                           <tr className="expanded-row">
-                            <td colSpan={9}>
+                            <td colSpan={10}>
                               <div className="expanded-detail">
                                 {row.session_id && (
                                   <div className="detail-group">
@@ -1675,7 +2285,7 @@ function App() {
                       ))}
                       {usageRows.length === 0 && !logsLoading && (
                         <tr>
-                          <td colSpan={7} style={{ textAlign: 'center', padding: '40px', color: 'var(--text-muted)' }}>
+                          <td colSpan={10} style={{ textAlign: 'center', padding: '40px', color: 'var(--text-muted)' }}>
                             {t('No requests found for the selected filters.')}
                           </td>
                         </tr>
@@ -1809,344 +2419,6 @@ function App() {
                   </div>
                 </div>
               </div>
-            </div>
-          )}
-
-          {view === 'sessions' && (
-            <div className="sessions-page">
-              {/* Summary stat cards */}
-              <div className="widgets-grid" style={{ marginBottom: '24px' }}>
-                <div className="widget-card">
-                  <div className="widget-title">{t('Total Sessions')}</div>
-                  <div className="widget-value">{sessionsSummary ? formatNumber(sessionsSummary.session_count) : '—'}</div>
-                </div>
-                <div className="widget-card">
-                  <div className="widget-title">{t('Avg Duration')}</div>
-                  <div className="widget-value">{sessionsSummary ? formatDuration(sessionsSummary.avg_duration_s) : '—'}</div>
-                </div>
-                <div className="widget-card">
-                  <div className="widget-title">{t('Total Tokens')}</div>
-                  <div className="widget-value">{sessionsSummary ? formatCompact(sessionsSummary.total_tokens) : '—'}</div>
-                </div>
-                <div className="widget-card">
-                  <div className="widget-title">{t('Estimated Cost')}</div>
-                  <div className="widget-value">{sessionsSummary ? formatCost(sessionsSummary.total_cost_usd) : '—'}</div>
-                </div>
-                <div className="widget-card">
-                  <div className="widget-title">{t('Average Response')}</div>
-                  <div className="widget-value">{sessionsSummary ? formatLatency(sessionsSummary.avg_latency_ms) : '—'}</div>
-                </div>
-              </div>
-
-              {/* Sessions table */}
-              <div className="panel">
-                <div className="panel-body" style={{ padding: 0 }}>
-                  <table className="table">
-                    <thead>
-                      <tr>
-                        <th style={{ cursor: 'pointer', width: '100px' }} onClick={() => handleSessionSort('session_id')}>
-                          {t('Session ID')} {sessionSortBy === 'session_id' ? (sessionSortOrder === 'asc' ? '↑' : '↓') : ''}
-                        </th>
-                        <th style={{ cursor: 'pointer' }} onClick={() => handleSessionSort('client_source')}>
-                          {t('Source')} {sessionSortBy === 'client_source' ? (sessionSortOrder === 'asc' ? '↑' : '↓') : ''}
-                        </th>
-                        <th style={{ cursor: 'pointer' }} onClick={() => handleSessionSort('started')}>
-                          {t('Started')} {sessionSortBy === 'started' ? (sessionSortOrder === 'asc' ? '↑' : '↓') : ''}
-                        </th>
-                        <th style={{ cursor: 'pointer' }} onClick={() => handleSessionSort('duration_s')}>
-                          {t('Duration')} {sessionSortBy === 'duration_s' ? (sessionSortOrder === 'asc' ? '↑' : '↓') : ''}
-                        </th>
-                        <th style={{ cursor: 'pointer' }} onClick={() => handleSessionSort('request_count')}>
-                          {t('Requests')} {sessionSortBy === 'request_count' ? (sessionSortOrder === 'asc' ? '↑' : '↓') : ''}
-                        </th>
-                        <th style={{ cursor: 'pointer' }} onClick={() => handleSessionSort('total_tokens')}>
-                          {t('Tokens')} {sessionSortBy === 'total_tokens' ? (sessionSortOrder === 'asc' ? '↑' : '↓') : ''}
-                        </th>
-                        <th style={{ cursor: 'pointer' }} onClick={() => handleSessionSort('total_cost_usd')}>
-                          {t('Cost')} {sessionSortBy === 'total_cost_usd' ? (sessionSortOrder === 'asc' ? '↑' : '↓') : ''}
-                        </th>
-                        <th style={{ cursor: 'pointer' }} onClick={() => handleSessionSort('avg_latency_ms')}>
-                          {t('Avg Response')} {sessionSortBy === 'avg_latency_ms' ? (sessionSortOrder === 'asc' ? '↑' : '↓') : ''}
-                        </th>
-                        <th style={{ cursor: 'pointer' }} onClick={() => handleSessionSort('avg_ttft_ms')}>
-                          {t('Avg TTFT')} {sessionSortBy === 'avg_ttft_ms' ? (sessionSortOrder === 'asc' ? '↑' : '↓') : ''}
-                        </th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {sessions.map(session => (
-                        <Fragment key={session.session_id}>
-                        <tr
-                          style={{ cursor: 'pointer', background: selectedSession?.session_id === session.session_id ? 'var(--surface-hover)' : undefined }}
-                          onClick={() => setSelectedSession(selectedSession?.session_id === session.session_id ? null : session)}
-                        >
-                          <td style={{ fontFamily: 'monospace', fontSize: '12px', width: '100px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
-                              title={session.session_id}>
-                            <ClickToCopy text={session.session_id} onCopy={showToast}>
-                              {session.session_id.includes('-') ? session.session_id.split('-')[0] : (session.session_id.length > 8 ? session.session_id.slice(0, 8) + '...' : session.session_id)}
-                            </ClickToCopy>
-                          </td>
-                          <td>
-                            <span style={{
-                              padding: '2px 8px',
-                              borderRadius: '4px',
-                              fontSize: '11px',
-                              fontWeight: 600,
-                              background: getSourceBadgeBg(session.client_source),
-                              color: getSourceBadgeText(session.client_source),
-                            }}>
-                              {session.client_source || 'unknown'}
-                            </span>
-                          </td>
-                          <td style={{ fontSize: '12px' }}>{formatTime(session.started)}</td>
-                          <td style={{ fontSize: '12px' }}>{formatDuration(session.duration_s)}</td>
-                          <td style={{ fontSize: '12px' }}>{formatNumber(session.request_count)}</td>
-                          <td style={{ fontSize: '12px' }}>{formatCompact(session.total_tokens)}</td>
-                          <td style={{ fontSize: '12px' }}>{formatCost(session.total_cost_usd)}</td>
-                          <td style={{ fontSize: '12px' }}>{formatLatency(session.avg_latency_ms)}</td>
-                          <td style={{ fontSize: '12px' }}>{formatLatency(session.avg_ttft_ms)}</td>
-                        </tr>
-                        {selectedSession?.session_id === session.session_id && (
-                          <tr key={session.session_id + '-detail'}>
-                            <td colSpan={9} style={{ padding: '0', background: 'var(--surface-hover)' }}>
-                              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '16px 24px', flexWrap: 'wrap', gap: '20px' }}>
-                                <div style={{ display: 'flex', gap: '32px', flexWrap: 'wrap', alignItems: 'flex-start' }}>
-                                  <div style={{ minWidth: '140px' }}>
-                                    <div style={{ fontSize: '10px', color: 'var(--text-muted)', marginBottom: '4px', textTransform: 'uppercase', letterSpacing: '0.5px', fontWeight: 700 }}>{t('Session ID')}</div>
-                                    <div style={{ fontFamily: 'monospace', fontSize: '12px', wordBreak: 'break-all', maxWidth: '320px', color: 'var(--text-primary)' }}>
-                                      <ClickToCopy text={session.session_id} onCopy={showToast}>
-                                        {session.session_id}
-                                      </ClickToCopy>
-                                    </div>
-                                  </div>
-
-                                  <div>
-                                    <div style={{ fontSize: '10px', color: 'var(--text-muted)', marginBottom: '4px', textTransform: 'uppercase', letterSpacing: '0.5px', fontWeight: 700 }}>{t('Timeline')}</div>
-                                    <div style={{ fontSize: '12px', color: 'var(--text-primary)' }}>
-                                      <div style={{ fontWeight: 600 }}>{formatTime(session.started)}</div>
-                                      <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '2px' }}>{formatDuration(session.duration_s)} {t('duration')}</div>
-                                    </div>
-                                  </div>
-
-                                  <div>
-                                    <div style={{ fontSize: '10px', color: 'var(--text-muted)', marginBottom: '6px', textTransform: 'uppercase', letterSpacing: '0.5px', fontWeight: 700 }}>{t('Cache Hit Rate')}</div>
-                                    <div style={{ width: '120px' }}>
-                                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', marginBottom: '4px' }}>
-                                        <span style={{ fontWeight: 700, color: 'var(--color-green)' }}>{session.prompt_tokens > 0 ? Math.round((session.cached_tokens / session.prompt_tokens) * 100) : 0}%</span>
-                                        <span style={{ color: 'var(--text-muted)' }}>{formatCompact(session.cached_tokens)} {t('tokens')}</span>
-                                      </div>
-                                      <div style={{ height: '6px', background: 'var(--progress-bg)', borderRadius: '3px', overflow: 'hidden', border: '1px solid var(--border-color)' }}>
-                                        <div style={{ height: '100%', background: 'var(--color-green)', width: `${session.prompt_tokens > 0 ? (session.cached_tokens / session.prompt_tokens) * 100 : 0}%` }} />
-                                      </div>
-                                    </div>
-                                  </div>
-
-                                  <div>
-                                    <div style={{ fontSize: '10px', color: 'var(--text-muted)', marginBottom: '4px', textTransform: 'uppercase', letterSpacing: '0.5px', fontWeight: 700 }}>{t('Avg Throughput')}</div>
-                                    <div style={{ display: 'flex', alignItems: 'baseline', gap: '4px' }}>
-                                      <span style={{ fontSize: '18px', fontWeight: 800, color: 'var(--text-primary)' }}>
-                                        {session.latency_sum_ms > 0 ? ((session.completion_tokens * 1000) / session.latency_sum_ms).toFixed(1) : '0.0'}
-                                      </span>
-                                      <span style={{ fontSize: '10px', color: 'var(--text-muted)', fontWeight: 600 }}>t/s</span>
-                                    </div>
-                                  </div>
-
-                                  <div style={{ display: 'flex', gap: '20px' }}>
-                                    <div>
-                                      <div style={{ fontSize: '10px', color: 'var(--text-muted)', marginBottom: '4px', textTransform: 'uppercase', letterSpacing: '0.5px', fontWeight: 700 }}>{t('Requests')}</div>
-                                      <div style={{ fontSize: '14px', fontWeight: 700, color: 'var(--text-primary)' }}>{formatNumber(session.request_count)}</div>
-                                      {session.failed_requests > 0 && (
-                                        <div style={{ fontSize: '10px', color: 'var(--color-red)', marginTop: '2px', fontWeight: 600 }}>
-                                          {session.failed_requests} {t('failed')}
-                                        </div>
-                                      )}
-                                    </div>
-                                    <div>
-                                      <div style={{ fontSize: '10px', color: 'var(--text-muted)', marginBottom: '4px', textTransform: 'uppercase', letterSpacing: '0.5px', fontWeight: 700 }}>{t('Success Rate')}</div>
-                                      <div style={{ fontSize: '14px', fontWeight: 700, color: session.failed_requests === 0 ? 'var(--color-green)' : 'var(--color-orange)' }}>
-                                        {session.request_count > 0 ? Math.round((session.successful_requests / session.request_count) * 100) : 0}%
-                                      </div>
-                                    </div>
-                                    <div>
-                                      <div style={{ fontSize: '10px', color: 'var(--text-muted)', marginBottom: '4px', textTransform: 'uppercase', letterSpacing: '0.5px', fontWeight: 700 }}>{t('Cost')}</div>
-                                      <div style={{ fontSize: '14px', fontWeight: 700, color: 'var(--color-green)' }}>{formatCost(session.total_cost_usd)}</div>
-                                    </div>
-                                  </div>
-
-                                  <div>
-                                    <div style={{ fontSize: '10px', color: 'var(--text-muted)', marginBottom: '6px', textTransform: 'uppercase', letterSpacing: '0.5px', fontWeight: 700 }}>{t('Performance')}</div>
-                                    <div style={{ display: 'flex', gap: '8px' }}>
-                                      <div style={{ background: 'var(--badge-success-bg)', color: 'var(--badge-success-text)', padding: '2px 10px', borderRadius: '4px', fontSize: '11px', fontWeight: 600 }}>
-                                        {formatLatency(session.avg_ttft_ms)} TTFT
-                                      </div>
-                                      <div style={{ background: 'var(--badge-error-bg)', color: 'var(--badge-error-text)', padding: '2px 10px', borderRadius: '4px', fontSize: '11px', fontWeight: 600 }}>
-                                        {formatLatency(session.avg_latency_ms)} Latency
-                                      </div>
-                                    </div>
-                                  </div>
-                                  <div>
-                                    <div style={{ fontSize: '10px', color: 'var(--text-muted)', marginBottom: '6px', textTransform: 'uppercase', letterSpacing: '0.5px', fontWeight: 700 }}>{t('Token Usage')}</div>
-                                    <div style={{ width: '160px' }}>
-                                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', marginBottom: '4px' }}>
-                                        <span style={{ fontWeight: 700, color: 'var(--text-primary)' }}>{formatCompact(session.total_tokens)}</span>
-                                        <span style={{ color: 'var(--text-muted)' }}>{t('total')}</span>
-                                      </div>
-                                      <div className="has-tooltip" style={{ borderBottom: 'none', display: 'block', width: '100%' }}>
-                                        {(() => {
-                                          const promptUncached = Math.max(0, session.prompt_tokens - session.cached_tokens);
-                                          const barTotal = session.cached_tokens + promptUncached + session.completion_tokens || 1;
-                                          return (
-                                            <>
-                                              <div style={{ height: '6px', background: 'var(--progress-bg)', borderRadius: '3px', overflow: 'hidden', border: '1px solid var(--border-color)', display: 'flex', width: '100%' }}>
-                                                <div style={{ height: '100%', background: 'var(--color-green)', width: `${(session.cached_tokens / barTotal) * 100}%` }} />
-                                                <div style={{ height: '100%', background: 'var(--color-blue)', width: `${(promptUncached / barTotal) * 100}%`, opacity: 0.7 }} />
-                                                <div style={{ height: '100%', background: 'var(--color-purple)', width: `${(session.completion_tokens / barTotal) * 100}%` }} />
-                                              </div>
-                                              <div className="tooltip-text" style={{ width: '180px', marginLeft: '-90px' }}>
-                                                <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                                                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                                                    <span style={{ color: 'var(--color-green)' }}>● {t('Cached')}:</span>
-                                                    <span>{formatNumber(session.cached_tokens)}</span>
-                                                  </div>
-                                                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                                                    <span style={{ color: 'var(--color-blue)' }}>● {t('Input')}:</span>
-                                                    <span>{formatNumber(promptUncached)}</span>
-                                                  </div>
-                                                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                                                    <span style={{ color: 'var(--color-purple)' }}>● {t('Output')}:</span>
-                                                    <span>{formatNumber(session.completion_tokens)}</span>
-                                                  </div>
-                                                </div>
-                                              </div>
-                                            </>
-                                          );
-                                        })()}
-                                      </div>
-                                      <div style={{ display: 'flex', gap: '8px', marginTop: '6px', fontSize: '9px', fontWeight: 600 }}>
-                                        <span style={{ color: 'var(--color-green)' }}>● {t('Cache')}</span>
-                                        <span style={{ color: 'var(--color-blue)' }}>● {t('In')}</span>
-                                        <span style={{ color: 'var(--color-purple)' }}>● {t('Out')}</span>
-                                      </div>
-                                    </div>
-                                  </div>
-                                </div>
-                                <div style={{ display: 'flex', gap: '8px' }}>
-                                  <button
-                                    style={{ padding: '8px 18px', background: 'var(--color-blue)', color: 'white', borderRadius: '8px', fontSize: '13px', fontWeight: 700, cursor: 'pointer', border: 'none', boxShadow: '0 2px 4px rgba(59, 130, 246, 0.3)', display: 'flex', alignItems: 'center', gap: '6px' }}
-                                    onClick={(e) => { e.stopPropagation(); handleViewInLogs(session); }}
-                                  >
-                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                                      <circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/>
-                                    </svg>
-                                    {t('View in Logs')}
-                                  </button>
-                                </div>
-                              </div>
-                            </td>
-                          </tr>
-                        )}
-                        </Fragment>
-                      ))}
-                      {sessions.length === 0 && !sessionsLoading && (
-                        <tr>
-                          <td colSpan={9} style={{ textAlign: 'center', padding: '40px', color: 'var(--text-muted)' }}>
-                            {t('No sessions found for the selected filters.')}
-                          </td>
-                        </tr>
-                      )}
-                    </tbody>
-                  </table>
-                </div>
-
-                {/* Pagination */}
-                {sessionCount > 50 && (
-                  <div style={{
-                    padding: '16px 24px',
-                    borderTop: '1px solid var(--border-color)',
-                    display: 'flex',
-                    justifyContent: 'space-between',
-                    alignItems: 'center',
-                    background: 'var(--surface-hover)',
-                  }}>
-                    <div style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>
-                      {t('Showing')} <span style={{ fontWeight: 700, color: 'var(--text-primary)' }}>
-                        {Math.min(sessionCount, (sessionPage - 1) * 50 + 1)}-{Math.min(sessionCount, sessionPage * 50)}
-                      </span> {t('of')} <span style={{ fontWeight: 700, color: 'var(--text-primary)' }}>{sessionCount}</span> {t('sessions')}
-                    </div>
-                    <div style={{ display: 'flex', gap: '8px' }}>
-                      <button disabled={sessionPage === 1} onClick={() => setSessionPage(p => p - 1)} className="pagination-btn">
-                        ◀ {t('Prev')}
-                      </button>
-                      <button disabled={sessionPage * 50 >= sessionCount} onClick={() => setSessionPage(p => p + 1)} className="pagination-btn">
-                        {t('Next')} ▶
-                      </button>
-                    </div>
-                  </div>
-                )}
-              </div>
-
-              {/* Session detail panel */}
-              {selectedSession && (
-                <div className="panel" style={{ marginTop: '16px' }}>
-                  <div className="panel-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <span>{t('Session Details')}</span>
-                    <button className="btn-ghost" onClick={() => setSelectedSession(null)} style={{ fontSize: '12px' }}>✕</button>
-                  </div>
-                  <div className="panel-body" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '16px' }}>
-                    <div>
-                      <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginBottom: '4px' }}>{t('Session ID')}</div>
-                      <div style={{ fontFamily: 'monospace', fontSize: '12px', wordBreak: 'break-all', userSelect: 'all' }}>
-                        {selectedSession.session_id}
-                      </div>
-                    </div>
-                    <div>
-                      <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginBottom: '4px' }}>{t('Source')}</div>
-                      <span style={{
-                        padding: '2px 8px',
-                        borderRadius: '4px',
-                        fontSize: '11px',
-                        fontWeight: 600,
-                        background: getSourceBadgeBg(selectedSession.client_source),
-                        color: getSourceBadgeText(selectedSession.client_source),
-                      }}>
-                        {selectedSession.client_source || 'unknown'}
-                      </span>
-                    </div>
-                    <div>
-                      <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginBottom: '4px' }}>{t('Duration')}</div>
-                      <div style={{ fontSize: '14px', fontWeight: 600 }}>{formatDuration(selectedSession.duration_s)}</div>
-                    </div>
-                    <div>
-                      <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginBottom: '4px' }}>{t('Requests')}</div>
-                      <div style={{ fontSize: '14px', fontWeight: 600 }}>{formatNumber(selectedSession.request_count)}</div>
-                    </div>
-                    <div>
-                      <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginBottom: '4px' }}>{t('Total Tokens')}</div>
-                      <div style={{ fontSize: '14px', fontWeight: 600 }}>{formatCompact(selectedSession.total_tokens)}</div>
-                    </div>
-                    <div>
-                      <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginBottom: '4px' }}>{t('Estimated Cost')}</div>
-                      <div style={{ fontSize: '14px', fontWeight: 600 }}>{formatCost(selectedSession.total_cost_usd)}</div>
-                    </div>
-                    <div>
-                      <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginBottom: '4px' }}>{t('Average Response')}</div>
-                      <div style={{ fontSize: '14px', fontWeight: 600 }}>{formatLatency(selectedSession.avg_latency_ms)}</div>
-                    </div>
-                    <div>
-                      <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginBottom: '4px' }}>{t('Avg TTFT')}</div>
-                      <div style={{ fontSize: '14px', fontWeight: 600 }}>{formatLatency(selectedSession.avg_ttft_ms)}</div>
-                    </div>
-                    <div style={{ display: 'flex', alignItems: 'flex-end' }}>
-                      <button
-                        style={{ padding: '8px 16px', background: 'var(--color-blue)', color: 'white', borderRadius: '8px', fontSize: '12px', fontWeight: 700, cursor: 'pointer', border: 'none' }}
-                        onClick={() => handleViewInLogs(selectedSession)}
-                      >
-                        {t('View in Logs')}
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              )}
             </div>
           )}
 
@@ -2494,14 +2766,10 @@ function App() {
                   </div>
                 </div>
               </div>
-            </div>
-          )}
 
-          {view === 'test' && (
-            <div className="test-page" style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
               <div className="panel">
                 <div className="panel-tabs">
-                  <div className="tab active"><span>🧪</span> {t('Upstream Connectivity Test')}</div>
+                  <div className="tab active"><span>🔌</span> {t('Upstream Connectivity Test')}</div>
                 </div>
                 <div className="panel-content" style={{ padding: '24px' }}>
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '24px' }}>
@@ -2523,9 +2791,9 @@ function App() {
 
                       <div className="filter-group">
                         <div className="filter-label">{t('API Key')}</div>
-                        <input 
-                          type="password" 
-                          className="input-plain" 
+                        <input
+                          type="password"
+                          className="input-plain"
                           placeholder="sk-..."
                           value={testApiKey}
                           onChange={(e) => setTestApiKey(e.target.value)}
@@ -2627,12 +2895,12 @@ function App() {
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
                       <div className="filter-label">{t('Test Result')}</div>
                       {!testResult ? (
-                        <div style={{ 
-                          flex: 1, 
-                          display: 'flex', 
+                        <div style={{
+                          flex: 1,
+                          display: 'flex',
                           flexDirection: 'column',
-                          alignItems: 'center', 
-                          justifyContent: 'center', 
+                          alignItems: 'center',
+                          justifyContent: 'center',
                           color: 'var(--text-muted)',
                           border: '2px dashed var(--border-color)',
                           borderRadius: '12px',
@@ -2655,7 +2923,7 @@ function App() {
                               <div style={{ fontSize: '24px', fontWeight: 800 }}>{testResult.latency_ms}ms</div>
                             </div>
                           </div>
-                          
+
                           {typeof testResult.body === 'string' && testResult.body.trim().startsWith('<') ? (
                             <div className="widget" style={{ padding: '16px', background: 'var(--icon-yellow-bg)' }}>
                               <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginBottom: '4px' }}>{t('Response')}</div>

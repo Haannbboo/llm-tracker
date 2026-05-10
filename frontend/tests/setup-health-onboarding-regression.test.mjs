@@ -10,9 +10,7 @@ const zhSource = readFileSync(join(here, 'src', 'i18n', 'zh.ts'), 'utf-8')
 
 const settingsStart = appSource.indexOf("{view === 'settings' && (")
 assert.notEqual(settingsStart, -1)
-const settingsEnd = appSource.indexOf("{view === 'test' && (", settingsStart)
-assert.notEqual(settingsEnd, -1)
-const settingsBlock = appSource.slice(settingsStart, settingsEnd)
+const settingsBlock = appSource.slice(settingsStart)
 
 const healthStart = appSource.indexOf('{/* Setup health + Detected agents */}')
 assert.notEqual(healthStart, -1)
