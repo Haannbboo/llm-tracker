@@ -12,6 +12,7 @@ import { TrendChart } from './charts/TrendChart'
 import { CacheHitRateChart } from './charts/CacheHitRateChart'
 import { TopUsageChart } from './charts/TopUsageChart'
 import { DailyHeatmap } from './charts/DailyHeatmap'
+import { InsightCards } from './InsightCards'
 import { t, useLang } from './i18n/index.ts'
 import { useCountUp } from './useCountUp'
 import { getVerifyTimeoutGuidance } from './setup-guidance'
@@ -1294,6 +1295,8 @@ function App() {
                   </>
                 )}
               </div>
+
+              <InsightCards summary={summary} dailyUsage={dailyUsage} />
 
               <div style={{ display: 'flex', gap: '24px', height: '400px' }}>
                 <div style={{ flex: '1 1 0', minWidth: 0 }}>

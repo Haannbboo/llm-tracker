@@ -347,7 +347,17 @@ export const zh: Record<string, string> = {
   'Slowest Session': '最慢会话',
   'Biggest Token Burner': '最大令牌消耗',
   'Best Cache Saver': '最佳缓存节省',
-  'Reliability Watch': '可靠性关注',
   'View in Logs': '在日志中查看',
   'Failed to fetch session data': '获取会话数据失败',
+
+  // InsightCards
+  'Top Cost Driver': '最大成本支出',
+  'Latency Watch': '延迟预警',
+  'Usage Trend': '用量趋势',
+  'Reliability Watch': '稳定性预警',
+  'Trending Up': '上涨中',
+  'Trending Down': '下降中',
+  'change': '变化',
+  'failed requests': '个失败请求',
+  'Check logs for details': '查看日志了解详情',
 }

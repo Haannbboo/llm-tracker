@@ -1071,3 +1071,56 @@
 .click-to-copy:hover::after {
   opacity: 0.7;
 }
+
+.insights-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 16px;
+  margin-bottom: 24px;
+}
+
+.insight-card {
+  background: var(--card-bg);
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  padding: 16px;
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  transition: transform 0.2s;
+}
+
+.insight-card:hover {
+  transform: translateY(-2px);
+}
+
+.insight-card.warning {
+  border-color: var(--color-red-muted, #fecaca);
+  background: var(--icon-pink-bg);
+}
+
+.insight-icon {
+  font-size: 20px;
+  margin-top: 2px;
+}
+
+.insight-title {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 4px;
+}
+
+.insight-value {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin-bottom: 2px;
+}
+
+.insight-detail {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
