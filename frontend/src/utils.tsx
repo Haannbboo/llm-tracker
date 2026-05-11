@@ -107,6 +107,7 @@ export function fillGaps(data: DailyUsage[], granularity: 'hour' | 'day', period
     latency_sum_ms: 0,
     avg_throughput: 0,
     successful_requests: 0, failed_requests: 0,
+    status_429: 0, status_4xx: 0, status_5xx: 0, status_unknown: 0,
   })
 
   const map = new Map(data.map(d => [d.period, d]))
@@ -248,4 +249,116 @@ export function getSourceBadgeText(name: string): string {
   if (name === 'gemini-cli') return '#528af2'
   if (name === 'proxy') return '#8b5cf6'
   return dark ? '#94a3b8' : '#475569'
+}
+
+export function shortSessionId(id: string) {
+  return id.length > 8 ? `${id.slice(0, 8)}…` : id
+}
+
+export function sessionAgentName(source: string | null | undefined) {
+  const raw = source || 'unknown'
+  return raw
+    .split(/[-_\s]+/)
+    .filter(Boolean)
+    .map(part => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(' ') || 'Unknown'
+}
+
+export function sessionDisplayName(session: { client_source: string }) {
+  return `${sessionAgentName(session.client_source)} session`
+}
+
+export type SessionInsight = {
+  key: string
+  title: string
+  session: import('./types').SessionSummary
+  value: string
+  detail: string
+  tone?: 'warning' | 'danger' | 'success'
+  onlyFailed?: boolean
+}
+
+export function buildSessionInsights(sessions: import('./types').SessionSummary[]): SessionInsight[] {
+  if (sessions.length === 0) return []
+
+  const insightSessions = [...sessions]
+  const mostExpensive = [...insightSessions].sort((a, b) => b.total_cost_usd - a.total_cost_usd)[0]
+  const slowest = [...insightSessions].sort((a, b) => b.avg_latency_ms - a.avg_latency_ms)[0]
+  const tokenBurner = [...insightSessions].sort((a, b) => b.total_tokens - a.total_tokens)[0]
+  const cacheSaver = [...insightSessions].filter(session => session.cached_tokens > 0).sort((a, b) => b.cached_tokens - a.cached_tokens)[0]
+  const reliabilityWatch = [...insightSessions].filter(session => session.failed_requests > 0).sort((a, b) => b.failed_requests - a.failed_requests)[0]
+
+  const insights: SessionInsight[] = []
+
+  if (mostExpensive && mostExpensive.total_cost_usd > 0) {
+    insights.push({
+      key: 'most-expensive',
+      title: 'Most Expensive Session',
+      session: mostExpensive,
+      value: formatCost(mostExpensive.total_cost_usd),
+      detail: `${formatNumber(mostExpensive.request_count)} requests · ${formatCompact(mostExpensive.total_tokens)} tokens`,
+    })
+  }
+
+  if (slowest && slowest.avg_latency_ms > 0) {
+    insights.push({
+      key: 'slowest',
+      title: 'Slowest Session',
+      session: slowest,
+      value: formatLatency(slowest.avg_latency_ms),
+      detail: `${formatNumber(slowest.request_count)} requests · ${formatDuration(slowest.duration_s)}`,
+      tone: slowest.avg_latency_ms >= 5000 ? 'warning' : undefined,
+    })
+  }
+
+  if (tokenBurner && tokenBurner.total_tokens > 0) {
+    insights.push({
+      key: 'token-burner',
+      title: 'Biggest Token Burner',
+      session: tokenBurner,
+      value: formatCompact(tokenBurner.total_tokens),
+      detail: `${formatCompact(tokenBurner.prompt_tokens)} in · ${formatCompact(tokenBurner.completion_tokens)} out`,
+    })
+  }
+
+  if (cacheSaver) {
+    insights.push({
+      key: 'cache-saver',
+      title: 'Best Cache Saver',
+      session: cacheSaver,
+      value: formatCompact(cacheSaver.cached_tokens),
+      detail: `${cacheSaver.prompt_tokens > 0 ? Math.round((cacheSaver.cached_tokens / cacheSaver.prompt_tokens) * 100) : 0}% cache hit estimate`,
+      tone: 'success',
+    })
+  }
+
+  if (reliabilityWatch) {
+    insights.push({
+      key: 'reliability-watch',
+      title: 'Reliability Watch',
+      session: reliabilityWatch,
+      value: `${formatNumber(reliabilityWatch.failed_requests)} failed`,
+      detail: `${reliabilityWatch.request_count > 0 ? Math.round((reliabilityWatch.successful_requests / reliabilityWatch.request_count) * 100) : 0}% success rate`,
+      tone: 'danger',
+      onlyFailed: true,
+    })
+  }
+
+  return insights
+}
+
+export function getAgentDisplayName(name: string) {
+  const normalized = name.toLowerCase()
+  if (normalized.includes('vectorengine') || normalized.includes('claude')) return 'Claude Code'
+  if (normalized.includes('codesonline') || normalized.includes('codex')) return 'Codex'
+  if (normalized.includes('gemini')) return 'Gemini CLI'
+  return name
+}
+
+export function getSetupAgentKey(name: string) {
+  const normalized = name.toLowerCase()
+  if (normalized.includes('vectorengine') || normalized.includes('claude')) return 'claude'
+  if (normalized.includes('codesonline') || normalized.includes('codex')) return 'codex'
+  if (normalized.includes('gemini')) return 'gemini'
+  return normalized
 }

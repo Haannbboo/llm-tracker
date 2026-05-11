@@ -42,12 +42,19 @@ export function ModelSelector({
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
           {activeFilter ? (
-            activeFilter.model ? (
+            activeFilter.only_failed && !activeFilter.model && !activeFilter.provider ? (
+              <>
+                <span>🚨</span>
+                <span style={{ fontSize: '13px', color: 'var(--color-red)', fontWeight: 600 }}>{t('Failed Requests')}</span>
+              </>
+            ) : activeFilter.model ? (
               <>
                 {getModelIcon(activeFilter.model)}
                 <span style={{ fontSize: '13px' }}>{activeFilter.model}</span>
+                {activeFilter.only_failed && <span style={{ color: 'var(--color-red)', fontSize: '11px', fontWeight: 600, marginLeft: '4px' }}>(Failed)</span>}
               </>
             ) : (
+              <>
               <span style={{
                 padding: '2px 8px',
                 borderRadius: '4px',
@@ -60,6 +67,8 @@ export function ModelSelector({
               }}>
                 {activeFilter.provider}
               </span>
+              {activeFilter.only_failed && <span style={{ color: 'var(--color-red)', fontSize: '11px', fontWeight: 600, marginLeft: '4px' }}>(Failed)</span>}
+              </>
             )
           ) : (
             <>

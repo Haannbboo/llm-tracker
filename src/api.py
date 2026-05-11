@@ -95,6 +95,10 @@ async def get_usage(
     session_id: str | None = None,
     since: str | None = None,
     until: str | None = None,
+    only_failed: bool = False,
+    status_429: bool = False,
+    status_4xx: bool = False,
+    status_5xx: bool = False,
 ):
     return fetch_recent_usage(
         limit=limit,
@@ -105,6 +109,10 @@ async def get_usage(
         session_id=session_id,
         since=since,
         until=until,
+        only_failed=only_failed,
+        status_429=status_429,
+        status_4xx=status_4xx,
+        status_5xx=status_5xx,
     )
 
 

@@ -2365,3 +2365,125 @@ def test_summarize_sessions(database_module, isolated_home):
     assert result["total_cost_usd"] == pytest.approx(0.016)
     # s1 spans 10:00-10:02 (120s), s2 is a single request (0s), avg = 60s
     assert result["avg_duration_s"] == 60
+
+
+def test_fetch_recent_usage_only_failed_filter(database_module, isolated_home):
+    db_path = str(isolated_home / "usage.db")
+    database_module.init_db(db_path)
+
+    with database_module.Session(database_module.get_engine(db_path)) as session:
+        session.add(
+            database_module.Usage(
+                ts="2024-01-01T00:00:00Z",
+                provider="p1",
+                model="m1",
+                endpoint="/chat",
+                status=200,
+            )
+        )
+        session.add(
+            database_module.Usage(
+                ts="2024-01-01T00:00:01Z",
+                provider="p1",
+                model="m1",
+                endpoint="/chat",
+                status=500,
+            )
+        )
+        session.commit()
+
+    # When: fetch all
+    all_rows = database_module.fetch_recent_usage(limit=10, db_path=db_path)
+    assert len(all_rows) == 2
+
+    # When: fetch only failed
+    failed_rows = database_module.fetch_recent_usage(
+        limit=10, only_failed=True, db_path=db_path
+    )
+    assert len(failed_rows) == 1
+    assert failed_rows[0]["status"] == 500
+
+
+def test_usage_daily_status_breakdown(database_module, isolated_home):
+    db_path = str(isolated_home / "usage_status.db")
+    database_module.init_db(db_path)
+
+    # Record 4 requests with different status codes
+    codes = [200, 429, 403, 500]
+    for i, code in enumerate(codes):
+        usage = database_module.Usage(
+            ts=f"2024-01-01T00:00:{i:02d}Z",
+            provider="p1",
+            model="m1",
+            endpoint="/chat",
+            status=code,
+            input_cost_usd=0,
+            output_cost_usd=0,
+            total_cost_usd=0,
+            prompt_length=0,
+        )
+        database_module.upsert_daily_aggregate(usage, db_path=db_path)
+
+    # Check aggregation
+    summary = database_module.summarize_usage_daily(since="2024-01-01", db_path=db_path)
+    assert len(summary) == 1
+    row = summary[0]
+    assert row["requests"] == 4
+    assert row["successful_requests"] == 1
+    assert row["failed_requests"] == 3
+    assert row["status_429"] == 1
+    assert row["status_4xx"] == 1  # 403
+    assert row["status_5xx"] == 1
+    assert row["status_unknown"] == 0
+
+
+def test_migration_adds_status_columns(database_module, isolated_home, load_module):
+    schema_migrations = load_module("src.schema_migrations")
+    db_path = str(isolated_home / "migration_test.db")
+
+    # 1. Create table without new columns
+    engine = database_module.get_engine(db_path)
+    with engine.begin() as conn:
+        conn.execute(
+            database_module.text("""
+            CREATE TABLE usage_daily (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                date TEXT NOT NULL,
+                provider TEXT NOT NULL,
+                model TEXT NOT NULL,
+                client_source TEXT NOT NULL DEFAULT '',
+                request_count INTEGER NOT NULL DEFAULT 0,
+                prompt_tokens INTEGER NOT NULL DEFAULT 0,
+                completion_tokens INTEGER NOT NULL DEFAULT 0,
+                reasoning_tokens INTEGER NOT NULL DEFAULT 0,
+                cached_tokens INTEGER NOT NULL DEFAULT 0,
+                total_tokens INTEGER NOT NULL DEFAULT 0,
+                tool_tokens INTEGER NOT NULL DEFAULT 0,
+                cache_creation_tokens INTEGER NOT NULL DEFAULT 0,
+                prompt_length INTEGER NOT NULL DEFAULT 0,
+                input_cost_usd NUMERIC(18, 8) NOT NULL DEFAULT 0,
+                output_cost_usd NUMERIC(18, 8) NOT NULL DEFAULT 0,
+                total_cost_usd NUMERIC(18, 8) NOT NULL DEFAULT 0,
+                successful_requests INTEGER NOT NULL DEFAULT 0,
+                failed_requests INTEGER NOT NULL DEFAULT 0,
+                latency_sum_ms INTEGER NOT NULL DEFAULT 0,
+                UNIQUE(date, provider, model, client_source)
+            )
+        """)
+        )
+
+    # 2. Run migration
+    applied = schema_migrations.migrate_database(db_path)
+    assert any("usage_daily.status_429" in a for a in applied)
+    assert any("usage_daily.status_4xx" in a for a in applied)
+    assert any("usage_daily.status_5xx" in a for a in applied)
+    assert any("usage_daily.status_unknown" in a for a in applied)
+
+    # 3. Verify columns exist
+    from sqlalchemy import inspect
+
+    columns = [c["name"] for c in inspect(engine).get_columns("usage_daily")]
+    assert "status_429" in columns
+    assert "status_4xx" in columns
+    assert "status_5xx" in columns
+    assert "status_unknown" in columns

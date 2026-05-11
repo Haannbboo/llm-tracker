@@ -159,6 +159,18 @@ class UsageDaily(Base):
     latency_sum_ms: Mapped[int] = mapped_column(
         Integer, nullable=False, server_default=text("0")
     )
+    status_429: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default=text("0")
+    )
+    status_4xx: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default=text("0")
+    )
+    status_5xx: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default=text("0")
+    )
+    status_unknown: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default=text("0")
+    )
 
 
 DB_URL_ENV_VAR = "LLM_TRACKER_DB_URL"
@@ -341,7 +353,33 @@ def upsert_daily_aggregate(usage: Usage, db_path: str | None = None) -> None:
             existing.successful_requests += 1 if is_success else 0
             existing.failed_requests += 0 if is_success else 1
             existing.latency_sum_ms += latency
+
+            if not is_success:
+                status = usage.status
+                if status == 429:
+                    existing.status_429 += 1
+                elif status is not None and 400 <= status < 500:
+                    existing.status_4xx += 1
+                elif status is not None and status >= 500:
+                    existing.status_5xx += 1
+                else:
+                    existing.status_unknown += 1
         else:
+            status_429 = 0
+            status_4xx = 0
+            status_5xx = 0
+            status_unknown = 0
+            if not is_success:
+                status = usage.status
+                if status == 429:
+                    status_429 = 1
+                elif status is not None and 400 <= status < 500:
+                    status_4xx = 1
+                elif status is not None and status >= 500:
+                    status_5xx = 1
+                else:
+                    status_unknown = 1
+
             session.add(
                 UsageDaily(
                     date=date,
@@ -363,6 +401,10 @@ def upsert_daily_aggregate(usage: Usage, db_path: str | None = None) -> None:
                     successful_requests=1 if is_success else 0,
                     failed_requests=0 if is_success else 1,
                     latency_sum_ms=latency,
+                    status_429=status_429,
+                    status_4xx=status_4xx,
+                    status_5xx=status_5xx,
+                    status_unknown=status_unknown,
                 )
             )
         session.commit()
@@ -468,6 +510,10 @@ def _empty_usage_summary() -> dict[str, Any]:
         "requests": 0,
         "successful_requests": 0,
         "failed_requests": 0,
+        "status_429": 0,
+        "status_4xx": 0,
+        "status_5xx": 0,
+        "status_unknown": 0,
         "prompt_tokens": 0,
         "completion_tokens": 0,
         "reasoning_tokens": 0,
@@ -489,6 +535,14 @@ def _add_row_to_summary(summary: dict[str, Any], row: dict[str, Any]) -> None:
     status = row.get("status")
     if status is not None and status >= 400:
         summary["failed_requests"] += 1
+        if status == 429:
+            summary["status_429"] += 1
+        elif 400 <= status < 500:
+            summary["status_4xx"] += 1
+        elif status >= 500:
+            summary["status_5xx"] += 1
+        else:
+            summary["status_unknown"] += 1
     else:
         summary["successful_requests"] += 1
 
@@ -523,6 +577,10 @@ def _usage_filters(
     session_id: str | None = None,
     since: str | None = None,
     until: str | None = None,
+    only_failed: bool = False,
+    status_429: bool = False,
+    status_4xx: bool = False,
+    status_5xx: bool = False,
 ) -> list[Any]:
     filters: list[Any] = []
     if provider:
@@ -537,6 +595,16 @@ def _usage_filters(
         filters.append(Usage.ts >= since)
     if until:
         filters.append(Usage.ts <= until)
+    if only_failed:
+        filters.append(Usage.status >= 400)
+    if status_429:
+        filters.append(Usage.status == 429)
+    if status_4xx:
+        filters.append(
+            and_(Usage.status >= 400, Usage.status < 500, Usage.status != 429)
+        )
+    if status_5xx:
+        filters.append(Usage.status >= 500)
     return filters
 
 
@@ -550,6 +618,10 @@ def fetch_recent_usage(
     session_id: str | None = None,
     since: str | None = None,
     until: str | None = None,
+    only_failed: bool = False,
+    status_429: bool = False,
+    status_4xx: bool = False,
+    status_5xx: bool = False,
     db_path: str | None = None,
 ) -> list[dict[str, Any]]:
     """Return recent usage rows plus the resolved base URL when available."""
@@ -560,6 +632,10 @@ def fetch_recent_usage(
         session_id=session_id,
         since=since,
         until=until,
+        only_failed=only_failed,
+        status_429=status_429,
+        status_4xx=status_4xx,
+        status_5xx=status_5xx,
     )
     query = (
         select(
@@ -757,6 +833,23 @@ def fetch_sessions(
                 func.count(
                     case((and_(Usage.status.isnot(None), Usage.status < 400), 1))
                 ).label("successful_requests"),
+                func.count(case((Usage.status == 429, 1))).label("status_429"),
+                func.count(
+                    case(
+                        (
+                            and_(
+                                Usage.status >= 400,
+                                Usage.status < 500,
+                                Usage.status != 429,
+                            ),
+                            1,
+                        )
+                    )
+                ).label("status_4xx"),
+                func.count(case((Usage.status >= 500, 1))).label("status_5xx"),
+                func.count(
+                    case((and_(Usage.status >= 400, Usage.status.is_(None)), 1))
+                ).label("status_unknown"),
             )
             .where(and_(*filters))
             .group_by(Usage.session_id)
@@ -783,6 +876,23 @@ def fetch_sessions(
                 func.count(
                     case((and_(Usage.status.isnot(None), Usage.status < 400), 1))
                 ).label("successful_requests"),
+                func.count(case((Usage.status == 429, 1))).label("status_429"),
+                func.count(
+                    case(
+                        (
+                            and_(
+                                Usage.status >= 400,
+                                Usage.status < 500,
+                                Usage.status != 429,
+                            ),
+                            1,
+                        )
+                    )
+                ).label("status_4xx"),
+                func.count(case((Usage.status >= 500, 1))).label("status_5xx"),
+                func.count(
+                    case((and_(Usage.status >= 400, Usage.status.is_(None)), 1))
+                ).label("status_unknown"),
             )
             .where(and_(*filters))
             .group_by(Usage.session_id)
@@ -1113,6 +1223,7 @@ def summarize_usage_by_source(
     provider: str | None = None,
     model: str | None = None,
     client_source: str | None = None,
+    db_path: str | None = None,
 ) -> list[dict[str, Any]]:
     """Aggregate usage_daily totals by client_source for dashboard source chart."""
     filters: list[Any] = []
@@ -1150,13 +1261,17 @@ def summarize_usage_by_source(
             func.sum(UsageDaily.total_cost_usd).label("total_cost_usd"),
             func.sum(UsageDaily.successful_requests).label("successful_requests"),
             func.sum(UsageDaily.failed_requests).label("failed_requests"),
+            func.sum(UsageDaily.status_429).label("status_429"),
+            func.sum(UsageDaily.status_4xx).label("status_4xx"),
+            func.sum(UsageDaily.status_5xx).label("status_5xx"),
+            func.sum(UsageDaily.status_unknown).label("status_unknown"),
         )
         .group_by(UsageDaily.client_source)
         .order_by(func.sum(UsageDaily.total_tokens).desc())
     )
     if filters:
         query = query.where(and_(*filters))
-    with get_engine().connect() as connection:
+    with get_engine(db_path).connect() as connection:
         return [_row_to_dict(row) for row in connection.execute(query)]
 
 
@@ -1167,6 +1282,7 @@ def summarize_usage_by_provider(
     provider: str | None = None,
     model: str | None = None,
     client_source: str | None = None,
+    db_path: str | None = None,
 ) -> list[dict[str, Any]]:
     """Aggregate usage_daily totals by provider for dashboard provider chart."""
     filters: list[Any] = []
@@ -1210,13 +1326,17 @@ def summarize_usage_by_provider(
             ).label("avg_effective_price_per_million_usd"),
             func.sum(UsageDaily.successful_requests).label("successful_requests"),
             func.sum(UsageDaily.failed_requests).label("failed_requests"),
+            func.sum(UsageDaily.status_429).label("status_429"),
+            func.sum(UsageDaily.status_4xx).label("status_4xx"),
+            func.sum(UsageDaily.status_5xx).label("status_5xx"),
+            func.sum(UsageDaily.status_unknown).label("status_unknown"),
         )
         .group_by(UsageDaily.provider)
         .order_by(func.sum(UsageDaily.total_tokens).desc())
     )
     if filters:
         query = query.where(and_(*filters))
-    with get_engine().connect() as connection:
+    with get_engine(db_path).connect() as connection:
         return [_row_to_dict(row) for row in connection.execute(query)]
 
 
@@ -1227,6 +1347,7 @@ def summarize_usage_daily(
     provider: str | None = None,
     model: str | None = None,
     client_source: str | None = None,
+    db_path: str | None = None,
 ) -> list[dict[str, Any]]:
     """Aggregate usage_daily totals by provider and model for dashboard summaries."""
     filters: list[Any] = []
@@ -1271,13 +1392,17 @@ def summarize_usage_daily(
             ).label("avg_effective_price_per_million_usd"),
             func.sum(UsageDaily.successful_requests).label("successful_requests"),
             func.sum(UsageDaily.failed_requests).label("failed_requests"),
+            func.sum(UsageDaily.status_429).label("status_429"),
+            func.sum(UsageDaily.status_4xx).label("status_4xx"),
+            func.sum(UsageDaily.status_5xx).label("status_5xx"),
+            func.sum(UsageDaily.status_unknown).label("status_unknown"),
         )
         .group_by(UsageDaily.provider, UsageDaily.model)
         .order_by(func.sum(UsageDaily.total_tokens).desc())
     )
     if filters:
         query = query.where(and_(*filters))
-    with get_engine().connect() as connection:
+    with get_engine(db_path).connect() as connection:
         return [_row_to_dict(row) for row in connection.execute(query)]
 
 
@@ -1433,6 +1558,7 @@ def aggregate_daily_by_period(
     provider: str | None = None,
     model: str | None = None,
     client_source: str | None = None,
+    db_path: str | None = None,
 ) -> list[dict[str, Any]]:
     """Read daily-bucketed usage from the pre-aggregated usage_daily table."""
     filters: list[Any] = []
@@ -1460,6 +1586,10 @@ def aggregate_daily_by_period(
             func.sum(UsageDaily.total_cost_usd).label("total_cost_usd"),
             func.sum(UsageDaily.successful_requests).label("successful_requests"),
             func.sum(UsageDaily.failed_requests).label("failed_requests"),
+            func.sum(UsageDaily.status_429).label("status_429"),
+            func.sum(UsageDaily.status_4xx).label("status_4xx"),
+            func.sum(UsageDaily.status_5xx).label("status_5xx"),
+            func.sum(UsageDaily.status_unknown).label("status_unknown"),
             (
                 func.sum(UsageDaily.latency_sum_ms) / func.sum(UsageDaily.request_count)
             ).label("avg_latency_ms"),
@@ -1475,7 +1605,7 @@ def aggregate_daily_by_period(
     )
     if filters:
         query = query.where(and_(*filters))
-    with get_engine().connect() as connection:
+    with get_engine(db_path).connect() as connection:
         return [_row_to_dict(row) for row in connection.execute(query)]
 
 
@@ -1487,6 +1617,7 @@ def aggregate_daily_by_dimension(
     provider: str | None = None,
     model: str | None = None,
     client_source: str | None = None,
+    db_path: str | None = None,
 ) -> list[dict[str, Any]]:
     """Read daily-bucketed usage grouped by a dimension (model/provider/client_source)."""
     filters: list[Any] = []
@@ -1521,11 +1652,15 @@ def aggregate_daily_by_dimension(
             func.sum(UsageDaily.latency_sum_ms).label("latency_sum_ms"),
             func.sum(UsageDaily.successful_requests).label("successful_requests"),
             func.sum(UsageDaily.failed_requests).label("failed_requests"),
+            func.sum(UsageDaily.status_429).label("status_429"),
+            func.sum(UsageDaily.status_4xx).label("status_4xx"),
+            func.sum(UsageDaily.status_5xx).label("status_5xx"),
+            func.sum(UsageDaily.status_unknown).label("status_unknown"),
         )
         .group_by(dim_col, UsageDaily.date)
         .order_by(UsageDaily.date)
     )
     if filters:
         query = query.where(and_(*filters))
-    with get_engine().connect() as connection:
+    with get_engine(db_path).connect() as connection:
         return [_row_to_dict(row) for row in connection.execute(query)]

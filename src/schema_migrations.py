@@ -168,6 +168,10 @@ def migrate_database(db_path: str | None = None) -> list[str]:
                     total_cost_usd NUMERIC(18, 8) NOT NULL DEFAULT 0,
                     successful_requests INTEGER NOT NULL DEFAULT 0,
                     failed_requests INTEGER NOT NULL DEFAULT 0,
+                    status_429 INTEGER NOT NULL DEFAULT 0,
+                    status_4xx INTEGER NOT NULL DEFAULT 0,
+                    status_5xx INTEGER NOT NULL DEFAULT 0,
+                    status_unknown INTEGER NOT NULL DEFAULT 0,
                     latency_sum_ms INTEGER NOT NULL DEFAULT 0,
                     UNIQUE(date, provider, model, client_source)
                 )
@@ -194,6 +198,10 @@ def migrate_database(db_path: str | None = None) -> list[str]:
                     total_cost_usd NUMERIC(18, 8) NOT NULL DEFAULT 0,
                     successful_requests INTEGER NOT NULL DEFAULT 0,
                     failed_requests INTEGER NOT NULL DEFAULT 0,
+                    status_429 INTEGER NOT NULL DEFAULT 0,
+                    status_4xx INTEGER NOT NULL DEFAULT 0,
+                    status_5xx INTEGER NOT NULL DEFAULT 0,
+                    status_unknown INTEGER NOT NULL DEFAULT 0,
                     latency_sum_ms INTEGER NOT NULL DEFAULT 0,
                     UNIQUE(date, provider, model, client_source)
                 )
@@ -201,6 +209,108 @@ def migrate_database(db_path: str | None = None) -> list[str]:
         with engine.begin() as connection:
             connection.execute(text(create_sql))
         applied.append("usage_daily.create")
+
+    status_cols_added = False
+    if _table_exists(engine, "usage_daily"):
+        for col in ["status_429", "status_4xx", "status_5xx", "status_unknown"]:
+            if _ensure_column(
+                engine,
+                "usage_daily",
+                col,
+                sqlite_definition="INTEGER NOT NULL DEFAULT 0",
+                postgresql_definition="INTEGER NOT NULL DEFAULT 0",
+            ):
+                applied.append(f"usage_daily.{col}")
+                status_cols_added = True
+
+        # Also check if backfill is needed even if columns were already there (from a previous session)
+        if not status_cols_added:
+            with engine.connect() as connection:
+                # Check if we have any failures that haven't been categorized yet
+                needs_backfill = connection.execute(
+                    text(
+                        "SELECT 1 FROM usage_daily WHERE failed_requests > 0 AND (status_429 + status_4xx + status_5xx + status_unknown) = 0 LIMIT 1"
+                    )
+                ).scalar()
+                if needs_backfill:
+                    status_cols_added = True
+
+    if status_cols_added:
+        # Backfill existing records in usage_daily from the raw usage table
+        with engine.begin() as connection:
+            if engine.dialect.name == "postgresql":
+                connection.execute(
+                    text(
+                        """
+                        UPDATE usage_daily
+                        SET 
+                            status_429 = sub.s429,
+                            status_4xx = sub.s4xx,
+                            status_5xx = sub.s5xx,
+                            status_unknown = 0
+                        FROM (
+                            SELECT 
+                                SUBSTRING(ts, 1, 10) as date,
+                                provider, model, COALESCE(client_source, '') as client_source,
+                                SUM(CASE WHEN status = 429 THEN 1 ELSE 0 END) as s429,
+                                SUM(CASE WHEN status >= 400 AND status < 500 AND status != 429 THEN 1 ELSE 0 END) as s4xx,
+                                SUM(CASE WHEN status >= 500 THEN 1 ELSE 0 END) as s5xx
+                            FROM usage
+                            GROUP BY SUBSTRING(ts, 1, 10), provider, model, COALESCE(client_source, '')
+                        ) AS sub
+                        WHERE usage_daily.date = sub.date 
+                          AND usage_daily.provider = sub.provider 
+                          AND usage_daily.model = sub.model 
+                          AND usage_daily.client_source = sub.client_source
+                    """
+                    )
+                )
+            else:
+                # SQLite-compatible update (supports UPDATE FROM in 3.33+, but we'll use a safer approach if possible)
+                # Actually, most modern SQLite environments for this app will have 3.33+.
+                # Let's use a standard correlated update for maximum compatibility if we're worried,
+                # but UPDATE FROM is much cleaner.
+                connection.execute(
+                    text(
+                        """
+                        UPDATE usage_daily
+                        SET 
+                            status_429 = (
+                                SELECT SUM(CASE WHEN status = 429 THEN 1 ELSE 0 END)
+                                FROM usage u
+                                WHERE substr(u.ts, 1, 10) = usage_daily.date
+                                  AND u.provider = usage_daily.provider
+                                  AND u.model = usage_daily.model
+                                  AND COALESCE(u.client_source, '') = usage_daily.client_source
+                            ),
+                            status_4xx = (
+                                SELECT SUM(CASE WHEN status >= 400 AND status < 500 AND status != 429 THEN 1 ELSE 0 END)
+                                FROM usage u
+                                WHERE substr(u.ts, 1, 10) = usage_daily.date
+                                  AND u.provider = usage_daily.provider
+                                  AND u.model = usage_daily.model
+                                  AND COALESCE(u.client_source, '') = usage_daily.client_source
+                            ),
+                            status_5xx = (
+                                SELECT SUM(CASE WHEN status >= 500 THEN 1 ELSE 0 END)
+                                FROM usage u
+                                WHERE substr(u.ts, 1, 10) = usage_daily.date
+                                  AND u.provider = usage_daily.provider
+                                  AND u.model = usage_daily.model
+                                  AND COALESCE(u.client_source, '') = usage_daily.client_source
+                            ),
+                            status_unknown = 0
+                        WHERE EXISTS (
+                            SELECT 1 FROM usage u 
+                            WHERE substr(u.ts, 1, 10) = usage_daily.date
+                              AND u.provider = usage_daily.provider
+                              AND u.model = usage_daily.model
+                              AND COALESCE(u.client_source, '') = usage_daily.client_source
+                        )
+                    """
+                    )
+                )
+        applied.append("usage_daily.status_backfill")
 
     if _table_exists(engine, "usage_daily") and _table_exists(engine, "usage"):
         with engine.connect() as connection:
@@ -217,7 +327,9 @@ def migrate_database(db_path: str | None = None) -> list[str]:
                             reasoning_tokens, cached_tokens, total_tokens,
                             tool_tokens, cache_creation_tokens, prompt_length,
                             input_cost_usd, output_cost_usd, total_cost_usd,
-                            successful_requests, failed_requests, latency_sum_ms
+                            successful_requests, failed_requests,
+                            status_429, status_4xx, status_5xx, status_unknown,
+                            latency_sum_ms
                         )
                         SELECT
                             substr(ts, 1, 10) as date,
@@ -236,6 +348,10 @@ def migrate_database(db_path: str | None = None) -> list[str]:
                             COALESCE(SUM(total_cost_usd), 0),
                             SUM(CASE WHEN status IS NULL OR status < 400 THEN 1 ELSE 0 END),
                             SUM(CASE WHEN status >= 400 THEN 1 ELSE 0 END),
+                            SUM(CASE WHEN status = 429 THEN 1 ELSE 0 END),
+                            SUM(CASE WHEN status >= 400 AND status < 500 AND status != 429 THEN 1 ELSE 0 END),
+                            SUM(CASE WHEN status >= 500 THEN 1 ELSE 0 END),
+                            0, -- status_unknown
                             COALESCE(SUM(latency_ms), 0)
                         FROM usage
                         GROUP BY substr(ts, 1, 10), provider, model, COALESCE(client_source, '')

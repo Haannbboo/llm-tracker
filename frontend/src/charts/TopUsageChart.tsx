@@ -47,9 +47,20 @@ const providerColors: Record<string, string> = {
 export function TopUsageChart({
   summary,
   theme,
+  filterParams = {},
+  showTrend = true,
 }: {
   summary: UsageSummary[]
   theme: Theme
+  filterParams?: {
+    provider?: string
+    model?: string | null
+    client_source?: string | null
+    since?: string | null
+    until?: string | null
+    only_failed?: boolean
+  }
+  showTrend?: boolean
 }) {
   const [dimension, setDimension] = useState<Dimension>('model')
   const [metric, setMetric] = useState<Metric>('tokens')
@@ -62,7 +73,15 @@ export function TopUsageChart({
     const controller = new AbortController()
     async function fetchSourceSummary() {
       try {
-        const res = await fetch('/usage/by-source', { signal: controller.signal })
+        const url = new URL('/usage/by-source', window.location.origin)
+        if (filterParams.provider) url.searchParams.set('provider', filterParams.provider)
+        if (filterParams.model) url.searchParams.set('model', filterParams.model)
+        if (filterParams.client_source) url.searchParams.set('client_source', filterParams.client_source)
+        if (filterParams.since) url.searchParams.set('since', filterParams.since)
+        if (filterParams.until) url.searchParams.set('until', filterParams.until)
+        if (filterParams.only_failed) url.searchParams.set('only_failed', 'true')
+
+        const res = await fetch(url.toString(), { signal: controller.signal })
         if (res.ok) {
           setSourceSummary(await res.json())
         }
@@ -72,7 +91,7 @@ export function TopUsageChart({
     }
     fetchSourceSummary()
     return () => controller.abort()
-  }, [dimension])
+  }, [dimension, filterParams])
 
   // Fetch trend data when dimension changes
   useEffect(() => {
@@ -81,6 +100,14 @@ export function TopUsageChart({
       try {
         const url = new URL('/usage/daily-by-dimension', window.location.origin)
         url.searchParams.set('dimension', dimension === 'source' ? 'client_source' : dimension)
+        
+        if (filterParams.provider) url.searchParams.set('provider', filterParams.provider)
+        if (filterParams.model) url.searchParams.set('model', filterParams.model)
+        if (filterParams.client_source) url.searchParams.set('client_source', filterParams.client_source)
+        if (filterParams.since) url.searchParams.set('since', filterParams.since)
+        if (filterParams.until) url.searchParams.set('until', filterParams.until)
+        if (filterParams.only_failed) url.searchParams.set('only_failed', 'true')
+
         const res = await fetch(url.toString(), { signal: controller.signal })
         if (res.ok) {
           setTrendData(await res.json())
@@ -91,7 +118,7 @@ export function TopUsageChart({
     }
     fetchTrend()
     return () => controller.abort()
-  }, [dimension])
+  }, [dimension, filterParams])
 
   const items: BarItem[] = useMemo(() => {
     if (dimension === 'model') {
@@ -193,46 +220,52 @@ export function TopUsageChart({
 
   const dimensionLabel = dimension === 'model' ? t('Models') : dimension === 'provider' ? t('Providers') : t('Sources')
 
+  const chart = (
+    <HorizontalBarChart
+      title={`${t('Top')} ${dimensionLabel}`}
+      icon="📊"
+      items={items}
+      metric={metric}
+    >
+      <div style={{
+        padding: '8px 12px',
+        borderTop: '1px solid var(--border-color)',
+        display: 'flex',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+      }}>
+        <div style={{ display: 'flex', gap: '2px', background: 'var(--tab-toggle-bg)', borderRadius: '6px', padding: '2px' }}>
+          {(['model', 'provider', 'source'] as Dimension[]).map(d => (
+            <button
+              key={d}
+              className={`tab-toggle-btn ${dimension === d ? 'active' : ''}`}
+              onClick={() => setDimension(d)}
+            >
+              {d === 'model' ? t('Models') : d === 'provider' ? t('Providers') : t('Sources')}
+            </button>
+          ))}
+        </div>
+        <div style={{ display: 'flex', gap: '2px', background: 'var(--tab-toggle-bg)', borderRadius: '6px', padding: '2px' }}>
+          {(['tokens', 'cost', 'throughput', 'successRate', 'cacheHitRate'] as Metric[]).map(m => (
+            <button
+              key={m}
+              className={`tab-toggle-btn ${metric === m ? 'active' : ''}`}
+              onClick={() => setMetric(m)}
+            >
+              {m === 'tokens' ? t('Tokens') : m === 'cost' ? t('Cost') : m === 'throughput' ? t('Speed') : m === 'successRate' ? t('Success') : t('Cache')}
+            </button>
+          ))}
+        </div>
+      </div>
+    </HorizontalBarChart>
+  )
+
+  if (!showTrend) return chart
+
   return (
     <div style={{ display: 'flex', gap: '16px', alignItems: 'stretch' }}>
       <div style={{ flex: 2 }}>
-        <HorizontalBarChart
-          title={`${t('Top')} ${dimensionLabel}`}
-          icon="📊"
-          items={items}
-          metric={metric}
-        >
-          <div style={{
-            padding: '8px 12px',
-            borderTop: '1px solid var(--border-color)',
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-          }}>
-            <div style={{ display: 'flex', gap: '2px', background: 'var(--tab-toggle-bg)', borderRadius: '6px', padding: '2px' }}>
-              {(['model', 'provider', 'source'] as Dimension[]).map(d => (
-                <button
-                  key={d}
-                  className={`tab-toggle-btn ${dimension === d ? 'active' : ''}`}
-                  onClick={() => setDimension(d)}
-                >
-                  {d === 'model' ? t('Models') : d === 'provider' ? t('Providers') : t('Sources')}
-                </button>
-              ))}
-            </div>
-            <div style={{ display: 'flex', gap: '2px', background: 'var(--tab-toggle-bg)', borderRadius: '6px', padding: '2px' }}>
-              {(['tokens', 'cost', 'throughput', 'successRate', 'cacheHitRate'] as Metric[]).map(m => (
-                <button
-                  key={m}
-                  className={`tab-toggle-btn ${metric === m ? 'active' : ''}`}
-                  onClick={() => setMetric(m)}
-                >
-                  {m === 'tokens' ? t('Tokens') : m === 'cost' ? t('Cost') : m === 'throughput' ? t('Speed') : m === 'successRate' ? t('Success') : t('Cache')}
-                </button>
-              ))}
-            </div>
-          </div>
-        </HorizontalBarChart>
+        {chart}
       </div>
       <div style={{ flex: 1, minWidth: 0 }}>
         <SparklineTrendPanel

@@ -17,6 +17,10 @@ export type UsageSummary = {
   avg_effective_price_per_million_usd: number | null
   successful_requests: number
   failed_requests: number
+  status_429: number | null
+  status_4xx: number | null
+  status_5xx: number | null
+  status_unknown: number | null
 }
 
 export type ProviderUsage = {
@@ -37,6 +41,10 @@ export type ProviderUsage = {
   avg_effective_price_per_million_usd: number | null
   successful_requests: number | null
   failed_requests: number | null
+  status_429: number | null
+  status_4xx: number | null
+  status_5xx: number | null
+  status_unknown: number | null
 }
 
 export type SourceUsage = {
@@ -55,6 +63,10 @@ export type SourceUsage = {
   total_cost_usd: number | null
   successful_requests: number | null
   failed_requests: number | null
+  status_429: number | null
+  status_4xx: number | null
+  status_5xx: number | null
+  status_unknown: number | null
 }
 
 export type UsageRow = {
@@ -95,9 +107,20 @@ export type DailyUsage = {
   avg_throughput: number | null
   successful_requests: number | null
   failed_requests: number | null
+  status_429: number | null
+  status_4xx: number | null
+  status_5xx: number | null
+  status_unknown: number | null
 }
 
-export type ActiveFilter = { provider: string; model: string | null } | null
+export type ActiveFilter = { 
+  provider: string; 
+  model: string | null; 
+  only_failed?: boolean;
+  status_429?: boolean;
+  status_4xx?: boolean;
+  status_5xx?: boolean;
+} | null
 export type DateRangeOption = '24h' | '7d' | '30d' | 'all' | 'custom'
 
 export type SessionSummary = {
@@ -117,6 +140,10 @@ export type SessionSummary = {
   avg_ttft_ms: number
   successful_requests: number
   failed_requests: number
+  status_429: number | null
+  status_4xx: number | null
+  status_5xx: number | null
+  status_unknown: number | null
 }
 
 export type SessionsSummary = {
@@ -125,4 +152,30 @@ export type SessionsSummary = {
   total_tokens: number
   total_cost_usd: number
   avg_latency_ms: number
+}
+
+export type SetupAgentHealth = {
+  configured: boolean
+  endpoint_matches: boolean
+  configured_endpoint: string | null
+  expected_endpoint: string
+  status: 'ready' | 'missing_config' | 'wrong_endpoint'
+}
+
+export type SetupDiagnostics = {
+  expected: {
+    otlp_endpoint: string
+    otlp_logs_endpoint: string
+  }
+  summary: {
+    total_agents: number
+    configured_agents: number
+    matching_agents: number
+  }
+  agents: Record<string, SetupAgentHealth>
+}
+
+export type OnboardingCopiedCommand = {
+  source: string
+  command: string
 }

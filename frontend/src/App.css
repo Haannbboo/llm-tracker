@@ -1099,6 +1099,11 @@
   background: var(--icon-pink-bg);
 }
 
+.insight-card.success {
+  border-color: var(--badge-success-bg);
+  background: var(--icon-green-bg);
+}
+
 .insight-icon {
   font-size: 20px;
   margin-top: 2px;
@@ -1123,4 +1128,14 @@
 .insight-detail {
   font-size: 12px;
   color: var(--text-secondary);
+}
+
+.status-link {
+  cursor: pointer;
+  text-decoration: underline;
+  transition: opacity 0.2s;
+}
+
+.status-link:hover {
+  opacity: 0.7;
 }
