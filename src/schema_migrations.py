@@ -359,4 +359,22 @@ def migrate_database(db_path: str | None = None) -> list[str]:
                 )
             applied.append("usage_daily.backfill")
 
+    # Slice 0: Backfill sessions table from usage when there are usage rows
+    # with session_ids that don't have a corresponding session record yet.
+    # The sessions table is created by init_db() via metadata.create_all().
+    if _table_exists(engine, "sessions") and _table_exists(engine, "usage"):
+        with engine.connect() as connection:
+            unbackfilled = connection.execute(
+                text(
+                    "SELECT COUNT(*) FROM usage "
+                    "WHERE session_id IS NOT NULL AND session_id != '' "
+                    "AND session_id NOT IN (SELECT session_id FROM sessions)"
+                )
+            ).scalar()
+        if unbackfilled and unbackfilled > 0:
+            from .database import rebuild_sessions_from_usage
+
+            rebuild_sessions_from_usage(db_path=db_path)
+            applied.append("sessions.backfill")
+
     return applied

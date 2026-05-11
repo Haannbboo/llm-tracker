@@ -2487,3 +2487,270 @@ def test_migration_adds_status_columns(database_module, isolated_home, load_modu
     assert "status_4xx" in columns
     assert "status_5xx" in columns
     assert "status_unknown" in columns
+
+
+# ---------------------------------------------------------------------------
+# Slice 0: Persist Sessions as First-Class Rows
+# ---------------------------------------------------------------------------
+
+
+def test_session_record_created_from_usage_ingestion(database_module, isolated_home):
+    """TDD step 1: Ingesting two usage rows with same session_id creates one
+    sessions row with summed tokens/cost/request count and min/max timestamps."""
+    db_path = str(isolated_home / "usage.db")
+    database_module.init_db(db_path)
+
+    database_module.log_usage(
+        database_module.Usage(
+            ts="2026-05-09T10:00:00+00:00",
+            provider="anthropic",
+            model="claude-sonnet-4-6",
+            client_source="claude-code",
+            session_id="sess-1",
+            endpoint="/v1/messages",
+            prompt_tokens=100,
+            completion_tokens=50,
+            total_tokens=150,
+            latency_ms=200,
+            ttft_ms=100,
+            input_cost_usd=0.001,
+            output_cost_usd=0.002,
+            total_cost_usd=0.003,
+            status=200,
+        ),
+        db_path=db_path,
+    )
+
+    database_module.log_usage(
+        database_module.Usage(
+            ts="2026-05-09T10:05:00+00:00",
+            provider="anthropic",
+            model="claude-sonnet-4-6",
+            client_source="claude-code",
+            session_id="sess-1",
+            endpoint="/v1/messages",
+            prompt_tokens=200,
+            completion_tokens=100,
+            total_tokens=300,
+            latency_ms=300,
+            ttft_ms=150,
+            input_cost_usd=0.002,
+            output_cost_usd=0.004,
+            total_cost_usd=0.006,
+            status=200,
+        ),
+        db_path=db_path,
+    )
+
+    from sqlalchemy import select
+    from sqlalchemy.orm import Session as OrmSession
+
+    engine = database_module.get_engine(db_path)
+    with OrmSession(engine) as orm:
+        session = orm.scalar(
+            select(database_module.SessionRecord).where(
+                database_module.SessionRecord.session_id == "sess-1"
+            )
+        )
+
+    assert session is not None, "SessionRecord should exist after ingesting usage rows"
+    assert session.request_count == 2
+    assert session.total_tokens == 450
+    assert session.prompt_tokens == 300
+    assert session.completion_tokens == 150
+    assert float(session.total_cost_usd) == pytest.approx(0.009, abs=1e-6)
+    assert session.started == "2026-05-09T10:00:00+00:00"
+    assert session.ended == "2026-05-09T10:05:00+00:00"
+    assert session.successful_requests == 2
+    assert session.failed_requests == 0
+
+
+def test_session_record_primary_model_picks_higher_cost(database_module, isolated_home):
+    """TDD step 2: Two models in one session; primary_model picks the one
+    with higher cumulative cost."""
+    db_path = str(isolated_home / "usage.db")
+    database_module.init_db(db_path)
+
+    # Model A: cost 0.003
+    database_module.log_usage(
+        database_module.Usage(
+            ts="2026-05-09T10:00:00+00:00",
+            provider="anthropic",
+            model="claude-sonnet-4-6",
+            client_source="claude-code",
+            session_id="sess-1",
+            endpoint="/v1/messages",
+            prompt_tokens=100,
+            completion_tokens=50,
+            total_tokens=150,
+            latency_ms=200,
+            ttft_ms=100,
+            input_cost_usd=0.001,
+            output_cost_usd=0.002,
+            total_cost_usd=0.003,
+            status=200,
+        ),
+        db_path=db_path,
+    )
+
+    # Model B: cost 0.015 (higher)
+    database_module.log_usage(
+        database_module.Usage(
+            ts="2026-05-09T10:01:00+00:00",
+            provider="openai",
+            model="gpt-4o",
+            client_source="claude-code",
+            session_id="sess-1",
+            endpoint="/v1/chat/completions",
+            prompt_tokens=200,
+            completion_tokens=100,
+            total_tokens=300,
+            latency_ms=300,
+            ttft_ms=150,
+            input_cost_usd=0.005,
+            output_cost_usd=0.01,
+            total_cost_usd=0.015,
+            status=200,
+        ),
+        db_path=db_path,
+    )
+
+    from sqlalchemy import select
+    from sqlalchemy.orm import Session as OrmSession
+
+    engine = database_module.get_engine(db_path)
+    with OrmSession(engine) as orm:
+        session = orm.scalar(
+            select(database_module.SessionRecord).where(
+                database_module.SessionRecord.session_id == "sess-1"
+            )
+        )
+
+    assert session.primary_model == "gpt-4o"
+    assert session.primary_provider == "openai"
+
+    import json
+
+    models = json.loads(session.models_json)
+    providers = json.loads(session.providers_json)
+    assert set(models.keys()) == {"claude-sonnet-4-6", "gpt-4o"}
+    assert set(providers.keys()) == {"anthropic", "openai"}
+
+
+def test_fetch_sessions_reads_from_persisted_table(database_module, isolated_home):
+    """TDD step 3: fetch_sessions() reads from the persisted sessions table,
+    not freshly grouped usage."""
+    db_path = str(isolated_home / "usage.db")
+    database_module.init_db(db_path)
+
+    # Directly insert a SessionRecord (bypassing log_usage)
+    from sqlalchemy.orm import Session
+
+    engine = database_module.get_engine(db_path)
+    with Session(engine) as session:
+        session.add(
+            database_module.SessionRecord(
+                session_id="manual-sess",
+                client_source="claude-code",
+                started="2026-05-09T08:00:00+00:00",
+                ended="2026-05-09T09:00:00+00:00",
+                request_count=5,
+                successful_requests=5,
+                failed_requests=0,
+                total_tokens=1000,
+                prompt_tokens=800,
+                completion_tokens=200,
+                cached_tokens=0,
+                total_cost_usd=0.05,
+                latency_sum_ms=5000,
+                avg_latency_ms=1000.0,
+                avg_ttft_ms=200.0,
+                primary_provider="anthropic",
+                primary_model="claude-sonnet-4-6",
+                models_json='{"claude-sonnet-4-6": 0.05}',
+                providers_json='{"anthropic": 0.05}',
+                last_usage_id=None,
+                updated_at="2026-05-09T09:00:00+00:00",
+            )
+        )
+        session.commit()
+
+    result = database_module.fetch_sessions(db_path=db_path)
+    assert len(result) == 1
+    assert result[0]["session_id"] == "manual-sess"
+    assert result[0]["request_count"] == 5
+    assert result[0]["total_tokens"] == 1000
+    assert result[0]["total_cost_usd"] == pytest.approx(0.05, abs=1e-6)
+    assert result[0]["duration_s"] == 3600
+
+
+def test_rebuild_sessions_from_usage(database_module, isolated_home):
+    """TDD step 4: Seed usage rows, run rebuild_sessions_from_usage(),
+    assert persisted rows match old aggregation behavior."""
+    db_path = str(isolated_home / "usage.db")
+    database_module.init_db(db_path)
+
+    # Seed usage rows for two sessions
+    for i in range(3):
+        database_module.log_usage(
+            database_module.Usage(
+                ts=f"2026-05-09T10:0{i}:00+00:00",
+                provider="anthropic",
+                model="claude-sonnet-4-6",
+                client_source="claude-code",
+                session_id="sess-1",
+                endpoint="/v1/messages",
+                prompt_tokens=100,
+                completion_tokens=50,
+                total_tokens=150,
+                latency_ms=200,
+                ttft_ms=100,
+                input_cost_usd=0.001,
+                output_cost_usd=0.002,
+                total_cost_usd=0.003,
+                status=200,
+            ),
+            db_path=db_path,
+        )
+
+    database_module.log_usage(
+        database_module.Usage(
+            ts="2026-05-09T11:00:00+00:00",
+            provider="openai",
+            model="gpt-4o",
+            client_source="codex",
+            session_id="sess-2",
+            endpoint="/v1/chat/completions",
+            prompt_tokens=200,
+            completion_tokens=100,
+            total_tokens=300,
+            latency_ms=300,
+            ttft_ms=150,
+            input_cost_usd=0.005,
+            output_cost_usd=0.01,
+            total_cost_usd=0.015,
+            status=200,
+        ),
+        db_path=db_path,
+    )
+
+    # Clear sessions table and rebuild from scratch
+    count = database_module.rebuild_sessions_from_usage(db_path=db_path)
+    assert count == 2
+
+    result = database_module.fetch_sessions(db_path=db_path)
+    assert len(result) == 2
+
+    by_id = {r["session_id"]: r for r in result}
+    s1 = by_id["sess-1"]
+    assert s1["request_count"] == 3
+    assert s1["total_tokens"] == 450
+    assert float(s1["total_cost_usd"]) == pytest.approx(0.009, abs=1e-6)
+    assert s1["started"] == "2026-05-09T10:00:00+00:00"
+    assert s1["ended"] == "2026-05-09T10:02:00+00:00"
+    assert s1["successful_requests"] == 3
+
+    s2 = by_id["sess-2"]
+    assert s2["request_count"] == 1
+    assert s2["total_tokens"] == 300
+    assert float(s2["total_cost_usd"]) == pytest.approx(0.015, abs=1e-6)

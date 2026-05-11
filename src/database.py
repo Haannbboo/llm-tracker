@@ -7,6 +7,7 @@ The steady-state pattern in this module is:
 
 from __future__ import annotations
 
+import json
 import os
 from datetime import datetime, timezone
 from decimal import Decimal
@@ -173,6 +174,50 @@ class UsageDaily(Base):
     )
 
 
+class SessionRecord(Base):
+    __tablename__ = "sessions"
+
+    session_id: Mapped[str] = mapped_column(String, primary_key=True)
+    client_source: Mapped[str | None] = mapped_column(String, nullable=True)
+    started: Mapped[str] = mapped_column(String, nullable=False)
+    ended: Mapped[str] = mapped_column(String, nullable=False)
+    request_count: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default=text("0")
+    )
+    successful_requests: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default=text("0")
+    )
+    failed_requests: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default=text("0")
+    )
+    total_tokens: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default=text("0")
+    )
+    prompt_tokens: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default=text("0")
+    )
+    completion_tokens: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default=text("0")
+    )
+    cached_tokens: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default=text("0")
+    )
+    total_cost_usd: Mapped[Decimal] = mapped_column(
+        Numeric(18, 8), nullable=False, server_default=text("0")
+    )
+    latency_sum_ms: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default=text("0")
+    )
+    avg_latency_ms: Mapped[float | None] = mapped_column(Numeric(18, 4), nullable=True)
+    avg_ttft_ms: Mapped[float | None] = mapped_column(Numeric(18, 4), nullable=True)
+    primary_provider: Mapped[str | None] = mapped_column(String, nullable=True)
+    primary_model: Mapped[str | None] = mapped_column(String, nullable=True)
+    providers_json: Mapped[str | None] = mapped_column(String, nullable=True)
+    models_json: Mapped[str | None] = mapped_column(String, nullable=True)
+    last_usage_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    updated_at: Mapped[str] = mapped_column(String, nullable=False)
+
+
 DB_URL_ENV_VAR = "LLM_TRACKER_DB_URL"
 
 _engine_cache: dict[str, Engine] = {}
@@ -300,6 +345,116 @@ def resolve_base_url_id(
     )
 
 
+def _compute_session_primary(
+    models_costs: dict[str, float],
+) -> tuple[str | None, str | None]:
+    """Return (primary_model, primary_provider) from model-cost mapping."""
+    if not models_costs:
+        return None, None
+    # No provider info in the cost map; provider is tracked separately
+    primary = max(models_costs, key=models_costs.get)  # type: ignore[arg-type]
+    return primary, None
+
+
+def upsert_session_from_usage(usage: Usage, db_path: str | None = None) -> None:
+    """Incrementally update the sessions table for a single usage row."""
+    if not usage.session_id:
+        return
+
+    is_success = usage.status is None or usage.status < 400
+    latency = usage.latency_ms or 0
+    ttft = usage.ttft_ms or 0
+    total_cost = Decimal(str(usage.total_cost_usd))
+    now = datetime.now(timezone.utc).isoformat()
+
+    engine = get_engine(db_path)
+    with Session(engine) as session:
+        existing = session.get(SessionRecord, usage.session_id)
+        if existing:
+            # Update timestamps
+            if usage.ts < existing.started:
+                existing.started = usage.ts
+            if usage.ts > existing.ended:
+                existing.ended = usage.ts
+
+            # Increment counters
+            existing.request_count += 1
+            existing.prompt_tokens += usage.prompt_tokens or 0
+            existing.completion_tokens += usage.completion_tokens or 0
+            existing.cached_tokens += usage.cached_tokens or 0
+            existing.total_tokens += usage.total_tokens or 0
+            existing.total_cost_usd += total_cost
+            existing.latency_sum_ms += latency
+            existing.successful_requests += 1 if is_success else 0
+            existing.failed_requests += 0 if is_success else 1
+
+            # Recompute averages
+            existing.avg_latency_ms = existing.latency_sum_ms / existing.request_count
+            # avg_ttft: store running sum in latency field... no, just recompute from existing
+            # We don't store ttft_sum, so approximate: new avg = (old_avg * (n-1) + new_val) / n
+            old_n = existing.request_count - 1
+            old_avg_ttft = float(existing.avg_ttft_ms or 0)
+            existing.avg_ttft_ms = (
+                old_avg_ttft * old_n + ttft
+            ) / existing.request_count
+
+            # Update models/providers JSON
+            models_costs: dict[str, float] = json.loads(existing.models_json or "{}")
+            providers_set: dict[str, float] = json.loads(
+                existing.providers_json or "{}"
+            )
+
+            model = usage.model
+            models_costs[model] = models_costs.get(model, 0) + float(total_cost)
+
+            provider = usage.provider
+            providers_set[provider] = providers_set.get(provider, 0) + float(total_cost)
+
+            existing.models_json = json.dumps(models_costs)
+            existing.providers_json = json.dumps(providers_set)
+
+            # Recompute primary model
+            primary_model, _ = _compute_session_primary(models_costs)
+            existing.primary_model = primary_model
+            # Primary provider: provider with highest cost
+            if providers_set:
+                existing.primary_provider = max(providers_set, key=providers_set.get)  # type: ignore[arg-type]
+
+            existing.last_usage_id = usage.id
+            existing.updated_at = now
+        else:
+            # Create new session record
+            models_costs = {usage.model: float(total_cost)}
+            providers_set = {usage.provider: float(total_cost)}
+
+            session.add(
+                SessionRecord(
+                    session_id=usage.session_id,
+                    client_source=usage.client_source,
+                    started=usage.ts,
+                    ended=usage.ts,
+                    request_count=1,
+                    successful_requests=1 if is_success else 0,
+                    failed_requests=0 if is_success else 1,
+                    total_tokens=usage.total_tokens or 0,
+                    prompt_tokens=usage.prompt_tokens or 0,
+                    completion_tokens=usage.completion_tokens or 0,
+                    cached_tokens=usage.cached_tokens or 0,
+                    total_cost_usd=total_cost,
+                    latency_sum_ms=latency,
+                    avg_latency_ms=float(latency),
+                    avg_ttft_ms=float(ttft),
+                    primary_provider=usage.provider,
+                    primary_model=usage.model,
+                    providers_json=json.dumps(providers_set),
+                    models_json=json.dumps(models_costs),
+                    last_usage_id=usage.id,
+                    updated_at=now,
+                )
+            )
+        session.commit()
+
+
 def log_usage(usage: Usage, db_path: str | None = None) -> None:
     """Persist a single usage row and update the daily aggregation table."""
     with Session(get_engine(db_path), expire_on_commit=False) as session:
@@ -313,6 +468,109 @@ def log_usage(usage: Usage, db_path: str | None = None) -> None:
         logging.getLogger(__name__).warning(
             "Failed to update daily aggregate for usage ts=%s", usage.ts
         )
+    try:
+        upsert_session_from_usage(usage, db_path=db_path)
+    except Exception:
+        import logging
+
+        logging.getLogger(__name__).warning(
+            "Failed to update session record for usage ts=%s", usage.ts
+        )
+
+
+def rebuild_sessions_from_usage(db_path: str | None = None) -> int:
+    """Clear and rebuild sessions table from usage rows. Returns count of sessions."""
+    engine = get_engine(db_path)
+
+    # Clear existing sessions
+    with engine.begin() as conn:
+        conn.execute(text("DELETE FROM sessions"))
+
+    # Fetch all usage rows with non-empty session_id, ordered for grouping
+    with Session(engine) as session:
+        rows = (
+            session.execute(
+                select(Usage)
+                .where(Usage.session_id.isnot(None), Usage.session_id != "")
+                .order_by(Usage.session_id, Usage.ts)
+            )
+            .scalars()
+            .all()
+        )
+
+    # Group by session_id in Python
+    grouped: dict[str, list[Usage]] = {}
+    for row in rows:
+        grouped.setdefault(row.session_id, []).append(row)  # type: ignore[arg-type]
+
+    now = datetime.now(timezone.utc).isoformat()
+    count = 0
+
+    with Session(engine) as session:
+        for sid, usages in grouped.items():
+            request_count = len(usages)
+            successful = sum(1 for u in usages if u.status is None or u.status < 400)
+            failed = request_count - successful
+            total_tokens = sum(u.total_tokens or 0 for u in usages)
+            prompt_tokens = sum(u.prompt_tokens or 0 for u in usages)
+            completion_tokens = sum(u.completion_tokens or 0 for u in usages)
+            cached_tokens = sum(u.cached_tokens or 0 for u in usages)
+            total_cost = sum(Decimal(str(u.total_cost_usd)) for u in usages)
+            latency_sum = sum(u.latency_ms or 0 for u in usages)
+            avg_latency = latency_sum / request_count if request_count else None
+            ttft_values = [u.ttft_ms for u in usages if u.ttft_ms is not None]
+            avg_ttft = sum(ttft_values) / len(ttft_values) if ttft_values else None
+
+            # Build model/provider cost maps
+            models_costs: dict[str, float] = {}
+            providers_costs: dict[str, float] = {}
+            for u in usages:
+                models_costs[u.model] = models_costs.get(u.model, 0) + float(
+                    u.total_cost_usd
+                )
+                providers_costs[u.provider] = providers_costs.get(
+                    u.provider, 0
+                ) + float(u.total_cost_usd)
+
+            primary_model = (
+                max(models_costs, key=models_costs.get) if models_costs else None
+            )  # type: ignore[arg-type]
+            primary_provider = (
+                max(providers_costs, key=providers_costs.get)
+                if providers_costs
+                else None
+            )  # type: ignore[arg-type]
+
+            session.add(
+                SessionRecord(
+                    session_id=sid,
+                    client_source=usages[0].client_source,
+                    started=usages[0].ts,
+                    ended=usages[-1].ts,
+                    request_count=request_count,
+                    successful_requests=successful,
+                    failed_requests=failed,
+                    total_tokens=total_tokens,
+                    prompt_tokens=prompt_tokens,
+                    completion_tokens=completion_tokens,
+                    cached_tokens=cached_tokens,
+                    total_cost_usd=total_cost,
+                    latency_sum_ms=latency_sum,
+                    avg_latency_ms=avg_latency,
+                    avg_ttft_ms=avg_ttft,
+                    primary_provider=primary_provider,
+                    primary_model=primary_model,
+                    providers_json=json.dumps(providers_costs),
+                    models_json=json.dumps(models_costs),
+                    last_usage_id=usages[-1].id,
+                    updated_at=now,
+                )
+            )
+            count += 1
+
+        session.commit()
+
+    return count
 
 
 def upsert_daily_aggregate(usage: Usage, db_path: str | None = None) -> None:
@@ -749,19 +1007,17 @@ def count_usage(
         return int(result or 0)
 
 
-# Allowed sort columns for fetch_sessions (maps frontend names to SQL expressions)
-# SQL-sortable columns. duration_s is excluded because date arithmetic
-# is vendor-specific; it is sorted in Python after the query.
+# Allowed sort columns for fetch_sessions (maps frontend names to SessionRecord columns)
 _SESSION_SORT_COLUMNS = {
-    "session_id": Usage.session_id,
-    "client_source": Usage.client_source,
-    "started": func.min(Usage.ts),
-    "ended": func.max(Usage.ts),
-    "request_count": func.count(),
-    "total_tokens": func.sum(Usage.total_tokens),
-    "total_cost_usd": func.sum(Usage.total_cost_usd),
-    "avg_latency_ms": func.avg(Usage.latency_ms),
-    "avg_ttft_ms": func.avg(Usage.ttft_ms),
+    "session_id": SessionRecord.session_id,
+    "client_source": SessionRecord.client_source,
+    "started": SessionRecord.started,
+    "ended": SessionRecord.ended,
+    "request_count": SessionRecord.request_count,
+    "total_tokens": SessionRecord.total_tokens,
+    "total_cost_usd": SessionRecord.total_cost_usd,
+    "avg_latency_ms": SessionRecord.avg_latency_ms,
+    "avg_ttft_ms": SessionRecord.avg_ttft_ms,
 }
 
 
@@ -778,6 +1034,31 @@ def _compute_duration_s(started: str | None, ended: str | None) -> int:
         return 0
 
 
+def _session_record_to_dict(rec: SessionRecord) -> dict[str, Any]:
+    """Convert a SessionRecord ORM object to the API response dict."""
+    started = rec.started
+    ended = rec.ended
+    return {
+        "session_id": rec.session_id,
+        "client_source": rec.client_source or "",
+        "model": rec.primary_model or "",
+        "started": started,
+        "ended": ended,
+        "duration_s": _compute_duration_s(started, ended),
+        "request_count": rec.request_count,
+        "total_tokens": rec.total_tokens,
+        "prompt_tokens": rec.prompt_tokens,
+        "completion_tokens": rec.completion_tokens,
+        "cached_tokens": rec.cached_tokens,
+        "total_cost_usd": float(rec.total_cost_usd),
+        "avg_latency_ms": round(float(rec.avg_latency_ms or 0), 1),
+        "latency_sum_ms": float(rec.latency_sum_ms),
+        "avg_ttft_ms": round(float(rec.avg_ttft_ms or 0), 1),
+        "successful_requests": rec.successful_requests,
+        "failed_requests": rec.failed_requests,
+    }
+
+
 def fetch_sessions(
     *,
     client_source: str | None = None,
@@ -789,155 +1070,44 @@ def fetch_sessions(
     offset: int = 0,
     db_path: str | None = None,
 ) -> list[dict[str, Any]]:
-    """Return sessions aggregated from the usage table."""
-    filters: list[Any] = [
-        Usage.session_id.isnot(None),
-        Usage.session_id != "",
-    ]
+    """Return sessions from the persisted sessions table."""
+    filters: list[Any] = []
     if client_source:
-        filters.append(Usage.client_source == client_source)
+        filters.append(SessionRecord.client_source == client_source)
     if since:
-        filters.append(Usage.ts >= since)
+        filters.append(SessionRecord.started >= since)
     if until:
-        filters.append(Usage.ts <= until)
+        filters.append(SessionRecord.ended <= until)
 
     sort_col = _SESSION_SORT_COLUMNS.get(sort_by)
-    # duration_s is sorted in Python after the query (vendor-specific date math)
     python_sort = sort_by == "duration_s"
+
+    engine = get_engine(db_path)
+
+    if python_sort:
+        # Fetch all, sort+paginate in Python
+        query = select(SessionRecord)
+        if filters:
+            query = query.where(and_(*filters))
+        with Session(engine) as session:
+            records = session.execute(query).scalars().all()
+        result = [_session_record_to_dict(r) for r in records]
+        result.sort(key=lambda r: r["duration_s"], reverse=(sort_order == "desc"))
+        return result[offset : offset + limit]
+
     if sort_col is not None:
         order = sort_col.asc() if sort_order == "asc" else sort_col.desc()
     else:
-        order = func.max(Usage.ts).desc()  # default fallback
+        order = SessionRecord.ended.desc()
 
-    # For duration_s sorting we need all rows first, then sort+paginate in Python.
-    # For SQL-sortable columns we can sort+paginate in SQL.
-    if python_sort:
-        query = (
-            select(
-                Usage.session_id,
-                func.min(Usage.client_source).label("client_source"),
-                func.min(Usage.model).label("model"),
-                func.min(Usage.ts).label("started"),
-                func.max(Usage.ts).label("ended"),
-                func.count().label("request_count"),
-                func.sum(Usage.total_tokens).label("total_tokens"),
-                func.sum(Usage.prompt_tokens).label("prompt_tokens"),
-                func.sum(Usage.completion_tokens).label("completion_tokens"),
-                func.sum(Usage.cached_tokens).label("cached_tokens"),
-                func.sum(Usage.total_cost_usd).label("total_cost_usd"),
-                func.avg(Usage.latency_ms).label("avg_latency_ms"),
-                func.sum(Usage.latency_ms).label("latency_sum_ms"),
-                func.avg(Usage.ttft_ms).label("avg_ttft_ms"),
-                func.count(
-                    case((and_(Usage.status.isnot(None), Usage.status >= 400), 1))
-                ).label("failed_requests"),
-                func.count(
-                    case((or_(Usage.status.is_(None), Usage.status < 400), 1))
-                ).label("successful_requests"),
-                func.count(case((Usage.status == 429, 1))).label("status_429"),
-                func.count(
-                    case(
-                        (
-                            and_(
-                                Usage.status >= 400,
-                                Usage.status < 500,
-                                Usage.status != 429,
-                            ),
-                            1,
-                        )
-                    )
-                ).label("status_4xx"),
-                func.count(case((Usage.status >= 500, 1))).label("status_5xx"),
-                func.count(
-                    case((and_(Usage.status >= 400, Usage.status.is_(None)), 1))
-                ).label("status_unknown"),
-            )
-            .where(and_(*filters))
-            .group_by(Usage.session_id)
-        )
-    else:
-        query = (
-            select(
-                Usage.session_id,
-                func.min(Usage.client_source).label("client_source"),
-                func.min(Usage.model).label("model"),
-                func.min(Usage.ts).label("started"),
-                func.max(Usage.ts).label("ended"),
-                func.count().label("request_count"),
-                func.sum(Usage.total_tokens).label("total_tokens"),
-                func.sum(Usage.prompt_tokens).label("prompt_tokens"),
-                func.sum(Usage.completion_tokens).label("completion_tokens"),
-                func.sum(Usage.cached_tokens).label("cached_tokens"),
-                func.sum(Usage.total_cost_usd).label("total_cost_usd"),
-                func.avg(Usage.latency_ms).label("avg_latency_ms"),
-                func.sum(Usage.latency_ms).label("latency_sum_ms"),
-                func.avg(Usage.ttft_ms).label("avg_ttft_ms"),
-                func.count(
-                    case((and_(Usage.status.isnot(None), Usage.status >= 400), 1))
-                ).label("failed_requests"),
-                func.count(
-                    case((or_(Usage.status.is_(None), Usage.status < 400), 1))
-                ).label("successful_requests"),
-                func.count(case((Usage.status == 429, 1))).label("status_429"),
-                func.count(
-                    case(
-                        (
-                            and_(
-                                Usage.status >= 400,
-                                Usage.status < 500,
-                                Usage.status != 429,
-                            ),
-                            1,
-                        )
-                    )
-                ).label("status_4xx"),
-                func.count(case((Usage.status >= 500, 1))).label("status_5xx"),
-                func.count(
-                    case((and_(Usage.status >= 400, Usage.status.is_(None)), 1))
-                ).label("status_unknown"),
-            )
-            .where(and_(*filters))
-            .group_by(Usage.session_id)
-            .order_by(order)
-            .limit(limit)
-            .offset(offset)
-        )
+    query = select(SessionRecord).order_by(order).limit(limit).offset(offset)
+    if filters:
+        query = query.where(and_(*filters))
 
-    with get_engine(db_path).connect() as connection:
-        rows = connection.execute(query).fetchall()
+    with Session(engine) as session:
+        records = session.execute(query).scalars().all()
 
-    result = []
-    for row in rows:
-        started = row.started
-        ended = row.ended
-        result.append(
-            {
-                "session_id": row.session_id,
-                "client_source": row.client_source or "",
-                "model": row.model or "",
-                "started": started,
-                "ended": ended,
-                "duration_s": _compute_duration_s(started, ended),
-                "request_count": row.request_count,
-                "total_tokens": int(row.total_tokens or 0),
-                "prompt_tokens": int(row.prompt_tokens or 0),
-                "completion_tokens": int(row.completion_tokens or 0),
-                "cached_tokens": int(row.cached_tokens or 0),
-                "total_cost_usd": float(row.total_cost_usd or 0),
-                "avg_latency_ms": round(float(row.avg_latency_ms or 0), 1),
-                "latency_sum_ms": float(row.latency_sum_ms or 0),
-                "avg_ttft_ms": round(float(row.avg_ttft_ms or 0), 1),
-                "successful_requests": int(row.successful_requests or 0),
-                "failed_requests": int(row.failed_requests or 0),
-            }
-        )
-
-    # Python-side sort+paginate for duration_s (vendor-specific date arithmetic)
-    if python_sort:
-        result.sort(key=lambda r: r["duration_s"], reverse=(sort_order == "desc"))
-        result = result[offset : offset + limit]
-
-    return result
+    return [_session_record_to_dict(r) for r in records]
 
 
 def count_sessions(
@@ -947,19 +1117,18 @@ def count_sessions(
     until: str | None = None,
     db_path: str | None = None,
 ) -> int:
-    """Count distinct sessions matching the filters."""
-    filters: list[Any] = [
-        Usage.session_id.isnot(None),
-        Usage.session_id != "",
-    ]
+    """Count sessions from the persisted sessions table."""
+    filters: list[Any] = []
     if client_source:
-        filters.append(Usage.client_source == client_source)
+        filters.append(SessionRecord.client_source == client_source)
     if since:
-        filters.append(Usage.ts >= since)
+        filters.append(SessionRecord.started >= since)
     if until:
-        filters.append(Usage.ts <= until)
+        filters.append(SessionRecord.ended <= until)
 
-    query = select(func.count(func.distinct(Usage.session_id))).where(and_(*filters))
+    query = select(func.count()).select_from(SessionRecord)
+    if filters:
+        query = query.where(and_(*filters))
     with get_engine(db_path).connect() as connection:
         result = connection.execute(query).scalar_one()
         return int(result or 0)
@@ -973,63 +1142,53 @@ def summarize_sessions(
     db_path: str | None = None,
 ) -> dict[str, Any]:
     """Return aggregate stats across all sessions matching the filters."""
-    filters: list[Any] = [
-        Usage.session_id.isnot(None),
-        Usage.session_id != "",
-    ]
+    filters: list[Any] = []
     if client_source:
-        filters.append(Usage.client_source == client_source)
+        filters.append(SessionRecord.client_source == client_source)
     if since:
-        filters.append(Usage.ts >= since)
+        filters.append(SessionRecord.started >= since)
     if until:
-        filters.append(Usage.ts <= until)
+        filters.append(SessionRecord.ended <= until)
 
-    # Subquery: per-session aggregates (GROUP BY session_id only --
-    # min(client_source) picks the primary source; in practice all rows
-    # in a session share the same client_source.)
-    subq = (
-        select(
-            Usage.session_id,
-            func.min(Usage.ts).label("started"),
-            func.max(Usage.ts).label("ended"),
-            func.sum(Usage.total_tokens).label("session_tokens"),
-            func.sum(Usage.total_cost_usd).label("session_cost"),
-            func.avg(Usage.latency_ms).label("session_avg_latency"),
-        )
-        .where(and_(*filters))
-        .group_by(Usage.session_id)
-        .subquery()
+    query = select(
+        func.count().label("session_count"),
+        func.sum(SessionRecord.total_tokens).label("total_tokens"),
+        func.sum(SessionRecord.total_cost_usd).label("total_cost_usd"),
+        func.avg(SessionRecord.avg_latency_ms).label("avg_latency_ms"),
+        func.sum(SessionRecord.latency_sum_ms).label("latency_sum_ms"),
     )
+    if filters:
+        query = query.where(and_(*filters))
 
-    # Outer query computes cross-session aggregates.
-    # avg_duration_s is derived from per-session started/ended in Python
-    # because SQL date arithmetic is vendor-specific.
-    inner_query = select(subq)
     with get_engine(db_path).connect() as connection:
-        rows = connection.execute(inner_query).fetchall()
+        row = connection.execute(query).fetchone()
 
-    if not rows:
+    if not row or row.session_count == 0:
         return {
             "session_count": 0,
             "avg_duration_s": 0,
             "total_tokens": 0,
-            "total_cost_usd": 0.0,
-            "avg_latency_ms": 0.0,
+            "total_cost_usd": 0,
+            "avg_latency_ms": 0,
         }
 
-    durations = [_compute_duration_s(r.started, r.ended) for r in rows]
-    total_tokens = sum(int(r.session_tokens or 0) for r in rows)
-    total_cost = sum(float(r.session_cost or 0) for r in rows)
-    latencies = [float(r.session_avg_latency or 0) for r in rows]
+    # Compute avg_duration_s from persisted started/ended in Python
+    duration_query = select(SessionRecord.started, SessionRecord.ended)
+    if filters:
+        duration_query = duration_query.where(and_(*filters))
+
+    with get_engine(db_path).connect() as connection:
+        duration_rows = connection.execute(duration_query).fetchall()
+
+    durations = [_compute_duration_s(r.started, r.ended) for r in duration_rows]
+    avg_duration = sum(durations) / len(durations) if durations else 0
 
     return {
-        "session_count": len(rows),
-        "avg_duration_s": round(sum(durations) / len(durations)) if durations else 0,
-        "total_tokens": total_tokens,
-        "total_cost_usd": total_cost,
-        "avg_latency_ms": round(sum(latencies) / len(latencies), 1)
-        if latencies
-        else 0.0,
+        "session_count": int(row.session_count),
+        "avg_duration_s": round(avg_duration, 1),
+        "total_tokens": int(row.total_tokens or 0),
+        "total_cost_usd": float(row.total_cost_usd or 0),
+        "avg_latency_ms": round(float(row.avg_latency_ms or 0), 1),
     }
 
 
