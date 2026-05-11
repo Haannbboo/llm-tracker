@@ -2754,3 +2754,101 @@ def test_rebuild_sessions_from_usage(database_module, isolated_home):
     assert s2["request_count"] == 1
     assert s2["total_tokens"] == 300
     assert float(s2["total_cost_usd"]) == pytest.approx(0.015, abs=1e-6)
+
+
+# ---------------------------------------------------------------------------
+# Slice 1: Store Manual Session Evaluations
+# ---------------------------------------------------------------------------
+
+
+def test_upsert_session_evaluation_creates_new(database_module, isolated_home):
+    """TDD step 1: Upsert evaluation for a session creates a new row."""
+    db_path = str(isolated_home / "usage.db")
+    database_module.init_db(db_path)
+
+    database_module.upsert_session_evaluation(
+        session_id="sess-1",
+        outcome="solved",
+        source="manual",
+        confidence=None,
+        task_title="Fixed dashboard navigation",
+        summary=None,
+        evidence=["User marked solved"],
+        failure_reason=None,
+        db_path=db_path,
+    )
+
+    result = database_module.get_session_evaluation("sess-1", db_path=db_path)
+    assert result is not None
+    assert result["outcome"] == "solved"
+    assert result["source"] == "manual"
+    assert result["task_title"] == "Fixed dashboard navigation"
+    assert result["evidence"] == ["User marked solved"]
+    assert result["failure_reason"] is None
+    assert result["confidence"] is None
+
+
+def test_upsert_session_evaluation_overwrites_existing(database_module, isolated_home):
+    """TDD step 5: Overwrite behavior — second upsert replaces the first."""
+    db_path = str(isolated_home / "usage.db")
+    database_module.init_db(db_path)
+
+    database_module.upsert_session_evaluation(
+        session_id="sess-1",
+        outcome="solved",
+        source="manual",
+        db_path=db_path,
+    )
+    database_module.upsert_session_evaluation(
+        session_id="sess-1",
+        outcome="failed",
+        source="manual",
+        failure_reason="Agent got stuck",
+        db_path=db_path,
+    )
+
+    result = database_module.get_session_evaluation("sess-1", db_path=db_path)
+    assert result is not None
+    assert result["outcome"] == "failed"
+    assert result["failure_reason"] == "Agent got stuck"
+
+
+def test_get_session_evaluation_returns_none_when_absent(
+    database_module, isolated_home
+):
+    """GET returns null when no evaluation exists for the session."""
+    db_path = str(isolated_home / "usage.db")
+    database_module.init_db(db_path)
+
+    result = database_module.get_session_evaluation("nonexistent", db_path=db_path)
+    assert result is None
+
+
+def test_delete_session_evaluation_removes_row(database_module, isolated_home):
+    """DELETE removes the evaluation and returns True."""
+    db_path = str(isolated_home / "usage.db")
+    database_module.init_db(db_path)
+
+    database_module.upsert_session_evaluation(
+        session_id="sess-1",
+        outcome="solved",
+        source="manual",
+        db_path=db_path,
+    )
+
+    deleted = database_module.delete_session_evaluation("sess-1", db_path=db_path)
+    assert deleted is True
+
+    result = database_module.get_session_evaluation("sess-1", db_path=db_path)
+    assert result is None
+
+
+def test_delete_session_evaluation_returns_false_when_absent(
+    database_module, isolated_home
+):
+    """DELETE returns False when no evaluation exists."""
+    db_path = str(isolated_home / "usage.db")
+    database_module.init_db(db_path)
+
+    deleted = database_module.delete_session_evaluation("nonexistent", db_path=db_path)
+    assert deleted is False

@@ -705,3 +705,108 @@ def test_usage_count_endpoint_passes_session_id(api_module, monkeypatch):
     )
     assert response.status_code == 200
     assert captured["session_id"] == "sess-123"
+
+
+# ---------------------------------------------------------------------------
+# Slice 1: Session Evaluation API
+# ---------------------------------------------------------------------------
+
+
+def test_put_session_evaluation_creates_evaluation(api_module, monkeypatch):
+    captured = {}
+
+    def fake_upsert(**kwargs):
+        captured.update(kwargs)
+
+    monkeypatch.setattr(api_module, "upsert_session_evaluation", fake_upsert)
+
+    response = TestClient(api_module.app).put(
+        "/sessions/sess-1/evaluation",
+        json={
+            "outcome": "solved",
+            "source": "manual",
+            "evidence": ["User marked solved"],
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "success"
+    assert captured["session_id"] == "sess-1"
+    assert captured["outcome"] == "solved"
+    assert captured["source"] == "manual"
+    assert captured["evidence"] == ["User marked solved"]
+
+
+def test_put_session_evaluation_invalid_outcome_returns_400(api_module, monkeypatch):
+    monkeypatch.setattr(api_module, "upsert_session_evaluation", lambda **kw: None)
+
+    response = TestClient(api_module.app).put(
+        "/sessions/sess-1/evaluation",
+        json={"outcome": "invalid_outcome"},
+    )
+
+    assert response.status_code == 400
+
+
+def test_put_session_evaluation_invalid_source_returns_400(api_module, monkeypatch):
+    monkeypatch.setattr(api_module, "upsert_session_evaluation", lambda **kw: None)
+
+    response = TestClient(api_module.app).put(
+        "/sessions/sess-1/evaluation",
+        json={"outcome": "solved", "source": "bogus_source"},
+    )
+
+    assert response.status_code == 400
+
+
+def test_get_session_evaluation_returns_evaluation(api_module, monkeypatch):
+    fake_eval = {
+        "session_id": "sess-1",
+        "outcome": "solved",
+        "source": "manual",
+        "confidence": None,
+        "task_title": "Fixed bug",
+        "summary": None,
+        "evidence": ["User marked solved"],
+        "failure_reason": None,
+        "reviewed_at": "2026-05-11T00:00:00+00:00",
+        "updated_at": "2026-05-11T00:00:00+00:00",
+    }
+    monkeypatch.setattr(
+        api_module, "get_session_evaluation", lambda sid, **kw: fake_eval
+    )
+
+    response = TestClient(api_module.app).get("/sessions/sess-1/evaluation")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["evaluation"]["outcome"] == "solved"
+    assert data["evaluation"]["task_title"] == "Fixed bug"
+
+
+def test_get_session_evaluation_returns_null_when_absent(api_module, monkeypatch):
+    monkeypatch.setattr(api_module, "get_session_evaluation", lambda sid, **kw: None)
+
+    response = TestClient(api_module.app).get("/sessions/sess-1/evaluation")
+
+    assert response.status_code == 200
+    assert response.json()["evaluation"] is None
+
+
+def test_delete_session_evaluation_removes_evaluation(api_module, monkeypatch):
+    monkeypatch.setattr(api_module, "delete_session_evaluation", lambda sid, **kw: True)
+
+    response = TestClient(api_module.app).delete("/sessions/sess-1/evaluation")
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "deleted"
+
+
+def test_delete_session_evaluation_returns_404_when_absent(api_module, monkeypatch):
+    monkeypatch.setattr(
+        api_module, "delete_session_evaluation", lambda sid, **kw: False
+    )
+
+    response = TestClient(api_module.app).delete("/sessions/sess-1/evaluation")
+
+    assert response.status_code == 404

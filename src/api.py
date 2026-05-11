@@ -15,15 +15,19 @@ from config.app import (
 )
 from .costs import calculate_costs
 from .database import (
+    VALID_OUTCOMES,
+    VALID_SOURCES,
     Usage,
     aggregate_daily_by_dimension,
     aggregate_daily_by_period,
     aggregate_usage_by_period,
     count_sessions,
     count_usage,
+    delete_session_evaluation,
     distinct_client_sources,
     fetch_recent_usage,
     fetch_sessions,
+    get_session_evaluation,
     get_usage_high_watermark,
     init_db,
     log_usage,
@@ -33,6 +37,7 @@ from .database import (
     summarize_usage_by_source,
     summarize_usage_daily,
     summarize_usage_window,
+    upsert_session_evaluation,
 )
 from contextlib import asynccontextmanager
 from pydantic import BaseModel
@@ -74,6 +79,16 @@ class UsageIngest(BaseModel):
     base_url: str | None = None
     base_url_provider_name: str | None = None
     base_url_source: str | None = None
+
+
+class SessionEvaluationUpdate(BaseModel):
+    outcome: str
+    source: str = "manual"
+    confidence: float | None = None
+    task_title: str | None = None
+    summary: str | None = None
+    evidence: list[str] = []
+    failure_reason: str | None = None
 
 
 @asynccontextmanager
@@ -361,6 +376,45 @@ async def get_sessions_summary(
         since=since,
         until=until,
     )
+
+
+@app.put("/sessions/{session_id}/evaluation")
+async def put_session_evaluation(session_id: str, update: SessionEvaluationUpdate):
+    if update.outcome not in VALID_OUTCOMES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid outcome: {update.outcome}. Must be one of {sorted(VALID_OUTCOMES)}",
+        )
+    if update.source not in VALID_SOURCES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid source: {update.source}. Must be one of {sorted(VALID_SOURCES)}",
+        )
+    upsert_session_evaluation(
+        session_id=session_id,
+        outcome=update.outcome,
+        source=update.source,
+        confidence=update.confidence,
+        task_title=update.task_title,
+        summary=update.summary,
+        evidence=update.evidence,
+        failure_reason=update.failure_reason,
+    )
+    return {"status": "success"}
+
+
+@app.get("/sessions/{session_id}/evaluation")
+async def get_evaluation(session_id: str):
+    evaluation = get_session_evaluation(session_id)
+    return {"evaluation": evaluation}
+
+
+@app.delete("/sessions/{session_id}/evaluation")
+async def delete_evaluation(session_id: str):
+    deleted = delete_session_evaluation(session_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="No evaluation found for session")
+    return {"status": "deleted"}
 
 
 @app.get("/config")

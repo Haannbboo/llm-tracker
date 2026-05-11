@@ -218,6 +218,29 @@ class SessionRecord(Base):
     updated_at: Mapped[str] = mapped_column(String, nullable=False)
 
 
+VALID_OUTCOMES = {"solved", "partial", "failed", "stuck", "no_op", "unknown"}
+VALID_SOURCES = {"manual", "heuristic", "llm"}
+
+
+class SessionEvaluation(Base):
+    __tablename__ = "session_evaluations"
+
+    session_id: Mapped[str] = mapped_column(String, primary_key=True)
+    outcome: Mapped[str] = mapped_column(
+        String, nullable=False, server_default=text("'unknown'")
+    )
+    source: Mapped[str] = mapped_column(
+        String, nullable=False, server_default=text("'manual'")
+    )
+    confidence: Mapped[float | None] = mapped_column(Numeric(5, 4), nullable=True)
+    task_title: Mapped[str | None] = mapped_column(String, nullable=True)
+    summary: Mapped[str | None] = mapped_column(String, nullable=True)
+    evidence_json: Mapped[str | None] = mapped_column(String, nullable=True)
+    failure_reason: Mapped[str | None] = mapped_column(String, nullable=True)
+    reviewed_at: Mapped[str] = mapped_column(String, nullable=False)
+    updated_at: Mapped[str] = mapped_column(String, nullable=False)
+
+
 DB_URL_ENV_VAR = "LLM_TRACKER_DB_URL"
 
 _engine_cache: dict[str, Engine] = {}
@@ -571,6 +594,90 @@ def rebuild_sessions_from_usage(db_path: str | None = None) -> int:
         session.commit()
 
     return count
+
+
+def upsert_session_evaluation(
+    session_id: str,
+    outcome: str,
+    source: str = "manual",
+    confidence: float | None = None,
+    task_title: str | None = None,
+    summary: str | None = None,
+    evidence: list[str] | None = None,
+    failure_reason: str | None = None,
+    db_path: str | None = None,
+) -> None:
+    """Upsert a session evaluation. Creates or overwrites the row."""
+    if outcome not in VALID_OUTCOMES:
+        raise ValueError(f"Invalid outcome: {outcome}. Must be one of {VALID_OUTCOMES}")
+    if source not in VALID_SOURCES:
+        raise ValueError(f"Invalid source: {source}. Must be one of {VALID_SOURCES}")
+
+    now = datetime.now(timezone.utc).isoformat()
+    engine = get_engine(db_path)
+    with Session(engine) as session:
+        existing = session.get(SessionEvaluation, session_id)
+        if existing:
+            existing.outcome = outcome
+            existing.source = source
+            existing.confidence = confidence
+            existing.task_title = task_title
+            existing.summary = summary
+            existing.evidence_json = json.dumps(evidence) if evidence else None
+            existing.failure_reason = failure_reason
+            existing.reviewed_at = now
+            existing.updated_at = now
+        else:
+            session.add(
+                SessionEvaluation(
+                    session_id=session_id,
+                    outcome=outcome,
+                    source=source,
+                    confidence=confidence,
+                    task_title=task_title,
+                    summary=summary,
+                    evidence_json=json.dumps(evidence) if evidence else None,
+                    failure_reason=failure_reason,
+                    reviewed_at=now,
+                    updated_at=now,
+                )
+            )
+        session.commit()
+
+
+def get_session_evaluation(
+    session_id: str, db_path: str | None = None
+) -> dict[str, Any] | None:
+    """Return evaluation dict for a session, or None if absent."""
+    engine = get_engine(db_path)
+    with Session(engine) as session:
+        ev = session.get(SessionEvaluation, session_id)
+        if not ev:
+            return None
+        return {
+            "session_id": ev.session_id,
+            "outcome": ev.outcome,
+            "source": ev.source,
+            "confidence": float(ev.confidence) if ev.confidence is not None else None,
+            "task_title": ev.task_title,
+            "summary": ev.summary,
+            "evidence": json.loads(ev.evidence_json) if ev.evidence_json else [],
+            "failure_reason": ev.failure_reason,
+            "reviewed_at": ev.reviewed_at,
+            "updated_at": ev.updated_at,
+        }
+
+
+def delete_session_evaluation(session_id: str, db_path: str | None = None) -> bool:
+    """Delete a session evaluation. Returns True if a row was deleted."""
+    engine = get_engine(db_path)
+    with Session(engine) as session:
+        ev = session.get(SessionEvaluation, session_id)
+        if not ev:
+            return False
+        session.delete(ev)
+        session.commit()
+        return True
 
 
 def upsert_daily_aggregate(usage: Usage, db_path: str | None = None) -> None:
