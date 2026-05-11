@@ -182,6 +182,7 @@ export function getModelIcon(model: string, theme: Theme = getTheme()) {
   if (m.includes('gemini')) return <img src="/models/google-gemini-icon.svg" alt="" style={style} />
   if (m.includes('minimax') || m.includes('mimimax')) return <img src="/models/minimax-color.svg" alt="" style={style} />
   if (m.includes('mimo') || m.includes('xiaomi')) return <img src="/models/xiaomi.svg" alt="" style={style} />
+  if (m.includes('inclusionai')) return <img src="/models/inclusionai.png" alt="" style={style} />
   if (m.includes('openrouter')) return <img src={dark ? '/models/openrouter-dark.svg' : '/models/openrouter.svg'} alt="" style={style} />
   return null
 }
@@ -230,6 +231,7 @@ export function getProviderIcon(provider: string, theme: Theme = getTheme()) {
   if (p.includes('minimax')) return <img src="/models/minimax-color.svg" alt="" style={style} />
   if (p.includes('xiaomi')) return <img src="/models/xiaomi.svg" alt="" style={style} />
   if (p.includes('openrouter')) return <img src={dark ? '/models/openrouter-dark.svg' : '/models/openrouter.svg'} alt="" style={style} />
+  if (p.includes('inclusionai')) return <img src="/models/inclusionai.png" alt="" style={style} />
   return null
 }
 

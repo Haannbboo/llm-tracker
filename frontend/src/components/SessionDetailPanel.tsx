@@ -1,6 +1,7 @@
 import { ClickToCopy } from './CopyButton'
 import { t } from '../i18n/index.ts'
-import { formatCompact, formatCost, formatDuration, formatLatency, formatNumber, formatTime, value } from '../utils'
+import { formatCompact, formatCost, formatDuration, formatLatency, formatNumber, formatTime, value, getModelIcon } from '../utils'
+import { getModelBadgeBackgroundColor, getModelTextColor } from '../model-badge'
 import type { SessionSummary } from '../types'
 
 // ─── Shared session detail content (used by both inline and panel) ─────────────
@@ -29,6 +30,33 @@ export function SessionDetailContent({ session, onNavigateToLogs, showToast }: {
             <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '2px' }}>{formatDuration(session.duration_s)} {t('duration')}</div>
           </div>
         </div>
+
+        {'model' in session && session.model && (
+          <div>
+            <div style={{ fontSize: '10px', color: 'var(--text-muted)', marginBottom: '4px', textTransform: 'uppercase', letterSpacing: '0.5px', fontWeight: 700 }}>{t('Model')}</div>
+            <div style={{
+              padding: '4px 6px',
+              borderRadius: '6px',
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '4px',
+              fontSize: '11px',
+              backgroundColor: getModelBadgeBackgroundColor(session.model),
+              color: getModelTextColor(session.model),
+              fontWeight: 600
+            }} title={session.model}>
+              {getModelIcon(session.model)}
+              <span style={{
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+                maxWidth: '160px'
+              }}>
+                {session.model}
+              </span>
+            </div>
+          </div>
+        )}
 
         <div>
           <div style={{ fontSize: '10px', color: 'var(--text-muted)', marginBottom: '6px', textTransform: 'uppercase', letterSpacing: '0.5px', fontWeight: 700 }}>{t('Cache Hit Rate')}</div>

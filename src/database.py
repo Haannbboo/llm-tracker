@@ -816,6 +816,7 @@ def fetch_sessions(
             select(
                 Usage.session_id,
                 func.min(Usage.client_source).label("client_source"),
+                func.min(Usage.model).label("model"),
                 func.min(Usage.ts).label("started"),
                 func.max(Usage.ts).label("ended"),
                 func.count().label("request_count"),
@@ -831,7 +832,7 @@ def fetch_sessions(
                     case((and_(Usage.status.isnot(None), Usage.status >= 400), 1))
                 ).label("failed_requests"),
                 func.count(
-                    case((and_(Usage.status.isnot(None), Usage.status < 400), 1))
+                    case((or_(Usage.status.is_(None), Usage.status < 400), 1))
                 ).label("successful_requests"),
                 func.count(case((Usage.status == 429, 1))).label("status_429"),
                 func.count(
@@ -859,6 +860,7 @@ def fetch_sessions(
             select(
                 Usage.session_id,
                 func.min(Usage.client_source).label("client_source"),
+                func.min(Usage.model).label("model"),
                 func.min(Usage.ts).label("started"),
                 func.max(Usage.ts).label("ended"),
                 func.count().label("request_count"),
@@ -874,7 +876,7 @@ def fetch_sessions(
                     case((and_(Usage.status.isnot(None), Usage.status >= 400), 1))
                 ).label("failed_requests"),
                 func.count(
-                    case((and_(Usage.status.isnot(None), Usage.status < 400), 1))
+                    case((or_(Usage.status.is_(None), Usage.status < 400), 1))
                 ).label("successful_requests"),
                 func.count(case((Usage.status == 429, 1))).label("status_429"),
                 func.count(
@@ -912,6 +914,7 @@ def fetch_sessions(
             {
                 "session_id": row.session_id,
                 "client_source": row.client_source or "",
+                "model": row.model or "",
                 "started": started,
                 "ended": ended,
                 "duration_s": _compute_duration_s(started, ended),

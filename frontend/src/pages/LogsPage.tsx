@@ -4,14 +4,15 @@ import { useDashboardData } from '../hooks/useDashboardData'
 import { useLogsData } from '../hooks/useLogsData'
 import { useSessionsData } from '../hooks/useSessionsData'
 import { ModelSelector } from '../ModelSelector'
+import { SessionSelector } from '../components/SessionSelector'
 import { ClickToCopy } from '../components/CopyButton'
 import { t } from '../i18n/index.ts'
 import {
   formatCost, formatLatency, formatNumber, formatRate, formatTime,
-  value, getProviderColor, getModelIcon, shortSessionId, timeAgo,
+  value, getProviderColor, getModelIcon, shortSessionId,
 } from '../utils'
 import { getModelBadgeBackgroundColor, getModelTextColor } from '../model-badge'
-import type { ActiveFilter, DateRangeOption, SessionSummary } from '../types'
+import type { ActiveFilter, DateRangeOption } from '../types'
 
 type Props = {
   initialSessionFilter?: string | null
@@ -94,27 +95,12 @@ export function LogsPage({ initialSessionFilter, initialActiveFilter }: Props) {
 
         <div className="filter-group">
           <div className="filter-label">{t('Session')}</div>
-          <select
-            className="input-plain"
-            value={sessionFilter || ''}
-            onChange={(e) => { setSessionFilter(e.target.value || null); resetPage(); }}
-          >
-            <option value="">{t('All Sessions')}</option>
-            {Object.entries(
-              sessions.reduce<Record<string, SessionSummary[]>>((acc, s) => {
-                (acc[s.client_source] ??= []).push(s)
-                return acc
-              }, {})
-            ).map(([source, group]) => (
-              <optgroup key={source} label={source}>
-                {group.map(s => (
-                  <option key={s.session_id} value={s.session_id}>
-                    {shortSessionId(s.session_id)} {s.request_count} req {timeAgo(s.started)}
-                  </option>
-                ))}
-              </optgroup>
-            ))}
-          </select>
+          <SessionSelector
+            sessions={sessions}
+            sessionFilter={sessionFilter}
+            onChange={(id) => { setSessionFilter(id); resetPage(); }}
+            sourceColors={providerColors}
+          />
         </div>
 
         <div className="filter-group">
@@ -163,13 +149,18 @@ export function LogsPage({ initialSessionFilter, initialActiveFilter }: Props) {
              <span className="refresh-icon">&#x21bb;</span>
            </button>
            <button
-            style={{ padding: '8px 16px', background: 'var(--color-blue)', color: 'white', borderRadius: '8px', fontSize: '12px', fontWeight: 700 }}
+            style={{ padding: '8px 16px', background: 'var(--tab-toggle-bg)', color: 'var(--text-secondary)', borderRadius: '8px', fontSize: '12px', fontWeight: 600, border: '1px solid var(--border-color)' }}
             onClick={() => {
+              setActiveFilter(null)
+              setActiveSource(null)
+              setSessionFilter(null)
               setDateRange('24h')
+              setCustomSince('')
+              setCustomUntil('')
               setPage(1)
             }}
            >
-             {t('Last 24h')}
+             {t('Reset')}
            </button>
         </div>
       </div>
@@ -528,7 +519,7 @@ export function LogsPage({ initialSessionFilter, initialActiveFilter }: Props) {
                         {row.session_id && (
                           <div className="detail-group">
                             <span className="detail-label">{t('Session ID')}</span>
-                            <span className="detail-value" style={{ fontFamily: 'monospace', fontSize: '12px' }}>
+                            <span className="detail-value">
                               <ClickToCopy text={row.session_id} onCopy={showToast}>
                                 {row.session_id}
                               </ClickToCopy>

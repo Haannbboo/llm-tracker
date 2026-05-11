@@ -126,6 +126,7 @@ export type DateRangeOption = '24h' | '7d' | '30d' | 'all' | 'custom'
 export type SessionSummary = {
   session_id: string
   client_source: string
+  model: string
   started: string
   ended: string
   duration_s: number

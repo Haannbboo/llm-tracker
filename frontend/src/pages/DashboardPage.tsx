@@ -1,4 +1,4 @@
-import { useState, Fragment } from 'react'
+import { useState, Fragment, useEffect, useRef } from 'react'
 import { useApp } from '../contexts/AppContext'
 import { useDashboardData } from '../hooks/useDashboardData'
 import { useSessionsData } from '../hooks/useSessionsData'
@@ -39,8 +39,8 @@ export function DashboardPage({ onNavigateToLogs }: Props) {
 
   // Sessions data hook
   const {
-    sessions, sessionsSummary, sessionCount, sessionsLoading,
-    sessionSortBy, sessionSortOrder, sessionPage,
+    sessions, sessionsSummary, sessionsLoading, hasMoreSessions,
+    sessionSortBy, sessionSortOrder,
     selectedSession, setSelectedSession,
     handleSessionSort, sessionInsights,
     setSessionPage,
@@ -56,6 +56,32 @@ export function DashboardPage({ onNavigateToLogs }: Props) {
 
   // Local state
   const [dashboardTab, setDashboardTab] = useState<'overview' | 'sessions'>('overview')
+  const [sessionSearch, setSessionSearch] = useState('')
+  const [loadingMore, setLoadingMore] = useState(false)
+  const sessionsTableRef = useRef<HTMLDivElement>(null)
+
+  // Infinite scroll for sessions
+  useEffect(() => {
+    if (dashboardTab !== 'sessions') return
+
+    const handleScroll = () => {
+      if (!sessionsTableRef.current || sessionsLoading || loadingMore || !hasMoreSessions) return
+      const { scrollTop, scrollHeight, clientHeight } = sessionsTableRef.current
+      if (scrollTop + clientHeight >= scrollHeight - 100) {
+        setLoadingMore(true)
+        setSessionPage(p => p + 1)
+      }
+    }
+
+    const el = sessionsTableRef.current
+    el?.addEventListener('scroll', handleScroll)
+    return () => el?.removeEventListener('scroll', handleScroll)
+  }, [dashboardTab, sessionsLoading, loadingMore, hasMoreSessions])
+
+  // Reset loading more when sessionPage changes
+  useEffect(() => {
+    if (!sessionsLoading) setLoadingMore(false)
+  }, [sessionsLoading])
 
   // Animated counters
   const animatedTotalTokens = useCountUp(dashboardInitialLoading ? 0 : totals.totalTokens)
@@ -666,25 +692,25 @@ export function DashboardPage({ onNavigateToLogs }: Props) {
       <div className="sessions-page">
         {/* Summary stat cards */}
         <div className="widgets-grid" style={{ marginBottom: '24px' }}>
-          <div className="widget-card">
-            <div className="widget-title">{t('Total Sessions')}</div>
-            <div className="widget-value">{sessionsSummary ? formatNumber(sessionsSummary.session_count) : '—'}</div>
+          <div className="widget">
+            <div style={{ fontSize: '10px', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.5px', fontWeight: 700 }}>{t('Total Sessions')}</div>
+            <div style={{ fontSize: '24px', fontWeight: 800, color: 'var(--text-primary)' }}>{sessionsSummary ? formatNumber(sessionsSummary.session_count) : '—'}</div>
           </div>
-          <div className="widget-card">
-            <div className="widget-title">{t('Avg Duration')}</div>
-            <div className="widget-value">{sessionsSummary ? formatDuration(sessionsSummary.avg_duration_s) : '—'}</div>
+          <div className="widget">
+            <div style={{ fontSize: '10px', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.5px', fontWeight: 700 }}>{t('Avg Duration')}</div>
+            <div style={{ fontSize: '24px', fontWeight: 800, color: 'var(--text-primary)' }}>{sessionsSummary ? formatDuration(sessionsSummary.avg_duration_s) : '—'}</div>
           </div>
-          <div className="widget-card">
-            <div className="widget-title">{t('Total Tokens')}</div>
-            <div className="widget-value">{sessionsSummary ? formatCompact(sessionsSummary.total_tokens) : '—'}</div>
+          <div className="widget">
+            <div style={{ fontSize: '10px', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.5px', fontWeight: 700 }}>{t('Total Tokens')}</div>
+            <div style={{ fontSize: '24px', fontWeight: 800, color: 'var(--text-primary)' }}>{sessionsSummary ? formatCompact(sessionsSummary.total_tokens) : '—'}</div>
           </div>
-          <div className="widget-card">
-            <div className="widget-title">{t('Estimated Cost')}</div>
-            <div className="widget-value">{sessionsSummary ? formatCost(sessionsSummary.total_cost_usd) : '—'}</div>
+          <div className="widget">
+            <div style={{ fontSize: '10px', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.5px', fontWeight: 700 }}>{t('Estimated Cost')}</div>
+            <div style={{ fontSize: '24px', fontWeight: 800, color: 'var(--color-green)' }}>{sessionsSummary ? formatCost(sessionsSummary.total_cost_usd) : '—'}</div>
           </div>
-          <div className="widget-card">
-            <div className="widget-title">{t('Average Response')}</div>
-            <div className="widget-value">{sessionsSummary ? formatLatency(sessionsSummary.avg_latency_ms) : '—'}</div>
+          <div className="widget">
+            <div style={{ fontSize: '10px', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.5px', fontWeight: 700 }}>{t('Avg Latency')}</div>
+            <div style={{ fontSize: '24px', fontWeight: 800, color: 'var(--text-primary)' }}>{sessionsSummary ? formatLatency(sessionsSummary.avg_latency_ms) : '—'}</div>
           </div>
         </div>
 
@@ -724,7 +750,17 @@ export function DashboardPage({ onNavigateToLogs }: Props) {
 
         {/* Sessions table */}
         {(sessions.length > 0 || sessionsLoading) && (
-        <div className="panel">
+        <div className="panel" ref={sessionsTableRef} style={{ maxHeight: 'calc(100vh - 200px)', overflowY: 'auto' }}>
+          <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--border-color)', display: 'flex', alignItems: 'center', gap: '8px', position: 'sticky', top: 0, background: 'var(--card-bg)', zIndex: 1 }}>
+            <input
+              className="input-plain"
+              type="text"
+              placeholder={t('Search sessions…')}
+              value={sessionSearch}
+              onChange={e => setSessionSearch(e.target.value)}
+              style={{ flex: 1, minWidth: 0 }}
+            />
+          </div>
           <div className="panel-body" style={{ padding: 0 }}>
             <table className="table sessions-table">
               <thead>
@@ -756,7 +792,13 @@ export function DashboardPage({ onNavigateToLogs }: Props) {
                 </tr>
               </thead>
               <tbody>
-                {sessions.map(session => (
+                {sessions.filter(s => {
+                    if (!sessionSearch.trim()) return true
+                    const q = sessionSearch.toLowerCase()
+                    return s.session_id.toLowerCase().includes(q) ||
+                      sessionDisplayName(s).toLowerCase().includes(q) ||
+                      s.client_source.toLowerCase().includes(q)
+                  }).map(session => (
                   <Fragment key={session.session_id}>
                   <tr
                     style={{ cursor: 'pointer', background: selectedSession?.session_id === session.session_id ? 'var(--surface-hover)' : undefined }}
@@ -803,33 +845,17 @@ export function DashboardPage({ onNavigateToLogs }: Props) {
                 ))}
               </tbody>
             </table>
+          {loadingMore && (
+              <div style={{ padding: '12px 24px', textAlign: 'center', color: 'var(--text-muted)', fontSize: '12px', borderTop: '1px solid var(--border-color)' }}>
+                {t('Loading more...')}
+              </div>
+            )}
+            {!hasMoreSessions && sessions.length > 50 && (
+              <div style={{ padding: '12px 24px', textAlign: 'center', color: 'var(--text-muted)', fontSize: '12px', borderTop: '1px solid var(--border-color)' }}>
+                {t('All sessions loaded')}
+              </div>
+            )}
           </div>
-
-          {/* Pagination */}
-          {sessionCount > 50 && (
-            <div style={{
-              padding: '16px 24px',
-              borderTop: '1px solid var(--border-color)',
-              display: 'flex',
-              justifyContent: 'space-between',
-              alignItems: 'center',
-              background: 'var(--surface-hover)',
-            }}>
-              <div style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>
-                {t('Showing')} <span style={{ fontWeight: 700, color: 'var(--text-primary)' }}>
-                  {Math.min(sessionCount, (sessionPage - 1) * 50 + 1)}-{Math.min(sessionCount, sessionPage * 50)}
-                </span> {t('of')} <span style={{ fontWeight: 700, color: 'var(--text-primary)' }}>{sessionCount}</span> {t('sessions')}
-              </div>
-              <div style={{ display: 'flex', gap: '8px' }}>
-                <button disabled={sessionPage === 1} onClick={() => setSessionPage(p => p - 1)} className="pagination-btn">
-                  ◀ {t('Prev')}
-                </button>
-                <button disabled={sessionPage * 50 >= sessionCount} onClick={() => setSessionPage(p => p + 1)} className="pagination-btn">
-                  {t('Next')} ▶
-                </button>
-              </div>
-            </div>
-          )}
         </div>
         )}
 

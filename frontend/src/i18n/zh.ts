@@ -285,7 +285,7 @@ export const zh: Record<string, string> = {
   'Wrong endpoint': '端点错误',
   'No local OTLP config found yet. Run bootstrap, then run a test command above. This page checks automatically.': '尚未找到本地 OTLP 配置。先运行 bootstrap，然后运行上面的测试命令。页面会自动检查。',
   'Diagnostics': '诊断',
-  'Agent': '代理',
+  'Agent': 'Agent',
   'Configured': '已配置',
 
   // Expanded row details

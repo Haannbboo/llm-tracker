@@ -19,6 +19,7 @@ export function useSessionsData(opts: {
   const [sessionSortBy, setSessionSortBy] = useState<string>('ended')
   const [sessionSortOrder, setSessionSortOrder] = useState<'asc' | 'desc'>('desc')
   const [sessionPage, setSessionPage] = useState(1)
+  const [hasMoreSessions, setHasMoreSessions] = useState(true)
   const [selectedSession, setSelectedSession] = useState<SessionSummary | null>(null)
 
   const handleSessionSort = useCallback((column: string) => {
@@ -70,9 +71,14 @@ export function useSessionsData(opts: {
         const [sessionsData, summaryData] =
           await Promise.all(responses.map(r => r.json())) as [{ sessions: SessionSummary[]; total: number }, SessionsSummary]
 
-        setSessions(sessionsData.sessions)
+        if (sessionPage === 1) {
+          setSessions(sessionsData.sessions)
+        } else {
+          setSessions(prev => [...prev, ...sessionsData.sessions])
+        }
         setSessionCount(sessionsData.total)
         setSessionsSummary(summaryData)
+        setHasMoreSessions(sessionsData.sessions.length === 50)
       } catch (err) {
         if (controller.signal.aborted) return
         setError(err instanceof Error ? err.message : t('Unknown error'))
@@ -86,7 +92,7 @@ export function useSessionsData(opts: {
   }, [opts.activeSource, opts.dateRange, opts.customSince, opts.customUntil, refreshTrigger, sessionSortBy, sessionSortOrder, sessionPage, setError])
 
   return {
-    sessions, sessionsSummary, sessionCount, sessionsLoading,
+    sessions, sessionsSummary, sessionCount, sessionsLoading, hasMoreSessions,
     sessionSortBy, sessionSortOrder, sessionPage,
     selectedSession, setSelectedSession,
     handleSessionSort, sessionInsights,
