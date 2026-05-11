@@ -56,6 +56,10 @@ PROJECT_MODULES = [
 def clear_project_modules() -> None:
     for module_name in PROJECT_MODULES:
         sys.modules.pop(module_name, None)
+    # Clear package submodules (e.g. src.database.models)
+    for key in list(sys.modules):
+        if any(key.startswith(prefix + ".") for prefix in PROJECT_MODULES):
+            sys.modules.pop(key, None)
 
 
 @pytest.fixture

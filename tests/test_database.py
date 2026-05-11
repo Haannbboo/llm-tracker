@@ -985,6 +985,9 @@ def test_get_or_create_base_url_reuses_exact_url_and_updates_metadata(
 def test_get_or_create_base_url_retries_in_fresh_transaction_after_duplicate_insert(
     database_module, monkeypatch
 ):
+    import src.database.base_url as base_url_mod
+    from sqlalchemy.exc import IntegrityError
+
     class FakeRow:
         id = 7
         provider_name = None
@@ -1013,14 +1016,14 @@ def test_get_or_create_base_url_retries_in_fresh_transaction_after_duplicate_ins
 
         def commit(self):
             if self.attempt == 0:
-                raise database_module.IntegrityError("INSERT", None, Exception("dup"))
+                raise IntegrityError("INSERT", None, Exception("dup"))
             state["updated"] = True
 
         def rollback(self):
             state["rolled_back"] = True
 
-    monkeypatch.setattr(database_module, "get_engine", lambda db_path=None: object())
-    monkeypatch.setattr(database_module, "Session", FakeSession)
+    monkeypatch.setattr(base_url_mod, "get_engine", lambda db_path=None: object())
+    monkeypatch.setattr(base_url_mod, "Session", FakeSession)
 
     base_url_id = database_module.get_or_create_base_url(
         "https://race.example/v1",
