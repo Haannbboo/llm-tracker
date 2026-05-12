@@ -2764,10 +2764,29 @@ def test_rebuild_sessions_from_usage(database_module, isolated_home):
 # ---------------------------------------------------------------------------
 
 
+def _insert_session_record(database_module, db_path, session_id="sess-1"):
+    """Helper: insert a minimal SessionRecord for evaluation tests."""
+    from sqlalchemy.orm import Session
+
+    engine = database_module.get_engine(db_path)
+    with Session(engine) as session:
+        session.add(
+            database_module.SessionRecord(
+                session_id=session_id,
+                client_source="test",
+                started="2026-05-11T10:00:00+00:00",
+                ended="2026-05-11T10:30:00+00:00",
+                updated_at="2026-05-11T10:30:00+00:00",
+            )
+        )
+        session.commit()
+
+
 def test_upsert_session_evaluation_creates_new(database_module, isolated_home):
-    """TDD step 1: Upsert evaluation for a session creates a new row."""
+    """Upsert evaluation on an existing session sets evaluation columns."""
     db_path = str(isolated_home / "usage.db")
     database_module.init_db(db_path)
+    _insert_session_record(database_module, db_path)
 
     database_module.upsert_session_evaluation(
         session_id="sess-1",
@@ -2789,12 +2808,14 @@ def test_upsert_session_evaluation_creates_new(database_module, isolated_home):
     assert result["evidence"] == ["User marked solved"]
     assert result["failure_reason"] is None
     assert result["confidence"] is None
+    assert result["evaluated_at"] is not None
 
 
 def test_upsert_session_evaluation_overwrites_existing(database_module, isolated_home):
-    """TDD step 5: Overwrite behavior — second upsert replaces the first."""
+    """Second upsert replaces the first evaluation."""
     db_path = str(isolated_home / "usage.db")
     database_module.init_db(db_path)
+    _insert_session_record(database_module, db_path)
 
     database_module.upsert_session_evaluation(
         session_id="sess-1",
@@ -2816,10 +2837,38 @@ def test_upsert_session_evaluation_overwrites_existing(database_module, isolated
     assert result["failure_reason"] == "Agent got stuck"
 
 
-def test_get_session_evaluation_returns_none_when_absent(
+def test_upsert_session_evaluation_raises_when_session_not_found(
     database_module, isolated_home
 ):
-    """GET returns null when no evaluation exists for the session."""
+    """Upsert raises ValueError when session doesn't exist."""
+    db_path = str(isolated_home / "usage.db")
+    database_module.init_db(db_path)
+
+    with pytest.raises(ValueError, match="Session not found"):
+        database_module.upsert_session_evaluation(
+            session_id="nonexistent",
+            outcome="solved",
+            source="manual",
+            db_path=db_path,
+        )
+
+
+def test_get_session_evaluation_returns_none_when_not_evaluated(
+    database_module, isolated_home
+):
+    """GET returns None when session exists but has no evaluation."""
+    db_path = str(isolated_home / "usage.db")
+    database_module.init_db(db_path)
+    _insert_session_record(database_module, db_path)
+
+    result = database_module.get_session_evaluation("sess-1", db_path=db_path)
+    assert result is None
+
+
+def test_get_session_evaluation_returns_none_when_session_absent(
+    database_module, isolated_home
+):
+    """GET returns None when session doesn't exist."""
     db_path = str(isolated_home / "usage.db")
     database_module.init_db(db_path)
 
@@ -2827,10 +2876,11 @@ def test_get_session_evaluation_returns_none_when_absent(
     assert result is None
 
 
-def test_delete_session_evaluation_removes_row(database_module, isolated_home):
-    """DELETE removes the evaluation and returns True."""
+def test_delete_session_evaluation_clears_columns(database_module, isolated_home):
+    """DELETE clears evaluation columns and returns True."""
     db_path = str(isolated_home / "usage.db")
     database_module.init_db(db_path)
+    _insert_session_record(database_module, db_path)
 
     database_module.upsert_session_evaluation(
         session_id="sess-1",
@@ -2846,10 +2896,10 @@ def test_delete_session_evaluation_removes_row(database_module, isolated_home):
     assert result is None
 
 
-def test_delete_session_evaluation_returns_false_when_absent(
+def test_delete_session_evaluation_returns_false_when_session_absent(
     database_module, isolated_home
 ):
-    """DELETE returns False when no evaluation exists."""
+    """DELETE returns False when session doesn't exist."""
     db_path = str(isolated_home / "usage.db")
     database_module.init_db(db_path)
 

@@ -8,7 +8,6 @@ The steady-state pattern in this module is:
 from .models import (
     Base,
     BaseUrl,
-    SessionEvaluation,
     SessionRecord,
     Usage,
     UsageDaily,
@@ -55,7 +54,6 @@ __all__ = [
     "BaseUrl",
     "DB_URL_ENV_VAR",
     "Session",
-    "SessionEvaluation",
     "SessionRecord",
     "USAGE_COPY_FIELDS",
     "Usage",

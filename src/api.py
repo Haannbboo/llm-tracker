@@ -390,16 +390,21 @@ async def put_session_evaluation(session_id: str, update: SessionEvaluationUpdat
             status_code=400,
             detail=f"Invalid source: {update.source}. Must be one of {sorted(VALID_SOURCES)}",
         )
-    upsert_session_evaluation(
-        session_id=session_id,
-        outcome=update.outcome,
-        source=update.source,
-        confidence=update.confidence,
-        task_title=update.task_title,
-        summary=update.summary,
-        evidence=update.evidence,
-        failure_reason=update.failure_reason,
-    )
+    try:
+        upsert_session_evaluation(
+            session_id=session_id,
+            outcome=update.outcome,
+            source=update.source,
+            confidence=update.confidence,
+            task_title=update.task_title,
+            summary=update.summary,
+            evidence=update.evidence,
+            failure_reason=update.failure_reason,
+        )
+    except ValueError as e:
+        if "Session not found" in str(e):
+            raise HTTPException(status_code=404, detail=str(e))
+        raise
     return {"status": "success"}
 
 
@@ -413,7 +418,7 @@ async def get_evaluation(session_id: str):
 async def delete_evaluation(session_id: str):
     deleted = delete_session_evaluation(session_id)
     if not deleted:
-        raise HTTPException(status_code=404, detail="No evaluation found for session")
+        raise HTTPException(status_code=404, detail="Session not found")
     return {"status": "deleted"}
 
 

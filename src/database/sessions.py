@@ -15,7 +15,6 @@ from sqlalchemy.orm import Session
 
 from .models import (
     SessionRecord,
-    SessionEvaluation,
     Usage,
     VALID_OUTCOMES,
     VALID_SOURCES,
@@ -228,7 +227,7 @@ def upsert_session_evaluation(
     failure_reason: str | None = None,
     db_path: str | None = None,
 ) -> None:
-    """Upsert a session evaluation. Creates or overwrites the row."""
+    """Set evaluation on an existing session. Raises ValueError if session not found."""
     if outcome not in VALID_OUTCOMES:
         raise ValueError(f"Invalid outcome: {outcome}. Must be one of {VALID_OUTCOMES}")
     if source not in VALID_SOURCES:
@@ -237,66 +236,57 @@ def upsert_session_evaluation(
     now = datetime.now(timezone.utc).isoformat()
     engine = get_engine(db_path)
     with Session(engine) as session:
-        existing = session.get(SessionEvaluation, session_id)
-        if existing:
-            existing.outcome = outcome
-            existing.source = source
-            existing.confidence = confidence
-            existing.task_title = task_title
-            existing.summary = summary
-            existing.evidence_json = json.dumps(evidence) if evidence else None
-            existing.failure_reason = failure_reason
-            existing.reviewed_at = now
-            existing.updated_at = now
-        else:
-            session.add(
-                SessionEvaluation(
-                    session_id=session_id,
-                    outcome=outcome,
-                    source=source,
-                    confidence=confidence,
-                    task_title=task_title,
-                    summary=summary,
-                    evidence_json=json.dumps(evidence) if evidence else None,
-                    failure_reason=failure_reason,
-                    reviewed_at=now,
-                    updated_at=now,
-                )
-            )
+        record = session.get(SessionRecord, session_id)
+        if not record:
+            raise ValueError(f"Session not found: {session_id}")
+        record.outcome = outcome
+        record.source = source
+        record.confidence = confidence
+        record.task_title = task_title
+        record.summary = summary
+        record.evidence_json = json.dumps(evidence) if evidence else None
+        record.failure_reason = failure_reason
+        record.evaluated_at = now
         session.commit()
 
 
 def get_session_evaluation(
     session_id: str, db_path: str | None = None
 ) -> dict[str, Any] | None:
-    """Return evaluation dict for a session, or None if absent."""
+    """Return evaluation dict for a session, or None if not found or not evaluated."""
     engine = get_engine(db_path)
     with Session(engine) as session:
-        ev = session.get(SessionEvaluation, session_id)
-        if not ev:
+        rec = session.get(SessionRecord, session_id)
+        if not rec or rec.outcome is None:
             return None
         return {
-            "session_id": ev.session_id,
-            "outcome": ev.outcome,
-            "source": ev.source,
-            "confidence": float(ev.confidence) if ev.confidence is not None else None,
-            "task_title": ev.task_title,
-            "summary": ev.summary,
-            "evidence": json.loads(ev.evidence_json) if ev.evidence_json else [],
-            "failure_reason": ev.failure_reason,
-            "reviewed_at": ev.reviewed_at,
-            "updated_at": ev.updated_at,
+            "session_id": rec.session_id,
+            "outcome": rec.outcome,
+            "source": rec.source,
+            "confidence": float(rec.confidence) if rec.confidence is not None else None,
+            "task_title": rec.task_title,
+            "summary": rec.summary,
+            "evidence": json.loads(rec.evidence_json) if rec.evidence_json else [],
+            "failure_reason": rec.failure_reason,
+            "evaluated_at": rec.evaluated_at,
         }
 
 
 def delete_session_evaluation(session_id: str, db_path: str | None = None) -> bool:
-    """Delete a session evaluation. Returns True if a row was deleted."""
+    """Clear evaluation columns on a session. Returns True if session found."""
     engine = get_engine(db_path)
     with Session(engine) as session:
-        ev = session.get(SessionEvaluation, session_id)
-        if not ev:
+        rec = session.get(SessionRecord, session_id)
+        if not rec:
             return False
-        session.delete(ev)
+        rec.outcome = None
+        rec.source = None
+        rec.confidence = None
+        rec.task_title = None
+        rec.summary = None
+        rec.evidence_json = None
+        rec.failure_reason = None
+        rec.evaluated_at = None
         session.commit()
         return True
 
@@ -332,7 +322,7 @@ def _session_record_to_dict(rec: SessionRecord) -> dict[str, Any]:
     """Convert a SessionRecord ORM object to the API response dict."""
     started = rec.started
     ended = rec.ended
-    return {
+    result: dict[str, Any] = {
         "session_id": rec.session_id,
         "client_source": rec.client_source or "",
         "model": rec.primary_model or "",
@@ -351,6 +341,21 @@ def _session_record_to_dict(rec: SessionRecord) -> dict[str, Any]:
         "successful_requests": rec.successful_requests,
         "failed_requests": rec.failed_requests,
     }
+    if rec.outcome is not None:
+        result["evaluation"] = {
+            "session_id": rec.session_id,
+            "outcome": rec.outcome,
+            "source": rec.source,
+            "confidence": float(rec.confidence) if rec.confidence is not None else None,
+            "task_title": rec.task_title,
+            "summary": rec.summary,
+            "evidence": json.loads(rec.evidence_json) if rec.evidence_json else [],
+            "failure_reason": rec.failure_reason,
+            "evaluated_at": rec.evaluated_at,
+        }
+    else:
+        result["evaluation"] = None
+    return result
 
 
 def fetch_sessions(

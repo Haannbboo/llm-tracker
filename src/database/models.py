@@ -174,26 +174,16 @@ class SessionRecord(Base):
     models_json: Mapped[str | None] = mapped_column(String, nullable=True)
     last_usage_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     updated_at: Mapped[str] = mapped_column(String, nullable=False)
-
-
-VALID_OUTCOMES = {"solved", "partial", "failed", "stuck", "no_op", "unknown"}
-VALID_SOURCES = {"manual", "heuristic", "llm"}
-
-
-class SessionEvaluation(Base):
-    __tablename__ = "session_evaluations"
-
-    session_id: Mapped[str] = mapped_column(String, primary_key=True)
-    outcome: Mapped[str] = mapped_column(
-        String, nullable=False, server_default=text("'unknown'")
-    )
-    source: Mapped[str] = mapped_column(
-        String, nullable=False, server_default=text("'manual'")
-    )
+    # Evaluation columns (NULL = not evaluated)
+    outcome: Mapped[str | None] = mapped_column(String, nullable=True)
+    source: Mapped[str | None] = mapped_column(String, nullable=True)
     confidence: Mapped[float | None] = mapped_column(Numeric(5, 4), nullable=True)
     task_title: Mapped[str | None] = mapped_column(String, nullable=True)
     summary: Mapped[str | None] = mapped_column(String, nullable=True)
     evidence_json: Mapped[str | None] = mapped_column(String, nullable=True)
     failure_reason: Mapped[str | None] = mapped_column(String, nullable=True)
-    reviewed_at: Mapped[str] = mapped_column(String, nullable=False)
-    updated_at: Mapped[str] = mapped_column(String, nullable=False)
+    evaluated_at: Mapped[str | None] = mapped_column(String, nullable=True)
+
+
+VALID_OUTCOMES = {"solved", "partial", "failed", "stuck", "no_op", "unknown"}
+VALID_SOURCES = {"manual", "heuristic", "llm"}

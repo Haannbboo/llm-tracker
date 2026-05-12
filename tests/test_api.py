@@ -759,6 +759,22 @@ def test_put_session_evaluation_invalid_source_returns_400(api_module, monkeypat
     assert response.status_code == 400
 
 
+def test_put_session_evaluation_returns_404_when_session_not_found(
+    api_module, monkeypatch
+):
+    def raise_not_found(**kwargs):
+        raise ValueError("Session not found: nonexistent")
+
+    monkeypatch.setattr(api_module, "upsert_session_evaluation", raise_not_found)
+
+    response = TestClient(api_module.app).put(
+        "/sessions/nonexistent/evaluation",
+        json={"outcome": "solved"},
+    )
+
+    assert response.status_code == 404
+
+
 def test_get_session_evaluation_returns_evaluation(api_module, monkeypatch):
     fake_eval = {
         "session_id": "sess-1",
@@ -769,8 +785,7 @@ def test_get_session_evaluation_returns_evaluation(api_module, monkeypatch):
         "summary": None,
         "evidence": ["User marked solved"],
         "failure_reason": None,
-        "reviewed_at": "2026-05-11T00:00:00+00:00",
-        "updated_at": "2026-05-11T00:00:00+00:00",
+        "evaluated_at": "2026-05-11T00:00:00+00:00",
     }
     monkeypatch.setattr(
         api_module, "get_session_evaluation", lambda sid, **kw: fake_eval

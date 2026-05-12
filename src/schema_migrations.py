@@ -359,6 +359,27 @@ def migrate_database(db_path: str | None = None) -> list[str]:
                 )
             applied.append("usage_daily.backfill")
 
+    # Slice 2: Add evaluation columns to sessions table (consolidated from session_evaluations)
+    if _table_exists(engine, "sessions"):
+        for col, definition in [
+            ("outcome", "TEXT"),
+            ("source", "TEXT"),
+            ("confidence", "NUMERIC(5, 4)"),
+            ("task_title", "TEXT"),
+            ("summary", "TEXT"),
+            ("evidence_json", "TEXT"),
+            ("failure_reason", "TEXT"),
+            ("evaluated_at", "TEXT"),
+        ]:
+            if _ensure_column(
+                engine,
+                "sessions",
+                col,
+                sqlite_definition=definition,
+                postgresql_definition=definition,
+            ):
+                applied.append(f"sessions.{col}")
+
     # Slice 0: Backfill sessions table from usage when there are usage rows
     # with session_ids that don't have a corresponding session record yet.
     # The sessions table is created by init_db() via metadata.create_all().
