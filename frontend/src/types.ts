@@ -123,6 +123,21 @@ export type ActiveFilter = {
 } | null
 export type DateRangeOption = '24h' | '7d' | '30d' | 'all' | 'custom'
 
+export type SessionOutcome = 'solved' | 'partial' | 'failed' | 'stuck' | 'no_op' | 'unknown'
+export type SessionEvaluationSource = 'manual' | 'heuristic' | 'llm'
+
+export type SessionEvaluation = {
+  session_id: string
+  outcome: SessionOutcome
+  source: SessionEvaluationSource
+  confidence: number | null
+  task_title: string | null
+  summary: string | null
+  evidence: string[]
+  failure_reason: string | null
+  evaluated_at: string | null
+}
+
 export type SessionSummary = {
   session_id: string
   client_source: string
@@ -145,6 +160,7 @@ export type SessionSummary = {
   status_4xx: number | null
   status_5xx: number | null
   status_unknown: number | null
+  evaluation: SessionEvaluation | null
 }
 
 export type SessionsSummary = {

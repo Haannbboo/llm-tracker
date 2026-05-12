@@ -377,6 +377,48 @@
   color: var(--badge-success-text);
 }
 
+.session-outcome-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.session-outcome-solved {
+  background: var(--success-bg, #d4edda);
+  color: var(--success-text, #155724);
+}
+
+.session-outcome-partial {
+  background: var(--warning-bg, #fff3cd);
+  color: var(--warning-text, #856404);
+}
+
+.session-outcome-failed {
+  background: var(--error-bg, #f8d7da);
+  color: var(--error-text, #721c24);
+}
+
+.session-outcome-stuck {
+  background: var(--warning-bg, #fff3cd);
+  color: var(--warning-text, #856404);
+}
+
+.session-outcome-no_op {
+  background: var(--neutral-bg, #e2e3e5);
+  color: var(--neutral-text, #383d41);
+}
+
+.session-outcome-unknown {
+  background: transparent;
+  color: var(--muted-text, #6c757d);
+  border: 1px dashed var(--border-color, #dee2e6);
+}
+
 .session-insights-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
@@ -604,6 +646,55 @@
   font-size: 12px;
   font-weight: 800;
   padding: 8px 14px;
+}
+
+.session-eval-buttons {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.session-eval-btn {
+  padding: 5px 12px;
+  border: 1px solid var(--border-color, #dee2e6);
+  border-radius: 6px;
+  background: var(--card-bg, #fff);
+  color: var(--text-color, #333);
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.session-eval-btn:hover {
+  background: var(--hover-bg, #f8f9fa);
+  border-color: var(--primary-color, #007bff);
+}
+
+.session-eval-btn.active {
+  background: var(--primary-color, #007bff);
+  color: #fff;
+  border-color: var(--primary-color, #007bff);
+}
+
+.session-eval-btn-reset {
+  border-color: var(--border-color, #dee2e6);
+  color: var(--muted-text, #6c757d);
+}
+
+.session-eval-section {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border-color, #f0f0f0);
+}
+
+.session-eval-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--muted-text, #6c757d);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 8px;
 }
 
 @media (max-width: 1100px) {

@@ -9,10 +9,13 @@ import {
   shouldProxyApiRequest,
 } from './vite-api-proxy.js'
 
-test('shouldProxyApiRequest matches config and usage routes', () => {
+test('shouldProxyApiRequest matches config, usage and session routes', () => {
   assert.equal(shouldProxyApiRequest('/config'), true)
   assert.equal(shouldProxyApiRequest('/usage'), true)
   assert.equal(shouldProxyApiRequest('/usage/count?since=1'), true)
+  assert.equal(shouldProxyApiRequest('/sessions'), true)
+  assert.equal(shouldProxyApiRequest('/sessions/summary'), true)
+  assert.equal(shouldProxyApiRequest('/sessions/123/evaluation'), true)
   assert.equal(shouldProxyApiRequest('/assets/index.js'), false)
 })
 

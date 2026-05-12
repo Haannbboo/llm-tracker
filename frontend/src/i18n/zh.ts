@@ -351,6 +351,23 @@ export const zh: Record<string, string> = {
   'View failed requests in logs': '在日志中查看失败请求',
   'Failed to fetch session data': '获取会话数据失败',
 
+  // Evaluations
+  'Evaluation': '评估',
+  'Outcome': '结果',
+  'Solved': '已解决',
+  'Partial': '部分完成',
+  'Failed': '失败',
+  'Stuck': '卡住',
+  'No-op': '无操作',
+  'Mark Solved': '标记已解决',
+  'Mark Partial': '标记部分完成',
+  'Mark Failed': '标记失败',
+  'Mark Stuck': '标记卡住',
+  'No evaluation yet': '尚未评估',
+  'Manual': '手动',
+  'Heuristic': '启发式',
+  'LLM': 'LLM',
+
   // InsightCards
   'Top Cost Driver': '最大成本支出',
   'Latency Watch': '延迟预警',

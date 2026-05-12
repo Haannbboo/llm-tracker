@@ -1,3 +1,4 @@
+import { useState, useEffect } from 'react'
 import { ClickToCopy } from './CopyButton'
 import { t } from '../i18n/index.ts'
 import { formatCompact, formatCost, formatDuration, formatLatency, formatNumber, formatTime, value, getModelIcon } from '../utils'
@@ -6,7 +7,68 @@ import type { SessionSummary } from '../types'
 
 // ─── Shared session detail content (used by both inline and panel) ─────────────
 
-export function SessionDetailContent({ session, onNavigateToLogs, showToast }: { session: SessionSummary; onNavigateToLogs: (session: SessionSummary, filters?: any) => void; showToast?: (msg: string) => void }) {
+export function SessionDetailContent({
+  session,
+  onNavigateToLogs,
+  showToast,
+  onEvaluationUpdate,
+}: {
+  session: SessionSummary
+  onNavigateToLogs: (session: SessionSummary, filters?: any) => void
+  showToast?: (msg: string) => void
+  onEvaluationUpdate?: (evaluation: any | null) => void
+}) {
+  const [localEvaluation, setLocalEvaluation] = useState(session.evaluation)
+  useEffect(() => {
+    setLocalEvaluation(session.evaluation)
+  }, [session.evaluation])
+
+  const updateEvaluation = async (outcome: string) => {
+    const prev = localEvaluation
+    const newEval =
+      outcome === 'reset'
+        ? null
+        : {
+            session_id: session.session_id,
+            outcome: outcome as any,
+            source: 'manual',
+            confidence: null,
+            task_title: null,
+            summary: null,
+            evidence: ['User marked outcome manually'],
+            failure_reason: null,
+            evaluated_at: new Date().toISOString(),
+          }
+
+    // Optimistic update
+    setLocalEvaluation(newEval)
+    if (onEvaluationUpdate) onEvaluationUpdate(newEval)
+
+    try {
+      if (outcome === 'reset') {
+        await fetch(`/sessions/${encodeURIComponent(session.session_id)}/evaluation`, {
+          method: 'DELETE',
+        })
+      } else {
+        await fetch(`/sessions/${encodeURIComponent(session.session_id)}/evaluation`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            outcome,
+            source: 'manual',
+            evidence: ['User marked outcome manually'],
+          }),
+        })
+      }
+    } catch {
+      setLocalEvaluation(prev) // Revert on error
+      if (onEvaluationUpdate) onEvaluationUpdate(prev)
+      if (showToast) showToast('Failed to update evaluation')
+    }
+  }
+
+  const outcomeLabels: Record<string, string> = { solved: 'Solved', partial: 'Partial', failed: 'Failed', stuck: 'Stuck', no_op: 'No-op' }
+
   return (
     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '20px', width: '100%' }}>
       <div style={{ display: 'flex', gap: '32px', flexWrap: 'wrap', alignItems: 'flex-start' }}>
@@ -198,6 +260,42 @@ export function SessionDetailContent({ session, onNavigateToLogs, showToast }: {
               <span style={{ color: 'var(--color-purple)' }}>● {t('Out')}</span>
             </div>
           </div>
+        </div>
+      </div>
+
+      <div className="session-eval-section">
+        <div className="session-eval-label">{t('Evaluation')}</div>
+        {localEvaluation && (
+          <div style={{ marginBottom: '8px' }}>
+            <span className={`session-outcome-badge session-outcome-${localEvaluation.outcome}`}>
+              {outcomeLabels[localEvaluation.outcome] || localEvaluation.outcome}
+            </span>
+            <span style={{ fontSize: '11px', color: 'var(--text-muted)', marginLeft: '8px' }}>
+              {t('Source')}: {localEvaluation.source === 'manual' ? t('Manual') : localEvaluation.source === 'heuristic' ? t('Heuristic') : t('LLM')}
+            </span>
+            {localEvaluation.evidence && localEvaluation.evidence.length > 0 && (
+              <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '4px' }}>
+                {localEvaluation.evidence.join(', ')}
+              </div>
+            )}
+          </div>
+        )}
+        <div className="session-eval-buttons">
+          {(['solved', 'partial', 'failed', 'stuck'] as const).map((o) => (
+            <button
+              key={o}
+              className={`session-eval-btn${localEvaluation?.outcome === o ? ' active' : ''}`}
+              onClick={() => updateEvaluation(o)}
+            >
+              {outcomeLabels[o]}
+            </button>
+          ))}
+          <button
+            className="session-eval-btn session-eval-btn-reset"
+            onClick={() => updateEvaluation('reset')}
+          >
+            {t('Reset')}
+          </button>
         </div>
       </div>
     </div>

@@ -25,6 +25,17 @@ type Props = {
   onNavigateToLogs: (filters?: { sessionFilter?: string; activeFilter?: ActiveFilter }) => void
 }
 
+function getOutcomeBadge(outcome: string | null | undefined): { label: string; className: string } {
+  switch (outcome) {
+    case 'solved': return { label: 'Solved', className: 'session-outcome-solved' }
+    case 'partial': return { label: 'Partial', className: 'session-outcome-partial' }
+    case 'failed': return { label: 'Failed', className: 'session-outcome-failed' }
+    case 'stuck': return { label: 'Stuck', className: 'session-outcome-stuck' }
+    case 'no_op': return { label: 'No-op', className: 'session-outcome-no_op' }
+    default: return { label: 'Unknown', className: 'session-outcome-unknown' }
+  }
+}
+
 export function DashboardPage({ onNavigateToLogs }: Props) {
   const { theme, showToast, error, localAgents, setupDiagnostics, requestUsageRefresh } = useApp()
 
@@ -39,20 +50,43 @@ export function DashboardPage({ onNavigateToLogs }: Props) {
 
   // Sessions data hook
   const {
-    sessions, sessionsSummary, sessionsLoading, hasMoreSessions,
-    sessionSortBy, sessionSortOrder,
-    selectedSession, setSelectedSession,
-    handleSessionSort, sessionInsights,
+    sessions,
+    setSessions,
+    sessionsSummary,
+    sessionsLoading,
+    hasMoreSessions,
+    sessionSortBy,
+    sessionSortOrder,
+    selectedSession,
+    setSelectedSession,
+    handleSessionSort,
+    sessionInsights,
     setSessionPage,
   } = useSessionsData({ activeSource, dateRange, customSince, customUntil })
 
   // Onboarding hook
   const {
-    verifyPhase, verificationResult, copiedOnboardingCommand,
-    armOnboardingVerification, resetVerification,
-    showFirstRunOnboarding, setupConfiguredAgents,
-    setupSummaryText, setupSummaryColor, verifyTimeoutGuidance,
+    verifyPhase,
+    verificationResult,
+    copiedOnboardingCommand,
+    armOnboardingVerification,
+    resetVerification,
+    showFirstRunOnboarding,
+    setupConfiguredAgents,
+    setupSummaryText,
+    setupSummaryColor,
+    verifyTimeoutGuidance,
   } = useOnboarding({ totalTrackedEvents, onFirstEvent: requestUsageRefresh })
+
+  // Evaluation update handler
+  const handleEvaluationUpdate = (sessionId: string, evaluation: any | null) => {
+    setSessions((prev) =>
+      prev.map((s) => (s.session_id === sessionId ? { ...s, evaluation } : s))
+    )
+    if (selectedSession?.session_id === sessionId) {
+      setSelectedSession({ ...selectedSession, evaluation })
+    }
+  }
 
   // Local state
   const [dashboardTab, setDashboardTab] = useState<'overview' | 'sessions'>('overview')
@@ -789,6 +823,7 @@ export function DashboardPage({ onNavigateToLogs }: Props) {
                   <th style={{ cursor: 'pointer' }} onClick={() => handleSessionSort('avg_latency_ms')}>
                     {t('Health')} {sessionSortBy === 'avg_latency_ms' ? (sessionSortOrder === 'asc' ? '↑' : '↓') : ''}
                   </th>
+                  <th style={{ width: '90px' }}>Outcome</th>
                 </tr>
               </thead>
               <tbody>
@@ -833,11 +868,21 @@ export function DashboardPage({ onNavigateToLogs }: Props) {
                       <span className="session-health-badge session-health-latency">{t('Resp')} {formatLatency(session.avg_latency_ms)}</span>
                       <span className="session-health-badge session-health-ttft">TTFT {formatLatency(session.avg_ttft_ms)}</span>
                     </td>
+                    <td>
+                      <span className={`session-outcome-badge ${getOutcomeBadge(session.evaluation?.outcome).className}`}>
+                        {getOutcomeBadge(session.evaluation?.outcome).label}
+                      </span>
+                    </td>
                   </tr>
                   {selectedSession?.session_id === session.session_id && (
                     <tr key={session.session_id + '-detail'}>
-                      <td colSpan={8} className="session-detail-cell">
-                        <SessionDetailInline session={session} onNavigateToLogs={handleViewInLogs} showToast={showToast} />
+                      <td colSpan={9} className="session-detail-cell">
+                        <SessionDetailInline
+                          session={session}
+                          onNavigateToLogs={handleViewInLogs}
+                          showToast={showToast}
+                          onEvaluationUpdate={(evalData) => handleEvaluationUpdate(session.session_id, evalData)}
+                        />
                       </td>
                     </tr>
                   )}
@@ -868,7 +913,11 @@ export function DashboardPage({ onNavigateToLogs }: Props) {
             </div>
             <div className="panel-body" style={{ padding: '20px 24px' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '20px' }}>
-                <SessionDetailContent session={selectedSession} onNavigateToLogs={handleViewInLogs} />
+                <SessionDetailContent
+                  session={selectedSession}
+                  onNavigateToLogs={handleViewInLogs}
+                  onEvaluationUpdate={(evalData) => handleEvaluationUpdate(selectedSession.session_id, evalData)}
+                />
                 <div style={{ display: 'flex', gap: '8px' }}>
                   <button
                     style={{ padding: '8px 18px', background: 'var(--color-blue)', color: 'white', borderRadius: '8px', fontSize: '13px', fontWeight: 700, cursor: 'pointer', border: 'none', boxShadow: '0 2px 4px rgba(59, 130, 246, 0.3)', display: 'flex', alignItems: 'center', gap: '6px' }}
@@ -892,10 +941,10 @@ export function DashboardPage({ onNavigateToLogs }: Props) {
 
 // ─── Inline expanded session detail (inside table row) ────────────────────────
 
-function SessionDetailInline({ session, onNavigateToLogs, showToast }: { session: SessionSummary; onNavigateToLogs: (session: SessionSummary, filters?: any) => void; showToast: (msg: string) => void }) {
+function SessionDetailInline({ session, onNavigateToLogs, showToast, onEvaluationUpdate }: { session: SessionSummary; onNavigateToLogs: (session: SessionSummary, filters?: any) => void; showToast: (msg: string) => void; onEvaluationUpdate: (evalData: any | null) => void }) {
   return (
     <div className="session-detail-expanded" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '16px 24px', flexWrap: 'wrap', gap: '20px' }}>
-      <SessionDetailContent session={session} onNavigateToLogs={onNavigateToLogs} showToast={showToast} />
+      <SessionDetailContent session={session} onNavigateToLogs={onNavigateToLogs} showToast={showToast} onEvaluationUpdate={onEvaluationUpdate} />
       <div style={{ display: 'flex', gap: '8px' }}>
         <button
           style={{ padding: '8px 18px', background: 'var(--color-blue)', color: 'white', borderRadius: '8px', fontSize: '13px', fontWeight: 700, cursor: 'pointer', border: 'none', boxShadow: '0 2px 4px rgba(59, 130, 246, 0.3)', display: 'flex', alignItems: 'center', gap: '6px' }}

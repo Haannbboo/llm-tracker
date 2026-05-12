@@ -92,10 +92,19 @@ export function useSessionsData(opts: {
   }, [opts.activeSource, opts.dateRange, opts.customSince, opts.customUntil, refreshTrigger, sessionSortBy, sessionSortOrder, sessionPage, setError])
 
   return {
-    sessions, sessionsSummary, sessionCount, sessionsLoading, hasMoreSessions,
-    sessionSortBy, sessionSortOrder, sessionPage,
-    selectedSession, setSelectedSession,
-    handleSessionSort, sessionInsights,
+    sessions,
+    setSessions,
+    sessionsSummary,
+    sessionCount,
+    sessionsLoading,
+    hasMoreSessions,
+    sessionSortBy,
+    sessionSortOrder,
+    sessionPage,
+    selectedSession,
+    setSelectedSession,
+    handleSessionSort,
+    sessionInsights,
     setSessionPage,
   }
 }
