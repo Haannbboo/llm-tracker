@@ -77,6 +77,13 @@ describe('Session evaluation UI', () => {
     assert.match(dashboard, /handleEvaluationUpdate/)
     assert.match(dashboard, /setSessions/)
   })
+
+  test('session detail notifies parent after evaluation persistence succeeds', () => {
+    assert.match(detail, /onEvaluationPersisted/)
+    assert.match(detail, /if \(!response\.ok\) throw new Error/)
+    assert.match(detail, /onEvaluationPersisted\?\.\(\)/)
+    assert.match(dashboard, /onEvaluationPersisted=\{refreshModelEffectiveness\}/)
+  })
 })
 
 describe('Session evaluation CSS', () => {

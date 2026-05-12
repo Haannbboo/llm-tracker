@@ -304,6 +304,8 @@ _SESSION_SORT_COLUMNS = {
     "avg_ttft_ms": SessionRecord.avg_ttft_ms,
 }
 
+_MODEL_EFFECTIVENESS_GROUPS = {"model", "provider", "source"}
+
 
 def _compute_duration_s(started: str | None, ended: str | None) -> int:
     """Compute duration in seconds from ISO timestamps."""
@@ -316,6 +318,33 @@ def _compute_duration_s(started: str | None, ended: str | None) -> int:
         return max(0, int((end - start).total_seconds()))
     except (ValueError, TypeError):
         return 0
+
+
+def _normalize_timestamp_filter(value: str) -> str:
+    try:
+        normalized = f"{value[:-1]}+00:00" if value.endswith(("Z", "z")) else value
+        parsed = datetime.fromisoformat(normalized)
+    except ValueError:
+        return value
+    if parsed.tzinfo is not None:
+        parsed = parsed.astimezone(timezone.utc)
+    return parsed.isoformat()
+
+
+def _session_filters(
+    *,
+    client_source: str | None = None,
+    since: str | None = None,
+    until: str | None = None,
+) -> list[Any]:
+    filters: list[Any] = []
+    if client_source:
+        filters.append(SessionRecord.client_source == client_source)
+    if since:
+        filters.append(SessionRecord.started >= _normalize_timestamp_filter(since))
+    if until:
+        filters.append(SessionRecord.ended <= _normalize_timestamp_filter(until))
+    return filters
 
 
 def _session_record_to_dict(rec: SessionRecord) -> dict[str, Any]:
@@ -358,6 +387,113 @@ def _session_record_to_dict(rec: SessionRecord) -> dict[str, Any]:
     return result
 
 
+def aggregate_model_effectiveness(
+    *,
+    group_by: str = "model",
+    since: str | None = None,
+    until: str | None = None,
+    client_source: str | None = None,
+    db_path: str | None = None,
+) -> dict[str, list[dict[str, Any]]]:
+    """Aggregate evaluated session outcomes by model, provider, or client source."""
+    if group_by not in _MODEL_EFFECTIVENESS_GROUPS:
+        raise ValueError(
+            f"Invalid group_by: {group_by}. Must be one of {sorted(_MODEL_EFFECTIVENESS_GROUPS)}"
+        )
+
+    filters = _session_filters(
+        client_source=client_source,
+        since=since,
+        until=until,
+    )
+
+    query = select(SessionRecord)
+    if filters:
+        query = query.where(and_(*filters))
+
+    with Session(get_engine(db_path)) as session:
+        records = session.execute(query).scalars().all()
+
+    grouped: dict[str, dict[str, Any]] = {}
+    for rec in records:
+        if group_by == "provider":
+            raw_key = rec.primary_provider
+        elif group_by == "source":
+            raw_key = rec.client_source
+        else:
+            raw_key = rec.primary_model
+        key = raw_key or "unknown"
+
+        group = grouped.setdefault(
+            key,
+            {
+                "key": key,
+                "session_count": 0,
+                "evaluated_count": 0,
+                "solved_count": 0,
+                "partial_count": 0,
+                "failed_count": 0,
+                "stuck_count": 0,
+                "unknown_count": 0,
+                "no_op_count": 0,
+                "solve_rate": None,
+                "total_cost_usd": 0.0,
+                "cost_per_solved": None,
+                "avg_duration_s": 0.0,
+                "_evaluated_cost_usd": 0.0,
+                "_total_duration_s": 0,
+            },
+        )
+
+        cost = float(rec.total_cost_usd or 0)
+        group["session_count"] += 1
+        group["total_cost_usd"] += cost
+        group["_total_duration_s"] += _compute_duration_s(rec.started, rec.ended)
+
+        if rec.outcome == "solved":
+            group["solved_count"] += 1
+            group["evaluated_count"] += 1
+            group["_evaluated_cost_usd"] += cost
+        elif rec.outcome == "partial":
+            group["partial_count"] += 1
+            group["evaluated_count"] += 1
+            group["_evaluated_cost_usd"] += cost
+        elif rec.outcome == "failed":
+            group["failed_count"] += 1
+            group["evaluated_count"] += 1
+            group["_evaluated_cost_usd"] += cost
+        elif rec.outcome == "stuck":
+            group["stuck_count"] += 1
+            group["evaluated_count"] += 1
+            group["_evaluated_cost_usd"] += cost
+        elif rec.outcome == "no_op":
+            group["no_op_count"] += 1
+        else:
+            group["unknown_count"] += 1
+
+    groups: list[dict[str, Any]] = []
+    for group in grouped.values():
+        evaluated_count = group["evaluated_count"]
+        solved_count = group["solved_count"]
+        session_count = group["session_count"]
+        if evaluated_count:
+            group["solve_rate"] = round(solved_count / evaluated_count, 4)
+        if solved_count:
+            group["cost_per_solved"] = group["_evaluated_cost_usd"] / solved_count
+        group["avg_duration_s"] = (
+            round(group["_total_duration_s"] / session_count, 1)
+            if session_count
+            else 0.0
+        )
+        group["total_cost_usd"] = float(group["total_cost_usd"])
+        group.pop("_evaluated_cost_usd")
+        group.pop("_total_duration_s")
+        groups.append(group)
+
+    groups.sort(key=lambda group: (-group["session_count"], group["key"]))
+    return {"groups": groups}
+
+
 def fetch_sessions(
     *,
     client_source: str | None = None,
@@ -370,13 +506,11 @@ def fetch_sessions(
     db_path: str | None = None,
 ) -> list[dict[str, Any]]:
     """Return sessions from the persisted sessions table."""
-    filters: list[Any] = []
-    if client_source:
-        filters.append(SessionRecord.client_source == client_source)
-    if since:
-        filters.append(SessionRecord.started >= since)
-    if until:
-        filters.append(SessionRecord.ended <= until)
+    filters = _session_filters(
+        client_source=client_source,
+        since=since,
+        until=until,
+    )
 
     sort_col = _SESSION_SORT_COLUMNS.get(sort_by)
     python_sort = sort_by == "duration_s"
@@ -417,13 +551,11 @@ def count_sessions(
     db_path: str | None = None,
 ) -> int:
     """Count sessions from the persisted sessions table."""
-    filters: list[Any] = []
-    if client_source:
-        filters.append(SessionRecord.client_source == client_source)
-    if since:
-        filters.append(SessionRecord.started >= since)
-    if until:
-        filters.append(SessionRecord.ended <= until)
+    filters = _session_filters(
+        client_source=client_source,
+        since=since,
+        until=until,
+    )
 
     query = select(func.count()).select_from(SessionRecord)
     if filters:
@@ -441,13 +573,11 @@ def summarize_sessions(
     db_path: str | None = None,
 ) -> dict[str, Any]:
     """Return aggregate stats across all sessions matching the filters."""
-    filters: list[Any] = []
-    if client_source:
-        filters.append(SessionRecord.client_source == client_source)
-    if since:
-        filters.append(SessionRecord.started >= since)
-    if until:
-        filters.append(SessionRecord.ended <= until)
+    filters = _session_filters(
+        client_source=client_source,
+        since=since,
+        until=until,
+    )
 
     query = select(
         func.count().label("session_count"),

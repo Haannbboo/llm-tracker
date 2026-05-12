@@ -351,6 +351,18 @@ export const zh: Record<string, string> = {
   'View failed requests in logs': '在日志中查看失败请求',
   'Failed to fetch session data': '获取会话数据失败',
 
+  // Model effectiveness
+  'Model Effectiveness': '模型效果',
+  'Based on': '基于',
+  'evaluated sessions': '个已评估会话',
+  'Small sample — treat this as directional.': '样本较小 — 仅作方向性参考。',
+  'No evaluated sessions yet.': '还没有已评估的会话。',
+  'Mark a few sessions as solved or failed to compare models on your real tasks.': '将几个会话标记为已解决或失败，即可按真实任务比较模型。',
+  'Evaluated': '已评估',
+  'Cost / solved': '每次解决成本',
+  'no-op': '无操作',
+  'Failed to fetch model effectiveness data': '获取模型效果数据失败',
+
   // Evaluations
   'Evaluation': '评估',
   'Outcome': '结果',

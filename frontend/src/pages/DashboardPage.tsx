@@ -1,7 +1,8 @@
-import { useState, Fragment, useEffect, useRef } from 'react'
+import { useState, Fragment, useEffect, useMemo, useRef } from 'react'
 import { useApp } from '../contexts/AppContext'
 import { useDashboardData } from '../hooks/useDashboardData'
 import { useSessionsData } from '../hooks/useSessionsData'
+import { useModelEffectivenessData } from '../hooks/useModelEffectivenessData'
 import { useOnboarding } from '../hooks/useOnboarding'
 import { useCountUp } from '../useCountUp'
 import { ModelSelector } from '../ModelSelector'
@@ -16,10 +17,10 @@ import { SessionDetailContent } from '../components/SessionDetailPanel'
 import { t } from '../i18n/index.ts'
 import {
   formatCompact, formatCost, formatDuration, formatLatency, formatNumber, formatRate,
-  formatTime, value, getSourceBadgeBg, getSourceBadgeText,
-  shortSessionId, sessionAgentName, sessionDisplayName, getAgentDisplayName,
+  formatTime, value, getModelIcon, getSourceBadgeBg, getSourceBadgeText,
+  shortSessionId, sessionAgentName, sessionDisplayName, getAgentDisplayName, getSinceDate,
 } from '../utils'
-import type { ActiveFilter, SessionSummary } from '../types'
+import type { ActiveFilter, ModelEffectivenessGroup, SessionSummary, SessionsSummary } from '../types'
 
 type Props = {
   onNavigateToLogs: (filters?: { sessionFilter?: string; activeFilter?: ActiveFilter }) => void
@@ -34,6 +35,15 @@ function getOutcomeBadge(outcome: string | null | undefined): { label: string; c
     case 'no_op': return { label: 'No-op', className: 'session-outcome-no_op' }
     default: return { label: 'Unknown', className: 'session-outcome-unknown' }
   }
+}
+
+function formatEffectivenessShare(count: number, evaluatedCount: number): string {
+  if (evaluatedCount === 0) return '—'
+  return `${Math.round((count / evaluatedCount) * 100)}%`
+}
+
+function modelEffectivenessClassifiedCount(group: ModelEffectivenessGroup): number {
+  return group.evaluated_count + group.no_op_count
 }
 
 export function DashboardPage({ onNavigateToLogs }: Props) {
@@ -52,7 +62,6 @@ export function DashboardPage({ onNavigateToLogs }: Props) {
   const {
     sessions,
     setSessions,
-    sessionsSummary,
     sessionsLoading,
     hasMoreSessions,
     sessionSortBy,
@@ -63,6 +72,40 @@ export function DashboardPage({ onNavigateToLogs }: Props) {
     sessionInsights,
     setSessionPage,
   } = useSessionsData({ activeSource, dateRange, customSince, customUntil })
+
+  // Sessions summary (fetched directly for the stats cards)
+  const [sessionsSummary, setSessionsSummary] = useState<SessionsSummary | null>(null)
+  useEffect(() => {
+    const url = new URL('/sessions/summary', window.location.origin)
+    if (activeSource) url.searchParams.set('client_source', activeSource)
+    if (dateRange !== 'all') {
+      const since = dateRange === 'custom' ? customSince : getSinceDate(dateRange)
+      if (since) url.searchParams.set('since', since)
+      if (customUntil) url.searchParams.set('until', customUntil)
+    }
+    fetch(url.toString())
+      .then(r => r.json())
+      .then(setSessionsSummary)
+      .catch(() => setSessionsSummary(null))
+  }, [activeSource, dateRange, customSince, customUntil])
+
+  const {
+    modelEffectiveness,
+    modelEffectivenessLoading,
+    refreshModelEffectiveness,
+  } = useModelEffectivenessData({ activeSource, dateRange, customSince, customUntil })
+
+  const modelEffectivenessTotals = useMemo(() => {
+    return modelEffectiveness.groups.reduce(
+      (totals, group) => ({
+        evaluated: totals.evaluated + modelEffectivenessClassifiedCount(group),
+        unknown: totals.unknown + group.unknown_count,
+        noOp: totals.noOp + group.no_op_count,
+        hasSmallSample: totals.hasSmallSample || (group.evaluated_count > 0 && group.evaluated_count < 5),
+      }),
+      { evaluated: 0, unknown: 0, noOp: 0, hasSmallSample: false }
+    )
+  }, [modelEffectiveness.groups])
 
   // Onboarding hook
   const {
@@ -732,7 +775,7 @@ export function DashboardPage({ onNavigateToLogs }: Props) {
           </div>
           <div className="widget">
             <div style={{ fontSize: '10px', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.5px', fontWeight: 700 }}>{t('Avg Duration')}</div>
-            <div style={{ fontSize: '24px', fontWeight: 800, color: 'var(--text-primary)' }}>{sessionsSummary ? formatDuration(sessionsSummary.avg_duration_s) : '—'}</div>
+            <div style={{ fontSize: '24px', fontWeight: 800, color: 'var(--text-primary)' }}>{sessionsSummary ? formatDuration(sessionsSummary.avg_duration_s, { secondsFractionDigits: 2 }) : '—'}</div>
           </div>
           <div className="widget">
             <div style={{ fontSize: '10px', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.5px', fontWeight: 700 }}>{t('Total Tokens')}</div>
@@ -772,6 +815,105 @@ export function DashboardPage({ onNavigateToLogs }: Props) {
             ))}
           </div>
         )}
+
+        <div className="panel model-effectiveness-panel">
+          <div className="model-effectiveness-header">
+            <div>
+              <div className="model-effectiveness-title">{t('Model Effectiveness')}</div>
+              <div className="model-effectiveness-subtitle">
+                {t('Based on')} {formatNumber(modelEffectivenessTotals.evaluated)} {t('evaluated sessions')} · {formatNumber(modelEffectivenessTotals.unknown)} {t('unknown')}
+                {modelEffectivenessTotals.noOp > 0 && (
+                  <> · {formatNumber(modelEffectivenessTotals.noOp)} {t('no-op')}</>
+                )}
+              </div>
+            </div>
+            {modelEffectivenessTotals.hasSmallSample && (
+              <div className="model-effectiveness-warning">
+                {t('Small sample — treat this as directional.')}
+              </div>
+            )}
+          </div>
+
+          {modelEffectivenessTotals.evaluated === 0 && !modelEffectivenessLoading ? (
+            <div className="model-effectiveness-empty">
+              <div className="model-effectiveness-empty-title">{t('No evaluated sessions yet.')}</div>
+              <div className="model-effectiveness-empty-copy">
+                {t('Mark a few sessions as solved or failed to compare models on your real tasks.')}
+              </div>
+            </div>
+          ) : (
+            <div className="model-effectiveness-table-wrap">
+              <table className="table model-effectiveness-table">
+                <thead>
+                  <tr>
+                    <th>{t('Model')}</th>
+                    <th>{t('Evaluated')}</th>
+                    <th>{t('Solved')}</th>
+                    <th>{t('Partial')}</th>
+                    <th>{t('Failed')}</th>
+                    <th>{t('Stuck')}</th>
+                    <th>{t('No-op')}</th>
+                    <th>{t('Unknown')}</th>
+                    <th>{t('Cost / solved')}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {modelEffectivenessLoading && modelEffectiveness.groups.length === 0 ? (
+                    <tr>
+                      <td colSpan={9} className="model-effectiveness-loading">—</td>
+                    </tr>
+                  ) : (
+                    modelEffectiveness.groups.map((group: ModelEffectivenessGroup) => (
+                      <tr key={group.key}>
+                        <td>
+                          <div className="model-effectiveness-model" title={group.key}>
+                            {getModelIcon(group.key)}
+                            <span>{group.key}</span>
+                          </div>
+                        </td>
+                        <td>
+                          <span className="model-effectiveness-count">{formatNumber(modelEffectivenessClassifiedCount(group))}</span>
+                          <span className="model-effectiveness-muted"> / {formatNumber(group.session_count)}</span>
+                        </td>
+                        <td>
+                          <div className="model-effectiveness-share model-effectiveness-share-solved">
+                            {formatEffectivenessShare(group.solved_count, group.evaluated_count)}
+                          </div>
+                          <div className="model-effectiveness-muted">{formatNumber(group.solved_count)}</div>
+                        </td>
+                        <td>
+                          <div className="model-effectiveness-share model-effectiveness-share-partial">
+                            {formatEffectivenessShare(group.partial_count, group.evaluated_count)}
+                          </div>
+                          <div className="model-effectiveness-muted">{formatNumber(group.partial_count)}</div>
+                        </td>
+                        <td>
+                          <div className="model-effectiveness-share model-effectiveness-share-failed">
+                            {formatEffectivenessShare(group.failed_count, group.evaluated_count)}
+                          </div>
+                          <div className="model-effectiveness-muted">{formatNumber(group.failed_count)}</div>
+                        </td>
+                        <td>
+                          <div className="model-effectiveness-share model-effectiveness-share-stuck">
+                            {formatEffectivenessShare(group.stuck_count, group.evaluated_count)}
+                          </div>
+                          <div className="model-effectiveness-muted">{formatNumber(group.stuck_count)}</div>
+                        </td>
+                        <td>
+                          <span className="model-effectiveness-count">{formatNumber(group.no_op_count)}</span>
+                        </td>
+                        <td>
+                          <span className="model-effectiveness-count">{formatNumber(group.unknown_count)}</span>
+                        </td>
+                        <td>{group.cost_per_solved === null ? '—' : formatCost(group.cost_per_solved)}</td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
 
         {sessions.length === 0 && !sessionsLoading && (
           <div className="sessions-empty-state panel">
@@ -882,6 +1024,7 @@ export function DashboardPage({ onNavigateToLogs }: Props) {
                           onNavigateToLogs={handleViewInLogs}
                           showToast={showToast}
                           onEvaluationUpdate={(evalData) => handleEvaluationUpdate(session.session_id, evalData)}
+                          onEvaluationPersisted={refreshModelEffectiveness}
                         />
                       </td>
                     </tr>
@@ -917,6 +1060,7 @@ export function DashboardPage({ onNavigateToLogs }: Props) {
                   session={selectedSession}
                   onNavigateToLogs={handleViewInLogs}
                   onEvaluationUpdate={(evalData) => handleEvaluationUpdate(selectedSession.session_id, evalData)}
+                  onEvaluationPersisted={refreshModelEffectiveness}
                 />
                 <div style={{ display: 'flex', gap: '8px' }}>
                   <button
@@ -941,10 +1085,10 @@ export function DashboardPage({ onNavigateToLogs }: Props) {
 
 // ─── Inline expanded session detail (inside table row) ────────────────────────
 
-function SessionDetailInline({ session, onNavigateToLogs, showToast, onEvaluationUpdate }: { session: SessionSummary; onNavigateToLogs: (session: SessionSummary, filters?: any) => void; showToast: (msg: string) => void; onEvaluationUpdate: (evalData: any | null) => void }) {
+function SessionDetailInline({ session, onNavigateToLogs, showToast, onEvaluationUpdate, onEvaluationPersisted }: { session: SessionSummary; onNavigateToLogs: (session: SessionSummary, filters?: any) => void; showToast: (msg: string) => void; onEvaluationUpdate: (evalData: any | null) => void; onEvaluationPersisted: () => void }) {
   return (
     <div className="session-detail-expanded" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '16px 24px', flexWrap: 'wrap', gap: '20px' }}>
-      <SessionDetailContent session={session} onNavigateToLogs={onNavigateToLogs} showToast={showToast} onEvaluationUpdate={onEvaluationUpdate} />
+      <SessionDetailContent session={session} onNavigateToLogs={onNavigateToLogs} showToast={showToast} onEvaluationUpdate={onEvaluationUpdate} onEvaluationPersisted={onEvaluationPersisted} />
       <div style={{ display: 'flex', gap: '8px' }}>
         <button
           style={{ padding: '8px 18px', background: 'var(--color-blue)', color: 'white', borderRadius: '8px', fontSize: '13px', fontWeight: 700, cursor: 'pointer', border: 'none', boxShadow: '0 2px 4px rgba(59, 130, 246, 0.3)', display: 'flex', alignItems: 'center', gap: '6px' }}
@@ -959,4 +1103,3 @@ function SessionDetailInline({ session, onNavigateToLogs, showToast, onEvaluatio
     </div>
   )
 }
-

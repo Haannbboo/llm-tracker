@@ -18,6 +18,7 @@ from .models import (
 from .engine import DB_URL_ENV_VAR, get_db_url, get_engine, init_db
 from .base_url import get_or_create_base_url, resolve_base_url_id
 from .sessions import (
+    aggregate_model_effectiveness,
     count_sessions,
     delete_session_evaluation,
     fetch_sessions,
@@ -60,6 +61,7 @@ __all__ = [
     "UsageDaily",
     "VALID_OUTCOMES",
     "VALID_SOURCES",
+    "aggregate_model_effectiveness",
     "aggregate_daily_by_dimension",
     "aggregate_daily_by_period",
     "aggregate_usage_by_period",

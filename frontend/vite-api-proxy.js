@@ -9,6 +9,7 @@ export function shouldProxyApiRequest(requestUrl) {
     pathname === '/test-connectivity' ||
     pathname === '/local/agents' ||
     pathname === '/local/setup-health' ||
+    pathname === '/model-effectiveness' ||
     pathname === '/sessions' ||
     pathname.startsWith('/sessions/')
   )

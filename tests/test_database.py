@@ -2113,6 +2113,39 @@ def test_fetch_sessions_filters_by_client_source(database_module, isolated_home)
     assert result[0]["session_id"] == "s2"
 
 
+def test_fetch_sessions_accepts_browser_iso_boundary_filters(
+    database_module, isolated_home
+):
+    db_path = str(isolated_home / "usage.db")
+    database_module.init_db(db_path)
+
+    database_module.log_usage(
+        database_module.Usage(
+            ts="2026-05-09T10:00:00+00:00",
+            provider="anthropic",
+            model="claude-sonnet-4-6",
+            client_source="claude-code",
+            session_id="boundary",
+            endpoint="/v1/messages",
+            prompt_tokens=100,
+            total_tokens=100,
+            input_cost_usd=0.001,
+            output_cost_usd=0.001,
+            total_cost_usd=0.002,
+            status=200,
+        ),
+        db_path=db_path,
+    )
+
+    result = database_module.fetch_sessions(
+        since="2026-05-09T10:00:00.000Z",
+        until="2026-05-09T10:00:00.000Z",
+        db_path=db_path,
+    )
+
+    assert [session["session_id"] for session in result] == ["boundary"]
+
+
 def test_fetch_sessions_sorting(database_module, isolated_home):
     db_path = str(isolated_home / "usage.db")
     database_module.init_db(db_path)
@@ -2764,21 +2797,22 @@ def test_rebuild_sessions_from_usage(database_module, isolated_home):
 # ---------------------------------------------------------------------------
 
 
-def _insert_session_record(database_module, db_path, session_id="sess-1"):
+def _insert_session_record(database_module, db_path, session_id="sess-1", **overrides):
     """Helper: insert a minimal SessionRecord for evaluation tests."""
     from sqlalchemy.orm import Session
 
+    values = {
+        "session_id": session_id,
+        "client_source": "test",
+        "started": "2026-05-11T10:00:00+00:00",
+        "ended": "2026-05-11T10:30:00+00:00",
+        "updated_at": "2026-05-11T10:30:00+00:00",
+    }
+    values.update(overrides)
+
     engine = database_module.get_engine(db_path)
     with Session(engine) as session:
-        session.add(
-            database_module.SessionRecord(
-                session_id=session_id,
-                client_source="test",
-                started="2026-05-11T10:00:00+00:00",
-                ended="2026-05-11T10:30:00+00:00",
-                updated_at="2026-05-11T10:30:00+00:00",
-            )
-        )
+        session.add(database_module.SessionRecord(**values))
         session.commit()
 
 
@@ -2905,3 +2939,220 @@ def test_delete_session_evaluation_returns_false_when_session_absent(
 
     deleted = database_module.delete_session_evaluation("nonexistent", db_path=db_path)
     assert deleted is False
+
+
+# ---------------------------------------------------------------------------
+# Slice 4: Model Effectiveness Aggregation API
+# ---------------------------------------------------------------------------
+
+
+def test_model_effectiveness_groups_by_primary_model(database_module, isolated_home):
+    """Aggregation attributes each session to its primary_model only."""
+    db_path = str(isolated_home / "usage.db")
+    database_module.init_db(db_path)
+
+    _insert_session_record(
+        database_module,
+        db_path,
+        "sess-solved",
+        client_source="codex",
+        primary_provider="openai",
+        primary_model="gpt-5.5",
+        models_json='{"gpt-5.5": 0.50, "claude-sonnet": 0.05}',
+        providers_json='{"openai": 0.50, "anthropic": 0.05}',
+        total_cost_usd=0.50,
+        outcome="solved",
+        source="manual",
+    )
+    _insert_session_record(
+        database_module,
+        db_path,
+        "sess-partial",
+        client_source="codex",
+        primary_provider="openai",
+        primary_model="gpt-5.5",
+        total_cost_usd=0.25,
+        outcome="partial",
+        source="manual",
+    )
+    _insert_session_record(
+        database_module,
+        db_path,
+        "sess-failed",
+        client_source="claude-code",
+        primary_provider="anthropic",
+        primary_model="claude-sonnet",
+        total_cost_usd=0.75,
+        outcome="failed",
+        source="manual",
+    )
+
+    result = database_module.aggregate_model_effectiveness(
+        group_by="model",
+        db_path=db_path,
+    )
+
+    by_key = {group["key"]: group for group in result["groups"]}
+    assert set(by_key) == {"gpt-5.5", "claude-sonnet"}
+
+    gpt = by_key["gpt-5.5"]
+    assert gpt["session_count"] == 2
+    assert gpt["evaluated_count"] == 2
+    assert gpt["solved_count"] == 1
+    assert gpt["partial_count"] == 1
+    assert gpt["failed_count"] == 0
+    assert gpt["solve_rate"] == pytest.approx(0.5)
+    assert gpt["total_cost_usd"] == pytest.approx(0.75)
+    assert gpt["cost_per_solved"] == pytest.approx(0.75)
+
+
+def test_model_effectiveness_unknown_and_no_op_do_not_pollute_solve_rate(
+    database_module, isolated_home
+):
+    """Unknown and no-op sessions are visible but excluded from solve_rate."""
+    db_path = str(isolated_home / "usage.db")
+    database_module.init_db(db_path)
+
+    _insert_session_record(
+        database_module,
+        db_path,
+        "sess-solved",
+        primary_model="gpt-5.5",
+        total_cost_usd=0.40,
+        outcome="solved",
+        source="manual",
+    )
+    _insert_session_record(
+        database_module,
+        db_path,
+        "sess-unknown-explicit",
+        primary_model="gpt-5.5",
+        total_cost_usd=0.20,
+        outcome="unknown",
+        source="manual",
+    )
+    _insert_session_record(
+        database_module,
+        db_path,
+        "sess-unknown-null",
+        primary_model="gpt-5.5",
+        total_cost_usd=0.20,
+    )
+    _insert_session_record(
+        database_module,
+        db_path,
+        "sess-no-op",
+        primary_model="gpt-5.5",
+        total_cost_usd=0.20,
+        outcome="no_op",
+        source="manual",
+    )
+
+    result = database_module.aggregate_model_effectiveness(
+        group_by="model",
+        db_path=db_path,
+    )
+
+    group = result["groups"][0]
+    assert group["session_count"] == 4
+    assert group["evaluated_count"] == 1
+    assert group["solved_count"] == 1
+    assert group["unknown_count"] == 2
+    assert group["no_op_count"] == 1
+    assert group["solve_rate"] == pytest.approx(1.0)
+    assert group["cost_per_solved"] == pytest.approx(0.40)
+
+
+def test_model_effectiveness_groups_by_source_and_filters(
+    database_module, isolated_home
+):
+    """Aggregation supports client source grouping with date/source filters."""
+    db_path = str(isolated_home / "usage.db")
+    database_module.init_db(db_path)
+
+    _insert_session_record(
+        database_module,
+        db_path,
+        "sess-in-range",
+        client_source="codex",
+        started="2026-05-11T10:00:00+00:00",
+        ended="2026-05-11T10:20:00+00:00",
+        total_cost_usd=0.25,
+        outcome="solved",
+        source="manual",
+    )
+    _insert_session_record(
+        database_module,
+        db_path,
+        "sess-other-source",
+        client_source="claude-code",
+        started="2026-05-11T11:00:00+00:00",
+        ended="2026-05-11T11:30:00+00:00",
+        total_cost_usd=0.25,
+        outcome="failed",
+        source="manual",
+    )
+    _insert_session_record(
+        database_module,
+        db_path,
+        "sess-out-of-range",
+        client_source="codex",
+        started="2026-05-10T10:00:00+00:00",
+        ended="2026-05-10T10:30:00+00:00",
+        total_cost_usd=0.25,
+        outcome="failed",
+        source="manual",
+    )
+
+    result = database_module.aggregate_model_effectiveness(
+        group_by="source",
+        since="2026-05-11T10:00:00.000Z",
+        until="2026-05-11T10:20:00.000Z",
+        client_source="codex",
+        db_path=db_path,
+    )
+
+    assert [group["key"] for group in result["groups"]] == ["codex"]
+    group = result["groups"][0]
+    assert group["session_count"] == 1
+    assert group["solved_count"] == 1
+    assert group["failed_count"] == 0
+
+
+def test_model_effectiveness_cost_per_solved_null_when_zero_solved(
+    database_module, isolated_home
+):
+    """cost_per_solved is null when there are no solved sessions."""
+    db_path = str(isolated_home / "usage.db")
+    database_module.init_db(db_path)
+
+    _insert_session_record(
+        database_module,
+        db_path,
+        "sess-failed",
+        primary_provider="anthropic",
+        total_cost_usd=0.25,
+        outcome="failed",
+        source="manual",
+    )
+    _insert_session_record(
+        database_module,
+        db_path,
+        "sess-stuck",
+        primary_provider="anthropic",
+        total_cost_usd=0.25,
+        outcome="stuck",
+        source="manual",
+    )
+
+    result = database_module.aggregate_model_effectiveness(
+        group_by="provider",
+        db_path=db_path,
+    )
+
+    group = result["groups"][0]
+    assert group["key"] == "anthropic"
+    assert group["evaluated_count"] == 2
+    assert group["stuck_count"] == 1
+    assert group["solve_rate"] == pytest.approx(0.0)
+    assert group["cost_per_solved"] is None

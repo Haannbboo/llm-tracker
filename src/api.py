@@ -20,6 +20,7 @@ from .database import (
     Usage,
     aggregate_daily_by_dimension,
     aggregate_daily_by_period,
+    aggregate_model_effectiveness,
     aggregate_usage_by_period,
     count_sessions,
     count_usage,
@@ -375,6 +376,26 @@ async def get_sessions_summary(
         client_source=client_source,
         since=since,
         until=until,
+    )
+
+
+@app.get("/model-effectiveness")
+async def model_effectiveness(
+    since: str | None = None,
+    until: str | None = None,
+    client_source: str | None = None,
+    group_by: str = "model",
+):
+    if group_by not in {"model", "source", "provider"}:
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid group_by. Must be one of ['model', 'provider', 'source']",
+        )
+    return aggregate_model_effectiveness(
+        group_by=group_by,
+        since=since,
+        until=until,
+        client_source=client_source,
     )
 
 

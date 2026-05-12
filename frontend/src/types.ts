@@ -171,6 +171,26 @@ export type SessionsSummary = {
   avg_latency_ms: number
 }
 
+export type ModelEffectivenessGroup = {
+  key: string
+  session_count: number
+  evaluated_count: number
+  solved_count: number
+  partial_count: number
+  failed_count: number
+  stuck_count: number
+  unknown_count: number
+  no_op_count: number
+  solve_rate: number | null
+  total_cost_usd: number
+  cost_per_solved: number | null
+  avg_duration_s: number
+}
+
+export type ModelEffectivenessResponse = {
+  groups: ModelEffectivenessGroup[]
+}
+
 export type SetupAgentHealth = {
   configured: boolean
   endpoint_matches: boolean

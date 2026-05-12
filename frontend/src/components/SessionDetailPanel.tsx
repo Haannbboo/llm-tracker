@@ -3,7 +3,7 @@ import { ClickToCopy } from './CopyButton'
 import { t } from '../i18n/index.ts'
 import { formatCompact, formatCost, formatDuration, formatLatency, formatNumber, formatTime, value, getModelIcon } from '../utils'
 import { getModelBadgeBackgroundColor, getModelTextColor } from '../model-badge'
-import type { SessionSummary } from '../types'
+import type { SessionEvaluation, SessionOutcome, SessionSummary } from '../types'
 
 // ─── Shared session detail content (used by both inline and panel) ─────────────
 
@@ -12,25 +12,27 @@ export function SessionDetailContent({
   onNavigateToLogs,
   showToast,
   onEvaluationUpdate,
+  onEvaluationPersisted,
 }: {
   session: SessionSummary
   onNavigateToLogs: (session: SessionSummary, filters?: any) => void
   showToast?: (msg: string) => void
-  onEvaluationUpdate?: (evaluation: any | null) => void
+  onEvaluationUpdate?: (evaluation: SessionEvaluation | null) => void
+  onEvaluationPersisted?: () => void
 }) {
   const [localEvaluation, setLocalEvaluation] = useState(session.evaluation)
   useEffect(() => {
     setLocalEvaluation(session.evaluation)
   }, [session.evaluation])
 
-  const updateEvaluation = async (outcome: string) => {
+  const updateEvaluation = async (outcome: SessionOutcome | 'reset') => {
     const prev = localEvaluation
-    const newEval =
+    const newEval: SessionEvaluation | null =
       outcome === 'reset'
         ? null
         : {
             session_id: session.session_id,
-            outcome: outcome as any,
+            outcome,
             source: 'manual',
             confidence: null,
             task_title: null,
@@ -45,12 +47,13 @@ export function SessionDetailContent({
     if (onEvaluationUpdate) onEvaluationUpdate(newEval)
 
     try {
+      let response: Response
       if (outcome === 'reset') {
-        await fetch(`/sessions/${encodeURIComponent(session.session_id)}/evaluation`, {
+        response = await fetch(`/sessions/${encodeURIComponent(session.session_id)}/evaluation`, {
           method: 'DELETE',
         })
       } else {
-        await fetch(`/sessions/${encodeURIComponent(session.session_id)}/evaluation`, {
+        response = await fetch(`/sessions/${encodeURIComponent(session.session_id)}/evaluation`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -60,6 +63,8 @@ export function SessionDetailContent({
           }),
         })
       }
+      if (!response.ok) throw new Error('Failed to update evaluation')
+      onEvaluationPersisted?.()
     } catch {
       setLocalEvaluation(prev) // Revert on error
       if (onEvaluationUpdate) onEvaluationUpdate(prev)
@@ -281,7 +286,7 @@ export function SessionDetailContent({
           </div>
         )}
         <div className="session-eval-buttons">
-          {(['solved', 'partial', 'failed', 'stuck'] as const).map((o) => (
+          {(['solved', 'partial', 'failed', 'stuck', 'no_op'] as const).map((o) => (
             <button
               key={o}
               className={`session-eval-btn${localEvaluation?.outcome === o ? ' active' : ''}`}

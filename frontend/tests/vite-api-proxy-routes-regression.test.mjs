@@ -9,6 +9,7 @@ const proxiedRoutes = [
   '/test-connectivity',
   '/local/agents',
   '/local/setup-health',
+  '/model-effectiveness?group_by=model',
 ]
 
 for (const route of proxiedRoutes) {

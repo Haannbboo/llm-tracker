@@ -6,6 +6,7 @@ import { dirname, join } from 'node:path'
 
 const here = join(dirname(fileURLToPath(import.meta.url)), '..')
 const appSource = readFileSync(join(here, 'src', 'App.tsx'), 'utf-8')
+const dashboardSource = readFileSync(join(here, 'src', 'pages', 'DashboardPage.tsx'), 'utf-8')
 const typesSource = readFileSync(join(here, 'src', 'types.ts'), 'utf-8')
 const utilsSource = readFileSync(join(here, 'src', 'utils.tsx'), 'utf-8')
 const zhSource = readFileSync(join(here, 'src', 'i18n', 'zh.ts'), 'utf-8')
@@ -49,6 +50,14 @@ test('sessions summary cards are rendered', () => {
   assert.match(sessionsSection, /t\('Avg Duration'\)/)
   assert.match(sessionsSection, /t\('Estimated Cost'\)/)
   assert.match(sessionsSection, /t\('Average Response'\)/)
+})
+
+test('sessions average duration rounds seconds to two decimal places', () => {
+  assert.match(utilsSource, /secondsFractionDigits\?: number/)
+  assert.match(
+    dashboardSource,
+    /formatDuration\(sessionsSummary\.avg_duration_s, \{ secondsFractionDigits: 2 \}\)/,
+  )
 })
 
 test('sessions insight cards are rendered above the sessions table', () => {

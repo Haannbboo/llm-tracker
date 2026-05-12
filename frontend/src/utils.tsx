@@ -62,12 +62,21 @@ export function formatLatency(input: number | null | undefined) {
   return latency >= 1000 ? `${(latency / 1000).toFixed(2)}s` : `${Math.round(latency)}ms`
 }
 
-export function formatDuration(seconds: number | null | undefined): string {
+type DurationFormatOptions = {
+  secondsFractionDigits?: number
+}
+
+function formatDurationSeconds(seconds: number, options: DurationFormatOptions): string {
+  if (options.secondsFractionDigits === undefined) return `${seconds}s`
+  return `${seconds.toFixed(options.secondsFractionDigits)}s`
+}
+
+export function formatDuration(seconds: number | null | undefined, options: DurationFormatOptions = {}): string {
   const s = value(seconds)
-  if (s < 60) return `${s}s`
+  if (s < 60) return formatDurationSeconds(s, options)
   const m = Math.floor(s / 60)
   const rem = s % 60
-  if (m < 60) return rem > 0 ? `${m}m ${rem}s` : `${m}m`
+  if (m < 60) return rem > 0 ? `${m}m ${formatDurationSeconds(rem, options)}` : `${m}m`
   const h = Math.floor(m / 60)
   const remM = m % 60
   return remM > 0 ? `${h}h ${remM}m` : `${h}h`

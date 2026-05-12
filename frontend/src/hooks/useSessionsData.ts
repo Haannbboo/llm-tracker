@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
-import type { SessionSummary, SessionsSummary, DateRangeOption } from '../types'
+import type { SessionSummary, DateRangeOption } from '../types'
 import { getSinceDate, buildSessionInsights } from '../utils'
 import { t } from '../i18n/index.ts'
 import { useApp } from '../contexts/AppContext'
@@ -13,7 +13,6 @@ export function useSessionsData(opts: {
   const { refreshTrigger, setError } = useApp()
 
   const [sessions, setSessions] = useState<SessionSummary[]>([])
-  const [sessionsSummary, setSessionsSummary] = useState<SessionsSummary | null>(null)
   const [sessionCount, setSessionCount] = useState(0)
   const [sessionsLoading, setSessionsLoading] = useState(true)
   const [sessionSortBy, setSessionSortBy] = useState<string>('ended')
@@ -57,19 +56,9 @@ export function useSessionsData(opts: {
         sessionsUrl.searchParams.set('limit', '50')
         sessionsUrl.searchParams.set('offset', String((sessionPage - 1) * 50))
 
-        const summaryUrl = new URL('/sessions/summary', window.location.origin)
-        if (opts.activeSource) summaryUrl.searchParams.set('client_source', opts.activeSource)
-        if (since) summaryUrl.searchParams.set('since', since)
-        if (until) summaryUrl.searchParams.set('until', until)
-
-        const responses = await Promise.all([
-          fetch(sessionsUrl.toString(), sig),
-          fetch(summaryUrl.toString(), sig),
-        ])
-
-        if (responses.some(r => !r.ok)) throw new Error(t('Failed to fetch session data'))
-        const [sessionsData, summaryData] =
-          await Promise.all(responses.map(r => r.json())) as [{ sessions: SessionSummary[]; total: number }, SessionsSummary]
+        const response = await fetch(sessionsUrl.toString(), sig)
+        if (!response.ok) throw new Error(t('Failed to fetch session data'))
+        const sessionsData: { sessions: SessionSummary[]; total: number } = await response.json()
 
         if (sessionPage === 1) {
           setSessions(sessionsData.sessions)
@@ -77,7 +66,6 @@ export function useSessionsData(opts: {
           setSessions(prev => [...prev, ...sessionsData.sessions])
         }
         setSessionCount(sessionsData.total)
-        setSessionsSummary(summaryData)
         setHasMoreSessions(sessionsData.sessions.length === 50)
       } catch (err) {
         if (controller.signal.aborted) return
@@ -94,7 +82,6 @@ export function useSessionsData(opts: {
   return {
     sessions,
     setSessions,
-    sessionsSummary,
     sessionCount,
     sessionsLoading,
     hasMoreSessions,

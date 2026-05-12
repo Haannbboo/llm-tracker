@@ -825,3 +825,69 @@ def test_delete_session_evaluation_returns_404_when_absent(api_module, monkeypat
     response = TestClient(api_module.app).delete("/sessions/sess-1/evaluation")
 
     assert response.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# Slice 4: Model Effectiveness API
+# ---------------------------------------------------------------------------
+
+
+def test_model_effectiveness_endpoint_passes_filters(api_module, monkeypatch):
+    captured = {}
+
+    def fake_aggregate(**kwargs):
+        captured.update(kwargs)
+        return {
+            "groups": [
+                {
+                    "key": "gpt-5.5",
+                    "session_count": 2,
+                    "evaluated_count": 1,
+                    "solved_count": 1,
+                    "partial_count": 0,
+                    "failed_count": 0,
+                    "stuck_count": 0,
+                    "unknown_count": 1,
+                    "no_op_count": 0,
+                    "solve_rate": 1.0,
+                    "total_cost_usd": 0.5,
+                    "cost_per_solved": 0.5,
+                    "avg_duration_s": 120.0,
+                }
+            ]
+        }
+
+    monkeypatch.setattr(api_module, "aggregate_model_effectiveness", fake_aggregate)
+
+    response = TestClient(api_module.app).get(
+        "/model-effectiveness",
+        params={
+            "group_by": "model",
+            "since": "2026-05-01T00:00:00Z",
+            "until": "2026-05-11T23:59:59Z",
+            "client_source": "codex",
+        },
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["groups"][0]["key"] == "gpt-5.5"
+    assert captured == {
+        "group_by": "model",
+        "since": "2026-05-01T00:00:00Z",
+        "until": "2026-05-11T23:59:59Z",
+        "client_source": "codex",
+    }
+
+
+def test_model_effectiveness_endpoint_rejects_invalid_group_by(api_module, monkeypatch):
+    monkeypatch.setattr(
+        api_module, "aggregate_model_effectiveness", lambda **kwargs: {"groups": []}
+    )
+
+    response = TestClient(api_module.app).get(
+        "/model-effectiveness",
+        params={"group_by": "evaluation_source"},
+    )
+
+    assert response.status_code == 400
