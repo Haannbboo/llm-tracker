@@ -891,3 +891,83 @@ def test_model_effectiveness_endpoint_rejects_invalid_group_by(api_module, monke
     )
 
     assert response.status_code == 400
+
+
+# ---------------------------------------------------------------------------
+# Slice 7: Session Evaluation Jobs API
+# ---------------------------------------------------------------------------
+
+
+def test_evaluate_with_llm_starts_background_job(api_module, monkeypatch):
+    captured = {}
+
+    def fake_start(session_id, background_tasks):
+        captured["session_id"] = session_id
+        captured["background_tasks"] = background_tasks
+        return {
+            "job_id": "job-1",
+            "kind": "session_evaluation",
+            "session_id": session_id,
+            "status": "queued",
+            "error": None,
+        }
+
+    monkeypatch.setattr(api_module, "start_session_evaluation_job", fake_start)
+
+    response = TestClient(api_module.app).post("/sessions/sess-1/evaluate-with-llm")
+
+    assert response.status_code == 202
+    assert response.json() == {
+        "job_id": "job-1",
+        "kind": "session_evaluation",
+        "session_id": "sess-1",
+        "status": "queued",
+        "error": None,
+    }
+    assert captured["session_id"] == "sess-1"
+
+
+def test_evaluate_with_llm_rejects_unsupported_source(api_module, monkeypatch):
+    def raise_unsupported(session_id, background_tasks):
+        raise ValueError("Unsupported session source: unknown")
+
+    monkeypatch.setattr(api_module, "start_session_evaluation_job", raise_unsupported)
+
+    response = TestClient(api_module.app).post(
+        "/sessions/sess-unsupported/evaluate-with-llm"
+    )
+
+    assert response.status_code == 400
+
+
+def test_poll_job_returns_status(api_module, monkeypatch):
+    monkeypatch.setattr(
+        api_module,
+        "get_evaluation_job",
+        lambda job_id: {
+            "job_id": job_id,
+            "kind": "session_evaluation",
+            "session_id": "sess-1",
+            "status": "running",
+            "error": None,
+        },
+    )
+
+    response = TestClient(api_module.app).get("/poll/job-1")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "job_id": "job-1",
+        "kind": "session_evaluation",
+        "session_id": "sess-1",
+        "status": "running",
+        "error": None,
+    }
+
+
+def test_poll_job_returns_404_for_unknown_job(api_module, monkeypatch):
+    monkeypatch.setattr(api_module, "get_evaluation_job", lambda job_id: None)
+
+    response = TestClient(api_module.app).get("/poll/missing")
+
+    assert response.status_code == 404

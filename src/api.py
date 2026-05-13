@@ -6,7 +6,7 @@ import yaml
 import httpx
 from decimal import Decimal
 from pathlib import Path
-from fastapi import FastAPI, HTTPException
+from fastapi import BackgroundTasks, FastAPI, HTTPException
 from fastapi.staticfiles import StaticFiles
 from config.app import (
     CONFIG,
@@ -28,6 +28,7 @@ from .database import (
     distinct_client_sources,
     fetch_recent_usage,
     fetch_sessions,
+    get_evaluation_job,
     get_session_evaluation,
     get_usage_high_watermark,
     init_db,
@@ -40,6 +41,7 @@ from .database import (
     summarize_usage_window,
     upsert_session_evaluation,
 )
+from .evaluation import start_session_evaluation_job
 from contextlib import asynccontextmanager
 from pydantic import BaseModel
 
@@ -441,6 +443,30 @@ async def delete_evaluation(session_id: str):
     if not deleted:
         raise HTTPException(status_code=404, detail="Session not found")
     return {"status": "deleted"}
+
+
+@app.post("/sessions/{session_id}/evaluate-with-llm", status_code=202)
+async def evaluate_session_with_llm(
+    session_id: str,
+    background_tasks: BackgroundTasks,
+):
+    try:
+        return start_session_evaluation_job(session_id, background_tasks)
+    except ValueError as e:
+        message = str(e)
+        if "Session not found" in message:
+            raise HTTPException(status_code=404, detail=message)
+        if "Unsupported session source" in message:
+            raise HTTPException(status_code=400, detail=message)
+        raise
+
+
+@app.get("/poll/{job_id}")
+async def poll_job(job_id: str):
+    job = get_evaluation_job(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Job not found")
+    return job
 
 
 @app.get("/config")

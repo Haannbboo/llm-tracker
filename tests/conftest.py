@@ -45,6 +45,7 @@ PROJECT_MODULES = [
     "src.cli",
     "src.costs",
     "src.database",
+    "src.evaluation",
     "src.schema_migrations",
     "src.otlp",
     "src.proxy",
@@ -108,6 +109,11 @@ def costs_module(load_module: Callable[[str], ModuleType]) -> ModuleType:
 @pytest.fixture
 def database_module(load_module: Callable[[str], ModuleType]) -> ModuleType:
     return load_module("src.database")
+
+
+@pytest.fixture
+def evaluation_module(load_module: Callable[[str], ModuleType]) -> ModuleType:
+    return load_module("src.evaluation")
 
 
 @pytest.fixture

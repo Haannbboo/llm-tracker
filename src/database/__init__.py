@@ -8,6 +8,7 @@ The steady-state pattern in this module is:
 from .models import (
     Base,
     BaseUrl,
+    EvaluationJob,
     SessionRecord,
     Usage,
     UsageDaily,
@@ -17,6 +18,14 @@ from .models import (
 )
 from .engine import DB_URL_ENV_VAR, get_db_url, get_engine, init_db
 from .base_url import get_or_create_base_url, resolve_base_url_id
+from .evaluation_jobs import (
+    create_session_evaluation_job,
+    find_active_session_evaluation_job,
+    get_evaluation_job,
+    mark_evaluation_job_failed,
+    mark_evaluation_job_running,
+    mark_evaluation_job_succeeded,
+)
 from .sessions import (
     aggregate_model_effectiveness,
     count_sessions,
@@ -54,6 +63,7 @@ __all__ = [
     "Base",
     "BaseUrl",
     "DB_URL_ENV_VAR",
+    "EvaluationJob",
     "Session",
     "SessionRecord",
     "USAGE_COPY_FIELDS",
@@ -67,17 +77,23 @@ __all__ = [
     "aggregate_usage_by_period",
     "count_sessions",
     "count_usage",
+    "create_session_evaluation_job",
     "delete_session_evaluation",
     "distinct_client_sources",
     "fetch_recent_usage",
     "fetch_sessions",
+    "find_active_session_evaluation_job",
     "get_db_url",
     "get_engine",
+    "get_evaluation_job",
     "get_or_create_base_url",
     "get_session_evaluation",
     "get_usage_high_watermark",
     "init_db",
     "log_usage",
+    "mark_evaluation_job_failed",
+    "mark_evaluation_job_running",
+    "mark_evaluation_job_succeeded",
     "merge_usage_database",
     "metadata",
     "rebuild_sessions_from_usage",

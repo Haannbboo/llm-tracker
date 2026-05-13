@@ -3156,3 +3156,134 @@ def test_model_effectiveness_cost_per_solved_null_when_zero_solved(
     assert group["stuck_count"] == 1
     assert group["solve_rate"] == pytest.approx(0.0)
     assert group["cost_per_solved"] is None
+
+
+# ---------------------------------------------------------------------------
+# Slice 7: Session Evaluation Jobs
+# ---------------------------------------------------------------------------
+
+
+def test_create_session_evaluation_job_persists_queued_job(
+    database_module, isolated_home
+):
+    db_path = str(isolated_home / "usage.db")
+    database_module.init_db(db_path)
+    _insert_session_record(
+        database_module,
+        db_path,
+        "sess-llm",
+        client_source="codex",
+    )
+
+    job = database_module.create_session_evaluation_job(
+        session_id="sess-llm",
+        client_source="codex",
+        db_path=db_path,
+    )
+
+    assert job["job_id"]
+    assert job["kind"] == "session_evaluation"
+    assert job["session_id"] == "sess-llm"
+    assert job["status"] == "queued"
+    assert job["error"] is None
+
+    polled = database_module.get_evaluation_job(job["job_id"], db_path=db_path)
+    assert polled == job
+
+
+def test_find_active_session_evaluation_job_reuses_non_stale_job(
+    database_module, isolated_home
+):
+    db_path = str(isolated_home / "usage.db")
+    database_module.init_db(db_path)
+    _insert_session_record(database_module, db_path, "sess-llm", client_source="codex")
+
+    job = database_module.create_session_evaluation_job(
+        session_id="sess-llm",
+        client_source="codex",
+        db_path=db_path,
+    )
+
+    active = database_module.find_active_session_evaluation_job(
+        session_id="sess-llm",
+        db_path=db_path,
+    )
+
+    assert active is not None
+    assert active["job_id"] == job["job_id"]
+
+
+def test_create_session_evaluation_job_reuses_active_job_after_unique_conflict(
+    database_module, isolated_home
+):
+    db_path = str(isolated_home / "usage.db")
+    database_module.init_db(db_path)
+    _insert_session_record(database_module, db_path, "sess-llm", client_source="codex")
+
+    first = database_module.create_session_evaluation_job(
+        session_id="sess-llm",
+        client_source="codex",
+        db_path=db_path,
+    )
+    second = database_module.create_session_evaluation_job(
+        session_id="sess-llm",
+        client_source="codex",
+        db_path=db_path,
+    )
+
+    assert second["job_id"] == first["job_id"]
+
+
+def test_stale_session_evaluation_job_is_failed_before_new_job(
+    database_module, isolated_home
+):
+    db_path = str(isolated_home / "usage.db")
+    database_module.init_db(db_path)
+    _insert_session_record(database_module, db_path, "sess-llm", client_source="codex")
+
+    old_job = database_module.create_session_evaluation_job(
+        session_id="sess-llm",
+        client_source="codex",
+        created_at="2026-05-11T10:00:00+00:00",
+        db_path=db_path,
+    )
+
+    active = database_module.find_active_session_evaluation_job(
+        session_id="sess-llm",
+        now="2026-05-11T10:06:00+00:00",
+        db_path=db_path,
+    )
+
+    assert active is None
+    stale = database_module.get_evaluation_job(old_job["job_id"], db_path=db_path)
+    assert stale is not None
+    assert stale["status"] == "failed"
+    assert stale["error"] == "Evaluation job timed out"
+
+
+def test_migrate_database_creates_evaluation_jobs_table(
+    database_module, schema_migrations_module, isolated_home
+):
+    db_path = str(isolated_home / "usage.db")
+    engine = database_module.get_engine(db_path)
+    database_module.metadata.drop_all(engine)
+
+    applied = schema_migrations_module.migrate_database(db_path)
+
+    assert "evaluation_jobs.create" in applied
+    assert "evaluation_jobs.active_unique_index" in applied
+    assert schema_migrations_module._table_exists(engine, "evaluation_jobs")
+    assert {
+        "job_id",
+        "kind",
+        "session_id",
+        "client_source",
+        "status",
+        "created_at",
+        "started_at",
+        "finished_at",
+        "error",
+    }.issubset(schema_migrations_module._table_column_names(engine, "evaluation_jobs"))
+    assert "ix_evaluation_jobs_one_active_per_session" in (
+        schema_migrations_module._index_names(engine, "evaluation_jobs")
+    )

@@ -82,6 +82,9 @@ describe('Session evaluation UI', () => {
     assert.match(detail, /onEvaluationPersisted/)
     assert.match(detail, /if \(!response\.ok\) throw new Error/)
     assert.match(detail, /onEvaluationPersisted\?\.\(\)/)
+    assert.match(detail, /refreshPersistedEvaluation/)
+    assert.match(detail, /\/sessions\/\$\{encodeURIComponent\(session\.session_id\)\}\/evaluation/)
+    assert.match(detail, /onEvaluationUpdate\?\.\(data\.evaluation\)/)
     assert.match(dashboard, /onEvaluationPersisted=\{refreshModelEffectiveness\}/)
   })
 

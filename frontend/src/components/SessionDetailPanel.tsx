@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { ClickToCopy } from './CopyButton'
 import { t } from '../i18n/index.ts'
 import { formatCompact, formatCost, formatDuration, formatLatency, formatNumber, formatTime, value, getModelIcon } from '../utils'
@@ -6,6 +6,13 @@ import { getModelBadgeBackgroundColor, getModelTextColor } from '../model-badge'
 import type { SessionEvaluation, SessionOutcome, SessionSummary } from '../types'
 
 // ─── Shared session detail content (used by both inline and panel) ─────────────
+
+type SessionLogFilters = {
+  onlyFailed?: boolean
+  status429?: boolean
+  status5xx?: boolean
+  status4xx?: boolean
+}
 
 export function SessionDetailContent({
   session,
@@ -15,15 +22,84 @@ export function SessionDetailContent({
   onEvaluationPersisted,
 }: {
   session: SessionSummary
-  onNavigateToLogs: (session: SessionSummary, filters?: any) => void
+  onNavigateToLogs: (session: SessionSummary, filters?: SessionLogFilters) => void
   showToast?: (msg: string) => void
   onEvaluationUpdate?: (evaluation: SessionEvaluation | null) => void
   onEvaluationPersisted?: () => void
 }) {
-  const [localEvaluation, setLocalEvaluation] = useState(session.evaluation)
+  const [localEvaluationOverride, setLocalEvaluationOverride] = useState<{ sessionId: string; evaluation: SessionEvaluation | null } | null>(null)
+  const [llmEvaluationStatus, setLlmEvaluationStatus] = useState<'idle' | 'queued' | 'running' | 'succeeded' | 'failed'>('idle')
+  const llmEvaluationPollRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const localEvaluation = localEvaluationOverride?.sessionId === session.session_id ? localEvaluationOverride.evaluation : session.evaluation
+  const setLocalEvaluation = (evaluation: SessionEvaluation | null) => {
+    setLocalEvaluationOverride({ sessionId: session.session_id, evaluation })
+  }
+
   useEffect(() => {
-    setLocalEvaluation(session.evaluation)
-  }, [session.evaluation])
+    return () => {
+      if (llmEvaluationPollRef.current) clearTimeout(llmEvaluationPollRef.current)
+    }
+  }, [])
+
+  const isLlmEvaluationRunning = llmEvaluationStatus === 'queued' || llmEvaluationStatus === 'running'
+
+  const refreshPersistedEvaluation = async () => {
+    const response = await fetch(`/sessions/${encodeURIComponent(session.session_id)}/evaluation`)
+    if (!response.ok) throw new Error('Failed to refresh session evaluation')
+
+    const data: { evaluation: SessionEvaluation | null } = await response.json()
+    setLocalEvaluation(data.evaluation)
+    onEvaluationUpdate?.(data.evaluation)
+  }
+
+  const pollLlmEvaluationJob = async (job: { job_id: string }) => {
+    try {
+      const response = await fetch(`/poll/${encodeURIComponent(job.job_id)}`)
+      if (!response.ok) throw new Error('Failed to poll LLM evaluation job')
+
+      const pollResult = await response.json()
+      if (pollResult.status === 'succeeded') {
+        setLlmEvaluationStatus('succeeded')
+        await refreshPersistedEvaluation()
+        onEvaluationPersisted?.()
+        showToast?.('Session evaluated with LLM')
+        return
+      }
+
+      if (pollResult.status === 'failed') {
+        setLlmEvaluationStatus('failed')
+        showToast?.('Failed to evaluate session with LLM')
+        return
+      }
+
+      setLlmEvaluationStatus(pollResult.status === 'running' ? 'running' : 'queued')
+      llmEvaluationPollRef.current = setTimeout(() => pollLlmEvaluationJob(job), 1500)
+    } catch {
+      setLlmEvaluationStatus('failed')
+      showToast?.('Failed to evaluate session with LLM')
+    }
+  }
+
+  const startLlmEvaluation = async () => {
+    if (isLlmEvaluationRunning) return
+    if (llmEvaluationPollRef.current) clearTimeout(llmEvaluationPollRef.current)
+
+    setLocalEvaluationOverride(null)
+    setLlmEvaluationStatus('queued')
+    try {
+      const response = await fetch(`/sessions/${encodeURIComponent(session.session_id)}/evaluate-with-llm`, {
+        method: 'POST',
+      })
+      if (!response.ok) throw new Error('Failed to start LLM evaluation')
+
+      const job = await response.json()
+      setLlmEvaluationStatus(job.status === 'running' ? 'running' : 'queued')
+      pollLlmEvaluationJob(job)
+    } catch {
+      setLlmEvaluationStatus('failed')
+      showToast?.('Failed to evaluate session with LLM')
+    }
+  }
 
   const updateEvaluation = async (outcome: SessionOutcome | 'reset') => {
     const prev = localEvaluation
@@ -302,6 +378,13 @@ export function SessionDetailContent({
             {t('Reset')}
           </button>
         </div>
+        <button
+          className="session-eval-btn"
+          disabled={isLlmEvaluationRunning}
+          onClick={startLlmEvaluation}
+        >
+          {isLlmEvaluationRunning ? t('Evaluating...') : t('Evaluate with LLM')}
+        </button>
       </div>
     </div>
   )

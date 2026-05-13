@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from decimal import Decimal
 
-from sqlalchemy import Integer, Numeric, String, text, ForeignKey
+from sqlalchemy import ForeignKey, Index, Integer, Numeric, String, text
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
@@ -187,3 +187,27 @@ class SessionRecord(Base):
 
 VALID_OUTCOMES = {"solved", "partial", "failed", "stuck", "no_op", "unknown"}
 VALID_SOURCES = {"manual", "heuristic", "llm"}
+
+
+class EvaluationJob(Base):
+    __tablename__ = "evaluation_jobs"
+
+    job_id: Mapped[str] = mapped_column(String, primary_key=True)
+    kind: Mapped[str] = mapped_column(String, nullable=False)
+    session_id: Mapped[str] = mapped_column(String, nullable=False)
+    client_source: Mapped[str | None] = mapped_column(String, nullable=True)
+    status: Mapped[str] = mapped_column(String, nullable=False)
+    created_at: Mapped[str] = mapped_column(String, nullable=False)
+    started_at: Mapped[str | None] = mapped_column(String, nullable=True)
+    finished_at: Mapped[str | None] = mapped_column(String, nullable=True)
+    error: Mapped[str | None] = mapped_column(String, nullable=True)
+
+
+Index(
+    "ix_evaluation_jobs_one_active_per_session",
+    EvaluationJob.kind,
+    EvaluationJob.session_id,
+    unique=True,
+    sqlite_where=EvaluationJob.status.in_(("queued", "running")),
+    postgresql_where=EvaluationJob.status.in_(("queued", "running")),
+)

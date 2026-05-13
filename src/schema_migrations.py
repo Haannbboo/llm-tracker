@@ -15,6 +15,39 @@ def _table_column_names(engine: Engine, table_name: str) -> set[str]:
     return {column["name"] for column in inspect(engine).get_columns(table_name)}
 
 
+def _index_names(engine: Engine, table_name: str) -> set[str]:
+    return {index["name"] for index in inspect(engine).get_indexes(table_name)}
+
+
+def _ensure_evaluation_jobs_active_unique_index(engine: Engine) -> bool:
+    index_name = "ix_evaluation_jobs_one_active_per_session"
+    if index_name in _index_names(engine, "evaluation_jobs"):
+        return False
+
+    with engine.begin() as connection:
+        if engine.dialect.name == "postgresql":
+            connection.execute(
+                text(
+                    f"""
+                    CREATE UNIQUE INDEX IF NOT EXISTS {index_name}
+                    ON evaluation_jobs (kind, session_id)
+                    WHERE status IN ('queued', 'running')
+                    """
+                )
+            )
+        else:
+            connection.execute(
+                text(
+                    f"""
+                    CREATE UNIQUE INDEX IF NOT EXISTS {index_name}
+                    ON evaluation_jobs (kind, session_id)
+                    WHERE status IN ('queued', 'running')
+                    """
+                )
+            )
+    return True
+
+
 def _ensure_column(
     engine: Engine,
     table_name: str,
@@ -77,9 +110,47 @@ def _drop_column(engine: Engine, table_name: str, column_name: str) -> bool:
 
 
 def migrate_database(db_path: str | None = None) -> list[str]:
-    init_db(db_path)
     engine = get_engine(db_path)
     applied: list[str] = []
+
+    if not _table_exists(engine, "evaluation_jobs"):
+        if engine.dialect.name == "postgresql":
+            create_sql = """
+                CREATE TABLE evaluation_jobs (
+                    job_id TEXT PRIMARY KEY,
+                    kind TEXT NOT NULL,
+                    session_id TEXT NOT NULL,
+                    client_source TEXT,
+                    status TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    started_at TEXT,
+                    finished_at TEXT,
+                    error TEXT
+                )
+            """
+        else:
+            create_sql = """
+                CREATE TABLE evaluation_jobs (
+                    job_id TEXT PRIMARY KEY,
+                    kind TEXT NOT NULL,
+                    session_id TEXT NOT NULL,
+                    client_source TEXT,
+                    status TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    started_at TEXT,
+                    finished_at TEXT,
+                    error TEXT
+                )
+            """
+        with engine.begin() as connection:
+            connection.execute(text(create_sql))
+        applied.append("evaluation_jobs.create")
+
+    init_db(db_path)
+
+    if _table_exists(engine, "evaluation_jobs"):
+        if _ensure_evaluation_jobs_active_unique_index(engine):
+            applied.append("evaluation_jobs.active_unique_index")
 
     if _table_exists(engine, "usage"):
         if _ensure_column(
