@@ -894,6 +894,62 @@ def test_model_effectiveness_endpoint_rejects_invalid_group_by(api_module, monke
 
 
 # ---------------------------------------------------------------------------
+# Slice 8: Daily Effectiveness Report API
+# ---------------------------------------------------------------------------
+
+
+def test_daily_effectiveness_endpoint_passes_date(api_module, monkeypatch):
+    captured = {}
+
+    def fake_report(**kwargs):
+        captured.update(kwargs)
+        return {
+            "date": kwargs["date"],
+            "summary": "You ran 2 AI sessions. 1 was evaluated. Total cost was $0.42.",
+            "session_count": 2,
+            "evaluated_count": 1,
+            "classified_count": 1,
+            "solved_count": 1,
+            "partial_count": 0,
+            "failed_count": 0,
+            "stuck_count": 0,
+            "no_op_count": 0,
+            "unknown_count": 1,
+            "total_cost_usd": 0.42,
+            "highlights": ["codex / gpt-5.5 solved 1/1 evaluated sessions"],
+            "needs_attention": [],
+            "model_takeaways": ["codex / gpt-5.5 solved 1/1 evaluated sessions"],
+            "groups": [],
+        }
+
+    monkeypatch.setattr(api_module, "daily_session_effectiveness_report", fake_report)
+
+    response = TestClient(api_module.app).get(
+        "/sessions/daily-effectiveness",
+        params={"date": "2026-05-10"},
+    )
+
+    assert response.status_code == 200
+    assert captured == {"date": "2026-05-10"}
+    assert response.json()["date"] == "2026-05-10"
+
+
+def test_daily_effectiveness_endpoint_rejects_invalid_date(api_module, monkeypatch):
+    def fake_report(**kwargs):
+        raise ValueError("Invalid date: not-a-date. Expected YYYY-MM-DD")
+
+    monkeypatch.setattr(api_module, "daily_session_effectiveness_report", fake_report)
+
+    response = TestClient(api_module.app).get(
+        "/sessions/daily-effectiveness",
+        params={"date": "not-a-date"},
+    )
+
+    assert response.status_code == 400
+    assert "Invalid date" in response.json()["detail"]
+
+
+# ---------------------------------------------------------------------------
 # Slice 7: Session Evaluation Jobs API
 # ---------------------------------------------------------------------------
 

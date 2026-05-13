@@ -24,6 +24,7 @@ from .database import (
     aggregate_usage_by_period,
     count_sessions,
     count_usage,
+    daily_session_effectiveness_report,
     delete_session_evaluation,
     distinct_client_sources,
     fetch_recent_usage,
@@ -399,6 +400,14 @@ async def model_effectiveness(
         until=until,
         client_source=client_source,
     )
+
+
+@app.get("/sessions/daily-effectiveness")
+async def sessions_daily_effectiveness(date: str):
+    try:
+        return daily_session_effectiveness_report(date=date)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 @app.put("/sessions/{session_id}/evaluation")

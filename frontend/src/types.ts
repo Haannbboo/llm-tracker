@@ -191,6 +191,38 @@ export type ModelEffectivenessResponse = {
   groups: ModelEffectivenessGroup[]
 }
 
+export type DailyEffectivenessGroup = {
+  model: string
+  client_source: string
+  session_count: number
+  evaluated_count: number
+  solved_count: number
+  failed_count: number
+  stuck_count: number
+  total_cost_usd: number
+  cost_per_solved: number | null
+  solve_rate: number | null
+}
+
+export type DailyEffectivenessReport = {
+  date: string
+  summary: string
+  session_count: number
+  evaluated_count: number
+  classified_count: number
+  solved_count: number
+  partial_count: number
+  failed_count: number
+  stuck_count: number
+  no_op_count: number
+  unknown_count: number
+  total_cost_usd: number
+  highlights: string[]
+  needs_attention: string[]
+  model_takeaways: string[]
+  groups: DailyEffectivenessGroup[]
+}
+
 export type SetupAgentHealth = {
   configured: boolean
   endpoint_matches: boolean

@@ -306,7 +306,7 @@ export function buildSessionInsights(sessions: import('./types').SessionSummary[
       key: 'most-expensive',
       title: 'Most Expensive Session',
       session: mostExpensive,
-      value: formatCost(mostExpensive.total_cost_usd),
+      value: formatCost(mostExpensive.total_cost_usd, 2),
       detail: `${formatNumber(mostExpensive.request_count)} requests · ${formatCompact(mostExpensive.total_tokens)} tokens`,
     })
   }

@@ -512,6 +512,83 @@
   padding: 5px 9px;
 }
 
+.daily-effectiveness-panel {
+  margin-bottom: 24px;
+  overflow: hidden;
+}
+
+.daily-effectiveness-header {
+  align-items: flex-start;
+  border-bottom: 1px solid var(--border-color);
+  display: flex;
+  gap: 16px;
+  justify-content: space-between;
+  padding: 16px 18px;
+}
+
+.daily-effectiveness-title {
+  color: var(--text-primary);
+  font-size: 15px;
+  font-weight: 800;
+}
+
+.daily-effectiveness-subtitle {
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.45;
+  margin-top: 4px;
+}
+
+.daily-effectiveness-body {
+  padding: 16px 18px 18px;
+}
+
+.daily-effectiveness-metrics {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  margin-bottom: 16px;
+}
+
+.daily-effectiveness-metric-value {
+  color: var(--text-primary);
+  font-size: 20px;
+  font-weight: 800;
+}
+
+.daily-effectiveness-metric-label {
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 700;
+  margin-top: 3px;
+  text-transform: uppercase;
+}
+
+.daily-effectiveness-lists {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.daily-effectiveness-list-title {
+  color: var(--text-primary);
+  font-size: 12px;
+  font-weight: 800;
+  margin-bottom: 8px;
+}
+
+.daily-effectiveness-list {
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.5;
+  margin: 0;
+  padding-left: 18px;
+}
+
+.daily-effectiveness-list li + li {
+  margin-top: 4px;
+}
+
 .model-effectiveness-panel {
   margin-bottom: 24px;
   overflow: hidden;

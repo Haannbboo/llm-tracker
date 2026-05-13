@@ -1,4 +1,4 @@
-import { useState, Fragment, useEffect, useMemo, useRef } from 'react'
+import { useState, Fragment, useEffect, useMemo, useRef, useCallback } from 'react'
 import { useApp } from '../contexts/AppContext'
 import { useDashboardData } from '../hooks/useDashboardData'
 import { useSessionsData } from '../hooks/useSessionsData'
@@ -20,7 +20,7 @@ import {
   formatTime, value, getModelIcon, getSourceBadgeBg, getSourceBadgeText,
   shortSessionId, sessionAgentName, sessionDisplayName, getAgentDisplayName, getSinceDate,
 } from '../utils'
-import type { ActiveFilter, ModelEffectivenessGroup, SessionSummary, SessionsSummary } from '../types'
+import type { ActiveFilter, DailyEffectivenessReport, ModelEffectivenessGroup, SessionSummary, SessionsSummary } from '../types'
 
 type Props = {
   onNavigateToLogs: (filters?: { sessionFilter?: string; activeFilter?: ActiveFilter }) => void
@@ -46,8 +46,15 @@ function modelEffectivenessClassifiedCount(group: ModelEffectivenessGroup): numb
   return group.evaluated_count + group.no_op_count
 }
 
+function getLocalDateKey(date: Date): string {
+  const year = date.getFullYear()
+  const month = String(date.getMonth() + 1).padStart(2, '0')
+  const day = String(date.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
+}
+
 export function DashboardPage({ onNavigateToLogs }: Props) {
-  const { theme, showToast, error, localAgents, setupDiagnostics, requestUsageRefresh } = useApp()
+  const { theme, showToast, error, localAgents, setupDiagnostics, requestUsageRefresh, refreshTrigger, setError } = useApp()
 
   // Dashboard data hook
   const {
@@ -106,6 +113,26 @@ export function DashboardPage({ onNavigateToLogs }: Props) {
       { evaluated: 0, unknown: 0, noOp: 0, hasSmallSample: false }
     )
   }, [modelEffectiveness.groups])
+
+  const todayDateKey = getLocalDateKey(new Date())
+  const [dailyEffectivenessReport, setDailyEffectivenessReport] = useState<DailyEffectivenessReport | null>(null)
+
+  const fetchDailyEffectivenessReport = useCallback(async () => {
+    try {
+      const url = new URL('/sessions/daily-effectiveness', window.location.origin)
+      url.searchParams.set('date', todayDateKey)
+      const response = await fetch(url.toString())
+      if (!response.ok) throw new Error(t('Failed to fetch daily effectiveness report'))
+      setDailyEffectivenessReport(await response.json() as DailyEffectivenessReport)
+    } catch (err) {
+      setDailyEffectivenessReport(null)
+      setError(err instanceof Error ? err.message : t('Unknown error'))
+    }
+  }, [setError, todayDateKey])
+
+  useEffect(() => {
+    void fetchDailyEffectivenessReport()
+  }, [fetchDailyEffectivenessReport, refreshTrigger])
 
   // Onboarding hook
   const {
@@ -783,7 +810,7 @@ export function DashboardPage({ onNavigateToLogs }: Props) {
           </div>
           <div className="widget">
             <div style={{ fontSize: '10px', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.5px', fontWeight: 700 }}>{t('Estimated Cost')}</div>
-            <div style={{ fontSize: '24px', fontWeight: 800, color: 'var(--color-green)' }}>{sessionsSummary ? formatCost(sessionsSummary.total_cost_usd) : '—'}</div>
+            <div style={{ fontSize: '24px', fontWeight: 800, color: 'var(--color-green)' }}>{sessionsSummary ? formatCost(sessionsSummary.total_cost_usd, 2) : '—'}</div>
           </div>
           <div className="widget">
             <div style={{ fontSize: '10px', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.5px', fontWeight: 700 }}>{t('Avg Latency')}</div>
@@ -815,6 +842,67 @@ export function DashboardPage({ onNavigateToLogs }: Props) {
             ))}
           </div>
         )}
+
+        <div className="panel daily-effectiveness-panel">
+          <div className="daily-effectiveness-header">
+            <div>
+              <div className="daily-effectiveness-title">{t('Today’s AI Work')}</div>
+              <div className="daily-effectiveness-subtitle">
+                {dailyEffectivenessReport ? dailyEffectivenessReport.summary : t('No daily effectiveness report yet.')}
+              </div>
+            </div>
+          </div>
+
+          {dailyEffectivenessReport && (
+            <div className="daily-effectiveness-body">
+              <div className="daily-effectiveness-metrics">
+                <div>
+                  <div className="daily-effectiveness-metric-value">{formatNumber(dailyEffectivenessReport.session_count)}</div>
+                  <div className="daily-effectiveness-metric-label">{t('Sessions')}</div>
+                </div>
+                <div>
+                  <div className="daily-effectiveness-metric-value">{formatNumber(dailyEffectivenessReport.evaluated_count)}</div>
+                  <div className="daily-effectiveness-metric-label">{t('Evaluated')}</div>
+                </div>
+                <div>
+                  <div className="daily-effectiveness-metric-value">{formatNumber(dailyEffectivenessReport.classified_count)}</div>
+                  <div className="daily-effectiveness-metric-label">{t('Classified')}</div>
+                </div>
+                <div>
+                  <div className="daily-effectiveness-metric-value">{formatCost(dailyEffectivenessReport.total_cost_usd, 2)}</div>
+                  <div className="daily-effectiveness-metric-label">{t('Estimated Cost')}</div>
+                </div>
+              </div>
+
+              <div className="daily-effectiveness-lists">
+                {dailyEffectivenessReport.highlights.length > 0 && (
+                  <div>
+                    <div className="daily-effectiveness-list-title">{t('Highlights')}</div>
+                    <ul className="daily-effectiveness-list">
+                      {dailyEffectivenessReport.highlights.map(item => <li key={item}>{item}</li>)}
+                    </ul>
+                  </div>
+                )}
+                {dailyEffectivenessReport.needs_attention.length > 0 && (
+                  <div>
+                    <div className="daily-effectiveness-list-title">{t('Needs attention')}</div>
+                    <ul className="daily-effectiveness-list">
+                      {dailyEffectivenessReport.needs_attention.map(item => <li key={item}>{item}</li>)}
+                    </ul>
+                  </div>
+                )}
+                {dailyEffectivenessReport.model_takeaways.length > 0 && (
+                  <div>
+                    <div className="daily-effectiveness-list-title">{t('Model Takeaways')}</div>
+                    <ul className="daily-effectiveness-list">
+                      {dailyEffectivenessReport.model_takeaways.map(item => <li key={item}>{item}</li>)}
+                    </ul>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
 
         <div className="panel model-effectiveness-panel">
           <div className="model-effectiveness-header">
@@ -905,7 +993,7 @@ export function DashboardPage({ onNavigateToLogs }: Props) {
                         <td>
                           <span className="model-effectiveness-count">{formatNumber(group.unknown_count)}</span>
                         </td>
-                        <td>{group.cost_per_solved === null ? '—' : formatCost(group.cost_per_solved)}</td>
+                        <td>{group.cost_per_solved === null ? '—' : formatCost(group.cost_per_solved, 2)}</td>
                       </tr>
                     ))
                   )}
@@ -1005,7 +1093,7 @@ export function DashboardPage({ onNavigateToLogs }: Props) {
                     <td style={{ fontSize: '12px' }}>{formatDuration(session.duration_s)}</td>
                     <td style={{ fontSize: '12px' }}>{formatNumber(session.request_count)}</td>
                     <td style={{ fontSize: '12px' }}>{formatCompact(session.total_tokens)}</td>
-                    <td style={{ fontSize: '12px' }}>{formatCost(session.total_cost_usd)}</td>
+                    <td style={{ fontSize: '12px' }}>{formatCost(session.total_cost_usd, 2)}</td>
                     <td className="session-health-cell">
                       <span className="session-health-badge session-health-latency">{t('Resp')} {formatLatency(session.avg_latency_ms)}</span>
                       <span className="session-health-badge session-health-ttft">TTFT {formatLatency(session.avg_ttft_ms)}</span>

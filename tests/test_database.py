@@ -3159,6 +3159,168 @@ def test_model_effectiveness_cost_per_solved_null_when_zero_solved(
 
 
 # ---------------------------------------------------------------------------
+# Slice 8: Daily Effectiveness Report
+# ---------------------------------------------------------------------------
+
+
+def test_daily_effectiveness_report_aggregates_day_metrics_in_sql(
+    database_module, isolated_home
+):
+    db_path = str(isolated_home / "usage.db")
+    database_module.init_db(db_path)
+
+    _insert_session_record(
+        database_module,
+        db_path,
+        "sess-solved",
+        client_source="codex",
+        primary_model="gpt-5.5",
+        started="2026-05-10T09:00:00+00:00",
+        ended="2026-05-10T09:20:00+00:00",
+        total_cost_usd=0.40,
+        outcome="solved",
+        source="manual",
+    )
+    _insert_session_record(
+        database_module,
+        db_path,
+        "sess-stuck",
+        client_source="gemini",
+        primary_model="gemini-flash",
+        started="2026-05-10T10:00:00+00:00",
+        ended="2026-05-10T10:20:00+00:00",
+        total_cost_usd=0.10,
+        outcome="stuck",
+        source="llm",
+    )
+    _insert_session_record(
+        database_module,
+        db_path,
+        "sess-no-op",
+        client_source="claude-code",
+        primary_model="claude-sonnet",
+        started="2026-05-10T11:00:00+00:00",
+        ended="2026-05-10T11:05:00+00:00",
+        total_cost_usd=0.05,
+        outcome="no_op",
+        source="llm",
+    )
+    _insert_session_record(
+        database_module,
+        db_path,
+        "sess-unknown",
+        client_source="codex",
+        primary_model="gpt-5.5",
+        started="2026-05-10T12:00:00+00:00",
+        ended="2026-05-10T12:05:00+00:00",
+        total_cost_usd=0.05,
+    )
+    _insert_session_record(
+        database_module,
+        db_path,
+        "sess-other-day",
+        client_source="codex",
+        primary_model="gpt-5.5",
+        started="2026-05-11T09:00:00+00:00",
+        ended="2026-05-11T09:20:00+00:00",
+        total_cost_usd=9.00,
+        outcome="failed",
+        source="manual",
+    )
+
+    report = database_module.daily_session_effectiveness_report(
+        date="2026-05-10",
+        db_path=db_path,
+    )
+
+    assert report["date"] == "2026-05-10"
+    assert report["session_count"] == 4
+    assert report["evaluated_count"] == 2
+    assert report["classified_count"] == 3
+    assert report["solved_count"] == 1
+    assert report["stuck_count"] == 1
+    assert report["no_op_count"] == 1
+    assert report["unknown_count"] == 1
+    assert report["total_cost_usd"] == pytest.approx(0.60)
+    assert "You ran 4 AI sessions" in report["summary"]
+    assert report["highlights"]
+    assert report["needs_attention"] == ["gemini / gemini-flash had 1 stuck session"]
+
+
+def test_daily_effectiveness_report_returns_sql_model_source_groups(
+    database_module, isolated_home
+):
+    db_path = str(isolated_home / "usage.db")
+    database_module.init_db(db_path)
+
+    _insert_session_record(
+        database_module,
+        db_path,
+        "sess-gpt-solved",
+        client_source="codex",
+        primary_model="gpt-5.5",
+        started="2026-05-10T09:00:00+00:00",
+        total_cost_usd=0.20,
+        outcome="solved",
+        source="manual",
+    )
+    _insert_session_record(
+        database_module,
+        db_path,
+        "sess-gpt-failed",
+        client_source="codex",
+        primary_model="gpt-5.5",
+        started="2026-05-10T10:00:00+00:00",
+        total_cost_usd=0.30,
+        outcome="failed",
+        source="manual",
+    )
+    _insert_session_record(
+        database_module,
+        db_path,
+        "sess-claude-solved",
+        client_source="claude-code",
+        primary_model="claude-sonnet",
+        started="2026-05-10T11:00:00+00:00",
+        total_cost_usd=0.60,
+        outcome="solved",
+        source="manual",
+    )
+
+    report = database_module.daily_session_effectiveness_report(
+        date="2026-05-10",
+        db_path=db_path,
+    )
+
+    groups = {
+        (group["client_source"], group["model"]): group for group in report["groups"]
+    }
+    assert groups[("codex", "gpt-5.5")]["session_count"] == 2
+    assert groups[("codex", "gpt-5.5")]["evaluated_count"] == 2
+    assert groups[("codex", "gpt-5.5")]["solved_count"] == 1
+    assert groups[("codex", "gpt-5.5")]["failed_count"] == 1
+    assert groups[("codex", "gpt-5.5")]["solve_rate"] == pytest.approx(0.5)
+    assert groups[("codex", "gpt-5.5")]["cost_per_solved"] == pytest.approx(0.50)
+    assert (
+        "claude-code / claude-sonnet solved 1/1 evaluated sessions"
+        in report["model_takeaways"]
+    )
+
+
+def test_daily_effectiveness_report_rejects_invalid_date(
+    database_module, isolated_home
+):
+    db_path = str(isolated_home / "usage.db")
+    database_module.init_db(db_path)
+
+    with pytest.raises(ValueError, match="Invalid date"):
+        database_module.daily_session_effectiveness_report(
+            date="2026-02-30",
+            db_path=db_path,
+        )
+
+
+# ---------------------------------------------------------------------------
 # Slice 7: Session Evaluation Jobs
 # ---------------------------------------------------------------------------
 

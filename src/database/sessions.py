@@ -6,11 +6,11 @@ Extracted from database/__init__.py during Phase 5 refactoring.
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Any
 
-from sqlalchemy import and_, func, select, text
+from sqlalchemy import and_, case, func, select, text
 from sqlalchemy.orm import Session
 
 from .models import (
@@ -305,6 +305,7 @@ _SESSION_SORT_COLUMNS = {
 }
 
 _MODEL_EFFECTIVENESS_GROUPS = {"model", "provider", "source"}
+_EVALUATED_OUTCOMES = ("solved", "partial", "failed", "stuck")
 
 
 def _compute_duration_s(started: str | None, ended: str | None) -> int:
@@ -492,6 +493,218 @@ def aggregate_model_effectiveness(
 
     groups.sort(key=lambda group: (-group["session_count"], group["key"]))
     return {"groups": groups}
+
+
+def _parse_report_date(value: str) -> datetime:
+    try:
+        day = datetime.strptime(value, "%Y-%m-%d").date()
+    except ValueError as exc:
+        raise ValueError(f"Invalid date: {value}. Expected YYYY-MM-DD") from exc
+    return datetime.combine(day, datetime.min.time(), tzinfo=timezone.utc)
+
+
+def _count_when(condition: Any) -> Any:
+    return func.coalesce(func.sum(case((condition, 1), else_=0)), 0)
+
+
+def _as_int(value: Any) -> int:
+    return int(value or 0)
+
+
+def _as_float(value: Any) -> float | None:
+    if value is None:
+        return None
+    return float(value)
+
+
+def _plural(value: int, singular: str, plural: str | None = None) -> str:
+    return singular if value == 1 else plural or f"{singular}s"
+
+
+def _format_group_name(group: dict[str, Any]) -> str:
+    return f"{group['client_source']} / {group['model']}"
+
+
+def _build_daily_report_text(
+    *,
+    session_count: int,
+    evaluated_count: int,
+    total_cost: float,
+    groups: list[dict[str, Any]],
+) -> tuple[str, list[str], list[str], list[str]]:
+    summary = (
+        f"You ran {session_count} AI {_plural(session_count, 'session')}. "
+        f"{evaluated_count} {_plural(evaluated_count, 'was', 'were')} evaluated. "
+        f"Total cost was ${total_cost:.2f}."
+    )
+
+    highlights: list[str] = []
+    needs_attention: list[str] = []
+    model_takeaways: list[str] = []
+
+    solved_groups = [
+        group
+        for group in groups
+        if group["evaluated_count"] > 0 and group["solved_count"] > 0
+    ]
+    solved_groups.sort(
+        key=lambda group: (
+            -(group["solve_rate"] or 0),
+            -group["solved_count"],
+            group["client_source"],
+            group["model"],
+        )
+    )
+    if solved_groups:
+        best = solved_groups[0]
+        highlights.append(
+            f"{_format_group_name(best)} solved {best['solved_count']}/{best['evaluated_count']} evaluated sessions"
+        )
+
+    for group in groups:
+        if group["stuck_count"] > 0:
+            needs_attention.append(
+                f"{_format_group_name(group)} had {group['stuck_count']} stuck {_plural(group['stuck_count'], 'session')}"
+            )
+        elif group["failed_count"] > 0 and group["solved_count"] == 0:
+            needs_attention.append(
+                f"{_format_group_name(group)} had {group['failed_count']} failed {_plural(group['failed_count'], 'session')}"
+            )
+
+    for group in solved_groups:
+        model_takeaways.append(
+            f"{_format_group_name(group)} solved {group['solved_count']}/{group['evaluated_count']} evaluated sessions"
+        )
+
+    return summary, highlights, needs_attention, model_takeaways
+
+
+def daily_session_effectiveness_report(
+    *,
+    date: str,
+    db_path: str | None = None,
+) -> dict[str, Any]:
+    """Return a computed daily effectiveness report using SQL aggregate reads."""
+    day_start = _parse_report_date(date)
+    next_day_start = day_start + timedelta(days=1)
+    started_filter = and_(
+        SessionRecord.started >= day_start.isoformat(),
+        SessionRecord.started < next_day_start.isoformat(),
+    )
+
+    evaluated_count_expr = _count_when(SessionRecord.outcome.in_(_EVALUATED_OUTCOMES))
+    solved_count_expr = _count_when(SessionRecord.outcome == "solved")
+    partial_count_expr = _count_when(SessionRecord.outcome == "partial")
+    failed_count_expr = _count_when(SessionRecord.outcome == "failed")
+    stuck_count_expr = _count_when(SessionRecord.outcome == "stuck")
+    no_op_count_expr = _count_when(SessionRecord.outcome == "no_op")
+    unknown_count_expr = _count_when(
+        (SessionRecord.outcome.is_(None)) | (SessionRecord.outcome == "unknown")
+    )
+    total_cost_expr = func.coalesce(func.sum(SessionRecord.total_cost_usd), 0)
+
+    totals_query = select(
+        func.count(SessionRecord.session_id).label("session_count"),
+        evaluated_count_expr.label("evaluated_count"),
+        solved_count_expr.label("solved_count"),
+        partial_count_expr.label("partial_count"),
+        failed_count_expr.label("failed_count"),
+        stuck_count_expr.label("stuck_count"),
+        no_op_count_expr.label("no_op_count"),
+        unknown_count_expr.label("unknown_count"),
+        total_cost_expr.label("total_cost_usd"),
+    ).where(started_filter)
+
+    model_key = func.coalesce(SessionRecord.primary_model, "unknown").label("model")
+    source_key = func.coalesce(SessionRecord.client_source, "unknown").label(
+        "client_source"
+    )
+    group_session_count = func.count(SessionRecord.session_id)
+    group_evaluated_count = _count_when(SessionRecord.outcome.in_(_EVALUATED_OUTCOMES))
+    group_solved_count = _count_when(SessionRecord.outcome == "solved")
+    group_failed_count = _count_when(SessionRecord.outcome == "failed")
+    group_stuck_count = _count_when(SessionRecord.outcome == "stuck")
+    group_total_cost = func.coalesce(func.sum(SessionRecord.total_cost_usd), 0)
+
+    groups_query = (
+        select(
+            model_key,
+            source_key,
+            group_session_count.label("session_count"),
+            group_evaluated_count.label("evaluated_count"),
+            group_solved_count.label("solved_count"),
+            group_failed_count.label("failed_count"),
+            group_stuck_count.label("stuck_count"),
+            group_total_cost.label("total_cost_usd"),
+            case(
+                (
+                    group_solved_count > 0,
+                    group_total_cost / group_solved_count,
+                ),
+                else_=None,
+            ).label("cost_per_solved"),
+            case(
+                (
+                    group_evaluated_count > 0,
+                    (group_solved_count * 1.0) / group_evaluated_count,
+                ),
+                else_=None,
+            ).label("solve_rate"),
+        )
+        .where(started_filter)
+        .group_by(model_key, source_key)
+        .order_by(group_session_count.desc(), source_key.asc(), model_key.asc())
+    )
+
+    with Session(get_engine(db_path)) as session:
+        totals = session.execute(totals_query).one()
+        group_rows = session.execute(groups_query).all()
+
+    groups = [
+        {
+            "model": row.model,
+            "client_source": row.client_source,
+            "session_count": _as_int(row.session_count),
+            "evaluated_count": _as_int(row.evaluated_count),
+            "solved_count": _as_int(row.solved_count),
+            "failed_count": _as_int(row.failed_count),
+            "stuck_count": _as_int(row.stuck_count),
+            "total_cost_usd": float(row.total_cost_usd or 0),
+            "cost_per_solved": _as_float(row.cost_per_solved),
+            "solve_rate": _as_float(row.solve_rate),
+        }
+        for row in group_rows
+    ]
+
+    session_count = _as_int(totals.session_count)
+    evaluated_count = _as_int(totals.evaluated_count)
+    no_op_count = _as_int(totals.no_op_count)
+    total_cost = float(totals.total_cost_usd or 0)
+    summary, highlights, needs_attention, model_takeaways = _build_daily_report_text(
+        session_count=session_count,
+        evaluated_count=evaluated_count,
+        total_cost=total_cost,
+        groups=groups,
+    )
+
+    return {
+        "date": date,
+        "summary": summary,
+        "session_count": session_count,
+        "evaluated_count": evaluated_count,
+        "classified_count": evaluated_count + no_op_count,
+        "solved_count": _as_int(totals.solved_count),
+        "partial_count": _as_int(totals.partial_count),
+        "failed_count": _as_int(totals.failed_count),
+        "stuck_count": _as_int(totals.stuck_count),
+        "no_op_count": no_op_count,
+        "unknown_count": _as_int(totals.unknown_count),
+        "total_cost_usd": total_cost,
+        "highlights": highlights,
+        "needs_attention": needs_attention,
+        "model_takeaways": model_takeaways,
+        "groups": groups,
+    }
 
 
 def fetch_sessions(

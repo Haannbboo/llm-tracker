@@ -351,6 +351,15 @@ export const zh: Record<string, string> = {
   'View failed requests in logs': '在日志中查看失败请求',
   'Failed to fetch session data': '获取会话数据失败',
 
+  // Daily effectiveness
+  'Today’s AI Work': '今天的 AI 工作',
+  'Classified': '已分类',
+  'Highlights': '亮点',
+  'Needs attention': '需要关注',
+  'Model Takeaways': '模型要点',
+  'No daily effectiveness report yet.': '还没有每日效果报告。',
+  'Failed to fetch daily effectiveness report': '获取每日效果报告失败',
+
   // Model effectiveness
   'Model Effectiveness': '模型效果',
   'Based on': '基于',

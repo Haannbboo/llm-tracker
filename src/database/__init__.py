@@ -29,6 +29,7 @@ from .evaluation_jobs import (
 from .sessions import (
     aggregate_model_effectiveness,
     count_sessions,
+    daily_session_effectiveness_report,
     delete_session_evaluation,
     fetch_sessions,
     get_session_evaluation,
@@ -78,6 +79,7 @@ __all__ = [
     "count_sessions",
     "count_usage",
     "create_session_evaluation_job",
+    "daily_session_effectiveness_report",
     "delete_session_evaluation",
     "distinct_client_sources",
     "fetch_recent_usage",

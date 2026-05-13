@@ -119,7 +119,16 @@ test('sessions table renders session data', () => {
   assert.match(dashboardSource, /sessions\.filter\([\s\S]*\)\.map\(session =>/)
   assert.match(dashboardSource, /session\.session_id/)
   assert.match(dashboardSource, /formatDuration\(session\.duration_s\)/)
-  assert.match(dashboardSource, /formatCost\(session\.total_cost_usd\)/)
+  assert.match(dashboardSource, /formatCost\(session\.total_cost_usd, 2\)/)
+})
+
+test('session page formats costs with two decimal places', () => {
+  assert.match(dashboardSource, /formatCost\(sessionsSummary\.total_cost_usd, 2\)/)
+  assert.match(dashboardSource, /formatCost\(dailyEffectivenessReport\.total_cost_usd, 2\)/)
+  assert.match(dashboardSource, /formatCost\(group\.cost_per_solved, 2\)/)
+  assert.match(dashboardSource, /formatCost\(session\.total_cost_usd, 2\)/)
+  assert.match(detailPanelSource, /formatCost\(session\.total_cost_usd, 2\)/)
+  assert.match(utilsSource, /formatCost\(mostExpensive\.total_cost_usd, 2\)/)
 })
 
 test('sessions table uses human-first row hierarchy with compact health', () => {
