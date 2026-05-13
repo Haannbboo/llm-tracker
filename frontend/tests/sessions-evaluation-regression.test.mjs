@@ -84,6 +84,19 @@ describe('Session evaluation UI', () => {
     assert.match(detail, /onEvaluationPersisted\?\.\(\)/)
     assert.match(dashboard, /onEvaluationPersisted=\{refreshModelEffectiveness\}/)
   })
+
+  test('session detail can launch and poll LLM evaluation jobs', () => {
+    assert.match(detail, /Evaluate with LLM/)
+    assert.match(detail, /evaluate-with-llm/)
+    assert.match(detail, /method: 'POST'/)
+    assert.match(detail, /\/poll\/\$\{encodeURIComponent\(job\.job_id\)\}/)
+    assert.match(detail, /llmEvaluationStatus === 'queued' \|\| llmEvaluationStatus === 'running'/)
+    assert.match(detail, /Evaluating\.\.\./)
+    assert.match(detail, /pollResult\.status === 'succeeded'/)
+    assert.match(detail, /onEvaluationPersisted\?\.\(\)/)
+    assert.match(detail, /pollResult\.status === 'failed'/)
+    assert.match(detail, /showToast\?\.\('Failed to evaluate session with LLM'\)/)
+  })
 })
 
 describe('Session evaluation CSS', () => {
@@ -106,5 +119,7 @@ describe('Session evaluation i18n', () => {
     assert.match(zh, /'Failed'/)
     assert.match(zh, /'Mark Solved'/)
     assert.match(zh, /'Evaluation'/)
+    assert.match(zh, /'Evaluate with LLM'/)
+    assert.match(zh, /'Evaluating\.\.\.'/)
   })
 })

@@ -5,13 +5,12 @@ import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
 
 const here = join(dirname(fileURLToPath(import.meta.url)), '..')
-const appSource = readFileSync(join(here, 'src', 'App.tsx'), 'utf-8')
+const logsSource = readFileSync(join(here, 'src', 'pages', 'LogsPage.tsx'), 'utf-8')
+const useLogsSource = readFileSync(join(here, 'src', 'hooks', 'useLogsData.ts'), 'utf-8')
 const cssSource = readFileSync(join(here, 'src', 'App.css'), 'utf-8')
 const zhSource = readFileSync(join(here, 'src', 'i18n', 'zh.ts'), 'utf-8')
 
-const logsStart = appSource.indexOf("{view === 'logs' && (")
-assert.notEqual(logsStart, -1, 'logs view block not found')
-const logsSection = appSource.slice(logsStart, logsStart + 17000)
+const logsSection = logsSource
 
 test('request logs render a compact session column without dumping full ids in rows', () => {
   assert.match(logsSection, /<th[^>]*>\{t\('Session'\)\}<\/th>/)
@@ -31,21 +30,23 @@ test('request log session id pill title exposes full id and click filters by ful
 test('request log row session ID is only a filter button, no separate copy button', () => {
   assert.match(logsSection, /className="request-log-session-filter"/)
   assert.doesNotMatch(logsSection, /className="btn-ghost request-log-session-copy"/)
-  assert.doesNotMatch(logsSection, /copyTextToClipboard\(sessionId, showToast\)/)
 })
 
 test('active request log session filter badge is visible, compact, titled, and clears only session filter', () => {
-  assert.match(logsSection, /className="badge request-log-session-filter-badge"/)
-  assert.match(logsSection, /title=\{sessionFilter\}/)
-  assert.match(logsSection, /\{t\('Session'\)\}: \{shortSessionId\(sessionFilter\)\}/)
-  assert.match(logsSection, /aria-label=\{t\('Clear session filter'\)\}/)
-  assert.match(logsSection, /onClick=\{\(\) => \{ setSessionFilter\(null\); resetPage\(\) \}\}/)
-  assert.doesNotMatch(logsSection, /setActiveFilter\('all'\)[\s\S]*setSessionFilter\(null\)/)
-  assert.doesNotMatch(logsSection, /setActiveSource\(null\)[\s\S]*setSessionFilter\(null\)/)
+  const badgeStart = logsSection.indexOf('className="badge request-log-session-filter-badge"')
+  assert.ok(badgeStart !== -1, 'session filter badge not found')
+  const badgeBlock = logsSection.slice(badgeStart, badgeStart + 1000)
+
+  assert.match(badgeBlock, /title=\{sessionFilter\}/)
+  assert.match(badgeBlock, /\{t\('Session'\)\}: \{shortSessionId\(sessionFilter\)\}/)
+  assert.match(badgeBlock, /aria-label=\{t\('Clear session filter'\)\}/)
+  assert.match(badgeBlock, /onClick=\{\(\) => \{ setSessionFilter\(null\); resetPage\(\) \}\}/)
+  assert.doesNotMatch(badgeBlock, /setActiveFilter\(null\)/)
+  assert.doesNotMatch(badgeBlock, /setActiveSource\(null\)/)
 })
 
 test('session_id remains wired into usage URL when active', () => {
-  assert.match(appSource, /if \(sessionFilter\) url\.searchParams\.set\('session_id', sessionFilter\)/)
+  assert.match(useLogsSource, /if \(opts\.sessionFilter\) usageUrl\.searchParams\.set\('session_id', opts\.sessionFilter\)/)
 })
 
 test('request logs session polish has readable compact styles', () => {

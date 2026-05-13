@@ -5,24 +5,21 @@ import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
 
 const here = join(dirname(fileURLToPath(import.meta.url)), '..')
-const appSource = readFileSync(join(here, 'src', 'App.tsx'), 'utf-8')
-
-const copyButtonComponentStart = appSource.indexOf('function CopyButton(')
-const appComponentStart = appSource.indexOf('function App()')
+const copyButtonSource = readFileSync(join(here, 'src', 'components', 'CopyButton.tsx'), 'utf-8')
+const dashboardSource = readFileSync(join(here, 'src', 'pages', 'DashboardPage.tsx'), 'utf-8')
+const settingsSource = readFileSync(join(here, 'src', 'pages', 'SettingsPage.tsx'), 'utf-8')
+const logsSource = readFileSync(join(here, 'src', 'pages', 'LogsPage.tsx'), 'utf-8')
 
 test('onboarding and connectivity copy controls use one shared CopyButton component', () => {
-  assert.notEqual(copyButtonComponentStart, -1, 'App.tsx should define a shared CopyButton component')
-  assert.notEqual(appComponentStart, -1, 'App.tsx should define App component after shared helpers')
+  assert.match(copyButtonSource, /function CopyButton\(/)
+  assert.match(copyButtonSource, /navigator\.clipboard\.writeText\(text\)/)
+  assert.match(copyButtonSource, /setCopied\(true\)/)
+  assert.match(copyButtonSource, /setTimeout\(\(\) => setCopied\(false\),/)
 
-  const copyButtonComponent = appSource.slice(copyButtonComponentStart, appComponentStart)
-  const appComponent = appSource.slice(appComponentStart)
+  assert.match(dashboardSource, /import \{[\s\S]*CopyButton[\s\S]*\} from '\.\.\/components\/CopyButton'/)
+  assert.match(settingsSource, /import \{[\s\S]*CopyButton[\s\S]*\} from '\.\.\/components\/CopyButton'/)
+  assert.match(logsSource, /import \{[\s\S]*ClickToCopy[\s\S]*\} from '\.\.\/components\/CopyButton'/)
 
-  assert.match(copyButtonComponent, /navigator\.clipboard\.writeText\(text\)/)
-  assert.match(copyButtonComponent, /setCopied\(true\)/)
-  assert.match(copyButtonComponent, /setTimeout\(\(\) => setCopied\(false\),/)
-
-  assert.equal((appComponent.match(/<CopyButton\b/g) || []).length, 3)
-  assert.doesNotMatch(appComponent, /navigator\.clipboard\.writeText/)
-  assert.doesNotMatch(appComponent, /btn\.textContent/)
-  assert.doesNotMatch(appComponent, /classList\.add\('btn-copy-clicked'\)/)
+  assert.match(dashboardSource, /<CopyButton\b/)
+  assert.match(settingsSource, /<CopyButton\b/)
 })

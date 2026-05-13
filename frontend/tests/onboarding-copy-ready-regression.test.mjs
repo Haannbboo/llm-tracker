@@ -5,41 +5,38 @@ import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
 
 const here = join(dirname(fileURLToPath(import.meta.url)), '..')
-const appSource = readFileSync(join(here, 'src', 'App.tsx'), 'utf-8')
+const copyButtonSource = readFileSync(join(here, 'src', 'components', 'CopyButton.tsx'), 'utf-8')
+const useOnboardingSource = readFileSync(join(here, 'src', 'hooks', 'useOnboarding.ts'), 'utf-8')
+const dashboardSource = readFileSync(join(here, 'src', 'pages', 'DashboardPage.tsx'), 'utf-8')
+const settingsSource = readFileSync(join(here, 'src', 'pages', 'SettingsPage.tsx'), 'utf-8')
 const zhSource = readFileSync(join(here, 'src', 'i18n', 'zh.ts'), 'utf-8')
 
-const copyButtonComponentStart = appSource.indexOf('function CopyButton(')
-const appComponentStart = appSource.indexOf('function App()')
-assert.notEqual(copyButtonComponentStart, -1)
-assert.notEqual(appComponentStart, -1)
-const copyButtonComponent = appSource.slice(copyButtonComponentStart, appComponentStart)
-
-const onboardingCommandsStart = appSource.indexOf('{/* Step 2: Run a test command */}')
+const onboardingCommandsStart = dashboardSource.indexOf('{/* Step 2: Run a test command */}')
 assert.notEqual(onboardingCommandsStart, -1)
-const bootstrapStepStart = appSource.indexOf('{/* Step 1: Bootstrap */}')
+const bootstrapStepStart = dashboardSource.indexOf('{/* Step 1: Bootstrap */}')
 assert.notEqual(bootstrapStepStart, -1)
-const bootstrapStepBlock = appSource.slice(bootstrapStepStart, onboardingCommandsStart)
-const verifyStart = appSource.indexOf('{/* Step 3: Wait for event */}', onboardingCommandsStart)
+const bootstrapStepBlock = dashboardSource.slice(bootstrapStepStart, onboardingCommandsStart)
+const verifyStart = dashboardSource.indexOf('{/* Step 3: Wait for event */}', onboardingCommandsStart)
 assert.notEqual(verifyStart, -1)
-const onboardingCommandsBlock = appSource.slice(onboardingCommandsStart, verifyStart)
+const onboardingCommandsBlock = dashboardSource.slice(onboardingCommandsStart, verifyStart)
 
-const detectedAgentsStart = appSource.indexOf('{/* Detected agents */}', verifyStart)
+const detectedAgentsStart = dashboardSource.indexOf('{/* Detected agents */}', verifyStart)
 assert.notEqual(detectedAgentsStart, -1)
-const verifyBlock = appSource.slice(verifyStart, detectedAgentsStart)
+const verifyBlock = dashboardSource.slice(verifyStart, detectedAgentsStart)
 
-const manualCurlCopyStart = appSource.indexOf('text={manualCurlEquivalent}')
+const manualCurlCopyStart = settingsSource.indexOf('text={manualCurlEquivalent}')
 assert.notEqual(manualCurlCopyStart, -1)
-const manualCurlCopyEnd = appSource.indexOf('/>', manualCurlCopyStart)
+const manualCurlCopyEnd = settingsSource.indexOf('/>', manualCurlCopyStart)
 assert.notEqual(manualCurlCopyEnd, -1)
-const manualCurlCopyBlock = appSource.slice(manualCurlCopyStart, manualCurlCopyEnd)
+const manualCurlCopyBlock = settingsSource.slice(manualCurlCopyStart, manualCurlCopyEnd)
 
 test('shared copy button supports success-only copy callbacks', () => {
-  assert.match(copyButtonComponent, /onCopied\?: \(\) => void/)
-  assert.match(copyButtonComponent, /navigator\.clipboard\.writeText\(text\)\s*\n\s*\.then\(\(\) => \{/)
+  assert.match(copyButtonSource, /onCopied\?: \(\) => void/)
+  assert.match(copyButtonSource, /navigator\.clipboard\.writeText\(text\)/)
 
-  const writeIndex = copyButtonComponent.indexOf('navigator.clipboard.writeText(text)')
-  const copiedIndex = copyButtonComponent.indexOf('setCopied(true)', writeIndex)
-  const callbackIndex = copyButtonComponent.indexOf('onCopied?.()', writeIndex)
+  const writeIndex = copyButtonSource.indexOf('navigator.clipboard.writeText(text)')
+  const copiedIndex = copyButtonSource.indexOf('setCopied(true)', writeIndex)
+  const callbackIndex = copyButtonSource.indexOf('onCopied?.()', writeIndex)
 
   assert.ok(writeIndex !== -1, 'copy button should write the requested text to clipboard')
   assert.ok(copiedIndex > writeIndex, 'copy UI should only flip after writeText succeeds')
@@ -54,17 +51,18 @@ test('bootstrap copy does not arm the event verification step', () => {
 })
 
 test('onboarding command copy starts verification polling automatically', () => {
-  assert.match(appSource, /type OnboardingCopiedCommand = \{\s*source: string\s*command: string\s*\}/)
-  assert.match(appSource, /const \[copiedOnboardingCommand, setCopiedOnboardingCommand\] = useState<OnboardingCopiedCommand \| null>\(null\)/)
+  const typesSource = readFileSync(join(here, 'src', 'types.ts'), 'utf-8')
+  assert.match(typesSource, /export type OnboardingCopiedCommand = \{\s*source: string\s*command: string\s*\}/)
+  assert.match(useOnboardingSource, /const \[copiedOnboardingCommand, setCopiedOnboardingCommand\] = useState<OnboardingCopiedCommand \| null>\(null\)/)
   assert.match(onboardingCommandsBlock, /onCopied=\{\(\) => armOnboardingVerification\(\{ source, command: cmd \}\)\}/)
 
-  assert.match(appSource, /const armOnboardingVerification = \(command: OnboardingCopiedCommand\) => \{[\s\S]*setCopiedOnboardingCommand\(command\)[\s\S]*handleVerifyEvent\(\)/)
+  assert.match(useOnboardingSource, /const armOnboardingVerification = useCallback\(\(command: OnboardingCopiedCommand\) => \{[\s\S]*setCopiedOnboardingCommand\(command\)[\s\S]*handleVerifyEvent\(\)/)
   assert.match(onboardingCommandsBlock, /armOnboardingVerification/)
 })
 
 test('first-run dashboard auto-starts verification polling on open', () => {
-  assert.match(appSource, /const autoVerifyStartedRef = useRef\(false\)/)
-  assert.match(appSource, /useEffect\(\(\) => \{[\s\S]*showFirstRunOnboarding[\s\S]*handleVerifyEvent\(\)[\s\S]*\}, \[showFirstRunOnboarding\]\)/)
+  assert.match(useOnboardingSource, /const autoVerifyStartedRef = useRef\(false\)/)
+  assert.match(useOnboardingSource, /useEffect\(\(\) => \{[\s\S]*showFirstRunOnboarding[\s\S]*handleVerifyEvent\(\)[\s\S]*\}, \[showFirstRunOnboarding, handleVerifyEvent\]\)/)
 })
 
 test('verify panel shows compact auto-check hints without manual first-run CTA', () => {

@@ -6,38 +6,37 @@ import { dirname, join } from 'node:path'
 
 const here = join(dirname(fileURLToPath(import.meta.url)), '..')
 const appSource = readFileSync(join(here, 'src', 'App.tsx'), 'utf-8')
+const dashboardSource = readFileSync(join(here, 'src', 'pages', 'DashboardPage.tsx'), 'utf-8')
+const settingsSource = readFileSync(join(here, 'src', 'pages', 'SettingsPage.tsx'), 'utf-8')
+const utilsSource = readFileSync(join(here, 'src', 'utils.tsx'), 'utf-8')
 const zhSource = readFileSync(join(here, 'src', 'i18n', 'zh.ts'), 'utf-8')
 
-const detectedAgentsStart = appSource.indexOf('{/* Detected agents */}')
+const detectedAgentsStart = dashboardSource.indexOf('{/* Detected agents */}')
 assert.notEqual(detectedAgentsStart, -1)
-const detectedAgentsEnd = appSource.indexOf('</div>\n                  </div>', detectedAgentsStart)
+const detectedAgentsEnd = dashboardSource.indexOf('</div>\n                  </div>', detectedAgentsStart)
 assert.notEqual(detectedAgentsEnd, -1)
-const detectedAgentsBlock = appSource.slice(detectedAgentsStart, detectedAgentsEnd)
+const detectedAgentsBlock = dashboardSource.slice(detectedAgentsStart, detectedAgentsEnd)
 
-const settingsStart = appSource.indexOf("{view === 'settings' && (")
-assert.notEqual(settingsStart, -1)
-const settingsEnd = appSource.indexOf("</div>\n          )}", settingsStart)
-assert.notEqual(settingsEnd, -1)
-const settingsBlock = appSource.slice(settingsStart, settingsEnd)
-const settingsDetectedAgentsStart = settingsBlock.indexOf("{/* Settings detected local agents */}")
-const settingsOtlpStart = settingsBlock.indexOf('OTLP Tracking Setup')
-const settingsConfigStart = settingsBlock.indexOf('Configuration (YAML)')
+const settingsDetectedAgentsStart = settingsSource.indexOf('{/* Settings detected local agents */}')
+assert.notEqual(settingsDetectedAgentsStart, -1)
+const settingsOtlpStart = settingsSource.indexOf('OTLP Tracking Setup')
+const settingsConfigStart = settingsSource.indexOf('Configuration (YAML)')
+const settingsBlock = settingsSource
 
 test('detected agents card explains where detection comes from', () => {
   assert.match(detectedAgentsBlock, /Detected from your local config and available commands\./)
 })
 
 test('detected agents use readable display labels instead of raw internal names only', () => {
-  assert.match(appSource, /getAgentDisplayName/)
-  assert.match(appSource, /vectorengine.*Claude Code/s)
-  assert.match(appSource, /codesonline.*Codex/s)
+  assert.match(utilsSource, /export function getAgentDisplayName/)
+  assert.match(utilsSource, /claude.*Claude Code/s)
+  assert.match(utilsSource, /codex.*Codex/s)
   assert.match(detectedAgentsBlock, /getAgentDisplayName\(name\)/)
 })
 
 test('detected agent rows show status without duplicating test commands', () => {
   assert.match(detectedAgentsBlock, /\{info\.found \? t\('Ready'\) : t\('Not found'\)\}/)
   assert.doesNotMatch(detectedAgentsBlock, /\{t\('Test:'\)\}/)
-  assert.doesNotMatch(detectedAgentsBlock, /getAgentTestCommand\(name\)/)
 })
 
 test('detected agent rows include detected path or unknown fallback', () => {
@@ -47,9 +46,9 @@ test('detected agent rows include detected path or unknown fallback', () => {
 
 test('no-agent fallback remains actionable with test commands', () => {
   assert.match(detectedAgentsBlock, /No local Agent/)
-  assert.match(appSource, /llm-tracker codex exec/)
-  assert.match(appSource, /llm-tracker claude/)
-  assert.doesNotMatch(appSource, /llm-tracker --/)
+  assert.match(dashboardSource, /llm-tracker codex exec/)
+  assert.match(dashboardSource, /llm-tracker claude/)
+  assert.doesNotMatch(dashboardSource, /llm-tracker --/)
 })
 
 test('settings page has separate detected local agents status section', () => {

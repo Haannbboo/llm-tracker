@@ -5,14 +5,14 @@ import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
 
 const here = join(dirname(fileURLToPath(import.meta.url)), '..')
-const appSource = readFileSync(join(here, 'src', 'App.tsx'), 'utf-8')
+const dashboardSource = readFileSync(join(here, 'src', 'pages', 'DashboardPage.tsx'), 'utf-8')
 const zhSource = readFileSync(join(here, 'src', 'i18n', 'zh.ts'), 'utf-8')
 
 // Extract the success block (when verificationResult is truthy)
-const successBlockStart = appSource.indexOf('{verificationResult ? (')
+const successBlockStart = dashboardSource.indexOf('{verificationResult ? (')
 assert.notEqual(successBlockStart, -1)
-const successBlockEnd = appSource.indexOf(': (', successBlockStart + 30)
-const successBlock = appSource.slice(successBlockStart, successBlockEnd)
+const successBlockEnd = dashboardSource.indexOf(': (', successBlockStart + 30)
+const successBlock = dashboardSource.slice(successBlockStart, successBlockEnd)
 
 test('success copy says tracking works with first request recorded', () => {
   assert.match(successBlock, /Tracking works\. Your first request is recorded\./)
@@ -43,7 +43,7 @@ test('success summary shows latency', () => {
 
 test('success block has view request logs CTA that navigates to logs', () => {
   assert.match(successBlock, /View request logs/)
-  assert.match(successBlock, /setView\('logs'\)/)
+  assert.match(successBlock, /onNavigateToLogs\(\)/)
 })
 
 test('success block still has reset button', () => {

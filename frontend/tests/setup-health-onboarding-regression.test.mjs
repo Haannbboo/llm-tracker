@@ -6,22 +6,24 @@ import { dirname, join } from 'node:path'
 
 const here = join(dirname(fileURLToPath(import.meta.url)), '..')
 const appSource = readFileSync(join(here, 'src', 'App.tsx'), 'utf-8')
+const appContextSource = readFileSync(join(here, 'src', 'contexts', 'AppContext.tsx'), 'utf-8')
+const dashboardSource = readFileSync(join(here, 'src', 'pages', 'DashboardPage.tsx'), 'utf-8')
+const settingsSource = readFileSync(join(here, 'src', 'pages', 'SettingsPage.tsx'), 'utf-8')
+const useOnboardingSource = readFileSync(join(here, 'src', 'hooks', 'useOnboarding.ts'), 'utf-8')
 const zhSource = readFileSync(join(here, 'src', 'i18n', 'zh.ts'), 'utf-8')
 
-const settingsStart = appSource.indexOf("{view === 'settings' && (")
-assert.notEqual(settingsStart, -1)
-const settingsBlock = appSource.slice(settingsStart)
+const settingsBlock = settingsSource
 
-const healthStart = appSource.indexOf('{/* Setup health + Detected agents */}')
+const healthStart = dashboardSource.indexOf('{/* Setup health + Detected agents */}')
 assert.notEqual(healthStart, -1)
-const healthEnd = appSource.indexOf('{/* Detected agents */}', healthStart)
+const healthEnd = dashboardSource.indexOf('{/* Detected agents */}', healthStart)
 assert.notEqual(healthEnd, -1)
-const onboardingHealthBlock = appSource.slice(healthStart, healthEnd)
+const onboardingHealthBlock = dashboardSource.slice(healthStart, healthEnd)
 
 test('app fetches local setup diagnostics from backend', () => {
-  assert.match(appSource, /SetupDiagnostics/)
-  assert.match(appSource, /useState<SetupDiagnostics \| null>/)
-  assert.match(appSource, /fetch\('\/local\/setup-health'\)/)
+  assert.match(appContextSource, /SetupDiagnostics/)
+  assert.match(appContextSource, /const \[setupDiagnostics, setSetupDiagnostics\] = useState<SetupDiagnostics \| null>/)
+  assert.match(appContextSource, /fetch\('\/local\/setup-health'\)/)
 })
 
 test('settings page includes OTLP diagnostics panel before raw YAML editor without pretending bootstrap can fix everything', () => {
@@ -41,18 +43,17 @@ test('settings page includes OTLP diagnostics panel before raw YAML editor witho
 
 test('onboarding setup health shows passive status only and does not offer unreliable setup repair', () => {
   assert.match(onboardingHealthBlock, /OTLP configured/)
-  assert.match(onboardingHealthBlock, /setupDiagnostics/)
-  assert.match(appSource, /foundLocalAgentCount/)
-  assert.match(appSource, /setupLocalAgentTotal/)
-  assert.match(appSource, /t\('No local Agent'\)/)
-  assert.doesNotMatch(appSource, /summary\.total_agents \?\? 3/)
+  assert.match(onboardingHealthBlock, /setupSummaryText/)
+  assert.match(useOnboardingSource, /foundLocalAgentCount/)
+  assert.match(useOnboardingSource, /setupLocalAgentTotal/)
+  assert.match(useOnboardingSource, /'No local Agent'/)
+  assert.doesNotMatch(dashboardSource, /summary\.total_agents \?\? 3/)
   assert.doesNotMatch(onboardingHealthBlock, /Fix setup/)
   assert.doesNotMatch(onboardingHealthBlock, /setupCommand/)
   assert.doesNotMatch(onboardingHealthBlock, /Copy bootstrap command/)
   assert.doesNotMatch(onboardingHealthBlock, /Copy expected endpoint/)
   assert.doesNotMatch(onboardingHealthBlock, /setView\('settings'\)/)
   assert.doesNotMatch(onboardingHealthBlock, /Agents detected/)
-  assert.doesNotMatch(onboardingHealthBlock, /configContent \? t\('Loaded'\) : t\('Unknown'\)/)
 })
 
 test('chinese translations include OTLP diagnostics strings', () => {

@@ -5,7 +5,8 @@ import { pathToFileURL, fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
 
 const here = join(dirname(fileURLToPath(import.meta.url)), '..')
-const appSource = readFileSync(join(here, 'src', 'App.tsx'), 'utf-8')
+const useOnboardingSource = readFileSync(join(here, 'src', 'hooks', 'useOnboarding.ts'), 'utf-8')
+const dashboardSource = readFileSync(join(here, 'src', 'pages', 'DashboardPage.tsx'), 'utf-8')
 const zhSource = readFileSync(join(here, 'src', 'i18n', 'zh.ts'), 'utf-8')
 const guidanceModulePath = join(here, 'src', 'setup-guidance.ts')
 
@@ -43,13 +44,13 @@ test('verify timeout guidance classifies setup health states without repair acti
 })
 
 test('verify tracking timeout UI uses setup-aware guidance while avoiding fake repair UX', () => {
-  assert.match(appSource, /getVerifyTimeoutGuidance/)
-  assert.match(appSource, /const verifyTimeoutGuidance = getVerifyTimeoutGuidance/)
-  assert.match(appSource, /verifyPhase === 'timeout'\s*\?\s*t\(verifyTimeoutGuidance\)/)
-  assert.doesNotMatch(appSource, /verifyPhase === 'timeout'\s*\?\s*t\('No event found yet'\)/)
-  assert.doesNotMatch(appSource, /Fix setup/)
-  assert.doesNotMatch(appSource, /setupCommand/)
-  assert.doesNotMatch(appSource, /Copy bootstrap command/)
+  assert.match(useOnboardingSource, /getVerifyTimeoutGuidance/)
+  assert.match(useOnboardingSource, /const verifyTimeoutGuidance = getVerifyTimeoutGuidance/)
+  assert.match(dashboardSource, /verifyPhase === 'timeout'\s*\?\s*t\(verifyTimeoutGuidance\)/)
+  assert.doesNotMatch(dashboardSource, /verifyPhase === 'timeout'\s*\?\s*t\('No event found yet'\)/)
+  assert.doesNotMatch(dashboardSource, /Fix setup/)
+  assert.doesNotMatch(dashboardSource, /setupCommand/)
+  assert.doesNotMatch(dashboardSource, /Copy bootstrap command/)
 })
 
 test('chinese translations include setup-aware verify timeout guidance', () => {

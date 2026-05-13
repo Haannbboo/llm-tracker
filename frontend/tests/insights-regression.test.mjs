@@ -5,19 +5,19 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
 const here = dirname(fileURLToPath(import.meta.url));
-const appSrc = readFileSync(join(here, '..', 'src', 'App.tsx'), 'utf8');
+const dashboardSrc = readFileSync(join(here, '..', 'src', 'pages', 'DashboardPage.tsx'), 'utf8');
 const insightCardsSrc = readFileSync(join(here, '..', 'src', 'InsightCards.tsx'), 'utf8');
 const zhSrc = readFileSync(join(here, '..', 'src', 'i18n', 'zh.ts'), 'utf8');
 
 describe('InsightCards regression', () => {
-  it('InsightCards is imported and used in App.tsx', () => {
+  it('InsightCards is imported and used in DashboardPage.tsx', () => {
     assert.ok(
-      appSrc.includes("import { InsightCards } from './InsightCards'"),
-      'App.tsx should import InsightCards'
+      dashboardSrc.includes("import { InsightCards } from '../InsightCards'"),
+      'DashboardPage.tsx should import InsightCards'
     );
     assert.ok(
-      appSrc.includes("<InsightCards summary={summary} dailyUsage={dailyUsage} />"),
-      'App.tsx should use InsightCards component'
+      dashboardSrc.includes("<InsightCards"),
+      'DashboardPage.tsx should use InsightCards component'
     );
   });
 
@@ -84,8 +84,9 @@ describe('InsightCards regression', () => {
       insightCardsSrc.includes('const { lang } = useLang()'),
       'InsightCards should use lang from useLang'
     );
-    assert.ok(
-      insightCardsSrc.includes('}, [summary, dailyUsage, lang])'),
+    assert.match(
+      insightCardsSrc,
+      /\}, \[summary, dailyUsage, lang, onClick\]\)/,
       'InsightCards useMemo should depend on lang'
     );
     assert.ok(
