@@ -110,9 +110,9 @@ test('empty sessions renders a standalone first-session card instead of an empty
 
 test('sessions table has supported sortable columns', () => {
   assert.match(dashboardSource, /handleSessionSort/)
-  assert.match(dashboardSource, /handleSessionSort\('avg_latency_ms'\)/)
   assert.match(dashboardSource, /handleSessionSort\('total_cost_usd'\)/)
   assert.match(dashboardSource, /handleSessionSort\('duration_s'\)/)
+  assert.match(dashboardSource, /handleSessionSort\('total_tokens'\)/)
 })
 
 test('sessions table renders session data', () => {
@@ -131,24 +131,23 @@ test('session page formats costs with two decimal places', () => {
   assert.match(utilsSource, /formatCost\(mostExpensive\.total_cost_usd, 2\)/)
 })
 
-test('sessions table uses human-first row hierarchy with compact health', () => {
+test('sessions table uses human-first row hierarchy with agent and model badges', () => {
   const sessionsStart = dashboardSource.indexOf("{dashboardTab === 'sessions' && (")
   assert.ok(sessionsStart !== -1, 'sessions tab block not found')
   const sessionsSection = dashboardSource.slice(sessionsStart, sessionsStart + 20000)
   assert.match(sessionsSection, /<table className="table sessions-table">/)
   assert.match(sessionsSection, /t\('Session'\)/)
   assert.match(sessionsSection, /t\('Agent'\)/)
-  assert.match(sessionsSection, /t\('Health'\)/)
   assert.match(sessionsSection, /sessionDisplayName\(session\).*formatTime\(session\.started\)/s)
   assert.match(sessionsSection, /shortSessionId\(session\.session_id\)/)
   assert.match(sessionsSection, /<ClickToCopy text=\{session\.session_id\} onCopy=\{showToast\}>/)
-  assert.match(sessionsSection, /session-health-badge session-health-latency/)
-  assert.match(sessionsSection, /session-health-badge session-health-ttft/)
+  assert.match(sessionsSection, /getModelBadgeBackgroundColor\(session\.model\)/)
+  assert.match(sessionsSection, /getModelTextColor\(session\.model\)/)
 })
 
 test('session detail panel exists', () => {
-  assert.match(dashboardSource, /selectedSession && \(/)
-  assert.match(dashboardSource, /t\('Session Details'\)/)
+  assert.match(dashboardSource, /selectedSession\?\.session_id === session\.session_id/)
+  assert.match(dashboardSource, /session-detail-cell/)
   assert.match(dashboardSource, /t\('View in Logs'\)/)
 })
 

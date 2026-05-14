@@ -9,6 +9,7 @@ export function useModelEffectivenessData(opts: {
   dateRange: DateRangeOption
   customSince: string
   customUntil: string
+  hideNoop?: boolean
 }) {
   const { refreshTrigger, setError } = useApp()
   const [modelEffectiveness, setModelEffectiveness] =
@@ -33,6 +34,7 @@ export function useModelEffectivenessData(opts: {
         if (opts.activeSource) url.searchParams.set('client_source', opts.activeSource)
         if (since) url.searchParams.set('since', since)
         if (until) url.searchParams.set('until', until)
+        if (opts.hideNoop) url.searchParams.set('hide_noop', 'true')
 
         const response = await fetch(url.toString(), { signal: controller.signal })
         if (!response.ok) throw new Error(t('Failed to fetch model effectiveness data'))
@@ -47,7 +49,7 @@ export function useModelEffectivenessData(opts: {
 
     void fetchModelEffectivenessData()
     return () => controller.abort()
-  }, [opts.activeSource, opts.dateRange, opts.customSince, opts.customUntil, refreshTrigger, modelEffectivenessRefreshKey, setError])
+  }, [opts.activeSource, opts.dateRange, opts.customSince, opts.customUntil, opts.hideNoop, refreshTrigger, modelEffectivenessRefreshKey, setError])
 
   return { modelEffectiveness, modelEffectivenessLoading, refreshModelEffectiveness }
 }

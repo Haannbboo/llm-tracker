@@ -23,6 +23,46 @@ def test_build_agent_command_uses_codex_ephemeral_resume(evaluation_module):
     assert invocation.stdin == "Evaluate this"
 
 
+def test_build_agent_command_claude_uses_model(evaluation_module):
+    invocation = evaluation_module.build_agent_invocation(
+        client_source="claude",
+        session_id="sess-1",
+        prompt="Evaluate this",
+        model="claude-3-opus",
+    )
+
+    assert invocation.command == [
+        "claude",
+        "--resume",
+        "sess-1",
+        "--fork-session",
+        "--print",
+        "--no-session-persistence",
+        "--model",
+        "claude-3-opus",
+        "Evaluate this",
+    ]
+
+
+def test_build_agent_command_gemini_uses_model(evaluation_module):
+    invocation = evaluation_module.build_agent_invocation(
+        client_source="gemini",
+        session_id="sess-1",
+        prompt="Evaluate this",
+        model="gemini-1.5-pro",
+    )
+
+    assert invocation.command == [
+        "gemini",
+        "--resume",
+        "sess-1",
+        "--model",
+        "gemini-1.5-pro",
+        "--prompt",
+        "Evaluate this",
+    ]
+
+
 def test_build_agent_command_rejects_unsupported_source(evaluation_module):
     with pytest.raises(ValueError, match="Unsupported session source"):
         evaluation_module.build_agent_invocation(

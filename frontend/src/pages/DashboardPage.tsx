@@ -20,6 +20,7 @@ import {
   formatTime, value, getModelIcon, getSourceBadgeBg, getSourceBadgeText,
   shortSessionId, sessionAgentName, sessionDisplayName, getAgentDisplayName, getSinceDate,
 } from '../utils'
+import { getModelBadgeBackgroundColor, getModelTextColor } from '../model-badge'
 import type { ActiveFilter, DailyEffectivenessReport, ModelEffectivenessGroup, SessionSummary, SessionsSummary } from '../types'
 
 type Props = {
@@ -56,6 +57,9 @@ function getLocalDateKey(date: Date): string {
 export function DashboardPage({ onNavigateToLogs }: Props) {
   const { theme, showToast, error, localAgents, setupDiagnostics, requestUsageRefresh, refreshTrigger, setError } = useApp()
 
+  // Toggle to hide no-op and single-request sessions from tables and aggregations
+  const [hideNoop, setHideNoop] = useState(true)
+
   // Dashboard data hook
   const {
     summary, dailyUsage, heatmapData, totalTrackedEvents, sources,
@@ -78,7 +82,7 @@ export function DashboardPage({ onNavigateToLogs }: Props) {
     handleSessionSort,
     sessionInsights,
     setSessionPage,
-  } = useSessionsData({ activeSource, dateRange, customSince, customUntil })
+  } = useSessionsData({ activeSource, dateRange, customSince, customUntil, hideNoop })
 
   // Sessions summary (fetched directly for the stats cards)
   const [sessionsSummary, setSessionsSummary] = useState<SessionsSummary | null>(null)
@@ -90,17 +94,18 @@ export function DashboardPage({ onNavigateToLogs }: Props) {
       if (since) url.searchParams.set('since', since)
       if (customUntil) url.searchParams.set('until', customUntil)
     }
+    if (hideNoop) url.searchParams.set('hide_noop', 'true')
     fetch(url.toString())
       .then(r => r.json())
       .then(setSessionsSummary)
       .catch(() => setSessionsSummary(null))
-  }, [activeSource, dateRange, customSince, customUntil])
+  }, [activeSource, dateRange, customSince, customUntil, hideNoop])
 
   const {
     modelEffectiveness,
     modelEffectivenessLoading,
     refreshModelEffectiveness,
-  } = useModelEffectivenessData({ activeSource, dateRange, customSince, customUntil })
+  } = useModelEffectivenessData({ activeSource, dateRange, customSince, customUntil, hideNoop })
 
   const modelEffectivenessTotals = useMemo(() => {
     return modelEffectiveness.groups.reduce(
@@ -149,12 +154,23 @@ export function DashboardPage({ onNavigateToLogs }: Props) {
   } = useOnboarding({ totalTrackedEvents, onFirstEvent: requestUsageRefresh })
 
   // Evaluation update handler
+  const [fadingOutSessions, setFadingOutSessions] = useState<Set<string>>(new Set())
   const handleEvaluationUpdate = (sessionId: string, evaluation: any | null) => {
+    // Update the evaluation optimistically
     setSessions((prev) =>
       prev.map((s) => (s.session_id === sessionId ? { ...s, evaluation } : s))
     )
     if (selectedSession?.session_id === sessionId) {
       setSelectedSession({ ...selectedSession, evaluation })
+    }
+    // Fade out no-op sessions when hideNoop is active
+    if (hideNoop && evaluation?.outcome === 'no_op') {
+      setFadingOutSessions(prev => new Set(prev).add(sessionId))
+      // Remove from state after the CSS transition (0.5s) completes
+      setTimeout(() => {
+        setFadingOutSessions(prev => { const next = new Set(prev); next.delete(sessionId); return next })
+        setSessions((prev) => prev.filter((s) => s.session_id !== sessionId))
+      }, 550)
     }
   }
 
@@ -1024,6 +1040,15 @@ export function DashboardPage({ onNavigateToLogs }: Props) {
               onChange={e => setSessionSearch(e.target.value)}
               style={{ flex: 1, minWidth: 0 }}
             />
+            <button
+              className={`btn-ghost${hideNoop ? ' active' : ''}`}
+              onClick={() => setHideNoop(prev => !prev)}
+              title={t('Hide no-op and single-request sessions')}
+              style={{ fontSize: '11px', padding: '4px 10px', whiteSpace: 'nowrap', display: 'flex', alignItems: 'center', gap: '4px' }}
+            >
+              <span style={{ opacity: hideNoop ? 1 : 0.5 }}>🚫</span>
+              {t('Hide no-op')}
+            </button>
           </div>
           <div className="panel-body" style={{ padding: 0 }}>
             <table className="table sessions-table">
@@ -1050,9 +1075,6 @@ export function DashboardPage({ onNavigateToLogs }: Props) {
                   <th style={{ cursor: 'pointer' }} onClick={() => handleSessionSort('total_cost_usd')}>
                     {t('Cost')} {sessionSortBy === 'total_cost_usd' ? (sessionSortOrder === 'asc' ? '↑' : '↓') : ''}
                   </th>
-                  <th style={{ cursor: 'pointer' }} onClick={() => handleSessionSort('avg_latency_ms')}>
-                    {t('Health')} {sessionSortBy === 'avg_latency_ms' ? (sessionSortOrder === 'asc' ? '↑' : '↓') : ''}
-                  </th>
                   <th style={{ width: '90px' }}>Outcome</th>
                 </tr>
               </thead>
@@ -1066,6 +1088,7 @@ export function DashboardPage({ onNavigateToLogs }: Props) {
                   }).map(session => (
                   <Fragment key={session.session_id}>
                   <tr
+                    className={fadingOutSessions.has(session.session_id) ? 'session-fade-out' : undefined}
                     style={{ cursor: 'pointer', background: selectedSession?.session_id === session.session_id ? 'var(--surface-hover)' : undefined }}
                     onClick={() => setSelectedSession(selectedSession?.session_id === session.session_id ? null : session)}
                   >
@@ -1078,26 +1101,47 @@ export function DashboardPage({ onNavigateToLogs }: Props) {
                       </div>
                     </td>
                     <td>
-                      <span style={{
-                        padding: '2px 8px',
-                        borderRadius: '4px',
-                        fontSize: '11px',
-                        fontWeight: 600,
-                        background: getSourceBadgeBg(session.client_source),
-                        color: getSourceBadgeText(session.client_source),
-                      }}>
-                        {sessionAgentName(session.client_source)}
-                      </span>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+                        <span style={{
+                          padding: '2px 8px',
+                          borderRadius: '4px',
+                          fontSize: '11px',
+                          fontWeight: 600,
+                          background: getSourceBadgeBg(session.client_source),
+                          color: getSourceBadgeText(session.client_source),
+                        }}>
+                          {sessionAgentName(session.client_source)}
+                        </span>
+                        {session.model && (
+                          <div style={{
+                            padding: '4px 6px',
+                            borderRadius: '6px',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '4px',
+                            fontSize: '11px',
+                            backgroundColor: getModelBadgeBackgroundColor(session.model),
+                            color: getModelTextColor(session.model),
+                            fontWeight: 600,
+                            maxWidth: '140px',
+                          }} title={session.model}>
+                            {getModelIcon(session.model)}
+                            <span style={{
+                              overflow: 'hidden',
+                              textOverflow: 'ellipsis',
+                              whiteSpace: 'nowrap',
+                            }}>
+                              {session.model}
+                            </span>
+                          </div>
+                        )}
+                      </div>
                     </td>
                     <td style={{ fontSize: '12px' }}>{formatTime(session.started)}</td>
                     <td style={{ fontSize: '12px' }}>{formatDuration(session.duration_s)}</td>
                     <td style={{ fontSize: '12px' }}>{formatNumber(session.request_count)}</td>
                     <td style={{ fontSize: '12px' }}>{formatCompact(session.total_tokens)}</td>
                     <td style={{ fontSize: '12px' }}>{formatCost(session.total_cost_usd, 2)}</td>
-                    <td className="session-health-cell">
-                      <span className="session-health-badge session-health-latency">{t('Resp')} {formatLatency(session.avg_latency_ms)}</span>
-                      <span className="session-health-badge session-health-ttft">TTFT {formatLatency(session.avg_ttft_ms)}</span>
-                    </td>
                     <td>
                       <span className={`session-outcome-badge ${getOutcomeBadge(session.evaluation?.outcome).className}`}>
                         {getOutcomeBadge(session.evaluation?.outcome).label}
@@ -1105,8 +1149,8 @@ export function DashboardPage({ onNavigateToLogs }: Props) {
                     </td>
                   </tr>
                   {selectedSession?.session_id === session.session_id && (
-                    <tr key={session.session_id + '-detail'}>
-                      <td colSpan={9} className="session-detail-cell">
+                    <tr key={session.session_id + '-detail'} className={fadingOutSessions.has(session.session_id) ? 'session-fade-out' : undefined}>
+                      <td colSpan={8} className="session-detail-cell">
                         <SessionDetailInline
                           session={session}
                           onNavigateToLogs={handleViewInLogs}
@@ -1135,36 +1179,6 @@ export function DashboardPage({ onNavigateToLogs }: Props) {
         </div>
         )}
 
-        {/* Session detail panel */}
-        {selectedSession && (
-          <div className="session-detail-panel panel" style={{ marginTop: '16px' }}>
-            <div className="panel-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <span>{t('Session Details')}</span>
-              <button className="btn-ghost" onClick={() => setSelectedSession(null)} style={{ fontSize: '12px' }}>✕</button>
-            </div>
-            <div className="panel-body" style={{ padding: '20px 24px' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '20px' }}>
-                <SessionDetailContent
-                  session={selectedSession}
-                  onNavigateToLogs={handleViewInLogs}
-                  onEvaluationUpdate={(evalData) => handleEvaluationUpdate(selectedSession.session_id, evalData)}
-                  onEvaluationPersisted={refreshModelEffectiveness}
-                />
-                <div style={{ display: 'flex', gap: '8px' }}>
-                  <button
-                    style={{ padding: '8px 18px', background: 'var(--color-blue)', color: 'white', borderRadius: '8px', fontSize: '13px', fontWeight: 700, cursor: 'pointer', border: 'none', boxShadow: '0 2px 4px rgba(59, 130, 246, 0.3)', display: 'flex', alignItems: 'center', gap: '6px' }}
-                    onClick={() => handleViewInLogs(selectedSession)}
-                  >
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                      <circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/>
-                    </svg>
-                    {t('View in Logs')}
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
       </div>
       )}
     </>

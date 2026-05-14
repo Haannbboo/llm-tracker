@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from 'react'
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import type { SessionSummary, DateRangeOption } from '../types'
 import { getSinceDate, buildSessionInsights } from '../utils'
 import { t } from '../i18n/index.ts'
@@ -9,17 +9,20 @@ export function useSessionsData(opts: {
   dateRange: DateRangeOption
   customSince: string
   customUntil: string
+  hideNoop?: boolean
 }) {
   const { refreshTrigger, setError } = useApp()
 
   const [sessions, setSessions] = useState<SessionSummary[]>([])
   const [sessionCount, setSessionCount] = useState(0)
   const [sessionsLoading, setSessionsLoading] = useState(true)
-  const [sessionSortBy, setSessionSortBy] = useState<string>('ended')
+  const [sessionSortBy, setSessionSortBy] = useState<string>('started')
   const [sessionSortOrder, setSessionSortOrder] = useState<'asc' | 'desc'>('desc')
   const [sessionPage, setSessionPage] = useState(1)
   const [hasMoreSessions, setHasMoreSessions] = useState(true)
   const [selectedSession, setSelectedSession] = useState<SessionSummary | null>(null)
+
+  const prevFilterKeyRef = useRef('')
 
   const handleSessionSort = useCallback((column: string) => {
     if (sessionSortBy === column) {
@@ -35,10 +38,27 @@ export function useSessionsData(opts: {
     return buildSessionInsights(sessions)
   }, [sessions])
 
+  // Filter-change keys — when any of these change, reset to page 1
+  const filterKey = `${opts.activeSource}|${opts.dateRange}|${opts.customSince}|${opts.customUntil}|${opts.hideNoop}`
+
   // Sessions fetch
   useEffect(() => {
     const controller = new AbortController()
     const sig = { signal: controller.signal }
+
+    // When filters change, React batches all state updates in this effect.
+    // Reset page to 1 first — subsequent re-renders with the new page value
+    // will re-trigger this effect via the sessionPage dependency.
+    const filterChanged = prevFilterKeyRef.current !== filterKey
+    if (filterChanged) {
+      prevFilterKeyRef.current = filterKey
+      if (sessionPage !== 1) {
+        setSessionPage(1)
+        return () => controller.abort()
+      }
+      // Page is already 1 — clear stale sessions so the table doesn't flash old data
+      setSessions([])
+    }
 
     async function fetchSessionsData() {
       setError(null)
@@ -55,6 +75,7 @@ export function useSessionsData(opts: {
         sessionsUrl.searchParams.set('sort_order', sessionSortOrder)
         sessionsUrl.searchParams.set('limit', '50')
         sessionsUrl.searchParams.set('offset', String((sessionPage - 1) * 50))
+        if (opts.hideNoop) sessionsUrl.searchParams.set('hide_noop', 'true')
 
         const response = await fetch(sessionsUrl.toString(), sig)
         if (!response.ok) throw new Error(t('Failed to fetch session data'))
@@ -77,7 +98,7 @@ export function useSessionsData(opts: {
 
     void fetchSessionsData()
     return () => controller.abort()
-  }, [opts.activeSource, opts.dateRange, opts.customSince, opts.customUntil, refreshTrigger, sessionSortBy, sessionSortOrder, sessionPage, setError])
+  }, [opts.activeSource, opts.dateRange, opts.customSince, opts.customUntil, opts.hideNoop, refreshTrigger, sessionSortBy, sessionSortOrder, sessionPage, setError])
 
   return {
     sessions,

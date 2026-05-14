@@ -10,7 +10,7 @@ from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Any
 
-from sqlalchemy import and_, case, func, select, text
+from sqlalchemy import and_, case, func, or_, select, text
 from sqlalchemy.orm import Session
 
 from .models import (
@@ -337,6 +337,7 @@ def _session_filters(
     client_source: str | None = None,
     since: str | None = None,
     until: str | None = None,
+    hide_noop: bool = False,
 ) -> list[Any]:
     filters: list[Any] = []
     if client_source:
@@ -345,6 +346,15 @@ def _session_filters(
         filters.append(SessionRecord.started >= _normalize_timestamp_filter(since))
     if until:
         filters.append(SessionRecord.ended <= _normalize_timestamp_filter(until))
+    if hide_noop:
+        # Exclude no-op sessions and single-request sessions (noise filtering)
+        filters.append(
+            or_(
+                SessionRecord.outcome != "no_op",
+                SessionRecord.outcome.is_(None),
+            )
+        )
+        filters.append(SessionRecord.request_count > 1)
     return filters
 
 
@@ -394,6 +404,7 @@ def aggregate_model_effectiveness(
     since: str | None = None,
     until: str | None = None,
     client_source: str | None = None,
+    hide_noop: bool = False,
     db_path: str | None = None,
 ) -> dict[str, list[dict[str, Any]]]:
     """Aggregate evaluated session outcomes by model, provider, or client source."""
@@ -406,6 +417,7 @@ def aggregate_model_effectiveness(
         client_source=client_source,
         since=since,
         until=until,
+        hide_noop=hide_noop,
     )
 
     query = select(SessionRecord)
@@ -716,6 +728,7 @@ def fetch_sessions(
     sort_order: str = "desc",
     limit: int = 50,
     offset: int = 0,
+    hide_noop: bool = False,
     db_path: str | None = None,
 ) -> list[dict[str, Any]]:
     """Return sessions from the persisted sessions table."""
@@ -723,6 +736,7 @@ def fetch_sessions(
         client_source=client_source,
         since=since,
         until=until,
+        hide_noop=hide_noop,
     )
 
     sort_col = _SESSION_SORT_COLUMNS.get(sort_by)
@@ -761,6 +775,7 @@ def count_sessions(
     client_source: str | None = None,
     since: str | None = None,
     until: str | None = None,
+    hide_noop: bool = False,
     db_path: str | None = None,
 ) -> int:
     """Count sessions from the persisted sessions table."""
@@ -768,6 +783,7 @@ def count_sessions(
         client_source=client_source,
         since=since,
         until=until,
+        hide_noop=hide_noop,
     )
 
     query = select(func.count()).select_from(SessionRecord)
@@ -783,6 +799,7 @@ def summarize_sessions(
     client_source: str | None = None,
     since: str | None = None,
     until: str | None = None,
+    hide_noop: bool = False,
     db_path: str | None = None,
 ) -> dict[str, Any]:
     """Return aggregate stats across all sessions matching the filters."""
@@ -790,6 +807,7 @@ def summarize_sessions(
         client_source=client_source,
         since=since,
         until=until,
+        hide_noop=hide_noop,
     )
 
     query = select(

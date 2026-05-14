@@ -310,7 +310,6 @@ export const zh: Record<string, string> = {
   'Started': '开始时间',
   'Duration': '时长',
   'Avg TTFT': '平均 TTFT',
-  'Health': '健康',
   'Resp': '响应',
   'Copy ID': '复制 ID',
   'Copy session ID': '复制会话 ID',
@@ -349,6 +348,8 @@ export const zh: Record<string, string> = {
   'Best Cache Saver': '最佳缓存节省',
   'View in Logs': '在日志中查看',
   'View failed requests in logs': '在日志中查看失败请求',
+  'Hide no-op': '隐藏无效会话',
+  'Hide no-op and single-request sessions': '隐藏无操作和单请求会话',
   'Failed to fetch session data': '获取会话数据失败',
 
   // Daily effectiveness

@@ -75,6 +75,7 @@ def build_agent_invocation(
     client_source: str | None,
     session_id: str,
     prompt: str,
+    model: str | None = None,
 ) -> AgentInvocation:
     agent = _normalize_client_source(client_source)
     if agent == "codex":
@@ -83,20 +84,24 @@ def build_agent_invocation(
             stdin=prompt,
         )
     if agent == "claude":
-        return AgentInvocation(
-            command=[
-                "claude",
-                "--resume",
-                session_id,
-                "--fork-session",
-                "--print",
-                "--no-session-persistence",
-                prompt,
-            ]
-        )
-    return AgentInvocation(
-        command=["gemini", "--resume", session_id, "--prompt", prompt]
-    )
+        command = [
+            "claude",
+            "--resume",
+            session_id,
+            "--fork-session",
+            "--print",
+            "--no-session-persistence",
+        ]
+        if model:
+            command.extend(["--model", model])
+        command.append(prompt)
+        return AgentInvocation(command=command)
+
+    command = ["gemini", "--resume", session_id]
+    if model:
+        command.extend(["--model", model])
+    command.extend(["--prompt", prompt])
+    return AgentInvocation(command=command)
 
 
 def is_claude_mem_observer_session(session_id: str) -> bool:
@@ -227,6 +232,7 @@ def run_session_evaluation_job(
             client_source=client_source,
             session_id=record.session_id,
             prompt=EVALUATION_PROMPT,
+            model=record.primary_model,
         )
 
         completed = subprocess.run(

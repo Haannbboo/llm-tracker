@@ -351,6 +351,7 @@ async def get_sessions(
     sort_order: str = "desc",
     limit: int = 50,
     offset: int = 0,
+    hide_noop: bool = False,
 ):
     sessions = fetch_sessions(
         client_source=client_source,
@@ -360,11 +361,13 @@ async def get_sessions(
         sort_order=sort_order,
         limit=limit,
         offset=offset,
+        hide_noop=hide_noop,
     )
     total = count_sessions(
         client_source=client_source,
         since=since,
         until=until,
+        hide_noop=hide_noop,
     )
     return {"sessions": sessions, "total": total}
 
@@ -374,11 +377,13 @@ async def get_sessions_summary(
     client_source: str | None = None,
     since: str | None = None,
     until: str | None = None,
+    hide_noop: bool = False,
 ):
     return summarize_sessions(
         client_source=client_source,
         since=since,
         until=until,
+        hide_noop=hide_noop,
     )
 
 
@@ -388,6 +393,7 @@ async def model_effectiveness(
     until: str | None = None,
     client_source: str | None = None,
     group_by: str = "model",
+    hide_noop: bool = False,
 ):
     if group_by not in {"model", "source", "provider"}:
         raise HTTPException(
@@ -399,6 +405,7 @@ async def model_effectiveness(
         since=since,
         until=until,
         client_source=client_source,
+        hide_noop=hide_noop,
     )
 
 

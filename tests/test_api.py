@@ -877,6 +877,7 @@ def test_model_effectiveness_endpoint_passes_filters(api_module, monkeypatch):
         "since": "2026-05-01T00:00:00Z",
         "until": "2026-05-11T23:59:59Z",
         "client_source": "codex",
+        "hide_noop": False,
     }
 
 

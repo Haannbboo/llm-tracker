@@ -312,24 +312,6 @@
   font-family: monospace;
 }
 
-.session-health-cell {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  font-size: 11px;
-}
-
-.session-health-badge {
-  border-radius: 999px;
-  font-weight: 700;
-  padding: 2px 8px;
-  white-space: nowrap;
-}
-
-.session-health-latency {
-  background: var(--badge-error-bg);
-  color: var(--badge-error-text);
-}
 
 .request-log-session-filter-badge {
   display: inline-flex;
@@ -372,11 +354,6 @@
   color: var(--text-muted);
 }
 
-.session-health-ttft {
-  background: var(--badge-success-bg);
-  color: var(--badge-success-text);
-}
-
 .session-outcome-badge {
   display: inline-flex;
   align-items: center;
@@ -417,6 +394,12 @@
   background: transparent;
   color: var(--muted-text, #6c757d);
   border: 1px dashed var(--border-color, #dee2e6);
+}
+
+.session-fade-out {
+  opacity: 0 !important;
+  transition: opacity 0.5s ease-out;
+  pointer-events: none;
 }
 
 .session-insights-grid {
