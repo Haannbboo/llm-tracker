@@ -955,17 +955,18 @@ def test_daily_effectiveness_endpoint_rejects_invalid_date(api_module, monkeypat
 # ---------------------------------------------------------------------------
 
 
-def test_evaluate_with_llm_starts_background_job(api_module, monkeypatch):
+def test_evaluate_with_llm_queues_job(api_module, monkeypatch):
     captured = {}
 
-    def fake_start(session_id, background_tasks):
+    def fake_start(session_id, **kwargs):
         captured["session_id"] = session_id
-        captured["background_tasks"] = background_tasks
+        captured.update(kwargs)
         return {
             "job_id": "job-1",
             "kind": "session_evaluation",
             "session_id": session_id,
             "status": "queued",
+            "trigger": "manual",
             "error": None,
         }
 
@@ -979,13 +980,26 @@ def test_evaluate_with_llm_starts_background_job(api_module, monkeypatch):
         "kind": "session_evaluation",
         "session_id": "sess-1",
         "status": "queued",
+        "trigger": "manual",
         "error": None,
     }
     assert captured["session_id"] == "sess-1"
+    assert captured["trigger"] == "manual"
+
+
+def test_evaluate_with_llm_returns_409_for_manual_evaluation(api_module, monkeypatch):
+    def raise_manual(session_id, **kwargs):
+        raise ValueError("Manual evaluation exists for session: sess-1")
+
+    monkeypatch.setattr(api_module, "start_session_evaluation_job", raise_manual)
+
+    response = TestClient(api_module.app).post("/sessions/sess-1/evaluate-with-llm")
+
+    assert response.status_code == 409
 
 
 def test_evaluate_with_llm_rejects_unsupported_source(api_module, monkeypatch):
-    def raise_unsupported(session_id, background_tasks):
+    def raise_unsupported(session_id, **kwargs):
         raise ValueError("Unsupported session source: unknown")
 
     monkeypatch.setattr(api_module, "start_session_evaluation_job", raise_unsupported)
@@ -997,15 +1011,18 @@ def test_evaluate_with_llm_rejects_unsupported_source(api_module, monkeypatch):
     assert response.status_code == 400
 
 
-def test_poll_job_returns_status(api_module, monkeypatch):
+def test_poll_job_returns_progress_fields(api_module, monkeypatch):
     monkeypatch.setattr(
         api_module,
-        "get_evaluation_job",
+        "get_evaluation_job_progress",
         lambda job_id: {
             "job_id": job_id,
             "kind": "session_evaluation",
             "session_id": "sess-1",
-            "status": "running",
+            "status": "queued",
+            "trigger": "manual",
+            "ahead_count": 1,
+            "queue_position": 2,
             "error": None,
         },
     )
@@ -1017,14 +1034,43 @@ def test_poll_job_returns_status(api_module, monkeypatch):
         "job_id": "job-1",
         "kind": "session_evaluation",
         "session_id": "sess-1",
-        "status": "running",
+        "status": "queued",
+        "trigger": "manual",
+        "ahead_count": 1,
+        "queue_position": 2,
         "error": None,
     }
 
 
 def test_poll_job_returns_404_for_unknown_job(api_module, monkeypatch):
-    monkeypatch.setattr(api_module, "get_evaluation_job", lambda job_id: None)
+    monkeypatch.setattr(api_module, "get_evaluation_job_progress", lambda job_id: None)
 
     response = TestClient(api_module.app).get("/poll/missing")
 
     assert response.status_code == 404
+
+
+def test_active_evaluation_jobs_returns_visible_session_jobs(api_module, monkeypatch):
+    monkeypatch.setattr(
+        api_module,
+        "list_active_evaluation_jobs_with_progress",
+        lambda session_ids=None: [
+            {
+                "job_id": "job-1",
+                "session_id": "sess-1",
+                "status": "running",
+                "trigger": "auto",
+                "ahead_count": 0,
+                "queue_position": 1,
+                "error": None,
+            }
+        ],
+    )
+
+    response = TestClient(api_module.app).get(
+        "/evaluation-jobs/active",
+        params={"session_ids": "sess-1,sess-2"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["jobs"]["sess-1"]["status"] == "running"

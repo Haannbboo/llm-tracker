@@ -1,3 +1,4 @@
+import asyncio
 import json
 import os
 import time
@@ -6,7 +7,7 @@ import yaml
 import httpx
 from decimal import Decimal
 from pathlib import Path
-from fastapi import BackgroundTasks, FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException
 from fastapi.staticfiles import StaticFiles
 from config.app import (
     CONFIG,
@@ -29,11 +30,12 @@ from .database import (
     distinct_client_sources,
     fetch_recent_usage,
     fetch_sessions,
-    get_evaluation_job,
+    get_evaluation_job_progress,
     get_session_evaluation,
     get_usage_high_watermark,
     init_db,
     log_usage,
+    list_active_evaluation_jobs_with_progress,
     resolve_base_url_id,
     summarize_sessions,
     summarize_usage_by_provider,
@@ -43,6 +45,7 @@ from .database import (
     upsert_session_evaluation,
 )
 from .evaluation import start_session_evaluation_job
+from .evaluation_worker import load_evaluation_worker_config, run_evaluation_worker
 from contextlib import asynccontextmanager
 from pydantic import BaseModel
 
@@ -98,7 +101,19 @@ class SessionEvaluationUpdate(BaseModel):
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_db()
-    yield
+    stop_event = asyncio.Event()
+    worker_config = load_evaluation_worker_config()
+    worker_task = asyncio.create_task(
+        run_evaluation_worker(stop_event=stop_event, config=worker_config)
+    )
+    try:
+        yield
+    finally:
+        stop_event.set()
+        try:
+            await worker_task
+        except asyncio.CancelledError:
+            pass
 
 
 app = FastAPI(title="llm-tracker-api", lifespan=lifespan)
@@ -464,25 +479,37 @@ async def delete_evaluation(session_id: str):
 @app.post("/sessions/{session_id}/evaluate-with-llm", status_code=202)
 async def evaluate_session_with_llm(
     session_id: str,
-    background_tasks: BackgroundTasks,
 ):
     try:
-        return start_session_evaluation_job(session_id, background_tasks)
+        return start_session_evaluation_job(session_id, trigger="manual")
     except ValueError as e:
         message = str(e)
         if "Session not found" in message:
             raise HTTPException(status_code=404, detail=message)
         if "Unsupported session source" in message:
             raise HTTPException(status_code=400, detail=message)
+        if "Manual evaluation exists" in message:
+            raise HTTPException(status_code=409, detail=message)
         raise
 
 
 @app.get("/poll/{job_id}")
 async def poll_job(job_id: str):
-    job = get_evaluation_job(job_id)
+    job = get_evaluation_job_progress(job_id)
     if job is None:
         raise HTTPException(status_code=404, detail="Job not found")
     return job
+
+
+@app.get("/evaluation-jobs/active")
+async def active_evaluation_jobs(session_ids: str | None = None):
+    parsed_session_ids = [
+        item for item in (session_ids or "").split(",") if item
+    ] or None
+    jobs = list_active_evaluation_jobs_with_progress(
+        session_ids=parsed_session_ids,
+    )
+    return {"jobs": {job["session_id"]: job for job in jobs}}
 
 
 @app.get("/config")

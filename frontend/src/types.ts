@@ -138,6 +138,21 @@ export type SessionEvaluation = {
   evaluated_at: string | null
 }
 
+export type EvaluationJobProgress = {
+  job_id: string
+  kind?: string
+  session_id: string
+  client_source?: string | null
+  status: 'queued' | 'running' | 'succeeded' | 'failed'
+  trigger: 'manual' | 'auto'
+  created_at?: string | null
+  started_at?: string | null
+  finished_at?: string | null
+  ahead_count: number
+  queue_position: number | null
+  error: string | null
+}
+
 export type SessionSummary = {
   session_id: string
   client_source: string

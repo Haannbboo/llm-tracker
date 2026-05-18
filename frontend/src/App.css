@@ -365,6 +365,20 @@
   white-space: nowrap;
 }
 
+.session-evaluation-job-badge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 22px;
+  padding: 2px 6px;
+  border-radius: 6px;
+  border: 1px solid var(--border-color);
+  background: var(--surface-hover);
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
 .session-outcome-solved {
   background: var(--success-bg, #d4edda);
   color: var(--success-text, #155724);
@@ -683,6 +697,105 @@
   color: var(--text-secondary);
   font-size: 13px;
   line-height: 1.5;
+}
+
+.evaluator-queue-panel {
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  margin-bottom: 24px;
+  overflow: hidden;
+}
+
+.evaluator-queue-header {
+  align-items: flex-start;
+  border-bottom: 1px solid var(--border-color);
+  display: flex;
+  gap: 16px;
+  justify-content: space-between;
+  padding: 12px 16px;
+}
+
+.evaluator-queue-title {
+  color: var(--text-primary);
+  font-size: 14px;
+  font-weight: 800;
+}
+
+.evaluator-queue-subtitle {
+  color: var(--text-muted);
+  font-size: 12px;
+  margin-top: 3px;
+}
+
+.evaluator-queue-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.evaluation-job-row {
+  align-items: center;
+  border-bottom: 1px solid var(--border-color);
+  display: grid;
+  gap: 12px;
+  grid-template-columns: 84px minmax(0, 1fr);
+  padding: 10px 16px;
+}
+
+.evaluation-job-row:last-child {
+  border-bottom: 0;
+}
+
+.evaluation-job-status {
+  align-items: center;
+  border-radius: 999px;
+  display: inline-flex;
+  font-size: 11px;
+  font-weight: 800;
+  justify-content: center;
+  min-height: 22px;
+  padding: 2px 8px;
+  white-space: nowrap;
+}
+
+.evaluation-job-status-running {
+  background: var(--badge-success-bg);
+  color: var(--badge-success-text);
+}
+
+.evaluation-job-status-queued {
+  background: var(--surface-hover);
+  border: 1px solid var(--border-color);
+  color: var(--text-secondary);
+}
+
+.evaluation-job-main {
+  min-width: 0;
+}
+
+.evaluation-job-session {
+  align-items: center;
+  color: var(--text-primary);
+  display: flex;
+  flex-wrap: wrap;
+  font-size: 12px;
+  font-weight: 800;
+  gap: 6px;
+}
+
+.evaluation-job-trigger,
+.evaluation-job-source {
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-weight: 700;
+  padding: 2px 6px;
+}
+
+.evaluation-job-meta {
+  color: var(--text-muted);
+  font-size: 11px;
+  margin-top: 3px;
 }
 
 .sessions-empty-state {

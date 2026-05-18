@@ -36,7 +36,7 @@ export function InsightCards({
         id: 'cost',
         title: t('Top Cost Driver'),
         value: `${topCost.model}`,
-        detail: formatCost(value(topCost.total_cost_usd)),
+        detail: formatCost(value(topCost.total_cost_usd), 2),
         icon: '💰',
         clickable: true,
         metadata: { provider: topCost.provider, model: topCost.model }

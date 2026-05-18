@@ -135,21 +135,21 @@ export function TrendChart({
                     </TooltipRow>
                     {hoveredData.total_cost_usd !== null && value(hoveredData.total_cost_usd) > 0 && (
                       <TooltipRow label={t('Est. Cost:')} labelColor="#f472b6">
-                        <span style={{ fontWeight: 800, color: '#f472b6' }}>{formatCost(hoveredData.total_cost_usd)}</span>
+                        <span style={{ fontWeight: 800, color: '#f472b6' }}>{formatCost(hoveredData.total_cost_usd, 4)}</span>
                       </TooltipRow>
                     )}
                   </>
                 ) : metric === 'cost' ? (
                   <>
                     <TooltipRow label={t('Input Cost:')} labelColor="#d97706">
-                      <span style={{ fontWeight: 600 }}>{formatCost(hoveredData.input_cost_usd)}</span>
+                      <span style={{ fontWeight: 600 }}>{formatCost(hoveredData.input_cost_usd, 4)}</span>
                     </TooltipRow>
                     <TooltipRow label={t('Output Cost:')} labelColor="#a855f7">
-                      <span style={{ fontWeight: 600 }}>{formatCost(hoveredData.output_cost_usd)}</span>
+                      <span style={{ fontWeight: 600 }}>{formatCost(hoveredData.output_cost_usd, 4)}</span>
                     </TooltipRow>
                     <TooltipDivider />
                     <TooltipRow label={t('Total Cost:')}>
-                      <span style={{ fontWeight: 800 }}>{formatCost(hoveredData.total_cost_usd)}</span>
+                      <span style={{ fontWeight: 800 }}>{formatCost(hoveredData.total_cost_usd, 4)}</span>
                     </TooltipRow>
                     <TooltipRow label={t('Tokens:')}>
                       <span style={{ fontWeight: 600 }}>{formatNumber(value(hoveredData.total_tokens))}</span>

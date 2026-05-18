@@ -83,6 +83,167 @@ def test_parse_requires_command(cli_module):
     assert result == 2
 
 
+def test_summary_command_evaluates_and_updates_session_by_default(
+    cli_module, database_module, isolated_home, monkeypatch, capsys
+):
+    db_path = str(isolated_home / "usage.db")
+    database_module.init_db(db_path)
+    monkeypatch.setitem(cli_module.CONFIG["db"], "url", db_path)
+
+    with database_module.Session(database_module.get_engine(db_path)) as session:
+        session.add(
+            database_module.SessionRecord(
+                session_id="sess-summary",
+                client_source="codex",
+                started="2026-05-14T10:00:00+00:00",
+                ended="2026-05-14T10:30:00+00:00",
+                updated_at="2026-05-14T10:30:00+00:00",
+            )
+        )
+        session.commit()
+
+    session_dir = isolated_home / ".codex" / "sessions" / "2026" / "05" / "14"
+    session_dir.mkdir(parents=True)
+    (session_dir / "rollout-sess-summary.jsonl").write_text(
+        "\n".join(
+            [
+                json.dumps(
+                    {
+                        "type": "response_item",
+                        "payload": {
+                            "type": "message",
+                            "role": "user",
+                            "content": [
+                                {"type": "input_text", "text": "Fix session summary"}
+                            ],
+                        },
+                    }
+                ),
+                json.dumps(
+                    {
+                        "type": "response_item",
+                        "payload": {
+                            "type": "message",
+                            "role": "assistant",
+                            "content": [
+                                {
+                                    "type": "output_text",
+                                    "text": "Implemented and verified the summary command.",
+                                }
+                            ],
+                        },
+                    }
+                ),
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    def fake_run(**kwargs):
+        assert kwargs["args"][0:5] == [
+            "codex",
+            "-c",
+            "otel.enabled=false",
+            "exec",
+            "--ephemeral",
+        ]
+        assert kwargs["env"]["OTEL_SDK_DISABLED"] == "true"
+        assert "USER:\nFix session summary" in kwargs["input"]
+        return subprocess.CompletedProcess(
+            args=kwargs["args"],
+            returncode=0,
+            stdout=json.dumps(
+                {
+                    "task_title": "Add summary command",
+                    "summary": "Implemented and verified the session summary command.",
+                    "outcome": "solved",
+                    "confidence": 0.91,
+                    "evidence": ["Assistant said implementation was verified"],
+                    "failure_reason": None,
+                }
+            ),
+            stderr="",
+        )
+
+    monkeypatch.setattr(cli_module.evaluation_subprocess, "run", fake_run)
+
+    code = cli_module.main(["summary", "sess-summary"])
+
+    captured = capsys.readouterr()
+    saved = database_module.get_session_evaluation("sess-summary", db_path=db_path)
+    assert code == 0
+    assert saved is not None
+    assert saved["outcome"] == "solved"
+    assert saved["source"] == "llm"
+    assert saved["task_title"] == "Add summary command"
+    assert "Add summary command" in captured.out
+    assert "solved" in captured.out
+
+
+def test_summary_command_no_update_prints_without_persisting(
+    cli_module, database_module, isolated_home, monkeypatch, capsys
+):
+    db_path = str(isolated_home / "usage.db")
+    database_module.init_db(db_path)
+    monkeypatch.setitem(cli_module.CONFIG["db"], "url", db_path)
+
+    with database_module.Session(database_module.get_engine(db_path)) as session:
+        session.add(
+            database_module.SessionRecord(
+                session_id="sess-preview",
+                client_source="codex",
+                started="2026-05-14T10:00:00+00:00",
+                ended="2026-05-14T10:30:00+00:00",
+                updated_at="2026-05-14T10:30:00+00:00",
+            )
+        )
+        session.commit()
+
+    session_dir = isolated_home / ".codex" / "sessions" / "2026" / "05" / "14"
+    session_dir.mkdir(parents=True)
+    (session_dir / "rollout-sess-preview.jsonl").write_text(
+        json.dumps(
+            {
+                "type": "response_item",
+                "payload": {
+                    "type": "message",
+                    "role": "user",
+                    "content": [{"type": "input_text", "text": "Preview summary"}],
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    def fake_run(**kwargs):
+        return subprocess.CompletedProcess(
+            args=kwargs["args"],
+            returncode=0,
+            stdout=json.dumps(
+                {
+                    "task_title": "Preview summary",
+                    "summary": "Previewed the session outcome.",
+                    "outcome": "partial",
+                    "confidence": 0.75,
+                    "evidence": ["Only one user turn was available"],
+                    "failure_reason": None,
+                }
+            ),
+            stderr="",
+        )
+
+    monkeypatch.setattr(cli_module.evaluation_subprocess, "run", fake_run)
+
+    code = cli_module.main(["summary", "--no-update", "sess-preview"])
+
+    captured = capsys.readouterr()
+    saved = database_module.get_session_evaluation("sess-preview", db_path=db_path)
+    assert code == 0
+    assert saved is None
+    assert "Preview summary" in captured.out
+    assert "partial" in captured.out
+
+
 class FakeClient:
     def __init__(self):
         self.before_calls = 0
@@ -948,6 +1109,46 @@ def test_llm_tracker_script_invokes_cli_outside_repo_root(tmp_path):
 
     assert result.returncode == 2
     assert "usage: llm-tracker [options] -- <command> [args...]" in result.stderr
+
+
+def test_llm_tracker_help_lists_available_commands(tmp_path):
+    script = Path(__file__).resolve().parents[1] / "scripts" / "llm-tracker"
+    env = os.environ.copy()
+    env["PYTHONDONTWRITEBYTECODE"] = "1"
+
+    result = subprocess.run(
+        [str(script), "--help"],
+        cwd=tmp_path,
+        env=env,
+        text=True,
+        capture_output=True,
+    )
+
+    assert result.returncode == 0
+    assert "available commands:" in result.stdout
+    assert "--summary-dest {stdout,stderr,file}" in result.stdout
+    assert "choose where the final usage summary is written" in result.stdout
+    assert (
+        "bootstrap                install deps, configure agents, and start services"
+        in result.stdout
+    )
+    assert "start                    start llm-tracker services" in result.stdout
+    assert (
+        "stop [program...]        stop all services or named services: llm-tracker-proxy, llm-tracker-api, llm-tracker-otlp"
+        in result.stdout
+    )
+    assert (
+        "restart [program...]     restart all services or named services: llm-tracker-proxy, llm-tracker-api, llm-tracker-otlp"
+        in result.stdout
+    )
+    assert "status                   show service status" in result.stdout
+    assert (
+        "summary <session_id>     show the saved LLM summary for a tracked session"
+        in result.stdout
+    )
+    assert "codex ...                run Codex with tracking" in result.stdout
+    assert "claude ...               run Claude Code with tracking" in result.stdout
+    assert "gemini ...               run Gemini CLI with tracking" in result.stdout
 
 
 def test_llm_tracker_script_injects_isolated_otlp_env_without_db_leak(

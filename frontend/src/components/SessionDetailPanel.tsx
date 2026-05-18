@@ -3,7 +3,7 @@ import { ClickToCopy } from './CopyButton'
 import { t } from '../i18n/index.ts'
 import { formatCompact, formatCost, formatDuration, formatLatency, formatNumber, formatTime, value, getModelIcon } from '../utils'
 import { getModelBadgeBackgroundColor, getModelTextColor } from '../model-badge'
-import type { SessionEvaluation, SessionOutcome, SessionSummary } from '../types'
+import type { EvaluationJobProgress, SessionEvaluation, SessionOutcome, SessionSummary } from '../types'
 
 // ─── Shared session detail content (used by both inline and panel) ─────────────
 
@@ -20,12 +20,14 @@ export function SessionDetailContent({
   showToast,
   onEvaluationUpdate,
   onEvaluationPersisted,
+  activeEvaluationJob,
 }: {
   session: SessionSummary
   onNavigateToLogs: (session: SessionSummary, filters?: SessionLogFilters) => void
   showToast?: (msg: string) => void
   onEvaluationUpdate?: (evaluation: SessionEvaluation | null) => void
   onEvaluationPersisted?: () => void
+  activeEvaluationJob?: EvaluationJobProgress | null
 }) {
   const [localEvaluationOverride, setLocalEvaluationOverride] = useState<{ sessionId: string; evaluation: SessionEvaluation | null } | null>(null)
   const [llmEvaluationStatus, setLlmEvaluationStatus] = useState<'idle' | 'queued' | 'running' | 'succeeded' | 'failed'>('idle')
@@ -42,6 +44,15 @@ export function SessionDetailContent({
   }, [])
 
   const isLlmEvaluationRunning = llmEvaluationStatus === 'queued' || llmEvaluationStatus === 'running'
+  const activeJobStatus = activeEvaluationJob?.status
+  const activeJobRunning = activeJobStatus === 'queued' || activeJobStatus === 'running'
+  const displayEvaluationRunning = isLlmEvaluationRunning || activeJobRunning
+  const progressLabel =
+    activeEvaluationJob?.status === 'queued'
+      ? `${t('Queued')}${activeEvaluationJob.queue_position ? ` #${activeEvaluationJob.queue_position}` : ''}`
+      : activeEvaluationJob?.status === 'running'
+        ? t('Evaluating...')
+        : null
 
   const refreshPersistedEvaluation = async () => {
     const response = await fetch(`/sessions/${encodeURIComponent(session.session_id)}/evaluation`)
@@ -81,7 +92,7 @@ export function SessionDetailContent({
   }
 
   const startLlmEvaluation = async () => {
-    if (isLlmEvaluationRunning) return
+    if (displayEvaluationRunning) return
     if (llmEvaluationPollRef.current) clearTimeout(llmEvaluationPollRef.current)
 
     setLocalEvaluationOverride(null)
@@ -380,10 +391,10 @@ export function SessionDetailContent({
         </div>
         <button
           className="session-eval-btn"
-          disabled={isLlmEvaluationRunning}
+          disabled={displayEvaluationRunning}
           onClick={startLlmEvaluation}
         >
-          {isLlmEvaluationRunning ? t('Evaluating...') : t('Evaluate with LLM')}
+          {progressLabel || (isLlmEvaluationRunning ? t('Evaluating...') : t('Evaluate with LLM'))}
         </button>
       </div>
     </div>

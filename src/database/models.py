@@ -196,6 +196,9 @@ class EvaluationJob(Base):
     kind: Mapped[str] = mapped_column(String, nullable=False)
     session_id: Mapped[str] = mapped_column(String, nullable=False)
     client_source: Mapped[str | None] = mapped_column(String, nullable=True)
+    trigger: Mapped[str] = mapped_column(
+        String, nullable=False, server_default=text("'manual'")
+    )
     status: Mapped[str] = mapped_column(String, nullable=False)
     created_at: Mapped[str] = mapped_column(String, nullable=False)
     started_at: Mapped[str | None] = mapped_column(String, nullable=True)

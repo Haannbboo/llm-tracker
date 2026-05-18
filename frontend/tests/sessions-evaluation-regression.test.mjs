@@ -100,6 +100,29 @@ describe('Session evaluation UI', () => {
     assert.match(detail, /pollResult\.status === 'failed'/)
     assert.match(detail, /showToast\?\.\('Failed to evaluate session with LLM'\)/)
   })
+
+  test('dashboard polls active evaluation jobs while sessions tab is open', () => {
+    assert.match(dashboard, /evaluation-jobs\/active/)
+    assert.match(dashboard, /setActiveEvaluationJobs/)
+    assert.match(dashboard, /setTimeout\(pollActiveEvaluationJobs, 2000\)/)
+  })
+
+  test('dashboard displays a global evaluator queue monitor', () => {
+    assert.match(dashboard, /activeEvaluationJobList/)
+    assert.match(dashboard, /Evaluator Queue/)
+    assert.match(dashboard, /evaluator-queue-panel/)
+    assert.match(dashboard, /evaluation-job-row/)
+    assert.doesNotMatch(dashboard, /url\.searchParams\.set\('session_ids'/)
+  })
+
+  test('session detail displays queued and running evaluation progress', () => {
+    assert.match(types, /export type EvaluationJobProgress/)
+    assert.match(detail, /activeEvaluationJob/)
+    assert.match(detail, /Queued/)
+    assert.match(detail, /queue_position/)
+    assert.match(detail, /llmEvaluationStatus === 'queued' \|\| llmEvaluationStatus === 'running'/)
+    assert.match(dashboard, /session-evaluation-job-badge/)
+  })
 })
 
 describe('Session evaluation CSS', () => {
@@ -113,6 +136,7 @@ describe('Session evaluation CSS', () => {
     assert.match(css, /\.session-eval-btn/)
     assert.match(css, /\.session-eval-buttons/)
     assert.match(css, /\.session-eval-section/)
+    assert.match(css, /\.session-evaluation-job-badge/)
   })
 })
 
@@ -124,5 +148,6 @@ describe('Session evaluation i18n', () => {
     assert.match(zh, /'Evaluation'/)
     assert.match(zh, /'Evaluate with LLM'/)
     assert.match(zh, /'Evaluating\.\.\.'/)
+    assert.match(zh, /'Queued'/)
   })
 })

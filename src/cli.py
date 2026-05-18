@@ -22,6 +22,9 @@ from .database import (
     merge_usage_database,
     summarize_usage_window,
 )
+from . import evaluation as evaluation_module
+
+evaluation_subprocess = evaluation_module.subprocess
 
 
 class ApiError(RuntimeError):
@@ -145,9 +148,36 @@ def build_proxy_base_urls() -> tuple[str, str]:
     return f"http://{host}:{port}/v1", f"http://{host}:{port}"
 
 
+class CliHelpFormatter(argparse.RawDescriptionHelpFormatter):
+    def __init__(self, prog: str):
+        super().__init__(prog, max_help_position=30)
+
+
 def parse_args(argv: list[str]) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(prog="llm-tracker")
-    parser.add_argument("--json", action="store_true")
+    parser = argparse.ArgumentParser(
+        prog="llm-tracker",
+        description=("Track an agent command or inspect a tracked session summary."),
+        epilog=(
+            "available commands:\n"
+            "  bootstrap                install deps, configure agents, and start services\n"
+            "  start                    start llm-tracker services\n"
+            "  stop [program...]        stop all services or named services: llm-tracker-proxy, llm-tracker-api, llm-tracker-otlp\n"
+            "  restart [program...]     restart all services or named services: llm-tracker-proxy, llm-tracker-api, llm-tracker-otlp\n"
+            "  status                   show service status\n"
+            "  summary <session_id>     show the saved LLM summary for a tracked session\n"
+            "  codex ...                run Codex with tracking\n"
+            "  claude ...               run Claude Code with tracking\n"
+            "  gemini ...               run Gemini CLI with tracking\n"
+            "  <any-command> ...        run any command with tracking\n\n"
+            "Use '--' only when passing llm-tracker flags before the child command."
+        ),
+        formatter_class=CliHelpFormatter,
+    )
+    parser.add_argument(
+        "--json",
+        action="store_true",
+        help="write the final usage summary as compact JSON",
+    )
     parser.add_argument(
         "--usage-only",
         action="store_true",
@@ -157,17 +187,51 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         "--summary-dest",
         choices=("stdout", "stderr", "file"),
         default="stderr",
+        help="choose where the final usage summary is written",
     )
-    parser.add_argument("--summary-file")
-    parser.add_argument("--wait-ms", type=int, default=3000)
-    parser.add_argument("--poll-ms", type=int, default=250)
-    parser.add_argument("--proxy-env", action="store_true")
-    parser.add_argument("--no-summary", action="store_true")
+    parser.add_argument(
+        "--summary-file",
+        help="path to write the summary when --summary-dest=file",
+    )
+    parser.add_argument(
+        "--wait-ms",
+        type=int,
+        default=3000,
+        help="max time in milliseconds to wait for tracked usage after the command exits",
+    )
+    parser.add_argument(
+        "--poll-ms",
+        type=int,
+        default=250,
+        help="poll interval in milliseconds while waiting for the final summary",
+    )
+    parser.add_argument(
+        "--proxy-env",
+        action="store_true",
+        help="set OPENAI_BASE_URL and ANTHROPIC_BASE_URL for the child command",
+    )
+    parser.add_argument(
+        "--no-summary",
+        action="store_true",
+        help="run tracking but skip printing the final usage summary",
+    )
     parser.add_argument("command", nargs=argparse.REMAINDER)
     args = parser.parse_args(argv)
     if args.command and args.command[0] == "--":
         args.command = args.command[1:]
     return args
+
+
+def parse_session_summary_args(command: list[str]) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(prog="llm-tracker summary")
+    parser.add_argument("--json", action="store_true")
+    parser.add_argument(
+        "--no-update",
+        action="store_true",
+        help="print the LLM summary without updating the sessions database row",
+    )
+    parser.add_argument("session_id")
+    return parser.parse_args(command[1:])
 
 
 def options_from_args(args: argparse.Namespace) -> RunOptions:
@@ -539,6 +603,60 @@ def wait_for_usage_flush(client: UsageApiClient, options: RunOptions) -> None:
     poll_summary(client, after_id=0, options=options)
 
 
+def run_session_summary_command(
+    command: list[str],
+    *,
+    json_output: bool = False,
+) -> int:
+    summary_args = parse_session_summary_args(command)
+    use_json = json_output or bool(summary_args.json)
+    try:
+        evaluation = evaluation_module.summarize_session_with_llm(
+            summary_args.session_id,
+            db_path=configured_main_db_url(),
+            update=not summary_args.no_update,
+        )
+    except Exception as exc:
+        print(f"llm-tracker summary failed: {exc}", file=sys.stderr)
+        return 1
+
+    if use_json:
+        print(json.dumps(evaluation, separators=(",", ":")))
+    else:
+        print(format_session_evaluation_summary(summary_args.session_id, evaluation))
+    return 0
+
+
+def format_session_evaluation_summary(
+    session_id: str,
+    evaluation: dict[str, Any],
+) -> str:
+    lines = [
+        "llm-tracker session summary",
+        f"session: {session_id}",
+        f"outcome: {evaluation.get('outcome') or 'unknown'}",
+    ]
+    confidence = evaluation.get("confidence")
+    if confidence is not None:
+        lines.append(f"confidence: {float(confidence):.2f}")
+    task_title = evaluation.get("task_title")
+    if task_title:
+        lines.append(f"title: {task_title}")
+    summary = evaluation.get("summary")
+    if summary:
+        lines.extend(["", str(summary)])
+    evidence = evaluation.get("evidence")
+    if evidence:
+        lines.append("")
+        lines.append("evidence:")
+        for item in evidence:
+            lines.append(f"  - {item}")
+    failure_reason = evaluation.get("failure_reason")
+    if failure_reason:
+        lines.extend(["", f"failure reason: {failure_reason}"])
+    return "\n".join(lines) + "\n"
+
+
 def write_summary(summary: dict[str, Any], options: RunOptions) -> None:
     if options.json_output:
         content = json.dumps(summary, separators=(",", ":")) + "\n"
@@ -612,6 +730,9 @@ def main(argv: list[str] | None = None) -> int:
     if not args.command:
         print("usage: llm-tracker [options] -- <command> [args...]", file=sys.stderr)
         return 2
+    if args.command[0] == "summary":
+        return run_session_summary_command(args.command, json_output=args.json)
+
     options = options_from_args(args)
     if options.summary_dest == "file" and not options.summary_file:
         print("--summary-file is required when --summary-dest=file", file=sys.stderr)

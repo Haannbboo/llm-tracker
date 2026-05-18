@@ -1,10 +1,15 @@
+import { useState } from 'react'
 import { formatCompact, formatCost, formatRate, formatThroughput } from '../utils'
+import { ChartTooltip, TooltipDivider, TooltipRow } from './ChartTooltip'
 import { t } from '../i18n/index.ts'
 
 export type BarItem = {
   name: string
   icon: React.ReactNode
   tokens: number
+  promptTokens?: number
+  completionTokens?: number
+  cachedTokens?: number
   cost: number
   throughput?: number | null
   pricePerMillion?: number | null
@@ -32,6 +37,8 @@ export function HorizontalBarChart({
   maxCount?: number
   children?: React.ReactNode
 }) {
+  const [hoveredItem, setHoveredItem] = useState<string | null>(null)
+
   const getMetricValue = (item: BarItem) => {
     if (metric === 'tokens') return item.tokens
     if (metric === 'cost') return item.cost
@@ -49,12 +56,34 @@ export function HorizontalBarChart({
     1
   )
 
+  const hovered = hoveredItem ? sorted.find((item) => item.name === hoveredItem) ?? null : null
+
   return (
     <div className="widget" style={{ flex: 1 }}>
       <div className="widget-header">
         <span>{icon} {title}</span>
       </div>
-      <div style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
+      <div style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '16px', position: 'relative' }}>
+        {metric === 'tokens' && hovered && (
+          <ChartTooltip left="50%">
+            <div style={{ fontWeight: 600, marginBottom: '8px', borderBottom: '1px solid var(--border-color)', paddingBottom: '4px', fontSize: '13px' }}>
+              {hovered.name}
+            </div>
+            <TooltipRow label={t('Cached:')} labelColor="var(--color-green)">
+              <span style={{ fontWeight: 600 }}>{formatCompact(hovered.cachedTokens ?? 0)}</span>
+            </TooltipRow>
+            <TooltipRow label={t('Input:')} labelColor="#94a3b8">
+              <span style={{ fontWeight: 600 }}>{formatCompact(Math.max(0, (hovered.promptTokens ?? 0) - (hovered.cachedTokens ?? 0)))}</span>
+            </TooltipRow>
+            <TooltipRow label={t('Output:')} labelColor="var(--color-blue)">
+              <span style={{ fontWeight: 600 }}>{formatCompact(hovered.completionTokens ?? 0)}</span>
+            </TooltipRow>
+            <TooltipDivider />
+            <TooltipRow label={t('Total Tokens:')}>
+              <span style={{ fontWeight: 800 }}>{formatCompact(hovered.tokens)}</span>
+            </TooltipRow>
+          </ChartTooltip>
+        )}
         {sorted.length === 0 ? (
           <div style={{ padding: '40px', textAlign: 'center', color: 'var(--text-muted)' }}>{t('No data available')}</div>
         ) : (
@@ -63,7 +92,12 @@ export function HorizontalBarChart({
             const percentage = (currentVal / maxValue) * 100
 
             return (
-              <div key={`${s.name}-${index}`} style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+              <div
+                key={`${s.name}-${index}`}
+                style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}
+                onMouseEnter={() => setHoveredItem(s.name)}
+                onMouseLeave={() => setHoveredItem((current) => current === s.name ? null : current)}
+              >
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '12px' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontWeight: 600 }}>
                     {s.icon}

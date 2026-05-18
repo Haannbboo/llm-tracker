@@ -121,6 +121,7 @@ def migrate_database(db_path: str | None = None) -> list[str]:
                     kind TEXT NOT NULL,
                     session_id TEXT NOT NULL,
                     client_source TEXT,
+                    trigger TEXT NOT NULL DEFAULT 'manual',
                     status TEXT NOT NULL,
                     created_at TEXT NOT NULL,
                     started_at TEXT,
@@ -135,6 +136,7 @@ def migrate_database(db_path: str | None = None) -> list[str]:
                     kind TEXT NOT NULL,
                     session_id TEXT NOT NULL,
                     client_source TEXT,
+                    trigger TEXT NOT NULL DEFAULT 'manual',
                     status TEXT NOT NULL,
                     created_at TEXT NOT NULL,
                     started_at TEXT,
@@ -151,6 +153,14 @@ def migrate_database(db_path: str | None = None) -> list[str]:
     if _table_exists(engine, "evaluation_jobs"):
         if _ensure_evaluation_jobs_active_unique_index(engine):
             applied.append("evaluation_jobs.active_unique_index")
+        if _ensure_column(
+            engine,
+            "evaluation_jobs",
+            "trigger",
+            sqlite_definition="TEXT NOT NULL DEFAULT 'manual'",
+            postgresql_definition="TEXT NOT NULL DEFAULT 'manual'",
+        ):
+            applied.append("evaluation_jobs.trigger")
 
     if _table_exists(engine, "usage"):
         if _ensure_column(

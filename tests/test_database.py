@@ -3353,6 +3353,41 @@ def test_create_session_evaluation_job_persists_queued_job(
     assert polled == job
 
 
+def test_create_session_evaluation_job_records_trigger(database_module, isolated_home):
+    db_path = str(isolated_home / "usage.db")
+    database_module.init_db(db_path)
+    _insert_session_record(
+        database_module, db_path, "sess-manual", client_source="codex"
+    )
+
+    manual = database_module.create_session_evaluation_job(
+        session_id="sess-manual",
+        client_source="codex",
+        trigger="manual",
+        db_path=db_path,
+    )
+
+    assert manual["trigger"] == "manual"
+
+
+def test_create_session_evaluation_job_defaults_trigger_to_manual(
+    database_module, isolated_home
+):
+    db_path = str(isolated_home / "usage.db")
+    database_module.init_db(db_path)
+    _insert_session_record(
+        database_module, db_path, "sess-default", client_source="codex"
+    )
+
+    job = database_module.create_session_evaluation_job(
+        session_id="sess-default",
+        client_source="codex",
+        db_path=db_path,
+    )
+
+    assert job["trigger"] == "manual"
+
+
 def test_find_active_session_evaluation_job_reuses_non_stale_job(
     database_module, isolated_home
 ):
@@ -3423,6 +3458,434 @@ def test_stale_session_evaluation_job_is_failed_before_new_job(
     assert stale["error"] == "Evaluation job timed out"
 
 
+def test_running_session_evaluation_job_uses_started_at_for_stale_check(
+    database_module, isolated_home
+):
+    db_path = str(isolated_home / "usage.db")
+    database_module.init_db(db_path)
+    _insert_session_record(
+        database_module, db_path, "sess-running", client_source="codex"
+    )
+
+    job = database_module.create_session_evaluation_job(
+        session_id="sess-running",
+        client_source="codex",
+        created_at="2026-05-11T10:00:00+00:00",
+        db_path=db_path,
+    )
+    claimed = database_module.claim_next_evaluation_job(
+        now="2026-05-11T10:05:00+00:00",
+        db_path=db_path,
+    )
+
+    active = database_module.find_active_session_evaluation_job(
+        session_id="sess-running",
+        now="2026-05-11T10:06:00+00:00",
+        db_path=db_path,
+    )
+
+    assert claimed["job_id"] == job["job_id"]
+    assert active is not None
+    assert active["job_id"] == job["job_id"]
+    assert active["status"] == "running"
+
+
+def test_claim_next_evaluation_job_orders_manual_before_auto_then_newest_session(
+    database_module, isolated_home
+):
+    db_path = str(isolated_home / "usage.db")
+    database_module.init_db(db_path)
+    _insert_session_record(
+        database_module,
+        db_path,
+        "old-auto",
+        client_source="codex",
+        updated_at="2026-05-14T10:00:00+00:00",
+    )
+    _insert_session_record(
+        database_module,
+        db_path,
+        "new-auto",
+        client_source="codex",
+        updated_at="2026-05-14T11:00:00+00:00",
+    )
+    _insert_session_record(
+        database_module,
+        db_path,
+        "manual",
+        client_source="codex",
+        updated_at="2026-05-14T09:00:00+00:00",
+    )
+    database_module.create_session_evaluation_job(
+        session_id="old-auto",
+        client_source="codex",
+        trigger="auto",
+        db_path=db_path,
+    )
+    database_module.create_session_evaluation_job(
+        session_id="new-auto",
+        client_source="codex",
+        trigger="auto",
+        db_path=db_path,
+    )
+    database_module.create_session_evaluation_job(
+        session_id="manual",
+        client_source="codex",
+        trigger="manual",
+        db_path=db_path,
+    )
+
+    first = database_module.claim_next_evaluation_job(db_path=db_path)
+    second = database_module.claim_next_evaluation_job(db_path=db_path)
+    third = database_module.claim_next_evaluation_job(db_path=db_path)
+
+    assert first["session_id"] == "manual"
+    assert first["status"] == "running"
+    assert second["session_id"] == "new-auto"
+    assert third["session_id"] == "old-auto"
+
+
+def test_claim_next_evaluation_job_skips_candidate_claimed_by_competing_worker(
+    database_module, isolated_home, monkeypatch
+):
+    db_path = str(isolated_home / "usage.db")
+    database_module.init_db(db_path)
+    _insert_session_record(
+        database_module,
+        db_path,
+        "first",
+        client_source="codex",
+        updated_at="2026-05-14T11:00:00+00:00",
+    )
+    _insert_session_record(
+        database_module,
+        db_path,
+        "second",
+        client_source="codex",
+        updated_at="2026-05-14T10:00:00+00:00",
+    )
+    first = database_module.create_session_evaluation_job(
+        session_id="first",
+        client_source="codex",
+        trigger="manual",
+        db_path=db_path,
+    )
+    second = database_module.create_session_evaluation_job(
+        session_id="second",
+        client_source="codex",
+        trigger="manual",
+        db_path=db_path,
+    )
+
+    original_next_queued_job_id = database_module.evaluation_jobs._next_queued_job_id
+    returned_stale_candidate = False
+
+    def stale_candidate_once(session):
+        nonlocal returned_stale_candidate
+        if returned_stale_candidate:
+            return original_next_queued_job_id(session)
+        returned_stale_candidate = True
+        with database_module.Session(database_module.get_engine(db_path)) as session:
+            job = session.get(database_module.EvaluationJob, first["job_id"])
+            job.status = "running"
+            job.started_at = "2026-05-14T11:01:00+00:00"
+            session.commit()
+        return first["job_id"]
+
+    monkeypatch.setattr(
+        database_module.evaluation_jobs,
+        "_next_queued_job_id",
+        stale_candidate_once,
+    )
+
+    claimed = database_module.claim_next_evaluation_job(
+        now="2026-05-14T11:02:00+00:00",
+        db_path=db_path,
+    )
+
+    assert claimed["job_id"] == second["job_id"]
+    assert (
+        database_module.get_evaluation_job(first["job_id"], db_path=db_path)[
+            "started_at"
+        ]
+        == "2026-05-14T11:01:00+00:00"
+    )
+
+
+def test_get_evaluation_job_progress_reports_queue_position(
+    database_module, isolated_home
+):
+    db_path = str(isolated_home / "usage.db")
+    database_module.init_db(db_path)
+    _insert_session_record(database_module, db_path, "running", client_source="codex")
+    _insert_session_record(database_module, db_path, "queued-1", client_source="codex")
+    _insert_session_record(database_module, db_path, "queued-2", client_source="codex")
+
+    running = database_module.create_session_evaluation_job(
+        session_id="running",
+        client_source="codex",
+        trigger="manual",
+        db_path=db_path,
+    )
+    queued_1 = database_module.create_session_evaluation_job(
+        session_id="queued-1",
+        client_source="codex",
+        trigger="manual",
+        db_path=db_path,
+    )
+    queued_2 = database_module.create_session_evaluation_job(
+        session_id="queued-2",
+        client_source="codex",
+        trigger="auto",
+        db_path=db_path,
+    )
+    database_module.claim_next_evaluation_job(db_path=db_path)
+
+    assert (
+        database_module.get_evaluation_job_progress(running["job_id"], db_path=db_path)[
+            "queue_position"
+        ]
+        == 1
+    )
+    queued_progress = database_module.get_evaluation_job_progress(
+        queued_1["job_id"], db_path=db_path
+    )
+    assert queued_progress["ahead_count"] == 1
+    assert queued_progress["queue_position"] == 2
+    assert (
+        database_module.get_evaluation_job_progress(
+            queued_2["job_id"], db_path=db_path
+        )["queue_position"]
+        == 3
+    )
+
+
+def test_evaluation_job_active_helpers_count_list_and_fail_stale_running_jobs(
+    database_module, isolated_home
+):
+    db_path = str(isolated_home / "usage.db")
+    database_module.init_db(db_path)
+    _insert_session_record(database_module, db_path, "stale", client_source="codex")
+    _insert_session_record(database_module, db_path, "fresh", client_source="codex")
+
+    stale = database_module.create_session_evaluation_job(
+        session_id="stale",
+        client_source="codex",
+        trigger="manual",
+        created_at="2026-05-14T09:00:00+00:00",
+        db_path=db_path,
+    )
+    fresh = database_module.create_session_evaluation_job(
+        session_id="fresh",
+        client_source="codex",
+        trigger="auto",
+        created_at="2026-05-14T09:03:00+00:00",
+        db_path=db_path,
+    )
+    first = database_module.claim_next_evaluation_job(
+        now="2026-05-14T09:00:00+00:00",
+        db_path=db_path,
+    )
+    second = database_module.claim_next_evaluation_job(
+        now="2026-05-14T09:03:00+00:00",
+        db_path=db_path,
+    )
+
+    assert [first["job_id"], second["job_id"]] == [stale["job_id"], fresh["job_id"]]
+    assert database_module.count_running_evaluation_jobs(db_path=db_path) == 2
+    active = database_module.list_active_evaluation_jobs(
+        session_ids=["fresh"],
+        db_path=db_path,
+    )
+    assert [job["job_id"] for job in active] == [fresh["job_id"]]
+
+    failed_count = database_module.fail_stale_running_evaluation_jobs(
+        now="2026-05-14T09:06:00+00:00",
+        db_path=db_path,
+    )
+
+    assert failed_count == 1
+    assert database_module.count_running_evaluation_jobs(db_path=db_path) == 1
+    assert (
+        database_module.get_evaluation_job(
+            stale["job_id"],
+            db_path=db_path,
+        )["status"]
+        == "failed"
+    )
+    assert (
+        database_module.get_evaluation_job(
+            fresh["job_id"],
+            db_path=db_path,
+        )["status"]
+        == "running"
+    )
+
+
+def test_fail_stale_running_evaluation_jobs_does_not_overwrite_terminal_update(
+    database_module, isolated_home, monkeypatch
+):
+    db_path = str(isolated_home / "usage.db")
+    database_module.init_db(db_path)
+    _insert_session_record(database_module, db_path, "stale", client_source="codex")
+
+    job = database_module.create_session_evaluation_job(
+        session_id="stale",
+        client_source="codex",
+        trigger="manual",
+        created_at="2026-05-14T09:00:00+00:00",
+        db_path=db_path,
+    )
+    database_module.claim_next_evaluation_job(
+        now="2026-05-14T09:00:00+00:00",
+        db_path=db_path,
+    )
+    original_fail_stale_job = getattr(
+        database_module.evaluation_jobs,
+        "_fail_stale_evaluation_job",
+        None,
+    )
+
+    def terminal_update_before_stale_fail(session, stale_job, finished_at):
+        session.execute(
+            database_module.evaluation_jobs.update(database_module.EvaluationJob)
+            .where(database_module.EvaluationJob.job_id == stale_job.job_id)
+            .values(
+                status="succeeded",
+                finished_at="2026-05-14T09:05:30+00:00",
+                error=None,
+            )
+            .execution_options(synchronize_session=False)
+        )
+        return original_fail_stale_job(session, stale_job, finished_at)
+
+    monkeypatch.setattr(
+        database_module.evaluation_jobs,
+        "_fail_stale_evaluation_job",
+        terminal_update_before_stale_fail,
+        raising=False,
+    )
+
+    failed_count = database_module.fail_stale_running_evaluation_jobs(
+        now="2026-05-14T09:06:00+00:00",
+        db_path=db_path,
+    )
+
+    current = database_module.get_evaluation_job(job["job_id"], db_path=db_path)
+    assert failed_count == 0
+    assert current["status"] == "succeeded"
+    assert current["finished_at"] == "2026-05-14T09:05:30+00:00"
+
+
+def test_find_active_session_evaluation_job_does_not_overwrite_terminal_update(
+    database_module, isolated_home, monkeypatch
+):
+    db_path = str(isolated_home / "usage.db")
+    database_module.init_db(db_path)
+    _insert_session_record(database_module, db_path, "stale", client_source="codex")
+
+    job = database_module.create_session_evaluation_job(
+        session_id="stale",
+        client_source="codex",
+        trigger="manual",
+        created_at="2026-05-14T09:00:00+00:00",
+        db_path=db_path,
+    )
+    original_fail_stale_job = getattr(
+        database_module.evaluation_jobs,
+        "_fail_stale_evaluation_job",
+        None,
+    )
+
+    def terminal_update_before_stale_fail(session, stale_job, finished_at):
+        session.execute(
+            database_module.evaluation_jobs.update(database_module.EvaluationJob)
+            .where(database_module.EvaluationJob.job_id == stale_job.job_id)
+            .values(
+                status="succeeded",
+                finished_at="2026-05-14T09:05:30+00:00",
+                error=None,
+            )
+            .execution_options(synchronize_session=False)
+        )
+        return original_fail_stale_job(session, stale_job, finished_at)
+
+    monkeypatch.setattr(
+        database_module.evaluation_jobs,
+        "_fail_stale_evaluation_job",
+        terminal_update_before_stale_fail,
+        raising=False,
+    )
+
+    active = database_module.find_active_session_evaluation_job(
+        session_id="stale",
+        now="2026-05-14T09:06:00+00:00",
+        db_path=db_path,
+    )
+
+    current = database_module.get_evaluation_job(job["job_id"], db_path=db_path)
+    assert active is None
+    assert current["status"] == "succeeded"
+    assert current["finished_at"] == "2026-05-14T09:05:30+00:00"
+
+
+def test_mark_evaluation_job_succeeded_does_not_overwrite_failed_job(
+    database_module, isolated_home
+):
+    db_path = str(isolated_home / "usage.db")
+    database_module.init_db(db_path)
+    _insert_session_record(database_module, db_path, "failed", client_source="codex")
+
+    job = database_module.create_session_evaluation_job(
+        session_id="failed",
+        client_source="codex",
+        trigger="manual",
+        db_path=db_path,
+    )
+    database_module.claim_next_evaluation_job(db_path=db_path)
+    database_module.mark_evaluation_job_failed(
+        job["job_id"],
+        "first failure",
+        db_path=db_path,
+    )
+
+    database_module.mark_evaluation_job_succeeded(job["job_id"], db_path=db_path)
+
+    current = database_module.get_evaluation_job(job["job_id"], db_path=db_path)
+    assert current["status"] == "failed"
+    assert current["error"] == "first failure"
+
+
+def test_mark_evaluation_job_running_does_not_revive_failed_job(
+    database_module, isolated_home
+):
+    db_path = str(isolated_home / "usage.db")
+    database_module.init_db(db_path)
+    _insert_session_record(database_module, db_path, "failed", client_source="codex")
+
+    job = database_module.create_session_evaluation_job(
+        session_id="failed",
+        client_source="codex",
+        trigger="manual",
+        db_path=db_path,
+    )
+    database_module.claim_next_evaluation_job(db_path=db_path)
+    database_module.mark_evaluation_job_failed(
+        job["job_id"],
+        "first failure",
+        db_path=db_path,
+    )
+
+    changed = database_module.mark_evaluation_job_running(
+        job["job_id"], db_path=db_path
+    )
+
+    current = database_module.get_evaluation_job(job["job_id"], db_path=db_path)
+    assert changed is False
+    assert current["status"] == "failed"
+    assert current["error"] == "first failure"
+
+
 def test_migrate_database_creates_evaluation_jobs_table(
     database_module, schema_migrations_module, isolated_home
 ):
@@ -3448,4 +3911,24 @@ def test_migrate_database_creates_evaluation_jobs_table(
     }.issubset(schema_migrations_module._table_column_names(engine, "evaluation_jobs"))
     assert "ix_evaluation_jobs_one_active_per_session" in (
         schema_migrations_module._index_names(engine, "evaluation_jobs")
+    )
+
+
+def test_migrate_database_adds_evaluation_job_trigger(
+    schema_migrations_module, database_module, isolated_home
+):
+    db_path = str(isolated_home / "usage.db")
+    database_module.init_db(db_path)
+    engine = database_module.get_engine(db_path)
+
+    with engine.begin() as connection:
+        connection.execute(
+            database_module.text("ALTER TABLE evaluation_jobs DROP COLUMN trigger")
+        )
+
+    applied = schema_migrations_module.migrate_database(db_path)
+
+    assert "evaluation_jobs.trigger" in applied
+    assert "trigger" in schema_migrations_module._table_column_names(
+        engine, "evaluation_jobs"
     )

@@ -65,6 +65,13 @@ def load_config(path: str | None = None) -> dict[str, Any]:
     server.setdefault("api_port", server["port"] + 1)
     server.setdefault("otlp_port", server["api_port"] + 1)
 
+    evaluation = config.setdefault("evaluation", {})
+    evaluation.setdefault("auto_enabled", True)
+    evaluation.setdefault("quiet_delay_seconds", 600)
+    evaluation.setdefault("max_concurrent_jobs", 1)
+    evaluation.setdefault("queue_buffer_multiplier", 2)
+    evaluation.setdefault("idle_sleep_cap_seconds", 30)
+
     if "url" not in db:
         db.setdefault("path", os.path.join(get_tracker_home(), "usage.db"))
         db["path"] = expand_path(db["path"])

@@ -1,3 +1,10 @@
+evaluation:
+  auto_enabled: true
+  quiet_delay_seconds: 600
+  max_concurrent_jobs: 1
+  queue_buffer_multiplier: 2
+  idle_sleep_cap_seconds: 30
+
 models:
   # Gemini Models
   gemini-3.1-pro-preview:

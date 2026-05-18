@@ -21,7 +21,7 @@ import {
   shortSessionId, sessionAgentName, sessionDisplayName, getAgentDisplayName, getSinceDate,
 } from '../utils'
 import { getModelBadgeBackgroundColor, getModelTextColor } from '../model-badge'
-import type { ActiveFilter, DailyEffectivenessReport, ModelEffectivenessGroup, SessionSummary, SessionsSummary } from '../types'
+import type { ActiveFilter, DailyEffectivenessReport, EvaluationJobProgress, ModelEffectivenessGroup, SessionSummary, SessionsSummary } from '../types'
 
 type Props = {
   onNavigateToLogs: (filters?: { sessionFilter?: string; activeFilter?: ActiveFilter }) => void
@@ -45,6 +45,15 @@ function formatEffectivenessShare(count: number, evaluatedCount: number): string
 
 function modelEffectivenessClassifiedCount(group: ModelEffectivenessGroup): number {
   return group.evaluated_count + group.no_op_count
+}
+
+function formatEvaluationJobBadge(job?: EvaluationJobProgress | null): string | null {
+  if (!job) return null
+  if (job.status === 'running') return t('Evaluating...')
+  if (job.status === 'queued') {
+    return `${t('Queued')}${job.queue_position ? ` #${job.queue_position}` : ''}`
+  }
+  return null
 }
 
 function getLocalDateKey(date: Date): string {
@@ -106,6 +115,71 @@ export function DashboardPage({ onNavigateToLogs }: Props) {
     modelEffectivenessLoading,
     refreshModelEffectiveness,
   } = useModelEffectivenessData({ activeSource, dateRange, customSince, customUntil, hideNoop })
+
+  const [dashboardTab, setDashboardTab] = useState<'overview' | 'sessions'>('overview')
+  const [activeEvaluationJobs, setActiveEvaluationJobs] = useState<Record<string, EvaluationJobProgress>>({})
+  const activeEvaluationJobsRef = useRef<Record<string, EvaluationJobProgress>>({})
+  const activeEvaluationJobsPollRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  useEffect(() => {
+    activeEvaluationJobsRef.current = activeEvaluationJobs
+  }, [activeEvaluationJobs])
+
+  const activeEvaluationJobList = useMemo(
+    () => Object.values(activeEvaluationJobs).sort((a, b) => {
+      const aPosition = a.queue_position ?? Number.MAX_SAFE_INTEGER
+      const bPosition = b.queue_position ?? Number.MAX_SAFE_INTEGER
+      if (aPosition !== bPosition) return aPosition - bPosition
+      return (a.created_at ?? '').localeCompare(b.created_at ?? '')
+    }),
+    [activeEvaluationJobs]
+  )
+  const runningEvaluationJobs = activeEvaluationJobList.filter((job) => job.status === 'running')
+  const queuedEvaluationJobs = activeEvaluationJobList.filter((job) => job.status === 'queued')
+
+  const pollActiveEvaluationJobs = useCallback(async () => {
+    if (dashboardTab !== 'sessions') {
+      setActiveEvaluationJobs({})
+      activeEvaluationJobsRef.current = {}
+      return
+    }
+
+    try {
+      const response = await fetch('/evaluation-jobs/active')
+      if (!response.ok) return
+
+      const data: { jobs: Record<string, EvaluationJobProgress> } = await response.json()
+      const previousHadActive = Object.keys(activeEvaluationJobsRef.current).length > 0
+      const nextHasActive = Object.values(data.jobs).some(
+        (job) => job.status === 'queued' || job.status === 'running'
+      )
+      activeEvaluationJobsRef.current = data.jobs
+      setActiveEvaluationJobs(data.jobs)
+
+      if (previousHadActive && !nextHasActive) {
+        requestUsageRefresh()
+        refreshModelEffectiveness()
+      }
+    } finally {
+      if (dashboardTab === 'sessions') {
+        activeEvaluationJobsPollRef.current = setTimeout(pollActiveEvaluationJobs, 2000)
+      }
+    }
+  }, [dashboardTab, refreshModelEffectiveness, requestUsageRefresh])
+
+  useEffect(() => {
+    if (activeEvaluationJobsPollRef.current) {
+      clearTimeout(activeEvaluationJobsPollRef.current)
+      activeEvaluationJobsPollRef.current = null
+    }
+    void pollActiveEvaluationJobs()
+    return () => {
+      if (activeEvaluationJobsPollRef.current) {
+        clearTimeout(activeEvaluationJobsPollRef.current)
+        activeEvaluationJobsPollRef.current = null
+      }
+    }
+  }, [pollActiveEvaluationJobs])
 
   const modelEffectivenessTotals = useMemo(() => {
     return modelEffectiveness.groups.reduce(
@@ -175,7 +249,6 @@ export function DashboardPage({ onNavigateToLogs }: Props) {
   }
 
   // Local state
-  const [dashboardTab, setDashboardTab] = useState<'overview' | 'sessions'>('overview')
   const [sessionSearch, setSessionSearch] = useState('')
   const [loadingMore, setLoadingMore] = useState(false)
   const sessionsTableRef = useRef<HTMLDivElement>(null)
@@ -1019,6 +1092,46 @@ export function DashboardPage({ onNavigateToLogs }: Props) {
           )}
         </div>
 
+        {activeEvaluationJobList.length > 0 && (
+          <div className="panel evaluator-queue-panel">
+            <div className="evaluator-queue-header">
+              <div>
+                <div className="evaluator-queue-title">{t('Evaluator Queue')}</div>
+                <div className="evaluator-queue-subtitle">
+                  {formatNumber(runningEvaluationJobs.length)} {t('running')} · {formatNumber(queuedEvaluationJobs.length)} {t('queued')}
+                </div>
+              </div>
+            </div>
+            <div className="evaluator-queue-list">
+              {activeEvaluationJobList.map((job) => (
+                <div key={job.job_id} className="evaluation-job-row">
+                  <div className={`evaluation-job-status evaluation-job-status-${job.status}`}>
+                    {job.status === 'running' ? t('Running') : t('Queued')}
+                  </div>
+                  <div className="evaluation-job-main">
+                    <div className="evaluation-job-session">
+                      <ClickToCopy text={job.session_id} onCopy={showToast}>
+                        <span>{shortSessionId(job.session_id)}</span>
+                      </ClickToCopy>
+                      <span className="evaluation-job-trigger">
+                        {job.trigger === 'auto' ? t('Auto') : t('Manual')}
+                      </span>
+                      {job.client_source && (
+                        <span className="evaluation-job-source">{sessionAgentName(job.client_source)}</span>
+                      )}
+                    </div>
+                    <div className="evaluation-job-meta">
+                      {job.queue_position ? `${t('Position')} #${job.queue_position}` : t('Active')}
+                      {' · '}
+                      {job.started_at ? `${t('Started')} ${formatTime(job.started_at)}` : `${t('Created')} ${job.created_at ? formatTime(job.created_at) : '—'}`}
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
         {sessions.length === 0 && !sessionsLoading && (
           <div className="sessions-empty-state panel">
             <div className="sessions-empty-title">{t('No sessions yet.')}</div>
@@ -1143,9 +1256,16 @@ export function DashboardPage({ onNavigateToLogs }: Props) {
                     <td style={{ fontSize: '12px' }}>{formatCompact(session.total_tokens)}</td>
                     <td style={{ fontSize: '12px' }}>{formatCost(session.total_cost_usd, 2)}</td>
                     <td>
-                      <span className={`session-outcome-badge ${getOutcomeBadge(session.evaluation?.outcome).className}`}>
-                        {getOutcomeBadge(session.evaluation?.outcome).label}
-                      </span>
+                      <div style={{ display: 'flex', gap: '6px', alignItems: 'center', flexWrap: 'wrap' }}>
+                        <span className={`session-outcome-badge ${getOutcomeBadge(session.evaluation?.outcome).className}`}>
+                          {getOutcomeBadge(session.evaluation?.outcome).label}
+                        </span>
+                        {activeEvaluationJobs[session.session_id] && (
+                          <span className="session-evaluation-job-badge">
+                            {formatEvaluationJobBadge(activeEvaluationJobs[session.session_id])}
+                          </span>
+                        )}
+                      </div>
                     </td>
                   </tr>
                   {selectedSession?.session_id === session.session_id && (
@@ -1157,6 +1277,7 @@ export function DashboardPage({ onNavigateToLogs }: Props) {
                           showToast={showToast}
                           onEvaluationUpdate={(evalData) => handleEvaluationUpdate(session.session_id, evalData)}
                           onEvaluationPersisted={refreshModelEffectiveness}
+                          activeEvaluationJob={activeEvaluationJobs[session.session_id] ?? null}
                         />
                       </td>
                     </tr>
@@ -1187,10 +1308,24 @@ export function DashboardPage({ onNavigateToLogs }: Props) {
 
 // ─── Inline expanded session detail (inside table row) ────────────────────────
 
-function SessionDetailInline({ session, onNavigateToLogs, showToast, onEvaluationUpdate, onEvaluationPersisted }: { session: SessionSummary; onNavigateToLogs: (session: SessionSummary, filters?: any) => void; showToast: (msg: string) => void; onEvaluationUpdate: (evalData: any | null) => void; onEvaluationPersisted: () => void }) {
+function SessionDetailInline({
+  session,
+  onNavigateToLogs,
+  showToast,
+  onEvaluationUpdate,
+  onEvaluationPersisted,
+  activeEvaluationJob,
+}: {
+  session: SessionSummary
+  onNavigateToLogs: (session: SessionSummary, filters?: any) => void
+  showToast: (msg: string) => void
+  onEvaluationUpdate: (evalData: any | null) => void
+  onEvaluationPersisted: () => void
+  activeEvaluationJob?: EvaluationJobProgress | null
+}) {
   return (
     <div className="session-detail-expanded" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '16px 24px', flexWrap: 'wrap', gap: '20px' }}>
-      <SessionDetailContent session={session} onNavigateToLogs={onNavigateToLogs} showToast={showToast} onEvaluationUpdate={onEvaluationUpdate} onEvaluationPersisted={onEvaluationPersisted} />
+      <SessionDetailContent session={session} onNavigateToLogs={onNavigateToLogs} showToast={showToast} onEvaluationUpdate={onEvaluationUpdate} onEvaluationPersisted={onEvaluationPersisted} activeEvaluationJob={activeEvaluationJob} />
       <div style={{ display: 'flex', gap: '8px' }}>
         <button
           style={{ padding: '8px 18px', background: 'var(--color-blue)', color: 'white', borderRadius: '8px', fontSize: '13px', fontWeight: 700, cursor: 'pointer', border: 'none', boxShadow: '0 2px 4px rgba(59, 130, 246, 0.3)', display: 'flex', alignItems: 'center', gap: '6px' }}

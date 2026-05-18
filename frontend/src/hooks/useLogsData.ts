@@ -21,7 +21,7 @@ export function useLogsData(opts: {
   const [jumpPage, setJumpPage] = useState('')
   const [logsLoading, setLogsLoading] = useState(true)
   const [expandedRow, setExpandedRow] = useState<number | null>(null)
-  const [modelColWidth, setModelColWidth] = useState(180)
+  const [modelColWidth, setModelColWidth] = useState(150)
   const resizeRef = useRef<{ startX: number; startWidth: number } | null>(null)
 
   const resetPage = useCallback(() => setPage(1), [])

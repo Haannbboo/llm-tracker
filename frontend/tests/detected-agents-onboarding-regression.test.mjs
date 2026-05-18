@@ -17,7 +17,7 @@ const detectedAgentsEnd = dashboardSource.indexOf('</div>\n                  </d
 assert.notEqual(detectedAgentsEnd, -1)
 const detectedAgentsBlock = dashboardSource.slice(detectedAgentsStart, detectedAgentsEnd)
 
-const settingsDetectedAgentsStart = settingsSource.indexOf('{/* Settings detected local agents */}')
+const settingsDetectedAgentsStart = settingsSource.indexOf('{/* Detected Agents */}')
 assert.notEqual(settingsDetectedAgentsStart, -1)
 const settingsOtlpStart = settingsSource.indexOf('OTLP Tracking Setup')
 const settingsConfigStart = settingsSource.indexOf('Configuration (YAML)')

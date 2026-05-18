@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { useApp } from '../contexts/AppContext'
 import { useSettingsData } from '../hooks/useSettingsData'
 import { CopyButton } from '../components/CopyButton'
@@ -9,6 +10,7 @@ type Props = {
 }
 
 export function SettingsPage({ providerColors }: Props) {
+  const [activeSection, setActiveSection] = useState<'tracker' | 'services' | 'connectivity'>('tracker')
   const colors = providerColors ?? FIXED_PROVIDER_COLORS
   const {
     configParsed, configContent, setConfigContent,
@@ -55,165 +57,199 @@ export function SettingsPage({ providerColors }: Props) {
 
   return (
     <div className="settings-page" style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
-      {/* Settings detected local agents */}
-      <div className="panel">
-        <div className="panel-tabs">
-          <div className="tab active"><span>🧭</span> {t('Detected Agents')}</div>
-        </div>
-        <div className="panel-body" style={{ padding: '0' }}>
-          <div style={{ padding: '16px', borderBottom: '1px solid var(--border-color)', fontSize: '13px', color: 'var(--text-secondary)' }}>
-            {t('Detected from your local config and available commands.')}
-          </div>
-          <table className="table">
-            <thead>
-              <tr>
-                <th>{t('Agent')}</th>
-                <th>{t('Status')}</th>
-                <th>{t('Detected:')}</th>
-              </tr>
-            </thead>
-            <tbody>
-              {localAgents && Object.keys(localAgents).length > 0 ? Object.entries(localAgents).map(([name, info]) => (
-                <tr key={name}>
-                  <td style={{ fontWeight: 700 }}>{getAgentDisplayName(name)}</td>
-                  <td>
-                    <span className={`badge ${info.found ? 'badge-success' : 'badge-error'}`}>
-                      {info.found ? t('Ready') : t('Not found')}
-                    </span>
-                  </td>
-                  <td style={{ fontSize: '12px', fontFamily: 'var(--font-mono)', color: info.path ? 'var(--text-secondary)' : 'var(--text-muted)' }}>
-                    {info.path || t('Unknown')}
-                  </td>
-                </tr>
-              )) : (
-                <tr>
-                  <td colSpan={3} style={{ textAlign: 'center', padding: '24px', color: 'var(--text-muted)' }}>
-                    {localAgents ? t('No local Agent') : t('Unknown')}
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
+      <div className="panel" style={{ overflow: 'hidden' }}>
+        <div
+          style={{
+            display: 'flex',
+            gap: '4px',
+            padding: '8px',
+            background: 'var(--tab-toggle-bg)',
+            borderRadius: '12px',
+            flexWrap: 'wrap',
+          }}
+        >
+          {[
+            { id: 'tracker', label: t('LLM-Tracker Settings') },
+            { id: 'services', label: t('Services') },
+            { id: 'connectivity', label: t('Connectivity Test') },
+          ].map((section) => (
+            <button
+              key={section.id}
+              type="button"
+              className={`tab-toggle-btn ${activeSection === section.id ? 'active' : ''}`}
+              onClick={() => setActiveSection(section.id as 'tracker' | 'services' | 'connectivity')}
+            >
+              {section.label}
+            </button>
+          ))}
         </div>
       </div>
 
-      <div className="panel">
-        <div className="panel-tabs">
-          <div className="tab active"><span>📡</span> {t('OTLP Tracking Setup')}</div>
-        </div>
-        <div className="panel-body" style={{ padding: '0' }}>
-          <table className="table">
-            <thead>
-              <tr>
-                <th>{t('Agent')}</th>
-                <th>{t('Status')}</th>
-                <th>{t('Expected endpoint')}</th>
-                <th>{t('Configured endpoint')}</th>
-              </tr>
-            </thead>
-            <tbody>
-              {setupDiagnostics ? Object.entries(setupDiagnostics.agents).map(([name, agent]) => (
-                <tr key={name}>
-                  <td style={{ fontWeight: 700 }}>{getAgentDisplayName(name)}</td>
-                  <td>
-                    <span className={`badge ${agent.endpoint_matches ? 'badge-success' : 'badge-error'}`}>
-                      {agent.status === 'ready' ? t('Ready') : agent.status === 'wrong_endpoint' ? t('Wrong endpoint') : t('Missing config')}
-                    </span>
-                  </td>
-                  <td style={{ fontSize: '12px', fontFamily: 'var(--font-mono)', color: 'var(--text-secondary)' }}>{agent.expected_endpoint}</td>
-                  <td style={{ fontSize: '12px', fontFamily: 'var(--font-mono)', color: agent.endpoint_matches ? 'var(--color-green)' : 'var(--color-red)' }}>
-                    {agent.configured_endpoint ?? '—'}
-                  </td>
-                </tr>
-              )) : (
-                <tr>
-                  <td colSpan={4} style={{ textAlign: 'center', padding: '24px', color: 'var(--text-muted)' }}>
-                    {t('Unknown')}
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-          <div style={{ padding: '16px', borderTop: '1px solid var(--border-color)', fontSize: '13px', color: 'var(--text-secondary)' }}>
-            {t('OTLP configured')}: <strong>{setupSummaryText}</strong> · {t('Configured')}: <strong>{setupConfiguredAgents}/{setupLocalAgentTotal}</strong>
-          </div>
-        </div>
-      </div>
-
-      <div className="panel">
-        <div className="panel-tabs">
-          <div className="tab active"><span>🔌</span> {t('Active Providers')}</div>
-        </div>
-        <div className="panel-body" style={{ padding: '0' }}>
-          <table className="table">
-            <thead>
-              <tr>
-                <th>{t('Provider')}</th>
-                <th>{t('Base URL')}</th>
-                <th>{t('Models')}</th>
-              </tr>
-            </thead>
-            <tbody>
-              {configParsed?.providers ? Object.entries(configParsed.providers as Record<string, unknown>).map(([name, conf]) => {
-                const c = conf as { models?: unknown[] | Record<string, unknown>, base_url?: string };
-                const models = Array.isArray(c.models)
-                  ? c.models
-                  : (c.models ? Object.keys(c.models) : []);
-                const color = getProviderColor(name, colors);
-                return (
-                  <tr key={name}>
-                    <td style={{ padding: '8px' }}>
-                      <div style={{
-                        padding: '4px 10px',
-                        borderRadius: '6px',
-                        backgroundColor: color + '22',
-                        color: color,
-                        fontWeight: 500,
-                        border: `1px solid ${color}44`,
-                        display: 'inline-block',
-                        fontSize: '12px'
-                      }}>
-                        {name}
-                      </div>
-                    </td>
-                    <td style={{ fontSize: '12px', color: 'var(--text-secondary)', fontFamily: 'var(--font-mono)' }}>{c.base_url}</td>
-                    <td>
-                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
-                        {(models as string[]).map((m: string) => {
-                          const mConf = !Array.isArray(c.models) ? (c.models?.[m] as { cost?: unknown }) : undefined;
-                          const hasOverride = mConf?.cost !== undefined;
-                          return (
-                            <span key={m} style={{
-                              fontSize: '10px',
-                              padding: '2px 6px',
-                              background: hasOverride ? 'var(--icon-yellow-bg)' : 'var(--tab-toggle-bg)',
-                              borderRadius: '4px',
-                              color: hasOverride ? 'var(--color-yellow)' : 'var(--text-secondary)',
-                              border: hasOverride ? `1px solid var(--color-yellow)` : '1px solid var(--border-color)',
-                              display: 'inline-flex',
-                              alignItems: 'center',
-                              gap: '4px'
-                            }}>
-                              {m}
-                              {hasOverride && <span title={t('Cost Override')} style={{ fontSize: '10px' }}>💰</span>}
-                            </span>
-                          );
-                        })}
-                      </div>
-                    </td>
+      {activeSection === 'services' && (
+        <>
+          {/* Detected Agents */}
+          <div className="panel">
+            <div className="panel-tabs">
+              <div className="tab active"><span>🧭</span> {t('Detected Agents')}</div>
+            </div>
+            <div className="panel-body" style={{ padding: '0' }}>
+              <div style={{ padding: '16px', borderBottom: '1px solid var(--border-color)', fontSize: '13px', color: 'var(--text-secondary)' }}>
+                {t('Detected from your local config and available commands.')}
+              </div>
+              <table className="table">
+                <thead>
+                  <tr>
+                    <th>{t('Agent')}</th>
+                    <th>{t('Status')}</th>
+                    <th>{t('Detected:')}</th>
                   </tr>
-                );
-              }) : (
-                <tr>
-                  <td colSpan={3} style={{ textAlign: 'center', padding: '24px', color: 'var(--text-muted)' }}>
-                    {t('No providers configured in config.yaml.')}
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
-      </div>
+                </thead>
+                <tbody>
+                  {localAgents && Object.keys(localAgents).length > 0 ? Object.entries(localAgents).map(([name, info]) => (
+                    <tr key={name}>
+                      <td style={{ fontWeight: 700 }}>{getAgentDisplayName(name)}</td>
+                      <td>
+                        <span className={`badge ${info.found ? 'badge-success' : 'badge-error'}`}>
+                          {info.found ? t('Ready') : t('Not found')}
+                        </span>
+                      </td>
+                      <td style={{ fontSize: '12px', fontFamily: 'var(--font-mono)', color: info.path ? 'var(--text-secondary)' : 'var(--text-muted)' }}>
+                        {info.path || t('Unknown')}
+                      </td>
+                    </tr>
+                  )) : (
+                    <tr>
+                      <td colSpan={3} style={{ textAlign: 'center', padding: '24px', color: 'var(--text-muted)' }}>
+                        {localAgents ? t('No local Agent') : t('Unknown')}
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <div className="panel">
+            <div className="panel-tabs">
+              <div className="tab active"><span>📡</span> {t('OTLP Tracking Setup')}</div>
+            </div>
+            <div className="panel-body" style={{ padding: '0' }}>
+              <table className="table">
+                <thead>
+                  <tr>
+                    <th>{t('Agent')}</th>
+                    <th>{t('Status')}</th>
+                    <th>{t('Expected endpoint')}</th>
+                    <th>{t('Configured endpoint')}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {setupDiagnostics ? Object.entries(setupDiagnostics.agents).map(([name, agent]) => (
+                    <tr key={name}>
+                      <td style={{ fontWeight: 700 }}>{getAgentDisplayName(name)}</td>
+                      <td>
+                        <span className={`badge ${agent.endpoint_matches ? 'badge-success' : 'badge-error'}`}>
+                          {agent.status === 'ready' ? t('Ready') : agent.status === 'wrong_endpoint' ? t('Wrong endpoint') : t('Missing config')}
+                        </span>
+                      </td>
+                      <td style={{ fontSize: '12px', fontFamily: 'var(--font-mono)', color: 'var(--text-secondary)' }}>{agent.expected_endpoint}</td>
+                      <td style={{ fontSize: '12px', fontFamily: 'var(--font-mono)', color: agent.endpoint_matches ? 'var(--color-green)' : 'var(--color-red)' }}>
+                        {agent.configured_endpoint ?? '—'}
+                      </td>
+                    </tr>
+                  )) : (
+                    <tr>
+                      <td colSpan={4} style={{ textAlign: 'center', padding: '24px', color: 'var(--text-muted)' }}>
+                        {t('Unknown')}
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+              <div style={{ padding: '16px', borderTop: '1px solid var(--border-color)', fontSize: '13px', color: 'var(--text-secondary)' }}>
+                {t('OTLP configured')}: <strong>{setupSummaryText}</strong> · {t('Configured')}: <strong>{setupConfiguredAgents}/{setupLocalAgentTotal}</strong>
+              </div>
+            </div>
+          </div>
+        </>
+      )}
+
+      {activeSection === 'tracker' && (
+        <>
+          <div className="panel">
+            <div className="panel-tabs">
+              <div className="tab active"><span>🔌</span> {t('Active Providers')}</div>
+            </div>
+            <div className="panel-body" style={{ padding: '0' }}>
+              <table className="table">
+                <thead>
+                  <tr>
+                    <th>{t('Provider')}</th>
+                    <th>{t('Base URL')}</th>
+                    <th>{t('Models')}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {configParsed?.providers ? Object.entries(configParsed.providers as Record<string, unknown>).map(([name, conf]) => {
+                    const c = conf as { models?: unknown[] | Record<string, unknown>, base_url?: string };
+                    const models = Array.isArray(c.models)
+                      ? c.models
+                      : (c.models ? Object.keys(c.models) : []);
+                    const color = getProviderColor(name, colors);
+                    return (
+                      <tr key={name}>
+                        <td style={{ padding: '8px' }}>
+                          <div style={{
+                            padding: '4px 10px',
+                            borderRadius: '6px',
+                            backgroundColor: color + '22',
+                            color: color,
+                            fontWeight: 500,
+                            border: `1px solid ${color}44`,
+                            display: 'inline-block',
+                            fontSize: '12px'
+                          }}>
+                            {name}
+                          </div>
+                        </td>
+                        <td style={{ fontSize: '12px', color: 'var(--text-secondary)', fontFamily: 'var(--font-mono)' }}>{c.base_url}</td>
+                        <td>
+                          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
+                            {(models as string[]).map((m: string) => {
+                              const mConf = !Array.isArray(c.models) ? (c.models?.[m] as { cost?: unknown }) : undefined;
+                              const hasOverride = mConf?.cost !== undefined;
+                              return (
+                                <span key={m} style={{
+                                  fontSize: '10px',
+                                  padding: '2px 6px',
+                                  background: hasOverride ? 'var(--icon-yellow-bg)' : 'var(--tab-toggle-bg)',
+                                  borderRadius: '4px',
+                                  color: hasOverride ? 'var(--color-yellow)' : 'var(--text-secondary)',
+                                  border: hasOverride ? `1px solid var(--color-yellow)` : '1px solid var(--border-color)',
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  gap: '4px'
+                                }}>
+                                  {m}
+                                  {hasOverride && <span title={t('Cost Override')} style={{ fontSize: '10px' }}>💰</span>}
+                                </span>
+                              );
+                            })}
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  }) : (
+                    <tr>
+                      <td colSpan={3} style={{ textAlign: 'center', padding: '24px', color: 'var(--text-muted)' }}>
+                        {t('No providers configured in config.yaml.')}
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
 
       <div className="panel">
         <div className="panel-tabs" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -397,8 +433,11 @@ export function SettingsPage({ providerColors }: Props) {
           </div>
         </div>
       </div>
+        </>
+      )}
 
-      <div className="panel">
+      {activeSection === 'connectivity' && (
+        <div className="panel">
         <div className="panel-tabs">
           <div className="tab active"><span>🔌</span> {t('Upstream Connectivity Test')}</div>
         </div>
@@ -588,7 +627,8 @@ export function SettingsPage({ providerColors }: Props) {
             </div>
           </div>
         </div>
-      </div>
+        </div>
+      )}
     </div>
   )
 }
