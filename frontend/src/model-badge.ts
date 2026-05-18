@@ -9,6 +9,8 @@ export function getModelColor(model: string): string {
   if (m.includes('minimax')) return '#ec6b53'
   if (m.includes('mimo-')) return '#dcc496'
   if (m.includes('inclusionai')) return '#6366f1'
+  if (m.includes('poolside')) return '#f97316'
+  if (m.includes('deepseek')) return '#4d7cff'
   if (m.includes('openrouter')) return '#6366f1'
   return '#f1f5f9'
 }
@@ -23,6 +25,8 @@ export function getModelTextColor(model: string, theme: Theme = getTheme()): str
   if (m.includes('minimax')) return dark ? '#fca5a5' : '#b91c1c'
   if (m.includes('mimo-')) return dark ? '#dcc496' : '#6b4f2a'
   if (m.includes('inclusionai')) return dark ? '#a5b4fc' : '#6366f1'
+  if (m.includes('poolside')) return dark ? '#fdba74' : '#c2410c'
+  if (m.includes('deepseek')) return dark ? '#93b4ff' : '#1d4ed8'
   if (m.includes('openrouter')) return dark ? '#a5b4fc' : '#6366f1'
   return dark ? '#f1f5f9' : '#1e293b'
 }
@@ -43,6 +47,8 @@ export function getModelBadgeBackgroundColor(model: string, theme: Theme = getTh
     return dark ? `${base}90` : `${base}80`
   }
   if (m.includes('inclusionai')) return dark ? '#6366f140' : '#6366f126'
+  if (m.includes('poolside')) return dark ? '#f9731640' : '#f9731626'
+  if (m.includes('deepseek')) return dark ? '#4d7cff40' : '#4d7cff26'
   if (m.includes('openrouter')) return dark ? '#6366f140' : '#6366f126'
   return dark ? '#64748b40' : '#64748b26'
 }
