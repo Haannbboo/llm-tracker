@@ -1,10 +1,10 @@
 import { useState, useRef, useEffect, useMemo } from 'react'
-import type { SessionSummary } from '../types'
+import type { SessionSelectorRow } from '../types'
 import { shortSessionId, timeAgo, sessionAgentName } from '../utils'
 import { t } from '../i18n/index.ts'
 
 interface SessionSelectorProps {
-  sessions: SessionSummary[]
+  sessions: SessionSelectorRow[]
   sessionFilter: string | null
   onChange: (id: string | null) => void
   sourceColors: Record<string, string>
@@ -26,18 +26,18 @@ export function SessionSelector({ sessions, sessionFilter, onChange, sourceColor
   }, [])
 
   const grouped = useMemo(() => {
-    const map = new Map<string, SessionSummary[]>()
+    const map = new Map<string, SessionSelectorRow[]>()
     for (const s of sessions) {
       const arr = map.get(s.client_source) ?? []
       arr.push(s)
       map.set(s.client_source, arr)
     }
-    return Array.from(map.entries()).sort(([a]: [string, SessionSummary[]], [b]: [string, SessionSummary[]]) => a.localeCompare(b))
+    return Array.from(map.entries()).sort(([a]: [string, SessionSelectorRow[]], [b]: [string, SessionSelectorRow[]]) => a.localeCompare(b))
   }, [sessions])
 
-  type FilteredGroup = { source: string; items: SessionSummary[] }
+  type FilteredGroup = { source: string; items: SessionSelectorRow[] }
 
-const filtered = useMemo((): FilteredGroup[] => {
+  const filtered = useMemo((): FilteredGroup[] => {
     if (!search.trim()) {
       return grouped.map(([source, items]) => ({ source, items }))
     }
@@ -45,7 +45,7 @@ const filtered = useMemo((): FilteredGroup[] => {
     return grouped
       .map(([source, list]) => ({
         source,
-        items: list.filter((s: SessionSummary) =>
+        items: list.filter((s: SessionSelectorRow) =>
           s.session_id.toLowerCase().includes(q) ||
           sessionAgentName(s.client_source).toLowerCase().includes(q)
         )
@@ -178,7 +178,7 @@ const filtered = useMemo((): FilteredGroup[] => {
               }}>
                 {sessionAgentName(group.source)}
               </div>
-              {group.items.map((s: SessionSummary) => (
+              {group.items.map((s: SessionSelectorRow) => (
                 <button
                   key={s.session_id}
                   onClick={() => { onChange(s.session_id); setIsOpen(false); setSearch('') }}

@@ -29,6 +29,7 @@ from .database import (
     delete_session_evaluation,
     distinct_client_sources,
     fetch_recent_usage,
+    fetch_session_selector_rows,
     fetch_sessions,
     get_evaluation_job_progress,
     get_session_evaluation,
@@ -362,12 +363,34 @@ async def get_sessions(
     client_source: str | None = None,
     since: str | None = None,
     until: str | None = None,
+    view: str = "summary",
     sort_by: str = "ended",
     sort_order: str = "desc",
     limit: int = 50,
     offset: int = 0,
     hide_noop: bool = False,
 ):
+    if view not in {"summary", "selector"}:
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid view. Must be one of ['summary', 'selector']",
+        )
+
+    if view == "selector":
+        return {
+            "sessions": fetch_session_selector_rows(
+                client_source=client_source,
+                since=since,
+                until=until,
+                sort_by=sort_by,
+                sort_order=sort_order,
+                limit=limit,
+                offset=offset,
+                hide_noop=hide_noop,
+            ),
+            "total": None,
+        }
+
     sessions = fetch_sessions(
         client_source=client_source,
         since=since,

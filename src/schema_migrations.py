@@ -48,6 +48,14 @@ def _ensure_evaluation_jobs_active_unique_index(engine: Engine) -> bool:
     return True
 
 
+def _ensure_index(engine: Engine, table_name: str, index_name: str, sql: str) -> bool:
+    if index_name in _index_names(engine, table_name):
+        return False
+    with engine.begin() as connection:
+        connection.execute(text(sql))
+    return True
+
+
 def _ensure_column(
     engine: Engine,
     table_name: str,
@@ -460,6 +468,22 @@ def migrate_database(db_path: str | None = None) -> list[str]:
                 postgresql_definition=definition,
             ):
                 applied.append(f"sessions.{col}")
+
+    if _table_exists(engine, "sessions"):
+        if _ensure_index(
+            engine,
+            "sessions",
+            "ix_sessions_started_desc",
+            "CREATE INDEX IF NOT EXISTS ix_sessions_started_desc ON sessions (started DESC)",
+        ):
+            applied.append("sessions.ix_sessions_started_desc")
+        if _ensure_index(
+            engine,
+            "sessions",
+            "ix_sessions_client_source_started_desc",
+            "CREATE INDEX IF NOT EXISTS ix_sessions_client_source_started_desc ON sessions (client_source, started DESC)",
+        ):
+            applied.append("sessions.ix_sessions_client_source_started_desc")
 
     # Slice 0: Backfill sessions table from usage when there are usage rows
     # with session_ids that don't have a corresponding session record yet.

@@ -178,6 +178,13 @@ export type SessionSummary = {
   evaluation: SessionEvaluation | null
 }
 
+export type SessionSelectorRow = {
+  session_id: string
+  client_source: string
+  request_count: number
+  started: string
+}
+
 export type SessionsSummary = {
   session_count: number
   avg_duration_s: number

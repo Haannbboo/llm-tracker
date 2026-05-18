@@ -648,6 +648,70 @@ def test_sessions_endpoint_passes_filters(api_module, monkeypatch):
     assert captured["offset"] == 10
 
 
+def test_sessions_endpoint_selector_view_skips_count(api_module, monkeypatch):
+    captured = {}
+    count_called = False
+
+    def fake_selector(**kwargs):
+        captured.update(kwargs)
+        return [
+            {
+                "session_id": "sess-1",
+                "client_source": "codex",
+                "request_count": 2,
+                "started": "2026-05-09T10:00:00+00:00",
+            }
+        ]
+
+    def fake_count(**kwargs):
+        nonlocal count_called
+        count_called = True
+        return 999
+
+    monkeypatch.setattr(api_module, "fetch_session_selector_rows", fake_selector)
+    monkeypatch.setattr(api_module, "count_sessions", fake_count)
+
+    response = TestClient(api_module.app).get(
+        "/sessions",
+        params={
+            "view": "selector",
+            "client_source": "codex",
+            "since": "2026-05-01T00:00:00Z",
+            "sort_by": "started",
+            "sort_order": "desc",
+            "limit": "50",
+            "offset": "0",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "sessions": [
+            {
+                "session_id": "sess-1",
+                "client_source": "codex",
+                "request_count": 2,
+                "started": "2026-05-09T10:00:00+00:00",
+            }
+        ],
+        "total": None,
+    }
+    assert count_called is False
+    assert captured["client_source"] == "codex"
+    assert captured["since"] == "2026-05-01T00:00:00Z"
+    assert captured["sort_by"] == "started"
+    assert captured["sort_order"] == "desc"
+    assert captured["limit"] == 50
+    assert captured["offset"] == 0
+
+
+def test_sessions_endpoint_rejects_unknown_view(api_module):
+    response = TestClient(api_module.app).get("/sessions", params={"view": "compact"})
+
+    assert response.status_code == 400
+    assert "Invalid view" in response.json()["detail"]
+
+
 def test_sessions_summary_endpoint_passes_filters(api_module, monkeypatch):
     captured = {}
 

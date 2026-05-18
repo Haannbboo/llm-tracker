@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { useApp } from '../contexts/AppContext'
 import { useDashboardData } from '../hooks/useDashboardData'
 import { useLogsData } from '../hooks/useLogsData'
-import { useSessionsData } from '../hooks/useSessionsData'
+import { useSessionSelectorData } from '../hooks/useSessionSelectorData'
 import { ModelSelector } from '../ModelSelector'
 import { SessionSelector } from '../components/SessionSelector'
 import { ClickToCopy } from '../components/CopyButton'
@@ -64,7 +64,7 @@ export function LogsPage({ initialSessionFilter, initialActiveFilter }: Props) {
   } = useLogsData({ activeFilter, activeSource, sessionFilter, dateRange, customSince, customUntil })
 
   // Sessions data for the session filter dropdown
-  const { sessions } = useSessionsData({ activeSource, dateRange, customSince, customUntil })
+  const { sessions } = useSessionSelectorData({ activeSource, dateRange, customSince, customUntil })
 
   return (
     <div className="logs-page">

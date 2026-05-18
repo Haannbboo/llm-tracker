@@ -398,6 +398,15 @@ def _session_record_to_dict(rec: SessionRecord) -> dict[str, Any]:
     return result
 
 
+def _selector_row_to_dict(row: Any) -> dict[str, Any]:
+    return {
+        "session_id": row.session_id,
+        "client_source": row.client_source or "",
+        "request_count": row.request_count,
+        "started": row.started,
+    }
+
+
 def aggregate_model_effectiveness(
     *,
     group_by: str = "model",
@@ -768,6 +777,44 @@ def fetch_sessions(
         records = session.execute(query).scalars().all()
 
     return [_session_record_to_dict(r) for r in records]
+
+
+def fetch_session_selector_rows(
+    *,
+    client_source: str | None = None,
+    since: str | None = None,
+    until: str | None = None,
+    sort_by: str = "started",
+    sort_order: str = "desc",
+    limit: int = 50,
+    offset: int = 0,
+    hide_noop: bool = False,
+    db_path: str | None = None,
+) -> list[dict[str, Any]]:
+    """Return lightweight session rows for selector/dropdown consumers."""
+    filters = _session_filters(
+        client_source=client_source,
+        since=since,
+        until=until,
+        hide_noop=hide_noop,
+    )
+    sort_col = _SESSION_SORT_COLUMNS.get(sort_by) or SessionRecord.started
+    order = sort_col.asc() if sort_order == "asc" else sort_col.desc()
+    query = (
+        select(
+            SessionRecord.session_id,
+            SessionRecord.client_source,
+            SessionRecord.request_count,
+            SessionRecord.started,
+        )
+        .order_by(order)
+        .limit(limit)
+        .offset(offset)
+    )
+    if filters:
+        query = query.where(and_(*filters))
+    with get_engine(db_path).connect() as connection:
+        return [_selector_row_to_dict(row) for row in connection.execute(query)]
 
 
 def count_sessions(

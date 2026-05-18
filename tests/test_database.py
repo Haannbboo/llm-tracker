@@ -2253,6 +2253,82 @@ def test_fetch_sessions_pagination(database_module, isolated_home):
     assert len(result) == 2
 
 
+def test_fetch_session_selector_rows_returns_only_dropdown_fields(
+    database_module, isolated_home
+):
+    db_path = str(isolated_home / "usage.db")
+    database_module.init_db(db_path)
+
+    database_module.log_usage(
+        database_module.Usage(
+            ts="2026-05-09T10:00:00+00:00",
+            provider="anthropic",
+            model="claude-sonnet-4-6",
+            client_source="claude-code",
+            session_id="sess-selector",
+            endpoint="/v1/messages",
+            prompt_tokens=100,
+            total_tokens=100,
+            input_cost_usd=0.001,
+            output_cost_usd=0.001,
+            total_cost_usd=0.002,
+            status=200,
+        ),
+        db_path=db_path,
+    )
+
+    result = database_module.fetch_session_selector_rows(db_path=db_path)
+
+    assert result == [
+        {
+            "session_id": "sess-selector",
+            "client_source": "claude-code",
+            "request_count": 1,
+            "started": "2026-05-09T10:00:00+00:00",
+        }
+    ]
+    assert "total_tokens" not in result[0]
+    assert "evaluation" not in result[0]
+
+
+def test_fetch_session_selector_rows_applies_filters_sort_and_pagination(
+    database_module, isolated_home
+):
+    db_path = str(isolated_home / "usage.db")
+    database_module.init_db(db_path)
+
+    for index, source in enumerate(["claude-code", "codex", "codex"]):
+        database_module.log_usage(
+            database_module.Usage(
+                ts=f"2026-05-09T1{index}:00:00+00:00",
+                provider="anthropic",
+                model="claude-sonnet-4-6",
+                client_source=source,
+                session_id=f"s{index}",
+                endpoint="/v1/messages",
+                prompt_tokens=100,
+                total_tokens=100,
+                input_cost_usd=0.001,
+                output_cost_usd=0.001,
+                total_cost_usd=0.002,
+                status=200,
+            ),
+            db_path=db_path,
+        )
+
+    result = database_module.fetch_session_selector_rows(
+        client_source="codex",
+        since="2026-05-09T10:30:00.000Z",
+        sort_by="started",
+        sort_order="desc",
+        limit=1,
+        offset=0,
+        db_path=db_path,
+    )
+
+    assert [row["session_id"] for row in result] == ["s2"]
+
+
 def test_count_sessions(database_module, isolated_home):
     db_path = str(isolated_home / "usage.db")
     database_module.init_db(db_path)
@@ -3912,6 +3988,28 @@ def test_migrate_database_creates_evaluation_jobs_table(
     assert "ix_evaluation_jobs_one_active_per_session" in (
         schema_migrations_module._index_names(engine, "evaluation_jobs")
     )
+
+
+def test_migrate_database_adds_session_selector_indexes(
+    database_module, schema_migrations_module, isolated_home
+):
+    from sqlalchemy import inspect
+
+    db_path = str(isolated_home / "usage.db")
+    database_module.init_db(db_path)
+
+    applied = schema_migrations_module.migrate_database(db_path=db_path)
+
+    index_names = {
+        index["name"]
+        for index in inspect(database_module.get_engine(db_path)).get_indexes(
+            "sessions"
+        )
+    }
+    assert "ix_sessions_started_desc" in index_names
+    assert "ix_sessions_client_source_started_desc" in index_names
+    assert "sessions.ix_sessions_started_desc" in applied
+    assert "sessions.ix_sessions_client_source_started_desc" in applied
 
 
 def test_migrate_database_adds_evaluation_job_trigger(
