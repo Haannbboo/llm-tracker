@@ -222,6 +222,7 @@ def upsert_session_evaluation(
     source: str = "manual",
     confidence: float | None = None,
     task_title: str | None = None,
+    task_title_zh: str | None = None,
     summary: str | None = None,
     evidence: list[str] | None = None,
     failure_reason: str | None = None,
@@ -242,7 +243,8 @@ def upsert_session_evaluation(
         record.outcome = outcome
         record.source = source
         record.confidence = confidence
-        record.task_title = task_title
+        record.task_title = task_title if source == "llm" else None
+        record.task_title_zh = task_title_zh if source == "llm" else None
         record.summary = summary
         record.evidence_json = json.dumps(evidence) if evidence else None
         record.failure_reason = failure_reason
@@ -265,6 +267,7 @@ def get_session_evaluation(
             "source": rec.source,
             "confidence": float(rec.confidence) if rec.confidence is not None else None,
             "task_title": rec.task_title,
+            "task_title_zh": rec.task_title_zh,
             "summary": rec.summary,
             "evidence": json.loads(rec.evidence_json) if rec.evidence_json else [],
             "failure_reason": rec.failure_reason,
@@ -283,6 +286,7 @@ def delete_session_evaluation(session_id: str, db_path: str | None = None) -> bo
         rec.source = None
         rec.confidence = None
         rec.task_title = None
+        rec.task_title_zh = None
         rec.summary = None
         rec.evidence_json = None
         rec.failure_reason = None
@@ -388,6 +392,7 @@ def _session_record_to_dict(rec: SessionRecord) -> dict[str, Any]:
             "source": rec.source,
             "confidence": float(rec.confidence) if rec.confidence is not None else None,
             "task_title": rec.task_title,
+            "task_title_zh": rec.task_title_zh,
             "summary": rec.summary,
             "evidence": json.loads(rec.evidence_json) if rec.evidence_json else [],
             "failure_reason": rec.failure_reason,

@@ -18,7 +18,7 @@ import { t } from '../i18n/index.ts'
 import {
   formatCompact, formatCost, formatDuration, formatLatency, formatNumber, formatRate,
   formatTime, value, getModelIcon, getSourceBadgeBg, getSourceBadgeText,
-  shortSessionId, sessionAgentName, sessionDisplayName, getAgentDisplayName, getSinceDate,
+  shortSessionId, sessionAgentName, sessionDisplayName, sessionTaskTitle, getAgentDisplayName, getSinceDate,
 } from '../utils'
 import { getModelBadgeBackgroundColor, getModelTextColor } from '../model-badge'
 import type { ActiveFilter, DailyEffectivenessReport, EvaluationJobProgress, ModelEffectivenessGroup, SessionSummary, SessionsSummary } from '../types'
@@ -64,7 +64,7 @@ function getLocalDateKey(date: Date): string {
 }
 
 export function DashboardPage({ onNavigateToLogs }: Props) {
-  const { theme, showToast, error, localAgents, setupDiagnostics, requestUsageRefresh, refreshTrigger, setError } = useApp()
+  const { theme, lang, showToast, error, localAgents, setupDiagnostics, requestUsageRefresh, refreshTrigger, setError } = useApp()
 
   // Toggle to hide no-op and single-request sessions from tables and aggregations
   const [hideNoop, setHideNoop] = useState(true)
@@ -250,8 +250,10 @@ export function DashboardPage({ onNavigateToLogs }: Props) {
 
   // Local state
   const [sessionSearch, setSessionSearch] = useState('')
+  const [sessionColWidth, setSessionColWidth] = useState(250)
   const [loadingMore, setLoadingMore] = useState(false)
   const sessionsTableRef = useRef<HTMLDivElement>(null)
+  const sessionColumnResizeRef = useRef<{ startX: number; startWidth: number } | null>(null)
 
   // Infinite scroll for sessions
   useEffect(() => {
@@ -285,6 +287,31 @@ export function DashboardPage({ onNavigateToLogs }: Props) {
 
   // Reset pagination when filters change
   const resetPage = () => setSessionPage(1)
+
+  const handleSessionColumnResizeStart = (event: React.MouseEvent) => {
+    event.preventDefault()
+    event.stopPropagation()
+    sessionColumnResizeRef.current = { startX: event.clientX, startWidth: sessionColWidth }
+    document.body.style.userSelect = 'none'
+    document.body.style.cursor = 'col-resize'
+
+    const handleMouseMove = (event: MouseEvent) => {
+      if (!sessionColumnResizeRef.current) return
+      const delta = event.clientX - sessionColumnResizeRef.current.startX
+      setSessionColWidth(Math.max(180, sessionColumnResizeRef.current.startWidth + delta))
+    }
+
+    const handleMouseUp = () => {
+      sessionColumnResizeRef.current = null
+      document.body.style.userSelect = ''
+      document.body.style.cursor = ''
+      document.removeEventListener('mousemove', handleMouseMove)
+      document.removeEventListener('mouseup', handleMouseUp)
+    }
+
+    document.addEventListener('mousemove', handleMouseMove)
+    document.addEventListener('mouseup', handleMouseUp)
+  }
 
   // Navigate to logs with session context
   const handleViewInLogs = (session: SessionSummary, filters?: { onlyFailed?: boolean; status429?: boolean; status4xx?: boolean; status5xx?: boolean }) => {
@@ -1167,8 +1194,23 @@ export function DashboardPage({ onNavigateToLogs }: Props) {
             <table className="table sessions-table">
               <thead>
                 <tr>
-                  <th className="sessions-col-session">
+                  <th className="sessions-col-session" style={{ width: sessionColWidth, position: 'relative' }}>
                     {t('Session')}
+                    <div
+                      onMouseDown={handleSessionColumnResizeStart}
+                      style={{
+                        position: 'absolute',
+                        right: 0,
+                        top: 0,
+                        bottom: 0,
+                        width: '3px',
+                        cursor: 'col-resize',
+                        userSelect: 'none',
+                        backgroundColor: 'rgba(128,128,128,0.2)',
+                      }}
+                      onMouseEnter={(event) => event.currentTarget.style.backgroundColor = 'rgba(128,128,128,0.5)'}
+                      onMouseLeave={(event) => event.currentTarget.style.backgroundColor = 'rgba(128,128,128,0.2)'}
+                    />
                   </th>
                   <th>
                     {t('Agent')}
@@ -1176,16 +1218,16 @@ export function DashboardPage({ onNavigateToLogs }: Props) {
                   <th style={{ cursor: 'pointer' }} onClick={() => handleSessionSort('started')}>
                     {t('Started')} {sessionSortBy === 'started' ? (sessionSortOrder === 'asc' ? '↑' : '↓') : ''}
                   </th>
-                  <th style={{ cursor: 'pointer' }} onClick={() => handleSessionSort('duration_s')}>
+                  <th className="sessions-col-duration" style={{ cursor: 'pointer' }} onClick={() => handleSessionSort('duration_s')}>
                     {t('Duration')} {sessionSortBy === 'duration_s' ? (sessionSortOrder === 'asc' ? '↑' : '↓') : ''}
                   </th>
-                  <th style={{ cursor: 'pointer' }} onClick={() => handleSessionSort('request_count')}>
+                  <th className="sessions-col-requests" style={{ cursor: 'pointer' }} onClick={() => handleSessionSort('request_count')}>
                     {t('Requests')} {sessionSortBy === 'request_count' ? (sessionSortOrder === 'asc' ? '↑' : '↓') : ''}
                   </th>
-                  <th style={{ cursor: 'pointer' }} onClick={() => handleSessionSort('total_tokens')}>
+                  <th className="sessions-col-tokens" style={{ cursor: 'pointer' }} onClick={() => handleSessionSort('total_tokens')}>
                     {t('Tokens')} {sessionSortBy === 'total_tokens' ? (sessionSortOrder === 'asc' ? '↑' : '↓') : ''}
                   </th>
-                  <th style={{ cursor: 'pointer' }} onClick={() => handleSessionSort('total_cost_usd')}>
+                  <th className="sessions-col-cost" style={{ cursor: 'pointer' }} onClick={() => handleSessionSort('total_cost_usd')}>
                     {t('Cost')} {sessionSortBy === 'total_cost_usd' ? (sessionSortOrder === 'asc' ? '↑' : '↓') : ''}
                   </th>
                   <th style={{ width: '90px' }}>Outcome</th>
@@ -1194,19 +1236,24 @@ export function DashboardPage({ onNavigateToLogs }: Props) {
               <tbody>
                 {sessions.filter(s => {
                     if (!sessionSearch.trim()) return true
-                    const q = sessionSearch.toLowerCase()
+                    const q = sessionSearch.trim().toLowerCase()
                     return s.session_id.toLowerCase().includes(q) ||
                       sessionDisplayName(s).toLowerCase().includes(q) ||
+                      sessionTaskTitle(s, lang).toLowerCase().includes(q) ||
+                      (s.evaluation?.task_title || '').toLowerCase().includes(q) ||
+                      (s.evaluation?.task_title_zh || '').toLowerCase().includes(q) ||
                       s.client_source.toLowerCase().includes(q)
-                  }).map(session => (
+                  }).map(session => {
+                    const displayTitle = sessionTaskTitle(session, lang)
+                    return (
                   <Fragment key={session.session_id}>
                   <tr
                     className={fadingOutSessions.has(session.session_id) ? 'session-fade-out' : undefined}
                     style={{ cursor: 'pointer', background: selectedSession?.session_id === session.session_id ? 'var(--surface-hover)' : undefined }}
                     onClick={() => setSelectedSession(selectedSession?.session_id === session.session_id ? null : session)}
                   >
-                    <td className="sessions-session-cell" title={session.session_id}>
-                      <div className="session-primary">{sessionDisplayName(session)} · {formatTime(session.started)}</div>
+                    <td className="sessions-session-cell" title={displayTitle}>
+                      <div className="session-primary" title={displayTitle} style={{ maxWidth: sessionColWidth - 24 }}>{displayTitle}</div>
                       <div className="session-secondary">
                         {formatNumber(session.request_count)} {t('requests')} · {formatDuration(session.duration_s)} · <ClickToCopy text={session.session_id} onCopy={showToast}>
                           <span className="session-short-id">{shortSessionId(session.session_id)}</span>
@@ -1251,10 +1298,10 @@ export function DashboardPage({ onNavigateToLogs }: Props) {
                       </div>
                     </td>
                     <td style={{ fontSize: '12px' }}>{formatTime(session.started)}</td>
-                    <td style={{ fontSize: '12px' }}>{formatDuration(session.duration_s)}</td>
-                    <td style={{ fontSize: '12px' }}>{formatNumber(session.request_count)}</td>
-                    <td style={{ fontSize: '12px' }}>{formatCompact(session.total_tokens)}</td>
-                    <td style={{ fontSize: '12px' }}>{formatCost(session.total_cost_usd, 2)}</td>
+                    <td className="sessions-number-cell" style={{ fontSize: '12px' }}>{formatDuration(session.duration_s)}</td>
+                    <td className="sessions-number-cell" style={{ fontSize: '12px' }}>{formatNumber(session.request_count)}</td>
+                    <td className="sessions-number-cell" style={{ fontSize: '12px' }}>{formatCompact(session.total_tokens)}</td>
+                    <td className="sessions-number-cell" style={{ fontSize: '12px' }}>{formatCost(session.total_cost_usd, 2)}</td>
                     <td>
                       <div style={{ display: 'flex', gap: '6px', alignItems: 'center', flexWrap: 'wrap' }}>
                         <span className={`session-outcome-badge ${getOutcomeBadge(session.evaluation?.outcome).className}`}>
@@ -1283,7 +1330,8 @@ export function DashboardPage({ onNavigateToLogs }: Props) {
                     </tr>
                   )}
                   </Fragment>
-                ))}
+                    )
+                  })}
               </tbody>
             </table>
           {loadingMore && (

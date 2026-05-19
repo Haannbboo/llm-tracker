@@ -1,4 +1,5 @@
 import type { DateRangeOption, DailyUsage } from './types'
+import type { Lang } from './i18n/index.ts'
 import { getTheme, type Theme } from './theme'
 
 export const numberFormatter = new Intl.NumberFormat()
@@ -285,6 +286,30 @@ export function sessionAgentName(source: string | null | undefined) {
 
 export function sessionDisplayName(session: { client_source: string }) {
   return `${sessionAgentName(session.client_source)} session`
+}
+
+type SessionTitleInput = {
+  client_source: string
+  evaluation?: {
+    task_title?: string | null
+    task_title_zh?: string | null
+  } | null
+}
+
+function firstNonEmpty(values: Array<string | null | undefined>): string | null {
+  for (const value of values) {
+    const trimmed = value?.trim()
+    if (trimmed) return trimmed
+  }
+  return null
+}
+
+export function sessionTaskTitle(session: SessionTitleInput, lang: Lang) {
+  const localizedTitle = lang === 'zh'
+    ? firstNonEmpty([session.evaluation?.task_title_zh, session.evaluation?.task_title])
+    : firstNonEmpty([session.evaluation?.task_title, session.evaluation?.task_title_zh])
+
+  return localizedTitle ?? sessionDisplayName(session)
 }
 
 export type SessionInsight = {

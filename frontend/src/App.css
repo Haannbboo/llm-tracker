@@ -272,14 +272,30 @@
   vertical-align: middle;
 }
 
-.sessions-col-session {
-  width: 250px;
-}
-
 .sessions-table .sessions-session-cell {
   position: relative;
   min-width: 0;
-  padding-right: 76px;
+}
+
+.sessions-col-duration {
+  width: 82px;
+}
+
+.sessions-col-requests {
+  width: 82px;
+}
+
+.sessions-col-tokens {
+  width: 76px;
+}
+
+.sessions-col-cost {
+  width: 72px;
+}
+
+.sessions-number-cell {
+  text-align: right;
+  white-space: nowrap;
 }
 
 .sessions-table tbody tr {
@@ -294,6 +310,12 @@
   color: var(--text-primary);
   font-size: 13px;
   font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.session-task-title {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;

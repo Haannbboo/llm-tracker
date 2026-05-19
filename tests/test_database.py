@@ -2893,7 +2893,7 @@ def _insert_session_record(database_module, db_path, session_id="sess-1", **over
 
 
 def test_upsert_session_evaluation_creates_new(database_module, isolated_home):
-    """Upsert evaluation on an existing session sets evaluation columns."""
+    """Manual upsert clears task titles even when callers provide them."""
     db_path = str(isolated_home / "usage.db")
     database_module.init_db(db_path)
     _insert_session_record(database_module, db_path)
@@ -2904,6 +2904,7 @@ def test_upsert_session_evaluation_creates_new(database_module, isolated_home):
         source="manual",
         confidence=None,
         task_title="Fixed dashboard navigation",
+        task_title_zh="修复仪表板导航",
         summary=None,
         evidence=["User marked solved"],
         failure_reason=None,
@@ -2914,11 +2915,58 @@ def test_upsert_session_evaluation_creates_new(database_module, isolated_home):
     assert result is not None
     assert result["outcome"] == "solved"
     assert result["source"] == "manual"
-    assert result["task_title"] == "Fixed dashboard navigation"
+    assert result["task_title"] is None
+    assert result["task_title_zh"] is None
     assert result["evidence"] == ["User marked solved"]
     assert result["failure_reason"] is None
     assert result["confidence"] is None
     assert result["evaluated_at"] is not None
+
+
+def test_upsert_session_evaluation_preserves_llm_task_titles(
+    database_module, isolated_home
+):
+    """LLM upsert preserves English and localized task titles."""
+    db_path = str(isolated_home / "usage.db")
+    database_module.init_db(db_path)
+    _insert_session_record(database_module, db_path)
+
+    database_module.upsert_session_evaluation(
+        session_id="sess-1",
+        outcome="solved",
+        source="llm",
+        task_title="Fixed dashboard navigation",
+        task_title_zh="修复仪表板导航",
+        db_path=db_path,
+    )
+
+    result = database_module.get_session_evaluation("sess-1", db_path=db_path)
+    assert result is not None
+    assert result["task_title"] == "Fixed dashboard navigation"
+    assert result["task_title_zh"] == "修复仪表板导航"
+
+
+def test_fetch_sessions_includes_task_title_zh_in_evaluation(
+    database_module, isolated_home
+):
+    """fetch_sessions includes localized task title in nested evaluation."""
+    db_path = str(isolated_home / "usage.db")
+    database_module.init_db(db_path)
+    _insert_session_record(database_module, db_path)
+
+    database_module.upsert_session_evaluation(
+        session_id="sess-1",
+        outcome="partial",
+        source="llm",
+        task_title="Tuned filters",
+        task_title_zh="调整筛选器",
+        db_path=db_path,
+    )
+
+    result = database_module.fetch_sessions(db_path=db_path)
+
+    assert result[0]["evaluation"]["task_title"] == "Tuned filters"
+    assert result[0]["evaluation"]["task_title_zh"] == "调整筛选器"
 
 
 def test_upsert_session_evaluation_overwrites_existing(database_module, isolated_home):
@@ -3004,6 +3052,19 @@ def test_delete_session_evaluation_clears_columns(database_module, isolated_home
 
     result = database_module.get_session_evaluation("sess-1", db_path=db_path)
     assert result is None
+
+    from sqlalchemy import select
+    from sqlalchemy.orm import Session
+
+    engine = database_module.get_engine(db_path)
+    with Session(engine) as session:
+        record = session.scalar(
+            select(database_module.SessionRecord).where(
+                database_module.SessionRecord.session_id == "sess-1"
+            )
+        )
+    assert record.task_title is None
+    assert record.task_title_zh is None
 
 
 def test_delete_session_evaluation_returns_false_when_session_absent(
@@ -4010,6 +4071,28 @@ def test_migrate_database_adds_session_selector_indexes(
     assert "ix_sessions_client_source_started_desc" in index_names
     assert "sessions.ix_sessions_started_desc" in applied
     assert "sessions.ix_sessions_client_source_started_desc" in applied
+
+
+def test_migration_adds_session_task_title_zh(
+    database_module, schema_migrations_module, isolated_home
+):
+    db_path = str(isolated_home / "usage.db")
+    database_module.init_db(db_path)
+    engine = database_module.get_engine(db_path)
+
+    with engine.begin() as connection:
+        connection.execute(
+            database_module.text("ALTER TABLE sessions DROP COLUMN task_title_zh")
+        )
+
+    applied = schema_migrations_module.migrate_database(db_path)
+    applied_again = schema_migrations_module.migrate_database(db_path)
+
+    assert "sessions.task_title_zh" in applied
+    assert "sessions.task_title_zh" not in applied_again
+    assert "task_title_zh" in schema_migrations_module._table_column_names(
+        engine, "sessions"
+    )
 
 
 def test_migrate_database_adds_evaluation_job_trigger(

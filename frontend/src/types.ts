@@ -132,6 +132,7 @@ export type SessionEvaluation = {
   source: SessionEvaluationSource
   confidence: number | null
   task_title: string | null
+  task_title_zh: string | null
   summary: string | null
   evidence: string[]
   failure_reason: string | null

@@ -28,6 +28,7 @@ describe('Session evaluation types', () => {
     assert.match(types, /export type SessionEvaluation/)
     assert.match(types, /outcome: SessionOutcome/)
     assert.match(types, /source: SessionEvaluationSource/)
+    assert.match(types, /task_title_zh: string \| null/)
     assert.match(types, /evaluated_at: string \| null/)
   })
 
@@ -122,6 +123,12 @@ describe('Session evaluation UI', () => {
     assert.match(detail, /queue_position/)
     assert.match(detail, /llmEvaluationStatus === 'queued' \|\| llmEvaluationStatus === 'running'/)
     assert.match(dashboard, /session-evaluation-job-badge/)
+  })
+
+  test('session detail displays session title in expanded row', () => {
+    assert.match(detail, /const sessionTitle = sessionTaskTitle\(displaySession, lang\)/)
+    assert.match(detail, /t\('Session Title'\)/)
+    assert.doesNotMatch(detail, /hasTaskTitle/)
   })
 })
 

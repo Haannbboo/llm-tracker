@@ -455,6 +455,7 @@ def migrate_database(db_path: str | None = None) -> list[str]:
             ("source", "TEXT"),
             ("confidence", "NUMERIC(5, 4)"),
             ("task_title", "TEXT"),
+            ("task_title_zh", "TEXT"),
             ("summary", "TEXT"),
             ("evidence_json", "TEXT"),
             ("failure_reason", "TEXT"),

@@ -179,6 +179,7 @@ class SessionRecord(Base):
     source: Mapped[str | None] = mapped_column(String, nullable=True)
     confidence: Mapped[float | None] = mapped_column(Numeric(5, 4), nullable=True)
     task_title: Mapped[str | None] = mapped_column(String, nullable=True)
+    task_title_zh: Mapped[str | None] = mapped_column(String, nullable=True)
     summary: Mapped[str | None] = mapped_column(String, nullable=True)
     evidence_json: Mapped[str | None] = mapped_column(String, nullable=True)
     failure_reason: Mapped[str | None] = mapped_column(String, nullable=True)

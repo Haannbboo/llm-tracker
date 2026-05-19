@@ -10,6 +10,7 @@ const dashboardSource = readFileSync(join(here, 'src', 'pages', 'DashboardPage.t
 const detailPanelSource = readFileSync(join(here, 'src', 'components', 'SessionDetailPanel.tsx'), 'utf-8')
 const typesSource = readFileSync(join(here, 'src', 'types.ts'), 'utf-8')
 const utilsSource = readFileSync(join(here, 'src', 'utils.tsx'), 'utf-8')
+const cssSource = readFileSync(join(here, 'src', 'App.css'), 'utf-8')
 const zhSource = readFileSync(join(here, 'src', 'i18n', 'zh.ts'), 'utf-8')
 
 test('view state type includes dashboard and logs only (no standalone sessions)', () => {
@@ -134,15 +135,56 @@ test('session page formats costs with two decimal places', () => {
 test('sessions table uses human-first row hierarchy with agent and model badges', () => {
   const sessionsStart = dashboardSource.indexOf("{dashboardTab === 'sessions' && (")
   assert.ok(sessionsStart !== -1, 'sessions tab block not found')
-  const sessionsSection = dashboardSource.slice(sessionsStart, sessionsStart + 20000)
+  const sessionsSection = dashboardSource.slice(sessionsStart, sessionsStart + 70000)
   assert.match(sessionsSection, /<table className="table sessions-table">/)
   assert.match(sessionsSection, /t\('Session'\)/)
   assert.match(sessionsSection, /t\('Agent'\)/)
-  assert.match(sessionsSection, /sessionDisplayName\(session\).*formatTime\(session\.started\)/s)
+  assert.match(sessionsSection, /sessionTaskTitle\(session, lang\)/)
+  assert.doesNotMatch(sessionsSection, /\{displayTitle\} · \{formatTime\(session\.started\)\}/)
   assert.match(sessionsSection, /shortSessionId\(session\.session_id\)/)
   assert.match(sessionsSection, /<ClickToCopy text=\{session\.session_id\} onCopy=\{showToast\}>/)
   assert.match(sessionsSection, /getModelBadgeBackgroundColor\(session\.model\)/)
   assert.match(sessionsSection, /getModelTextColor\(session\.model\)/)
+})
+
+test('session task title helper centralizes localized fallback', () => {
+  assert.match(utilsSource, /export function sessionTaskTitle/)
+  assert.match(utilsSource, /lang === 'zh'/)
+  assert.match(utilsSource, /sessionDisplayName\(session\)/)
+})
+
+test('sessions table uses localized task title helper', () => {
+  assert.match(dashboardSource, /sessionTaskTitle\(session, lang\)/)
+  assert.match(dashboardSource, /const \{[^}]*lang[^}]*\} = useApp\(\)/s)
+})
+
+test('sessions table supports draggable session column width', () => {
+  assert.match(dashboardSource, /sessionColWidth/)
+  assert.match(dashboardSource, /handleSessionColumnResizeStart/)
+  assert.match(dashboardSource, /onMouseDown=\{handleSessionColumnResizeStart\}/)
+  assert.match(dashboardSource, /cursor: 'col-resize'/)
+  assert.match(dashboardSource, /maxWidth: sessionColWidth - 24/)
+  assert.doesNotMatch(dashboardSource, /expandedSessionTitleIds/)
+  assert.doesNotMatch(dashboardSource, /session-title-toggle/)
+  assert.doesNotMatch(cssSource, /\.session-title-expanded/)
+  assert.doesNotMatch(cssSource, /padding-right: 76px/)
+})
+
+test('sessions table keeps numeric columns compact', () => {
+  assert.match(dashboardSource, /className="sessions-col-duration"/)
+  assert.match(dashboardSource, /className="sessions-col-requests"/)
+  assert.match(dashboardSource, /className="sessions-col-tokens"/)
+  assert.match(dashboardSource, /className="sessions-col-cost"/)
+  assert.match(dashboardSource, /className="sessions-number-cell"/)
+  assert.match(cssSource, /\.sessions-col-duration\s*\{\s*width: 82px;/)
+  assert.match(cssSource, /\.sessions-col-requests\s*\{\s*width: 82px;/)
+  assert.match(cssSource, /\.sessions-col-tokens\s*\{\s*width: 76px;/)
+  assert.match(cssSource, /\.sessions-col-cost\s*\{\s*width: 72px;/)
+})
+
+test('session search includes both localized task title fields', () => {
+  assert.match(dashboardSource, /s\.evaluation\?\.task_title/)
+  assert.match(dashboardSource, /s\.evaluation\?\.task_title_zh/)
 })
 
 test('session detail panel exists', () => {

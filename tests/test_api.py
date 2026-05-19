@@ -850,6 +850,27 @@ def test_put_session_evaluation_invalid_source_returns_400(api_module, monkeypat
     assert response.status_code == 400
 
 
+def test_put_session_evaluation_rejects_llm_source(api_module, monkeypatch):
+    def fail_if_called(**kwargs):
+        raise AssertionError("manual evaluation endpoint should not write LLM results")
+
+    monkeypatch.setattr(api_module, "upsert_session_evaluation", fail_if_called)
+
+    response = TestClient(api_module.app).put(
+        "/sessions/sess-1/evaluation",
+        json={
+            "outcome": "solved",
+            "source": "llm",
+            "task_title": "Spoofed task title",
+            "task_title_zh": "伪造任务标题",
+            "evidence": ["caller supplied an LLM source"],
+        },
+    )
+
+    assert response.status_code == 400
+    assert "manual" in response.json()["detail"].lower()
+
+
 def test_put_session_evaluation_returns_404_when_session_not_found(
     api_module, monkeypatch
 ):
@@ -873,6 +894,7 @@ def test_get_session_evaluation_returns_evaluation(api_module, monkeypatch):
         "source": "manual",
         "confidence": None,
         "task_title": "Fixed bug",
+        "task_title_zh": "修复错误",
         "summary": None,
         "evidence": ["User marked solved"],
         "failure_reason": None,
@@ -888,6 +910,7 @@ def test_get_session_evaluation_returns_evaluation(api_module, monkeypatch):
     data = response.json()
     assert data["evaluation"]["outcome"] == "solved"
     assert data["evaluation"]["task_title"] == "Fixed bug"
+    assert data["evaluation"]["task_title_zh"] == "修复错误"
 
 
 def test_get_session_evaluation_returns_null_when_absent(api_module, monkeypatch):

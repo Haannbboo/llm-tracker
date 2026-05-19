@@ -99,6 +99,7 @@ class SessionEvaluationUpdate(BaseModel):
     source: str = "manual"
     confidence: float | None = None
     task_title: str | None = None
+    task_title_zh: str | None = None
     summary: str | None = None
     evidence: list[str] = []
     failure_reason: str | None = None
@@ -499,6 +500,11 @@ async def put_session_evaluation(session_id: str, update: SessionEvaluationUpdat
             status_code=400,
             detail=f"Invalid source: {update.source}. Must be one of {sorted(VALID_SOURCES)}",
         )
+    if update.source != "manual":
+        raise HTTPException(
+            status_code=400,
+            detail="Manual evaluation endpoint only accepts source 'manual'. Use the LLM evaluation endpoint for LLM-sourced results.",
+        )
     try:
         upsert_session_evaluation(
             session_id=session_id,
@@ -506,6 +512,7 @@ async def put_session_evaluation(session_id: str, update: SessionEvaluationUpdat
             source=update.source,
             confidence=update.confidence,
             task_title=update.task_title,
+            task_title_zh=update.task_title_zh,
             summary=update.summary,
             evidence=update.evidence,
             failure_reason=update.failure_reason,

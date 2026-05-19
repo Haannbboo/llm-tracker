@@ -1,7 +1,8 @@
 import { useState, useEffect, useRef } from 'react'
 import { ClickToCopy } from './CopyButton'
 import { t } from '../i18n/index.ts'
-import { formatCompact, formatCost, formatDuration, formatLatency, formatNumber, formatTime, value, getModelIcon } from '../utils'
+import { useApp } from '../contexts/AppContext'
+import { formatCompact, formatCost, formatDuration, formatLatency, formatNumber, formatTime, value, getModelIcon, sessionTaskTitle } from '../utils'
 import { getModelBadgeBackgroundColor, getModelTextColor } from '../model-badge'
 import type { EvaluationJobProgress, SessionEvaluation, SessionOutcome, SessionSummary } from '../types'
 
@@ -29,10 +30,13 @@ export function SessionDetailContent({
   onEvaluationPersisted?: () => void
   activeEvaluationJob?: EvaluationJobProgress | null
 }) {
+  const { lang } = useApp()
   const [localEvaluationOverride, setLocalEvaluationOverride] = useState<{ sessionId: string; evaluation: SessionEvaluation | null } | null>(null)
   const [llmEvaluationStatus, setLlmEvaluationStatus] = useState<'idle' | 'queued' | 'running' | 'succeeded' | 'failed'>('idle')
   const llmEvaluationPollRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const localEvaluation = localEvaluationOverride?.sessionId === session.session_id ? localEvaluationOverride.evaluation : session.evaluation
+  const displaySession = { ...session, evaluation: localEvaluation }
+  const sessionTitle = sessionTaskTitle(displaySession, lang)
   const setLocalEvaluation = (evaluation: SessionEvaluation | null) => {
     setLocalEvaluationOverride({ sessionId: session.session_id, evaluation })
   }
@@ -123,6 +127,7 @@ export function SessionDetailContent({
             source: 'manual',
             confidence: null,
             task_title: null,
+            task_title_zh: null,
             summary: null,
             evidence: ['User marked outcome manually'],
             failure_reason: null,
@@ -174,6 +179,13 @@ export function SessionDetailContent({
             ) : (
               <span style={{ userSelect: 'all' }}>{session.session_id}</span>
             )}
+          </div>
+        </div>
+
+        <div style={{ minWidth: 0, maxWidth: '320px', flex: '1 1 160px' }}>
+          <div style={{ fontSize: '10px', color: 'var(--text-muted)', marginBottom: '4px', textTransform: 'uppercase', letterSpacing: '0.5px', fontWeight: 700 }}>{t('Session Title')}</div>
+          <div className="session-task-title" title={sessionTitle}>
+            {sessionTitle}
           </div>
         </div>
 

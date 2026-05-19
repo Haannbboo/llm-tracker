@@ -205,6 +205,16 @@ def test_evaluation_prompt_treats_memory_tasks_as_no_op(evaluation_module):
     assert 'return outcome "no_op"' in prompt
 
 
+def test_evaluation_prompt_requests_localized_task_titles(evaluation_module):
+    prompt = evaluation_module.EVALUATION_PROMPT
+
+    assert '"task_title_zh": string | null' in prompt
+    assert "task_title is a concise English title" in prompt
+    assert "task_title_zh is a concise Chinese title" in prompt
+    assert "2-6 words" in prompt
+    assert "If there is no substantive task, set both titles to null" in prompt
+
+
 def test_detects_claude_mem_observer_session(evaluation_module, isolated_home):
     session_dir = (
         isolated_home
@@ -232,6 +242,7 @@ def test_parse_evaluation_output_accepts_json_with_cli_noise(evaluation_module):
 The 'metricReader' option is deprecated. Please use 'metricReaders' instead.
 {
   "task_title": "Update frontend regression tests",
+  "task_title_zh": "更新前端回归测试",
   "summary": "Updated and committed frontend tests.",
   "outcome": "solved",
   "confidence": 1.0,
@@ -243,7 +254,39 @@ The 'metricReader' option is deprecated. Please use 'metricReaders' instead.
 
     assert parsed["outcome"] == "solved"
     assert parsed["task_title"] == "Update frontend regression tests"
+    assert parsed["task_title_zh"] == "更新前端回归测试"
     assert parsed["evidence"] == ["Verified tests passed"]
+
+
+def test_parse_evaluation_output_tolerates_missing_task_title_zh(evaluation_module):
+    parsed = evaluation_module.parse_evaluation_output(
+        '{"task_title":"Fix dashboard","summary":"Done","outcome":"solved","confidence":0.8,"evidence":[],"failure_reason":null}'
+    )
+
+    assert parsed["task_title"] == "Fix dashboard"
+    assert parsed["task_title_zh"] is None
+
+
+@pytest.mark.parametrize("outcome", ["no_op", "unknown"])
+def test_parse_evaluation_output_clears_titles_for_non_substantive_outcomes(
+    evaluation_module, outcome
+):
+    parsed = evaluation_module.parse_evaluation_output(
+        json.dumps(
+            {
+                "task_title": "Fix dashboard",
+                "task_title_zh": "修复仪表板",
+                "summary": "No substantive task was evaluated.",
+                "outcome": outcome,
+                "confidence": 0.8,
+                "evidence": [],
+                "failure_reason": None,
+            }
+        )
+    )
+
+    assert parsed["task_title"] is None
+    assert parsed["task_title_zh"] is None
 
 
 @pytest.mark.parametrize("confidence", [True, -0.1, 1.1, 82])
@@ -519,7 +562,7 @@ def test_run_session_evaluation_job_saves_llm_evaluation_before_success(
         return subprocess.CompletedProcess(
             args=kwargs["args"],
             returncode=0,
-            stdout='{"task_title":"Fix dashboard","summary":"Completed the requested dashboard fix.","outcome":"solved","confidence":0.82,"evidence":["Final response said tests passed"],"failure_reason":null}',
+            stdout='{"task_title":"Fix dashboard","task_title_zh":"修复仪表板","summary":"Completed the requested dashboard fix.","outcome":"solved","confidence":0.82,"evidence":["Final response said tests passed"],"failure_reason":null}',
             stderr="",
         )
 
@@ -533,6 +576,7 @@ def test_run_session_evaluation_job_saves_llm_evaluation_before_success(
     assert saved["source"] == "llm"
     assert saved["confidence"] == pytest.approx(0.82)
     assert saved["task_title"] == "Fix dashboard"
+    assert saved["task_title_zh"] == "修复仪表板"
 
     polled = database_module.get_evaluation_job(job["job_id"], db_path=db_path)
     assert polled is not None
@@ -594,10 +638,13 @@ def test_summarize_session_with_llm_marks_evaluator_session_no_op(
 
     saved = database_module.get_session_evaluation("sess-evaluator", db_path=db_path)
     assert result["outcome"] == "no_op"
-    assert result["task_title"] == "LLM evaluation session"
+    assert result["task_title"] is None
+    assert result["task_title_zh"] is None
     assert saved is not None
     assert saved["outcome"] == "no_op"
     assert saved["source"] == "llm"
+    assert saved["task_title"] is None
+    assert saved["task_title_zh"] is None
 
 
 def test_execute_session_evaluation_job_does_not_overwrite_later_manual_evaluation(
@@ -771,7 +818,8 @@ def test_run_session_evaluation_job_saves_unknown_when_transcript_missing(
     assert saved["outcome"] == "unknown"
     assert saved["source"] == "llm"
     assert saved["confidence"] == pytest.approx(0.0)
-    assert saved["task_title"] == "Transcript unavailable"
+    assert saved["task_title"] is None
+    assert saved["task_title_zh"] is None
 
     polled = database_module.get_evaluation_job(job["job_id"], db_path=db_path)
     assert polled is not None
@@ -826,7 +874,8 @@ def test_run_session_evaluation_job_marks_claude_mem_sessions_no_op(
     assert saved["outcome"] == "no_op"
     assert saved["source"] == "llm"
     assert saved["confidence"] == pytest.approx(1.0)
-    assert saved["task_title"] == "Claude-Mem observer session"
+    assert saved["task_title"] is None
+    assert saved["task_title_zh"] is None
 
     polled = database_module.get_evaluation_job(job["job_id"], db_path=db_path)
     assert polled is not None

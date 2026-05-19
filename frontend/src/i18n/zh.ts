@@ -306,6 +306,7 @@ export const zh: Record<string, string> = {
   'Avg Duration': '平均时长',
   'Session': '会话',
   'Session ID': '会话 ID',
+  'Session Title': '会话标题',
   'All Sessions': '全部会话',
   'Started': '开始时间',
   'Duration': '时长',

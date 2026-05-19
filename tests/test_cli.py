@@ -155,6 +155,7 @@ def test_summary_command_evaluates_and_updates_session_by_default(
             stdout=json.dumps(
                 {
                     "task_title": "Add summary command",
+                    "task_title_zh": "添加摘要命令",
                     "summary": "Implemented and verified the session summary command.",
                     "outcome": "solved",
                     "confidence": 0.91,
@@ -176,6 +177,7 @@ def test_summary_command_evaluates_and_updates_session_by_default(
     assert saved["outcome"] == "solved"
     assert saved["source"] == "llm"
     assert saved["task_title"] == "Add summary command"
+    assert saved["task_title_zh"] == "添加摘要命令"
     assert "Add summary command" in captured.out
     assert "solved" in captured.out
 
