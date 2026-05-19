@@ -261,6 +261,7 @@ def test_run_session_evaluation_job_sanitizes_agent_failure_errors(
     database_module,
     isolated_home,
     monkeypatch,
+    caplog,
 ):
     db_path = str(isolated_home / "usage.db")
     database_module.init_db(db_path)
@@ -303,8 +304,12 @@ def test_run_session_evaluation_job_sanitizes_agent_failure_errors(
         return subprocess.CompletedProcess(
             args=kwargs["args"],
             returncode=1,
-            stdout="",
-            stderr="/Users/hanbo/private/token.txt failed with api_key=secret",
+            stdout='{"api_key":"sk-stdout-secret","authorization":"Bearer stdout-token"}',
+            stderr=(
+                "/Users/hanbo/private/token.txt /home/hanbo/token.txt "
+                "failed with api_key=secret OPENAI_API_KEY=sk-env-secret "
+                "Authorization: Bearer bearer-secret --api-key cli-secret"
+            ),
         )
 
     monkeypatch.setattr(evaluation_module.subprocess, "run", fake_run)
@@ -315,6 +320,16 @@ def test_run_session_evaluation_job_sanitizes_agent_failure_errors(
     assert polled is not None
     assert polled["status"] == "failed"
     assert polled["error"] == "Evaluation agent failed"
+    assert "Evaluation agent subprocess failed" in caplog.text
+    assert "returncode=1" in caplog.text
+    assert "api_key=secret" not in caplog.text
+    assert "sk-stdout-secret" not in caplog.text
+    assert "stdout-token" not in caplog.text
+    assert "sk-env-secret" not in caplog.text
+    assert "bearer-secret" not in caplog.text
+    assert "cli-secret" not in caplog.text
+    assert "/Users/hanbo/private/token.txt" not in caplog.text
+    assert "/home/hanbo/token.txt" not in caplog.text
 
 
 def test_start_session_evaluation_job_rejects_manual_evaluation(

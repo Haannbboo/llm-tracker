@@ -10,6 +10,33 @@ def test_usage_daily_endpoint_exists(api_module):
     assert callable(api_module.usage_daily)
 
 
+def test_lifespan_shutdown_cancels_stuck_evaluation_worker(api_module, monkeypatch):
+    started = asyncio.Event()
+
+    async def stuck_worker(**kwargs):
+        started.set()
+        await asyncio.Event().wait()
+
+    monkeypatch.setattr(api_module, "init_db", lambda: None)
+    monkeypatch.setattr(api_module, "EVALUATION_WORKER_SHUTDOWN_TIMEOUT_SECONDS", 0.01)
+    monkeypatch.setattr(api_module, "run_evaluation_worker", stuck_worker)
+    monkeypatch.setattr(
+        api_module,
+        "load_evaluation_worker_config",
+        lambda: object(),
+    )
+
+    async def exercise_lifespan():
+        async with api_module.lifespan(api_module.app):
+            await asyncio.wait_for(started.wait(), timeout=1)
+
+    asyncio.run(asyncio.wait_for(exercise_lifespan(), timeout=1))
+
+
+def test_api_defines_bounded_evaluation_worker_shutdown(api_module):
+    assert hasattr(api_module, "_stop_evaluation_worker")
+
+
 def test_usage_high_watermark_endpoint(api_module, monkeypatch):
     monkeypatch.setattr(api_module, "get_usage_high_watermark", lambda: 42)
 

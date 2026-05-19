@@ -18,6 +18,7 @@ test('shouldProxyApiRequest matches config, usage and session routes', () => {
   assert.equal(shouldProxyApiRequest('/sessions/123/evaluation'), true)
   assert.equal(shouldProxyApiRequest('/model-effectiveness?group_by=model'), true)
   assert.equal(shouldProxyApiRequest('/poll/job-123'), true)
+  assert.equal(shouldProxyApiRequest('/evaluation-jobs/active'), true)
   assert.equal(shouldProxyApiRequest('/assets/index.js'), false)
 })
 

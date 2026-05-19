@@ -4,6 +4,7 @@ evaluation:
   max_concurrent_jobs: 1
   queue_buffer_multiplier: 2
   idle_sleep_cap_seconds: 30
+  worker_tick_timeout_seconds: 120
 
 models:
   # Gemini Models

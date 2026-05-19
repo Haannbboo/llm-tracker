@@ -11,6 +11,7 @@ const proxiedRoutes = [
   '/local/setup-health',
   '/model-effectiveness?group_by=model',
   '/poll/job-123',
+  '/evaluation-jobs/active',
 ]
 
 for (const route of proxiedRoutes) {

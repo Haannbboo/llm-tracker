@@ -416,3 +416,80 @@ def test_run_evaluation_worker_once_respects_max_concurrent_jobs(
     assert len(created) == 1
     assert to_thread_calls == ["_claim_evaluation_jobs"]
     assert database_module.count_running_evaluation_jobs(db_path=db_path) == 1
+
+
+def test_run_evaluation_worker_continues_after_failed_tick(
+    evaluation_worker_module,
+    monkeypatch,
+    caplog,
+):
+    calls = []
+    stop_event = asyncio.Event()
+
+    async def fake_run_once(**kwargs):
+        calls.append(kwargs["config"])
+        if len(calls) == 1:
+            raise RuntimeError("database temporarily unavailable")
+        stop_event.set()
+        return 0
+
+    monkeypatch.setattr(
+        evaluation_worker_module,
+        "run_evaluation_worker_once",
+        fake_run_once,
+    )
+
+    asyncio.run(
+        evaluation_worker_module.run_evaluation_worker(
+            stop_event=stop_event,
+            config=evaluation_worker_module.EvaluationWorkerConfig(
+                idle_sleep_cap_seconds=1
+            ),
+        )
+    )
+
+    assert len(calls) == 2
+    assert "Evaluation worker tick failed" in caplog.text
+
+
+def test_run_evaluation_worker_continues_after_timed_out_tick(
+    evaluation_worker_module,
+    monkeypatch,
+    caplog,
+):
+    calls = []
+    release_first_tick = asyncio.Event()
+    stop_event = asyncio.Event()
+
+    async def fake_run_once(**kwargs):
+        calls.append(kwargs["config"])
+        if len(calls) == 1:
+            await release_first_tick.wait()
+            return 0
+        stop_event.set()
+        return 0
+
+    monkeypatch.setattr(
+        evaluation_worker_module,
+        "run_evaluation_worker_once",
+        fake_run_once,
+    )
+
+    async def exercise_worker():
+        async def release_after_timeout():
+            await asyncio.sleep(1.2)
+            release_first_tick.set()
+
+        asyncio.create_task(release_after_timeout())
+        await evaluation_worker_module.run_evaluation_worker(
+            stop_event=stop_event,
+            config=evaluation_worker_module.EvaluationWorkerConfig(
+                idle_sleep_cap_seconds=1,
+                worker_tick_timeout_seconds=1,
+            ),
+        )
+
+    asyncio.run(exercise_worker())
+
+    assert len(calls) == 2
+    assert "Evaluation worker tick timed out" in caplog.text

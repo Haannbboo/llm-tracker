@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
+import re
 import subprocess
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -26,6 +28,9 @@ from .database import (
 )
 
 EVALUATION_TIMEOUT_SECONDS = 5 * 60
+EVALUATION_LOG_PREVIEW_CHARS = 500
+
+logger = logging.getLogger(__name__)
 
 EVALUATION_PROMPT = """You are evaluating a local agent session transcript for task outcome.
 
@@ -463,6 +468,40 @@ def _unknown_transcript_unavailable_evaluation(error: Exception) -> dict[str, An
     }
 
 
+def _sanitize_evaluator_log_text(value: str) -> str:
+    text = value.strip()
+    if not text:
+        return ""
+    text = re.sub(
+        r"(?i)\b([A-Z0-9_]*(?:api[_-]?key|token|secret|password)[A-Z0-9_]*)"
+        r"\s*=\s*\S+",
+        r"\1=[redacted]",
+        text,
+    )
+    text = re.sub(
+        r'(?i)("?[A-Z0-9_ -]*(?:api[_-]?key|token|secret|password|authorization)'
+        r'[A-Z0-9_ -]*"?\s*:\s*")[^"]*(")',
+        r"\1[redacted]\2",
+        text,
+    )
+    text = re.sub(
+        r"(?i)(authorization\s*:\s*bearer\s+)\S+",
+        r"\1[redacted]",
+        text,
+    )
+    text = re.sub(
+        r"(?i)(--(?:api-?key|token|secret|password)\s+)\S+",
+        r"\1[redacted]",
+        text,
+    )
+    text = re.sub(r"\bsk-[A-Za-z0-9_-]{8,}", "sk-[redacted]", text)
+    text = re.sub(r"/(?:Users|home|var/folders)/[^\s\"']+", "[path]", text)
+    text = re.sub(r"[A-Za-z]:\\Users\\[^\s\"']+", "[path]", text)
+    if len(text) > EVALUATION_LOG_PREVIEW_CHARS:
+        text = f"{text[:EVALUATION_LOG_PREVIEW_CHARS]}..."
+    return text
+
+
 def _decode_evaluation_payload(output: str) -> Any:
     stripped = output.strip()
     decoder = json.JSONDecoder()
@@ -685,6 +724,12 @@ def summarize_session_with_llm(
         env={**os.environ, **invocation.env} if invocation.env else None,
     )
     if completed.returncode != 0:
+        logger.warning(
+            "Evaluation agent subprocess failed: returncode=%s stdout=%r stderr=%r",
+            completed.returncode,
+            _sanitize_evaluator_log_text(completed.stdout),
+            _sanitize_evaluator_log_text(completed.stderr),
+        )
         raise ValueError("Evaluation agent failed")
 
     evaluation = parse_evaluation_output(completed.stdout)

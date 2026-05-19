@@ -71,6 +71,7 @@ def load_config(path: str | None = None) -> dict[str, Any]:
     evaluation.setdefault("max_concurrent_jobs", 1)
     evaluation.setdefault("queue_buffer_multiplier", 2)
     evaluation.setdefault("idle_sleep_cap_seconds", 30)
+    evaluation.setdefault("worker_tick_timeout_seconds", 120)
 
     if "url" not in db:
         db.setdefault("path", os.path.join(get_tracker_home(), "usage.db"))

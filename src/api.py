@@ -1,5 +1,6 @@
 import asyncio
 import json
+import logging
 import os
 import time
 import tomllib
@@ -51,6 +52,10 @@ from contextlib import asynccontextmanager
 from pydantic import BaseModel
 
 
+logger = logging.getLogger(__name__)
+EVALUATION_WORKER_SHUTDOWN_TIMEOUT_SECONDS = 5
+
+
 class ConfigUpdate(BaseModel):
     content: str
 
@@ -99,6 +104,36 @@ class SessionEvaluationUpdate(BaseModel):
     failure_reason: str | None = None
 
 
+async def _stop_evaluation_worker(
+    worker_task: asyncio.Task,
+    *,
+    timeout_seconds: float | None = None,
+) -> None:
+    timeout = (
+        EVALUATION_WORKER_SHUTDOWN_TIMEOUT_SECONDS
+        if timeout_seconds is None
+        else timeout_seconds
+    )
+    done, _pending = await asyncio.wait({worker_task}, timeout=timeout)
+    if done:
+        try:
+            await worker_task
+        except asyncio.CancelledError:
+            pass
+        return
+
+    worker_task.cancel()
+    logger.warning("Evaluation worker shutdown timed out; cancelling worker task")
+    done, _pending = await asyncio.wait({worker_task}, timeout=timeout)
+    if done:
+        try:
+            await worker_task
+        except asyncio.CancelledError:
+            pass
+        return
+    logger.warning("Evaluation worker task did not finish after cancellation")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_db()
@@ -111,10 +146,7 @@ async def lifespan(app: FastAPI):
         yield
     finally:
         stop_event.set()
-        try:
-            await worker_task
-        except asyncio.CancelledError:
-            pass
+        await _stop_evaluation_worker(worker_task)
 
 
 app = FastAPI(title="llm-tracker-api", lifespan=lifespan)

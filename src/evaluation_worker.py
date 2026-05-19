@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -36,6 +37,9 @@ from .evaluation import (
 )
 
 
+logger = logging.getLogger(__name__)
+
+
 @dataclass(frozen=True)
 class EvaluationWorkerConfig:
     auto_enabled: bool = True
@@ -43,6 +47,7 @@ class EvaluationWorkerConfig:
     max_concurrent_jobs: int = 1
     queue_buffer_multiplier: int = 2
     idle_sleep_cap_seconds: int = 30
+    worker_tick_timeout_seconds: int = 120
 
 
 def load_evaluation_worker_config(
@@ -55,6 +60,10 @@ def load_evaluation_worker_config(
         max_concurrent_jobs=max(1, int(raw.get("max_concurrent_jobs", 1))),
         queue_buffer_multiplier=max(1, int(raw.get("queue_buffer_multiplier", 2))),
         idle_sleep_cap_seconds=max(1, int(raw.get("idle_sleep_cap_seconds", 30))),
+        worker_tick_timeout_seconds=max(
+            1,
+            int(raw.get("worker_tick_timeout_seconds", 120)),
+        ),
     )
 
 
@@ -376,12 +385,30 @@ async def run_evaluation_worker(
 ) -> None:
     worker_config = config or load_evaluation_worker_config()
     active_tasks: set[asyncio.Task] = set()
+    tick_task: asyncio.Task[int] | None = None
     while not stop_event.is_set():
-        await run_evaluation_worker_once(
-            config=worker_config,
-            db_path=db_path,
-            active_tasks=active_tasks,
+        if tick_task is None:
+            tick_task = asyncio.create_task(
+                run_evaluation_worker_once(
+                    config=worker_config,
+                    db_path=db_path,
+                    active_tasks=active_tasks,
+                )
+            )
+
+        done, _pending = await asyncio.wait(
+            {tick_task},
+            timeout=worker_config.worker_tick_timeout_seconds,
         )
+        if done:
+            try:
+                await tick_task
+            except Exception:
+                logger.exception("Evaluation worker tick failed")
+            tick_task = None
+        else:
+            logger.error("Evaluation worker tick timed out")
+
         try:
             await asyncio.wait_for(
                 stop_event.wait(),
@@ -389,5 +416,7 @@ async def run_evaluation_worker(
             )
         except asyncio.TimeoutError:
             continue
+    if tick_task is not None and not tick_task.done():
+        tick_task.cancel()
     if active_tasks:
         await asyncio.gather(*active_tasks, return_exceptions=True)
