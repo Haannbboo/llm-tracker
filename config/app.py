@@ -1,43 +1,21 @@
 import os
 import threading
-from dataclasses import dataclass
 from typing import Any
 
 import yaml
 from . import merge as merge_helpers
+from .models import (
+    ModelCost,
+    ProviderConfig,
+    expand_path,
+    get_tracker_home,
+    normalize_model_cost_key,
+)
 
-DEFAULT_TRACKER_HOME = "~/.llm-tracker"
 CONFIG_ENV_VAR = "LLM_TRACKER_CONFIG"
-TRACKER_HOME_ENV_VAR = "LLM_TRACKER_HOME"
 
 merge_missing_config_defaults = merge_helpers.merge_missing_config_defaults
 sync_config_file_with_defaults = merge_helpers.sync_config_file_with_defaults
-
-
-@dataclass(frozen=True)
-class ProviderConfig:
-    name: str
-    base_url: str
-    price_multiplier: float = 1.0
-
-
-@dataclass(frozen=True)
-class ModelCost:
-    input: float
-    output: float
-    cache_read: float
-
-
-def normalize_model_cost_key(model_name: str) -> str:
-    return model_name.lower()
-
-
-def expand_path(path: str) -> str:
-    return os.path.expanduser(path)
-
-
-def get_tracker_home() -> str:
-    return expand_path(os.environ.get(TRACKER_HOME_ENV_VAR, DEFAULT_TRACKER_HOME))
 
 
 def get_config_path(path: str | None = None) -> str:
@@ -109,6 +87,7 @@ def _parse_model_cost(model_config: Any) -> ModelCost | None:
         input=float(cost.get("input", 0)),
         output=float(cost.get("output", 0)),
         cache_read=float(cost.get("cacheRead", 0)),
+        cache_write=float(cost["cacheWrite"]) if "cacheWrite" in cost else None,
     )
 
 
@@ -133,15 +112,18 @@ def build_maps(
 
 def build_cost_maps(
     config: dict[str, Any],
+    remote_costs: dict[str, ModelCost] | None = None,
 ) -> tuple[dict[str, ModelCost], dict[str, dict[str, ModelCost]]]:
     model_costs: dict[str, ModelCost] = {}
     provider_model_costs: dict[str, dict[str, ModelCost]] = {}
 
+    # Layer 1: YAML models (manual overrides)
     for model_name, model_config in config.get("models", {}).items():
         model_cost = _parse_model_cost(model_config)
         if model_cost is not None:
             model_costs[normalize_model_cost_key(model_name)] = model_cost
 
+    # Layer 2: YAML provider-specific overrides
     for provider_name, provider in config["providers"].items():
         provider_costs: dict[str, ModelCost] = {}
         models = provider.get("models", {})
@@ -152,6 +134,12 @@ def build_cost_maps(
                     provider_costs[normalize_model_cost_key(model_name)] = model_cost
         if provider_costs:
             provider_model_costs[provider_name] = provider_costs
+
+    # Layer 3: Remote pricing fills gaps (models with no YAML cost)
+    if remote_costs:
+        for key, cost in remote_costs.items():
+            if key not in model_costs:
+                model_costs[key] = cost
 
     return model_costs, provider_model_costs
 
@@ -167,9 +155,19 @@ def _replace_contents(target: dict, source: dict) -> None:
 
 
 def refresh_runtime_config(path: str | None = None) -> dict[str, Any]:
+    from .pricing import fetch_remote_pricing
+
     updated_config = load_config(path)
+
+    # Fetch LiteLLM pricing (uses local cache as fallback if network unavailable).
+    auto_fetch = updated_config.get("pricing", {}).get("auto_fetch", True)
+    if auto_fetch:
+        remote_costs = fetch_remote_pricing()
+    else:
+        remote_costs = {}
+
     provider_map, model_map = build_maps(updated_config)
-    model_costs, provider_model_costs = build_cost_maps(updated_config)
+    model_costs, provider_model_costs = build_cost_maps(updated_config, remote_costs)
 
     with _config_lock:
         _replace_contents(CONFIG, updated_config)

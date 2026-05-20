@@ -2,6 +2,7 @@ import { createContext, useContext, useState, useCallback, useEffect } from 'rea
 import type { ReactNode } from 'react'
 import { toggleTheme, getTheme } from '../theme'
 import { useLang } from '../i18n/index.ts'
+import type { PricingMap } from '../types.ts'
 
 type AppContextType = {
   // Theme
@@ -20,6 +21,10 @@ type AppContextType = {
   setConfigParsed: (c: Record<string, any> | null) => void
   configStatus: 'idle' | 'saving' | 'saved' | 'error'
   setConfigStatus: (s: 'idle' | 'saving' | 'saved' | 'error') => void
+
+  // Pricing
+  pricingData: PricingMap | null
+  setPricingData: (p: PricingMap | null) => void
 
   // Toast
   showToast: (message: string) => void
@@ -41,6 +46,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [configContent, setConfigContent] = useState('')
   const [configParsed, setConfigParsed] = useState<Record<string, any> | null>(null)
   const [configStatus, setConfigStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle')
+  const [pricingData, setPricingData] = useState<PricingMap | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [refreshTrigger, setRefreshTrigger] = useState(0)
 
@@ -58,22 +64,28 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setTheme(toggleTheme())
   }, [])
 
-  // Fetch config on mount
+  // Fetch config and pricing on mount
   useEffect(() => {
     const controller = new AbortController()
-    async function fetchInitialConfig() {
+    async function fetchInitialData() {
       try {
-        const response = await fetch('/config', { signal: controller.signal })
-        if (response.ok) {
-          const data = await response.json()
+        const [configResp, pricingResp] = await Promise.all([
+          fetch('/config', { signal: controller.signal }),
+          fetch('/pricing', { signal: controller.signal }),
+        ])
+        if (configResp.ok) {
+          const data = await configResp.json()
           setConfigContent(data.content)
           setConfigParsed(data.parsed)
         }
+        if (pricingResp.ok) {
+          setPricingData(await pricingResp.json())
+        }
       } catch (err) {
-        console.error('Failed to load initial config:', err)
+        console.error('Failed to load initial data:', err)
       }
     }
-    void fetchInitialConfig()
+    void fetchInitialData()
     return () => controller.abort()
   }, [])
 
@@ -82,6 +94,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       theme, setTheme, toggleThemeHandler,
       lang, setLang,
       configContent, setConfigContent, configParsed, setConfigParsed, configStatus, setConfigStatus,
+      pricingData, setPricingData,
       showToast,
       error, setError,
       refreshTrigger, requestUsageRefresh,

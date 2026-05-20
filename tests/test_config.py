@@ -220,7 +220,7 @@ def test_build_cost_maps_parses_global_and_provider_model_costs(config_module):
     }
 
 
-def test_build_cost_maps_ignores_cache_write(config_module):
+def test_build_cost_maps_preserves_cache_write_metadata(config_module):
     model_costs, provider_model_costs = config_module.build_cost_maps(
         {
             "models": {
@@ -255,11 +255,13 @@ def test_build_cost_maps_ignores_cache_write(config_module):
         input=1.5,
         output=2.5,
         cache_read=0.15,
+        cache_write=1.875,
     )
     assert provider_model_costs["alpha"]["alpha-1"] == config_module.ModelCost(
         input=3.0,
         output=4.0,
         cache_read=0.3,
+        cache_write=3.75,
     )
 
 

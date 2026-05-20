@@ -609,6 +609,69 @@ async def update_config(update: ConfigUpdate):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.get("/pricing")
+async def get_pricing():
+    """Return all models with resolved pricing and source metadata."""
+    from config.app import _parse_model_cost, normalize_model_cost_key
+    from config.pricing import get_remote_pricing
+
+    yaml_models = CONFIG.get("models", {})
+    yaml_providers = CONFIG.get("providers", {})
+    remote_costs = get_remote_pricing()
+
+    result: dict[str, dict] = {}
+
+    # Layer 1: YAML global models with explicit cost blocks
+    for model_name, model_config in yaml_models.items():
+        cost = _parse_model_cost(model_config)
+        if cost is None:
+            continue
+        key = normalize_model_cost_key(model_name)
+        result[key] = {
+            "input": cost.input,
+            "output": cost.output,
+            "cache_read": cost.cache_read,
+            "cache_write": cost.cache_write,
+            "source": "yaml",
+            "scope": "global",
+        }
+
+    # Layer 2: YAML provider-specific cost overrides
+    for prov_name, prov_conf in yaml_providers.items():
+        if not isinstance(prov_conf, dict):
+            continue
+        models = prov_conf.get("models", {})
+        if not isinstance(models, dict):
+            continue
+        for model_name, model_config in models.items():
+            cost = _parse_model_cost(model_config)
+            if cost is None:
+                continue
+            key = normalize_model_cost_key(model_name)
+            result[key] = {
+                "input": cost.input,
+                "output": cost.output,
+                "cache_read": cost.cache_read,
+                "cache_write": cost.cache_write,
+                "source": "yaml",
+                "scope": prov_name,
+            }
+
+    # Layer 3: LiteLLM auto-fetched (fill gaps only)
+    for key, cost in remote_costs.items():
+        if key not in result:
+            result[key] = {
+                "input": cost.input,
+                "output": cost.output,
+                "cache_read": cost.cache_read,
+                "cache_write": cost.cache_write,
+                "source": "litellm",
+                "scope": "global",
+            }
+
+    return result
+
+
 @app.post("/test-connectivity")
 async def test_connectivity(test: ConnectivityTest):
     url = test.base_url.rstrip("/")

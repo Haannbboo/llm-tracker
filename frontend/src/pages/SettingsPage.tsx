@@ -4,7 +4,7 @@ import { useSettingsData } from '../hooks/useSettingsData'
 import { CopyButton } from '../components/CopyButton'
 import { t } from '../i18n/index.ts'
 import { FIXED_PROVIDER_COLORS, getProviderColor, getModelIcon, getAgentDisplayName } from '../utils'
-import type { SetupDiagnostics } from '../types'
+import type { SetupDiagnostics, PricingEntry } from '../types'
 import type { LocalAgentInfo } from '../hooks/useDashboardAgents'
 
 type Props = {
@@ -23,6 +23,7 @@ export function SettingsPage({ providerColors }: Props) {
 
   const {
     selectedPricingProvider, setSelectedPricingProvider,
+    pricingSearch, setPricingSearch, filteredPricingModels,
     testBaseUrl, setTestBaseUrl, testApiKey, setTestApiKey,
     testFormat, setTestFormat, testModel, setTestModel,
     testMessage, setTestMessage, testResult, isTesting,
@@ -279,7 +280,25 @@ export function SettingsPage({ providerColors }: Props) {
             </select>
           </div>
         </div>
-        <div className="panel-body" style={{ padding: '0' }}>
+        <div style={{ padding: '8px 16px' }}>
+          <input
+            type="text"
+            placeholder={t('Search models...')}
+            value={pricingSearch}
+            onChange={(e) => setPricingSearch(e.target.value)}
+            style={{
+              width: '100%',
+              padding: '6px 12px',
+              borderRadius: '6px',
+              border: '1px solid var(--border-color)',
+              fontSize: '13px',
+              background: 'var(--input-bg)',
+              color: 'var(--text-primary)',
+              outline: 'none',
+            }}
+          />
+        </div>
+        <div className="panel-body" style={{ padding: '0', maxHeight: '600px', overflowY: 'auto' }}>
           <table className="table">
             <thead>
               <tr>
@@ -287,64 +306,83 @@ export function SettingsPage({ providerColors }: Props) {
                 <th>{t('Input (per 1M)')}</th>
                 <th>{t('Output (per 1M)')}</th>
                 <th>{t('Cache Read (per 1M)')}</th>
-                <th>{t('Cache Write (per 1M)')}</th>
+                <th style={{ width: '60px' }}>{t('Source')}</th>
               </tr>
             </thead>
             <tbody>
-              {configParsed?.models ? Object.keys(configParsed.models).map((name) => {
-                const globalCost = configParsed.models[name]?.cost || {};
+              {filteredPricingModels.length > 0 ? filteredPricingModels.map((model) => {
+                const name = model.name;
+                const isYaml = model.source === 'yaml';
+                const globalCost = configParsed?.models?.[name]?.cost || {};
                 const providerCost = selectedPricingProvider !== 'global'
-                  ? (configParsed.providers?.[selectedPricingProvider]?.models?.[name]?.cost || {})
+                  ? (configParsed?.providers?.[selectedPricingProvider]?.models?.[name]?.cost || {})
                   : null;
-
-                const isOverridden = providerCost !== null && Object.keys(providerCost).length > 0;
-                const activeCost = providerCost !== null ? providerCost : globalCost;
+                const hasProviderOverride = providerCost !== null && Object.keys(providerCost).length > 0;
+                const activeCost = hasProviderOverride ? providerCost : globalCost;
 
                 const inputProps = (field: string) => ({
                   type: "number",
                   step: "0.001",
                   value: activeCost[field] !== undefined ? activeCost[field] : "",
-                  placeholder: selectedPricingProvider !== 'global' ? (globalCost[field] ?? "—") : "0.000",
+                  placeholder: isYaml
+                    ? (activeCost[field] !== undefined ? String(activeCost[field]) : "0.000")
+                    : (model[field as keyof PricingEntry] !== undefined ? String(model[field as keyof PricingEntry]) : "—"),
                   onChange: (e: React.ChangeEvent<HTMLInputElement>) => handleCostChange(name, field, e.target.value),
                   style: {
                     width: '100%',
                     padding: '6px 8px',
                     borderRadius: '4px',
                     border: '1px solid transparent',
-                    background: activeCost[field] === undefined && selectedPricingProvider !== 'global' ? 'transparent' : 'var(--input-bg)',
+                    background: !isYaml && activeCost[field] === undefined ? 'transparent' : 'var(--input-bg)',
                     borderBottom: '1px solid var(--border-color)',
                     fontSize: '13px',
-                    color: activeCost[field] === undefined && selectedPricingProvider !== 'global' ? 'var(--text-muted)' : 'var(--text-primary)',
+                    color: !isYaml && activeCost[field] === undefined ? 'var(--text-muted)' : 'var(--text-primary)',
                     outline: 'none',
                     textAlign: 'left' as const
                   }
                 });
 
                 return (
-                  <tr key={name} style={{ background: isOverridden ? 'var(--icon-yellow-bg)' : 'transparent' }}>
+                  <tr key={name} style={{ background: hasProviderOverride ? 'var(--icon-yellow-bg)' : isYaml ? 'rgba(255, 215, 0, 0.05)' : 'transparent' }}>
                     <td style={{ fontWeight: 700 }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                         {getModelIcon(name)}
                         {name}
-                        {isOverridden && <span title={t('Provider Override')} style={{ fontSize: '10px' }}>💰</span>}
+                        {hasProviderOverride && <span title={t('Provider Override')} style={{ fontSize: '10px' }}>💰</span>}
                       </div>
                     </td>
                     <td><input {...inputProps('input')} /></td>
                     <td><input {...inputProps('output')} /></td>
                     <td><input {...inputProps('cacheRead')} /></td>
-                    <td><input {...inputProps('cacheWrite')} /></td>
+                    <td>
+                      <span style={{
+                        fontSize: '10px',
+                        fontWeight: 600,
+                        padding: '2px 6px',
+                        borderRadius: '4px',
+                        background: isYaml ? 'var(--icon-yellow-bg)' : 'var(--surface-hover)',
+                        color: isYaml ? '#b8860b' : 'var(--text-muted)',
+                      }}>
+                        {isYaml ? 'YAML' : 'Auto'}
+                      </span>
+                    </td>
                   </tr>
                 );
               }) : (
                 <tr>
                   <td colSpan={5} style={{ textAlign: 'center', padding: '24px', color: 'var(--text-muted)' }}>
-                    {t('No global models configured in config.yaml.')}
+                    {pricingSearch ? t('No models match your search.') : t('No pricing data available.')}
                   </td>
                 </tr>
               )}
             </tbody>
           </table>
         </div>
+        {filteredPricingModels.length > 0 && (
+          <div style={{ padding: '8px 16px', fontSize: '11px', color: 'var(--text-muted)', borderTop: '1px solid var(--border-color)' }}>
+            {t('Showing')} {filteredPricingModels.length} {t('models')} ({filteredPricingModels.filter(m => m.source === 'yaml').length} {t('YAML')}, {filteredPricingModels.filter(m => m.source === 'litellm').length} {t('auto')})
+          </div>
+        )}
       </div>
 
       <div className="panel">

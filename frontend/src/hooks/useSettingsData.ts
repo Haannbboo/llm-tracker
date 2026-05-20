@@ -1,12 +1,30 @@
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useMemo } from 'react'
 import yaml from 'js-yaml'
 import { t } from '../i18n/index.ts'
 import { useApp } from '../contexts/AppContext'
+import type { PricingEntry } from '../types.ts'
 
 export function useSettingsData() {
-  const { configContent, setConfigContent, configParsed, setConfigParsed, configStatus: _configStatus, setConfigStatus, setError } = useApp()
+  const { configContent, setConfigContent, configParsed, setConfigParsed, configStatus: _configStatus, setConfigStatus, setError, pricingData, setPricingData } = useApp()
 
   const [selectedPricingProvider, setSelectedPricingProvider] = useState('global')
+  const [pricingSearch, setPricingSearch] = useState('')
+
+  const filteredPricingModels = useMemo(() => {
+    if (!pricingData) return []
+    const search = pricingSearch.toLowerCase()
+    const models: Array<{ name: string } & PricingEntry> = []
+    for (const [name, data] of Object.entries(pricingData)) {
+      if (name.includes('/')) continue // skip provider-prefixed keys
+      if (search && !name.toLowerCase().includes(search)) continue
+      models.push({ name, ...data })
+    }
+    models.sort((a, b) => {
+      if (a.source !== b.source) return a.source === 'yaml' ? -1 : 1
+      return a.name.localeCompare(b.name)
+    })
+    return models
+  }, [pricingData, pricingSearch])
 
   // Connectivity test state
   const [testBaseUrl, setTestBaseUrl] = useState('')
@@ -28,6 +46,11 @@ export function useSettingsData() {
       if (response.ok) {
         setConfigStatus('saved')
         setTimeout(() => setConfigStatus('idle'), 3000)
+        // Re-fetch pricing to update source tags after save
+        try {
+          const pricingResp = await fetch('/pricing')
+          if (pricingResp.ok) setPricingData(await pricingResp.json())
+        } catch { /* non-critical */ }
       } else {
         const error = await response.json()
         setError(error.detail || t('Failed to save config'))
@@ -109,6 +132,7 @@ export function useSettingsData() {
 
   return {
     selectedPricingProvider, setSelectedPricingProvider,
+    pricingSearch, setPricingSearch, filteredPricingModels,
     testBaseUrl, setTestBaseUrl, testApiKey, setTestApiKey,
     testFormat, setTestFormat, testModel, setTestModel,
     testMessage, setTestMessage, testResult, isTesting,

@@ -8,7 +8,7 @@ import yaml
 
 # Only these top-level sections are safe to backfill from config.example.yaml
 # without introducing example provider stanzas into an existing user config.
-SYNCABLE_TOP_LEVEL_KEYS = ("models", "server", "db")
+SYNCABLE_TOP_LEVEL_KEYS = ("models", "server", "db", "pricing")
 
 
 def _merge_missing_dict_values(

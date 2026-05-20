@@ -271,3 +271,16 @@ export type OnboardingCopiedCommand = {
   source: string
   command: string
 }
+
+export type PricingSource = 'yaml' | 'litellm'
+
+export type PricingEntry = {
+  input: number
+  output: number
+  cache_read: number
+  cache_write: number | null
+  source: PricingSource
+  scope: string
+}
+
+export type PricingMap = Record<string, PricingEntry>
