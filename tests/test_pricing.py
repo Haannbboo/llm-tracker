@@ -1,11 +1,8 @@
 from __future__ import annotations
 
-import json
-from unittest.mock import MagicMock, patch
-
 from fastapi.testclient import TestClient
 
-from config.app import ModelCost, normalize_model_cost_key
+from config.app import ModelCost
 from config.pricing import (
     _claude_3x_alias,
     _is_chat_model,
@@ -90,6 +87,45 @@ def test_parse_model_cost_without_cache_write(config_module):
 
     assert cost is not None
     assert cost.cache_write is None
+
+
+def test_apply_patch_set_creates_nested_dicts_with_literal_keys(config_module):
+    config = {"models": {}}
+
+    config_module._apply_patch(
+        config,
+        ["models", "vendor/model.v1", "cost", "cacheRead"],
+        "set",
+        0.25,
+    )
+
+    assert config["models"]["vendor/model.v1"]["cost"]["cacheRead"] == 0.25
+
+
+def test_apply_patch_delete_missing_leaf_is_noop(config_module):
+    config = {"models": {"test-model": {"cost": {"input": 1.0}}}}
+
+    config_module._apply_patch(
+        config,
+        ["models", "test-model", "cost", "cacheRead"],
+        "delete",
+        None,
+    )
+
+    assert config == {"models": {"test-model": {"cost": {"input": 1.0}}}}
+
+
+def test_apply_patch_delete_missing_nested_path_is_noop(config_module):
+    config = {"models": {}}
+
+    config_module._apply_patch(
+        config,
+        ["models", "missing-model", "cost", "input"],
+        "delete",
+        None,
+    )
+
+    assert config == {"models": {}}
 
 
 def test_is_chat_model_chat_mode():
@@ -679,6 +715,141 @@ def test_pricing_provider_override_beats_global_and_fallback_gets_multiplier(
     assert data["global-only"]["input"] == 3.0
     assert data["global-only"]["multiplier"] == 2.0
     assert data["global-only"]["effective_input"] == 6.0
+
+
+def test_patch_config_applies_patches_and_refreshes_runtime(
+    api_module, isolated_home, monkeypatch
+):
+    config_path = isolated_home / ".llm-tracker" / "config.yaml"
+    config_path.write_text(
+        """# tracker config
+server:
+  host: 127.0.0.1
+  port: 4000
+db:
+  path: ~/.llm-tracker/usage.db
+models:
+  test-model:
+    cost:
+      input: 1.0
+      output: 2.0
+      cacheRead: 0.1
+providers: {}
+""",
+        encoding="utf-8",
+    )
+    api_module.CONFIG_PATH = str(config_path)
+    refreshed_paths = []
+    monkeypatch.setattr(
+        api_module,
+        "refresh_runtime_config",
+        lambda path: refreshed_paths.append(path),
+    )
+
+    response = TestClient(api_module.app).patch(
+        "/config",
+        json={
+            "patches": [
+                {
+                    "path": ["models", "test-model", "cost", "input"],
+                    "op": "set",
+                    "value": 3.5,
+                },
+                {
+                    "path": ["models", "test-model", "cost", "cacheRead"],
+                    "op": "delete",
+                    "value": None,
+                },
+            ]
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"status": "success"}
+    content = config_path.read_text(encoding="utf-8")
+    assert "# tracker config" in content
+    assert "input: 3.5" in content
+    assert "cacheRead" not in content
+    assert refreshed_paths == [str(config_path)]
+
+
+def test_patch_config_rejects_non_numeric_set_value(api_module, isolated_home):
+    response = TestClient(api_module.app).patch(
+        "/config",
+        json={
+            "patches": [
+                {
+                    "path": ["models", "test-model", "cost", "input"],
+                    "op": "set",
+                    "value": "not-a-number",
+                },
+            ]
+        },
+    )
+
+    assert response.status_code == 422
+
+
+def test_patch_config_rejects_numeric_string_set_value(api_module, isolated_home):
+    response = TestClient(api_module.app).patch(
+        "/config",
+        json={
+            "patches": [
+                {
+                    "path": ["models", "test-model", "cost", "input"],
+                    "op": "set",
+                    "value": "1.2",
+                },
+            ]
+        },
+    )
+
+    assert response.status_code == 422
+
+
+def test_patch_config_rejects_null_set_value_without_persisting(
+    api_module, isolated_home
+):
+    config_path = isolated_home / ".llm-tracker" / "config.yaml"
+    original_content = config_path.read_text(encoding="utf-8")
+
+    response = TestClient(api_module.app).patch(
+        "/config",
+        json={
+            "patches": [
+                {
+                    "path": ["models", "test-model", "cost", "input"],
+                    "op": "set",
+                    "value": None,
+                },
+            ]
+        },
+    )
+
+    assert response.status_code == 422
+    assert config_path.read_text(encoding="utf-8") == original_content
+
+
+def test_patch_config_rejects_missing_set_value_without_persisting(
+    api_module, isolated_home
+):
+    config_path = isolated_home / ".llm-tracker" / "config.yaml"
+    original_content = config_path.read_text(encoding="utf-8")
+
+    response = TestClient(api_module.app).patch(
+        "/config",
+        json={
+            "patches": [
+                {
+                    "path": ["models", "test-model", "cost", "input"],
+                    "op": "set",
+                },
+            ]
+        },
+    )
+
+    assert response.status_code == 422
+    assert config_path.read_text(encoding="utf-8") == original_content
 
 
 # --- Claude 3.x alias ---

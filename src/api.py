@@ -13,6 +13,7 @@ from fastapi.staticfiles import StaticFiles
 from config.app import (
     CONFIG,
     CONFIG_PATH,
+    _apply_patch,
     _config_lock,
     refresh_runtime_config,
 )
@@ -50,7 +51,8 @@ from .database import (
 from .evaluation import start_session_evaluation_job
 from .evaluation_worker import load_evaluation_worker_config, run_evaluation_worker
 from contextlib import asynccontextmanager
-from pydantic import BaseModel
+from pydantic import BaseModel, model_validator
+from typing import Literal
 
 
 logger = logging.getLogger(__name__)
@@ -59,6 +61,30 @@ EVALUATION_WORKER_SHUTDOWN_TIMEOUT_SECONDS = 5
 
 class ConfigUpdate(BaseModel):
     content: str
+
+
+class ConfigPatch(BaseModel):
+    path: list[str]
+    op: Literal["set", "delete"]
+    value: float | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def require_numeric_value_for_set(cls, data):
+        if not isinstance(data, dict):
+            return data
+        if data.get("op") != "set":
+            return data
+        value = data.get("value")
+        if value is None:
+            raise ValueError("set patches require a numeric value")
+        if isinstance(value, bool) or not isinstance(value, int | float):
+            raise ValueError("set patches require a numeric value")
+        return data
+
+
+class ConfigPatchUpdate(BaseModel):
+    patches: list[ConfigPatch]
 
 
 class ConnectivityTest(BaseModel):
@@ -606,6 +632,47 @@ async def update_config(update: ConfigUpdate):
         return {"status": "success"}
     except yaml.YAMLError as e:
         raise HTTPException(status_code=400, detail=f"Invalid YAML: {str(e)}")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.patch("/config")
+async def patch_config(update: ConfigPatchUpdate):
+    from ruamel.yaml import YAML
+    from ruamel.yaml.error import YAMLError as RuamelYAMLError
+
+    path = os.path.expanduser(CONFIG_PATH)
+    yaml_parser = YAML()
+    yaml_parser.preserve_quotes = True
+
+    try:
+        if os.path.exists(path):
+            with open(path, "r", encoding="utf-8") as f:
+                config = yaml_parser.load(f) or {}
+        else:
+            config = {}
+
+        if not isinstance(config, dict):
+            raise HTTPException(
+                status_code=400,
+                detail="Config root must be a YAML mapping",
+            )
+
+        for patch in update.patches:
+            _apply_patch(config, patch.path, patch.op, patch.value)
+
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8") as f:
+            yaml_parser.dump(config, f)
+
+        refresh_runtime_config(path)
+        return {"status": "success"}
+    except RuamelYAMLError as e:
+        raise HTTPException(status_code=400, detail=f"Invalid YAML: {str(e)}")
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
