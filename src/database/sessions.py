@@ -226,6 +226,7 @@ def upsert_session_evaluation(
     summary: str | None = None,
     evidence: list[str] | None = None,
     failure_reason: str | None = None,
+    skip_if_manual: bool = False,
     db_path: str | None = None,
 ) -> None:
     """Set evaluation on an existing session. Raises ValueError if session not found."""
@@ -240,6 +241,8 @@ def upsert_session_evaluation(
         record = session.get(SessionRecord, session_id)
         if not record:
             raise ValueError(f"Session not found: {session_id}")
+        if skip_if_manual and record.source == "manual":
+            return
         record.outcome = outcome
         record.source = source
         record.confidence = confidence

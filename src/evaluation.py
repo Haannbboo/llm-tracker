@@ -613,30 +613,28 @@ def parse_evaluation_output(output: str) -> dict[str, Any]:
     }
 
 
-def _persist_evaluation(
+def _upsert_llm_evaluation(
     *,
     session_id: str,
     evaluation: dict[str, Any],
     db_path: str | None,
+    skip_if_manual: bool = False,
 ) -> None:
-    with Session(get_engine(db_path)) as session:
-        record = session.get(SessionRecord, session_id)
-        if not record:
-            raise ValueError(f"Session not found: {session_id}")
-        if record.source == "manual":
-            return
-        record.outcome = evaluation["outcome"]
-        record.source = "llm"
-        record.confidence = evaluation["confidence"]
-        record.task_title = evaluation["task_title"]
-        record.task_title_zh = evaluation.get("task_title_zh")
-        record.summary = evaluation["summary"]
-        record.evidence_json = (
-            json.dumps(evaluation["evidence"]) if evaluation["evidence"] else None
-        )
-        record.failure_reason = evaluation["failure_reason"]
-        record.evaluated_at = datetime.now(timezone.utc).isoformat()
-        session.commit()
+    from .database import upsert_session_evaluation
+
+    upsert_session_evaluation(
+        session_id=session_id,
+        outcome=evaluation["outcome"],
+        source="llm",
+        confidence=evaluation["confidence"],
+        task_title=evaluation.get("task_title"),
+        task_title_zh=evaluation.get("task_title_zh"),
+        summary=evaluation.get("summary"),
+        evidence=evaluation.get("evidence"),
+        failure_reason=evaluation.get("failure_reason"),
+        skip_if_manual=skip_if_manual,
+        db_path=db_path,
+    )
 
 
 def _session_has_manual_evaluation(
@@ -656,7 +654,7 @@ def mark_evaluator_session_no_op(
 ) -> bool:
     if _session_has_manual_evaluation(session_id, db_path=db_path):
         return False
-    _persist_evaluation(
+    _upsert_llm_evaluation(
         session_id=session_id,
         evaluation=_no_op_evaluator_session_evaluation(),
         db_path=db_path,
@@ -683,10 +681,11 @@ def summarize_session_with_llm(
     except ValueError as exc:
         evaluation = _unknown_transcript_unavailable_evaluation(exc)
         if update:
-            _persist_evaluation(
+            _upsert_llm_evaluation(
                 session_id=record.session_id,
                 evaluation=evaluation,
                 db_path=db_path,
+                skip_if_manual=True,
             )
         return evaluation
 
@@ -695,10 +694,11 @@ def summarize_session_with_llm(
     ):
         evaluation = _no_op_claude_mem_evaluation()
         if update:
-            _persist_evaluation(
+            _upsert_llm_evaluation(
                 session_id=record.session_id,
                 evaluation=evaluation,
                 db_path=db_path,
+                skip_if_manual=True,
             )
         return evaluation
 
@@ -707,20 +707,22 @@ def summarize_session_with_llm(
     except (TranscriptLoadError, ValueError) as exc:
         evaluation = _unknown_transcript_unavailable_evaluation(exc)
         if update:
-            _persist_evaluation(
+            _upsert_llm_evaluation(
                 session_id=record.session_id,
                 evaluation=evaluation,
                 db_path=db_path,
+                skip_if_manual=True,
             )
         return evaluation
 
     if _transcript_is_evaluator_session(transcript):
         evaluation = _no_op_evaluator_session_evaluation()
         if update:
-            _persist_evaluation(
+            _upsert_llm_evaluation(
                 session_id=record.session_id,
                 evaluation=evaluation,
                 db_path=db_path,
+                skip_if_manual=True,
             )
         return evaluation
 
@@ -744,10 +746,11 @@ def summarize_session_with_llm(
 
     evaluation = parse_evaluation_output(completed.stdout)
     if update:
-        _persist_evaluation(
+        _upsert_llm_evaluation(
             session_id=record.session_id,
             evaluation=evaluation,
             db_path=db_path,
+            skip_if_manual=True,
         )
     return evaluation
 
