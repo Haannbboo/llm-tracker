@@ -256,6 +256,13 @@ models:
       cacheRead: 0.03
       cacheWrite: 0.375
 
+  # Z-AI / GLM
+  z-ai/glm-5.1-20260406:
+    cost:
+      input: 0.98
+      output: 3.08
+      cacheRead: 0.182
+
   # Xiaomi Mimo
   mimo-v2.5-pro:
     cost:

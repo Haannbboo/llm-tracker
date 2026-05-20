@@ -196,6 +196,7 @@ export function getModelIcon(model: string, theme: Theme = getTheme()) {
   if (m.includes('poolside')) return <img src="/models/poolside.png" alt="" style={style} />
   if (m.includes('deepseek')) return <img src="/models/deepseek.png" alt="" style={style} />
   if (m.includes('openrouter')) return <img src={dark ? '/models/openrouter-dark.svg' : '/models/openrouter.svg'} alt="" style={style} />
+  if (m.startsWith('z-ai/') || m.includes('glm')) return <img src="/models/z-ai.svg" alt="" style={style} />
   return null
 }
 
@@ -210,6 +211,7 @@ export function getProviderBadgeColor(provider: string): string {
   if (p.includes('openrouter')) return '#6366f1'
   if (p.includes('poolside')) return '#f97316'
   if (p.includes('deepseek')) return '#4d7cff'
+  if (p.includes('z-ai')) return '#1F63EC'
   return '#f1f5f9'
 }
 
@@ -219,7 +221,7 @@ export function getProviderBadgeBg(provider: string, theme: Theme = getTheme()):
   const p = provider.toLowerCase()
   if (p.startsWith('tencent/')) return dark ? '#0052D980' : '#0052D926'
   if (p.includes('openai') || p.includes('xiaomi')) return dark ? `${base}90` : `${base}80`
-  if (p.includes('anthropic') || p.includes('google') || p.includes('minimax') || p.includes('openrouter') || p.includes('poolside') || p.includes('deepseek')) return dark ? `${base}40` : `${base}26`
+  if (p.includes('anthropic') || p.includes('google') || p.includes('minimax') || p.includes('openrouter') || p.includes('poolside') || p.includes('deepseek') || p.includes('z-ai')) return dark ? `${base}40` : `${base}26`
   return dark ? '#334155' : '#f1f5f9'
 }
 
@@ -232,6 +234,7 @@ export function getProviderBadgeText(provider: string, theme: Theme = getTheme()
   if (p.includes('openrouter')) return dark ? '#a5b4fc' : '#6366f1'
   if (p.includes('poolside')) return dark ? '#fdba74' : '#c2410c'
   if (p.includes('deepseek')) return dark ? '#93b4ff' : '#1d4ed8'
+  if (p.includes('z-ai')) return dark ? '#7daaf5' : '#1F63EC'
   if (p.includes('anthropic') || p.includes('google') || p.includes('minimax')) return getProviderBadgeColor(provider)
   return dark ? '#94a3b8' : '#475569'
 }
@@ -250,6 +253,7 @@ export function getProviderIcon(provider: string, theme: Theme = getTheme()) {
   if (p.includes('inclusionai')) return <img src="/models/inclusionai.png" alt="" style={style} />
   if (p.includes('poolside')) return <img src="/models/poolside.png" alt="" style={style} />
   if (p.includes('deepseek')) return <img src="/models/deepseek.png" alt="" style={style} />
+  if (p.includes('z-ai')) return <img src="/models/z-ai.svg" alt="" style={style} />
   return null
 }
 
