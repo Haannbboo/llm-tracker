@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 from unittest.mock import MagicMock, patch
 
+from fastapi.testclient import TestClient
+
 from config.app import ModelCost, normalize_model_cost_key
 from config.pricing import (
     _claude_3x_alias,
@@ -317,6 +319,170 @@ def test_provider_override_takes_priority_over_remote(config_module):
     assert provider_costs["my-provider"]["special-model"].input == 5.0
     # Remote also populates global (since no global YAML entry)
     assert model_costs["special-model"].input == 1.0
+
+
+# --- resolve_all_costs integration ---
+
+
+def test_resolve_all_costs_yaml_global(config_module):
+    config = {
+        "models": {
+            "claude-sonnet-4-6": {
+                "cost": {"input": 3.0, "output": 15.0, "cacheRead": 0.3}
+            },
+        },
+        "providers": {},
+    }
+
+    resolved = config_module.resolve_all_costs(config)
+
+    assert resolved.global_costs["claude-sonnet-4-6"].source == "yaml"
+    assert resolved.global_costs["claude-sonnet-4-6"].cost.input == 3.0
+    assert resolved.provider_costs == {}
+
+
+def test_resolve_all_costs_provider_override_keeps_global(config_module):
+    config = {
+        "models": {
+            "test-model": {"cost": {"input": 1.0, "output": 2.0, "cacheRead": 0.1}},
+        },
+        "providers": {
+            "my-provider": {
+                "base_url": "https://example.com",
+                "models": {
+                    "test-model": {
+                        "cost": {"input": 5.0, "output": 10.0, "cacheRead": 0.5}
+                    },
+                },
+            },
+        },
+    }
+
+    resolved = config_module.resolve_all_costs(config)
+
+    assert resolved.global_costs["test-model"].cost.input == 1.0
+    assert resolved.global_costs["test-model"].source == "yaml"
+    assert resolved.provider_costs["my-provider"]["test-model"].cost.input == 5.0
+    assert resolved.provider_costs["my-provider"]["test-model"].source == "yaml"
+
+
+def test_resolve_all_costs_litellm_gap_fill(config_module):
+    config = {
+        "models": {"claude-sonnet-4-6": {}},
+        "providers": {},
+    }
+    remote = {
+        "claude-sonnet-4-6": ModelCost(input=3.0, output=15.0, cache_read=0.3),
+    }
+
+    resolved = config_module.resolve_all_costs(config, remote)
+
+    assert resolved.global_costs["claude-sonnet-4-6"].source == "litellm"
+    assert resolved.global_costs["claude-sonnet-4-6"].cost.input == 3.0
+
+
+def test_resolve_all_costs_yaml_wins_over_litellm(config_module):
+    config = {
+        "models": {
+            "test-model": {"cost": {"input": 1.0, "output": 2.0, "cacheRead": 0.1}},
+        },
+        "providers": {},
+    }
+    remote = {
+        "test-model": ModelCost(input=99.0, output=99.0, cache_read=99.0),
+    }
+
+    resolved = config_module.resolve_all_costs(config, remote)
+
+    assert resolved.global_costs["test-model"].cost.input == 1.0
+    assert resolved.global_costs["test-model"].source == "yaml"
+
+
+def test_resolve_all_costs_both_scopes_coexist(config_module):
+    config = {
+        "models": {
+            "test-model": {"cost": {"input": 1.0, "output": 2.0, "cacheRead": 0.1}},
+        },
+        "providers": {
+            "prov-a": {
+                "base_url": "https://a.com",
+                "models": {
+                    "test-model": {
+                        "cost": {"input": 5.0, "output": 10.0, "cacheRead": 0.5}
+                    },
+                },
+            },
+        },
+    }
+
+    resolved = config_module.resolve_all_costs(config)
+
+    assert resolved.global_costs["test-model"].cost.input == 1.0
+    assert resolved.provider_costs["prov-a"]["test-model"].cost.input == 5.0
+
+
+def test_build_cost_maps_uses_resolved_behavior(config_module):
+    config = {
+        "models": {
+            "test-model": {"cost": {"input": 1.0, "output": 2.0, "cacheRead": 0.1}},
+        },
+        "providers": {
+            "prov-a": {
+                "base_url": "https://a.com",
+                "models": {
+                    "test-model": {
+                        "cost": {"input": 5.0, "output": 10.0, "cacheRead": 0.5}
+                    },
+                },
+            },
+        },
+    }
+    remote = {
+        "remote-only": ModelCost(input=3.0, output=6.0, cache_read=0.3),
+        "test-model": ModelCost(input=99.0, output=99.0, cache_read=99.0),
+    }
+
+    model_costs, provider_model_costs = config_module.build_cost_maps(config, remote)
+
+    assert model_costs["test-model"].input == 1.0
+    assert model_costs["remote-only"].input == 3.0
+    assert provider_model_costs["prov-a"]["test-model"].input == 5.0
+
+
+def test_pricing_endpoint_provider_display_overwrites_global_same_key(
+    api_module, monkeypatch
+):
+    api_module.CONFIG.clear()
+    api_module.CONFIG.update(
+        {
+            "models": {
+                "test-model": {"cost": {"input": 1.0, "output": 2.0, "cacheRead": 0.1}},
+            },
+            "providers": {
+                "prov-a": {
+                    "base_url": "https://a.com",
+                    "models": {
+                        "test-model": {
+                            "cost": {
+                                "input": 5.0,
+                                "output": 10.0,
+                                "cacheRead": 0.5,
+                            }
+                        },
+                    },
+                },
+            },
+        }
+    )
+    monkeypatch.setattr("config.pricing.get_remote_pricing", lambda: {})
+
+    response = TestClient(api_module.app).get("/pricing")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["test-model"]["scope"] == "prov-a"
+    assert data["test-model"]["source"] == "yaml"
+    assert data["test-model"]["input"] == 5.0
 
 
 # --- Claude 3.x alias ---

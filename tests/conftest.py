@@ -53,18 +53,27 @@ PROJECT_MODULES = [
     "src.schema_migrations",
     "src.otlp",
     "src.proxy",
+    "src.recorder",
     "src.utils",
     "src.provider_parser",
 ]
 
 
 def clear_project_modules() -> None:
+    removed_modules = set(PROJECT_MODULES)
     for module_name in PROJECT_MODULES:
         sys.modules.pop(module_name, None)
     # Clear package submodules (e.g. src.database.models)
     for key in list(sys.modules):
         if any(key.startswith(prefix + ".") for prefix in PROJECT_MODULES):
             sys.modules.pop(key, None)
+            removed_modules.add(key)
+
+    for module_name in removed_modules:
+        package_name, _, attribute = module_name.rpartition(".")
+        package = sys.modules.get(package_name)
+        if package is not None and hasattr(package, attribute):
+            delattr(package, attribute)
 
 
 @pytest.fixture

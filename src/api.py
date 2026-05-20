@@ -13,6 +13,7 @@ from fastapi.staticfiles import StaticFiles
 from config.app import (
     CONFIG,
     CONFIG_PATH,
+    _config_lock,
     refresh_runtime_config,
 )
 from .costs import calculate_costs
@@ -612,61 +613,34 @@ async def update_config(update: ConfigUpdate):
 @app.get("/pricing")
 async def get_pricing():
     """Return all models with resolved pricing and source metadata."""
-    from config.app import _parse_model_cost, normalize_model_cost_key
+    from config.app import resolve_all_costs
     from config.pricing import get_remote_pricing
 
-    yaml_models = CONFIG.get("models", {})
-    yaml_providers = CONFIG.get("providers", {})
-    remote_costs = get_remote_pricing()
+    with _config_lock:
+        config_snapshot = dict(CONFIG)
 
+    resolved = resolve_all_costs(config_snapshot, get_remote_pricing())
     result: dict[str, dict] = {}
 
-    # Layer 1: YAML global models with explicit cost blocks
-    for model_name, model_config in yaml_models.items():
-        cost = _parse_model_cost(model_config)
-        if cost is None:
-            continue
-        key = normalize_model_cost_key(model_name)
+    for key, resolved_cost in resolved.global_costs.items():
         result[key] = {
-            "input": cost.input,
-            "output": cost.output,
-            "cache_read": cost.cache_read,
-            "cache_write": cost.cache_write,
-            "source": "yaml",
+            "input": resolved_cost.cost.input,
+            "output": resolved_cost.cost.output,
+            "cache_read": resolved_cost.cost.cache_read,
+            "cache_write": resolved_cost.cost.cache_write,
+            "source": resolved_cost.source,
             "scope": "global",
         }
 
-    # Layer 2: YAML provider-specific cost overrides
-    for prov_name, prov_conf in yaml_providers.items():
-        if not isinstance(prov_conf, dict):
-            continue
-        models = prov_conf.get("models", {})
-        if not isinstance(models, dict):
-            continue
-        for model_name, model_config in models.items():
-            cost = _parse_model_cost(model_config)
-            if cost is None:
-                continue
-            key = normalize_model_cost_key(model_name)
+    for provider_name, costs in resolved.provider_costs.items():
+        for key, resolved_cost in costs.items():
             result[key] = {
-                "input": cost.input,
-                "output": cost.output,
-                "cache_read": cost.cache_read,
-                "cache_write": cost.cache_write,
-                "source": "yaml",
-                "scope": prov_name,
-            }
-
-    # Layer 3: LiteLLM auto-fetched (fill gaps only)
-    for key, cost in remote_costs.items():
-        if key not in result:
-            result[key] = {
-                "input": cost.input,
-                "output": cost.output,
-                "cache_read": cost.cache_read,
-                "cache_write": cost.cache_write,
-                "source": "litellm",
-                "scope": "global",
+                "input": resolved_cost.cost.input,
+                "output": resolved_cost.cost.output,
+                "cache_read": resolved_cost.cost.cache_read,
+                "cache_write": resolved_cost.cost.cache_write,
+                "source": resolved_cost.source,
+                "scope": provider_name,
             }
 
     return result

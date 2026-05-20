@@ -7,6 +7,8 @@ from . import merge as merge_helpers
 from .models import (
     ModelCost,
     ProviderConfig,
+    ResolvedCost,
+    ResolvedCosts,
     expand_path,
     get_tracker_home,
     normalize_model_cost_key,
@@ -114,34 +116,55 @@ def build_cost_maps(
     config: dict[str, Any],
     remote_costs: dict[str, ModelCost] | None = None,
 ) -> tuple[dict[str, ModelCost], dict[str, dict[str, ModelCost]]]:
-    model_costs: dict[str, ModelCost] = {}
-    provider_model_costs: dict[str, dict[str, ModelCost]] = {}
+    resolved = resolve_all_costs(config, remote_costs)
+    model_costs = {key: rc.cost for key, rc in resolved.global_costs.items()}
+    provider_model_costs = {
+        provider: {key: rc.cost for key, rc in costs.items()}
+        for provider, costs in resolved.provider_costs.items()
+    }
+    return model_costs, provider_model_costs
 
-    # Layer 1: YAML models (manual overrides)
+
+def resolve_all_costs(
+    config: dict[str, Any],
+    remote_costs: dict[str, ModelCost] | None = None,
+) -> ResolvedCosts:
+    """Resolve global and provider model costs with source metadata."""
+    global_costs: dict[str, ResolvedCost] = {}
+    provider_costs: dict[str, dict[str, ResolvedCost]] = {}
+
     for model_name, model_config in config.get("models", {}).items():
         model_cost = _parse_model_cost(model_config)
         if model_cost is not None:
-            model_costs[normalize_model_cost_key(model_name)] = model_cost
+            global_costs[normalize_model_cost_key(model_name)] = ResolvedCost(
+                cost=model_cost,
+                source="yaml",
+            )
 
-    # Layer 2: YAML provider-specific overrides
-    for provider_name, provider in config["providers"].items():
-        provider_costs: dict[str, ModelCost] = {}
+    for provider_name, provider in config.get("providers", {}).items():
+        if not isinstance(provider, dict):
+            continue
         models = provider.get("models", {})
         if isinstance(models, dict):
             for model_name, model_config in models.items():
                 model_cost = _parse_model_cost(model_config)
                 if model_cost is not None:
-                    provider_costs[normalize_model_cost_key(model_name)] = model_cost
-        if provider_costs:
-            provider_model_costs[provider_name] = provider_costs
+                    provider_costs.setdefault(provider_name, {})[
+                        normalize_model_cost_key(model_name)
+                    ] = ResolvedCost(
+                        cost=model_cost,
+                        source="yaml",
+                    )
 
-    # Layer 3: Remote pricing fills gaps (models with no YAML cost)
     if remote_costs:
         for key, cost in remote_costs.items():
-            if key not in model_costs:
-                model_costs[key] = cost
+            if key not in global_costs:
+                global_costs[key] = ResolvedCost(
+                    cost=cost,
+                    source="litellm",
+                )
 
-    return model_costs, provider_model_costs
+    return ResolvedCosts(global_costs=global_costs, provider_costs=provider_costs)
 
 
 _config_lock = threading.Lock()

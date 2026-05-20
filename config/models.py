@@ -32,5 +32,17 @@ class ModelCost:
     cache_write: float | None = None
 
 
+@dataclass(frozen=True)
+class ResolvedCost:
+    cost: ModelCost
+    source: str
+
+
+@dataclass(frozen=True)
+class ResolvedCosts:
+    global_costs: dict[str, ResolvedCost]
+    provider_costs: dict[str, dict[str, ResolvedCost]]
+
+
 def normalize_model_cost_key(model_name: str) -> str:
     return model_name.lower()
