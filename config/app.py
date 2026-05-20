@@ -1,4 +1,5 @@
 import os
+import threading
 from dataclasses import dataclass
 from typing import Any
 
@@ -155,21 +156,27 @@ def build_cost_maps(
     return model_costs, provider_model_costs
 
 
+_config_lock = threading.Lock()
+
+
+def _replace_contents(target: dict, source: dict) -> None:
+    """Update target in place to match source without a clear-then-fill window."""
+    target.update(source)
+    for stale in set(target) - set(source):
+        del target[stale]
+
+
 def refresh_runtime_config(path: str | None = None) -> dict[str, Any]:
     updated_config = load_config(path)
     provider_map, model_map = build_maps(updated_config)
     model_costs, provider_model_costs = build_cost_maps(updated_config)
 
-    CONFIG.clear()
-    CONFIG.update(updated_config)
-    PROVIDER_MAP.clear()
-    PROVIDER_MAP.update(provider_map)
-    MODEL_MAP.clear()
-    MODEL_MAP.update(model_map)
-    MODEL_COSTS.clear()
-    MODEL_COSTS.update(model_costs)
-    PROVIDER_MODEL_COSTS.clear()
-    PROVIDER_MODEL_COSTS.update(provider_model_costs)
+    with _config_lock:
+        _replace_contents(CONFIG, updated_config)
+        _replace_contents(PROVIDER_MAP, provider_map)
+        _replace_contents(MODEL_MAP, model_map)
+        _replace_contents(MODEL_COSTS, model_costs)
+        _replace_contents(PROVIDER_MODEL_COSTS, provider_model_costs)
 
     return CONFIG
 

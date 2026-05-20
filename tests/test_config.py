@@ -2,6 +2,7 @@ import os
 import runpy
 import subprocess
 import sys
+import threading
 from pathlib import Path
 
 import yaml
@@ -685,3 +686,48 @@ models: {}
     namespace = runpy.run_path(str(repo_root / "config" / "otlp.conf.py"))
 
     assert namespace["bind"] == "127.0.0.1:4005"
+
+
+def test_replace_contents_updates_keys(config_module):
+    target = {"a": 1, "b": 2, "c": 3}
+    source = {"a": 10, "b": 20, "d": 40}
+    config_module._replace_contents(target, source)
+    assert target == {"a": 10, "b": 20, "d": 40}
+    assert "c" not in target
+
+
+def test_replace_contents_empty_source(config_module):
+    target = {"a": 1, "b": 2}
+    source = {}
+    config_module._replace_contents(target, source)
+    assert target == {}
+
+
+def test_replace_contents_no_stale_keys(config_module):
+    target = {"a": 1}
+    source = {"a": 2}
+    config_module._replace_contents(target, source)
+    assert target == {"a": 2}
+
+
+def test_replace_contents_concurrent_readers_never_see_empty(config_module):
+    target = {f"key{i}": i for i in range(100)}
+    errors = []
+
+    def reader():
+        for _ in range(1000):
+            if not target:
+                errors.append("saw empty dict")
+                return
+
+    threads = [threading.Thread(target=reader) for _ in range(4)]
+    for thread in threads:
+        thread.start()
+
+    new_source = {f"key{i}": i * 10 for i in range(50, 150)}
+    config_module._replace_contents(target, new_source)
+
+    for thread in threads:
+        thread.join()
+
+    assert not errors
