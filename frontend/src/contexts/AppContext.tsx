@@ -2,7 +2,6 @@ import { createContext, useContext, useState, useCallback, useEffect } from 'rea
 import type { ReactNode } from 'react'
 import { toggleTheme, getTheme } from '../theme'
 import { useLang } from '../i18n/index.ts'
-import type { SetupDiagnostics } from '../types'
 
 type AppContextType = {
   // Theme
@@ -29,10 +28,6 @@ type AppContextType = {
   error: string | null
   setError: (e: string | null) => void
 
-  // Agents
-  localAgents: Record<string, { found: boolean; path: string | null }> | null
-  setupDiagnostics: SetupDiagnostics | null
-
   // Refresh
   refreshTrigger: number
   requestUsageRefresh: () => void
@@ -47,8 +42,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [configParsed, setConfigParsed] = useState<Record<string, any> | null>(null)
   const [configStatus, setConfigStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle')
   const [error, setError] = useState<string | null>(null)
-  const [localAgents, setLocalAgents] = useState<Record<string, { found: boolean; path: string | null }> | null>(null)
-  const [setupDiagnostics, setSetupDiagnostics] = useState<SetupDiagnostics | null>(null)
   const [refreshTrigger, setRefreshTrigger] = useState(0)
 
   const [toast, setToast] = useState<{ message: string; visible: boolean }>({ message: '', visible: false })
@@ -65,7 +58,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setTheme(toggleTheme())
   }, [])
 
-  // Fetch config and agents on mount
+  // Fetch config on mount
   useEffect(() => {
     const controller = new AbortController()
     async function fetchInitialConfig() {
@@ -80,21 +73,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         console.error('Failed to load initial config:', err)
       }
     }
-    async function fetchLocalAgents() {
-      try {
-        const response = await fetch('/local/agents', { signal: controller.signal })
-        if (response.ok) setLocalAgents(await response.json())
-      } catch {}
-    }
-    async function fetchSetupDiagnostics() {
-      try {
-        const response = await fetch('/local/setup-health')
-        if (response.ok) setSetupDiagnostics(await response.json())
-      } catch {}
-    }
     void fetchInitialConfig()
-    void fetchLocalAgents()
-    void fetchSetupDiagnostics()
     return () => controller.abort()
   }, [])
 
@@ -105,7 +84,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
       configContent, setConfigContent, configParsed, setConfigParsed, configStatus, setConfigStatus,
       showToast,
       error, setError,
-      localAgents, setupDiagnostics,
       refreshTrigger, requestUsageRefresh,
     }}>
       {children}

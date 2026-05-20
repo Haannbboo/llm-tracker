@@ -1,15 +1,15 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
-import type { UsageRow, OnboardingCopiedCommand } from '../types'
+import type { SetupDiagnostics, UsageRow, OnboardingCopiedCommand } from '../types'
 import { getVerifyTimeoutGuidance } from '../setup-guidance'
 import { getSetupAgentKey } from '../utils'
-import { useApp } from '../contexts/AppContext'
+import type { LocalAgentInfo } from './useDashboardAgents'
 
 export function useOnboarding(opts: {
   totalTrackedEvents: number | null
   onFirstEvent: () => void
+  localAgents: Record<string, LocalAgentInfo> | null
+  setupDiagnostics: SetupDiagnostics | null
 }) {
-  const { localAgents, setupDiagnostics } = useApp()
-
   const [verifyPhase, setVerifyPhase] = useState<'idle' | 'polling' | 'success' | 'timeout'>('idle')
   const [verificationResult, setVerificationResult] = useState<UsageRow | null>(null)
   const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null)
@@ -81,28 +81,28 @@ export function useOnboarding(opts: {
     handleVerifyEvent()
   }, [showFirstRunOnboarding, handleVerifyEvent])
 
-  const foundLocalAgents = localAgents
-    ? Object.entries(localAgents).filter(([, info]) => info.found)
+  const foundLocalAgents = opts.localAgents
+    ? Object.entries(opts.localAgents).filter(([, info]) => info.found)
     : []
   const foundLocalAgentCount = foundLocalAgents.length
-  const setupLocalAgentTotal = setupDiagnostics
-    ? foundLocalAgents.filter(([name]) => setupDiagnostics.agents[getSetupAgentKey(name)]).length
+  const setupLocalAgentTotal = opts.setupDiagnostics
+    ? foundLocalAgents.filter(([name]) => opts.setupDiagnostics?.agents[getSetupAgentKey(name)]).length
     : foundLocalAgentCount
-  const setupMatchingAgents = setupDiagnostics
-    ? foundLocalAgents.filter(([name]) => setupDiagnostics.agents[getSetupAgentKey(name)]?.endpoint_matches).length
+  const setupMatchingAgents = opts.setupDiagnostics
+    ? foundLocalAgents.filter(([name]) => opts.setupDiagnostics?.agents[getSetupAgentKey(name)]?.endpoint_matches).length
     : 0
-  const setupConfiguredAgents = setupDiagnostics
-    ? foundLocalAgents.filter(([name]) => setupDiagnostics.agents[getSetupAgentKey(name)]?.configured).length
+  const setupConfiguredAgents = opts.setupDiagnostics
+    ? foundLocalAgents.filter(([name]) => opts.setupDiagnostics?.agents[getSetupAgentKey(name)]?.configured).length
     : 0
-  const setupSummaryText = setupDiagnostics
+  const setupSummaryText = opts.setupDiagnostics
     ? setupLocalAgentTotal > 0
       ? `${setupMatchingAgents}/${setupLocalAgentTotal}`
       : 'No local Agent'
     : 'Unknown'
-  const setupSummaryColor = setupDiagnostics && setupMatchingAgents > 0 ? 'var(--color-green)' : 'var(--text-muted)'
+  const setupSummaryColor = opts.setupDiagnostics && setupMatchingAgents > 0 ? 'var(--color-green)' : 'var(--text-muted)'
   const verifyTimeoutGuidance = getVerifyTimeoutGuidance({
-    setupHealthAvailable: setupDiagnostics !== null,
-    localAgentDetectionAvailable: localAgents !== null,
+    setupHealthAvailable: opts.setupDiagnostics !== null,
+    localAgentDetectionAvailable: opts.localAgents !== null,
     localAgentCount: foundLocalAgentCount,
     setupLocalAgentTotal,
     configuredAgents: setupConfiguredAgents,

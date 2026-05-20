@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useApp } from '../contexts/AppContext'
 import { useDashboardData } from '../hooks/useDashboardData'
 import { useOnboarding } from '../hooks/useOnboarding'
+import { useDashboardAgents } from '../hooks/useDashboardAgents'
 import { ModelSelector } from '../ModelSelector'
 import { OverviewTab } from './OverviewTab'
 import { SessionsTab } from './SessionsTab'
@@ -13,7 +14,8 @@ type Props = {
 }
 
 export function DashboardPage({ onNavigateToLogs }: Props) {
-  const { theme, error, localAgents, setupDiagnostics, requestUsageRefresh } = useApp()
+  const { theme, error, requestUsageRefresh } = useApp()
+  const { localAgents, setupDiagnostics } = useDashboardAgents()
 
   // Dashboard data hook
   const {
@@ -36,7 +38,12 @@ export function DashboardPage({ onNavigateToLogs }: Props) {
     setupSummaryText,
     setupSummaryColor,
     verifyTimeoutGuidance,
-  } = useOnboarding({ totalTrackedEvents, onFirstEvent: requestUsageRefresh })
+  } = useOnboarding({
+    totalTrackedEvents,
+    onFirstEvent: requestUsageRefresh,
+    localAgents,
+    setupDiagnostics,
+  })
 
   const [dashboardTab, setDashboardTab] = useState<'overview' | 'sessions'>('overview')
   const resetPage = () => {}
