@@ -69,6 +69,13 @@ from .usage import (
 from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
+
+def record_usage(*args, **kwargs):
+    from ..recorder import record_usage as _record_usage
+
+    return _record_usage(*args, **kwargs)
+
+
 __all__ = [
     "Base",
     "BaseUrl",
@@ -117,6 +124,7 @@ __all__ = [
     "merge_usage_database",
     "metadata",
     "rebuild_sessions_from_usage",
+    "record_usage",
     "resolve_base_url_id",
     "select",
     "summarize_sessions",
