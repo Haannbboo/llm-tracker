@@ -1,23 +1,11 @@
 import os
 
-import yaml
-
-from config.runtime_ports import resolve_otlp_service_port
+from config.server_config import load_server_config
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-with open(
-    os.path.expanduser("~/.llm-tracker/config.yaml"), encoding="utf-8"
-) as config_file:
-    cfg = yaml.safe_load(config_file) or {}
-
-
-def _resolve_bind(config):
-    service_port = resolve_otlp_service_port(config)
-    return f"{service_port.host}:{service_port.port}"
-
-
-bind = _resolve_bind(cfg)
+_server = load_server_config()
+bind = f"{_server.otlp_host}:{_server.otlp_port}"
 workers = 1
 worker_class = "uvicorn.workers.UvicornWorker"
 accesslog = os.path.join(ROOT, "logs/otlp.access.log")

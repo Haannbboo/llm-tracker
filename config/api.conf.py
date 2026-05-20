@@ -1,19 +1,11 @@
 import os
 
-import yaml
+from config.server_config import load_server_config
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-with open(
-    os.path.expanduser("~/.llm-tracker/config.yaml"), encoding="utf-8"
-) as config_file:
-    cfg = yaml.safe_load(config_file) or {}
-server = cfg.get("server", {})
-proxy_port = int(server.get("port", 4000))
-
-bind = (
-    f"{server.get('host', '127.0.0.1')}:{int(server.get('api_port', proxy_port + 1))}"
-)
+_server = load_server_config()
+bind = f"{_server.host}:{_server.api_port}"
 workers = 1
 worker_class = "uvicorn.workers.UvicornWorker"
 accesslog = os.path.join(ROOT, "logs/api.access.log")
