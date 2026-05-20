@@ -1,5 +1,4 @@
 import pytest
-from decimal import Decimal
 
 
 def test_proxy_registers_v1_and_compatibility_paths(proxy_module):
@@ -195,14 +194,7 @@ async def test_forward_persists_parsed_client_source(proxy_module, monkeypatch):
 
     monkeypatch.setattr(proxy_module.httpx, "AsyncClient", FakeAsyncClient)
     monkeypatch.setattr(
-        proxy_module, "resolve_provider_base_url_id", lambda provider: 7
-    )
-    monkeypatch.setattr(
-        proxy_module,
-        "log_usage",
-        lambda usage, db_path=None: captured.update(
-            {"db_path": db_path, "usage": usage}
-        ),
+        proxy_module, "record_usage", lambda **fields: captured.update(fields)
     )
     monkeypatch.setattr(proxy_module, "record_proxy_user_agent", lambda path, ua: None)
 
@@ -225,7 +217,7 @@ async def test_forward_persists_parsed_client_source(proxy_module, monkeypatch):
     response = await proxy_module.forward(request, "/v1/responses")
 
     assert response.status_code == 200
-    assert captured["usage"].client_source == "opencode"
+    assert captured["client_source"] == "opencode"
 
 
 def test_resolve_provider_supports_configured_model_matches(proxy_module):
@@ -352,14 +344,7 @@ async def test_forward_logs_base_url_id_from_provider_config(proxy_module, monke
 
     monkeypatch.setattr(proxy_module.httpx, "AsyncClient", FakeAsyncClient)
     monkeypatch.setattr(
-        proxy_module, "resolve_provider_base_url_id", lambda provider: 7
-    )
-    monkeypatch.setattr(
-        proxy_module,
-        "log_usage",
-        lambda usage, db_path=None: captured.update(
-            {"db_path": db_path, "usage": usage}
-        ),
+        proxy_module, "record_usage", lambda **fields: captured.update(fields)
     )
 
     request = proxy_module.Request(
@@ -376,13 +361,12 @@ async def test_forward_logs_base_url_id_from_provider_config(proxy_module, monke
 
     assert response.status_code == 200
     assert captured["url"] == "https://api.example.com/v1/responses"
-    assert captured["usage"].base_url_id == 7
-    assert captured["usage"].provider == "test-provider"
-    assert captured["usage"].input_cost_usd == Decimal("0.000025")
-    assert captured["usage"].output_cost_usd == Decimal("0.0000375")
-    assert captured["usage"].total_cost_usd == Decimal("0.0000625")
-    assert captured["usage"].status == 200
-    assert captured["usage"].ttft_ms is None
+    assert captured["base_url"] == "https://api.example.com/v1"
+    assert captured["base_url_provider"] == "test-provider"
+    assert captured["base_url_source"] == "proxy_config"
+    assert captured["provider"] == "test-provider"
+    assert captured["status"] == 200
+    assert captured["ttft_ms"] is None
 
 
 @pytest.mark.anyio
@@ -441,14 +425,7 @@ async def test_streaming_forward_logs_first_chunk_latency(proxy_module, monkeypa
     monkeypatch.setattr(proxy_module.httpx, "AsyncClient", FakeAsyncClient)
     monkeypatch.setattr(proxy_module.time, "monotonic", FakeMonotonic())
     monkeypatch.setattr(
-        proxy_module, "resolve_provider_base_url_id", lambda provider: 7
-    )
-    monkeypatch.setattr(
-        proxy_module,
-        "log_usage",
-        lambda usage, db_path=None: captured.update(
-            {"db_path": db_path, "usage": usage}
-        ),
+        proxy_module, "record_usage", lambda **fields: captured.update(fields)
     )
 
     request = proxy_module.Request(
@@ -468,7 +445,7 @@ async def test_streaming_forward_logs_first_chunk_latency(proxy_module, monkeypa
     assert b"".join(chunks).startswith(b'data: {"type":"response.output_text.delta"}')
     assert captured["method"] == "POST"
     assert captured["url"] == "https://api.example.com/v1/responses"
-    assert captured["usage"].ttft_ms == 25
-    assert captured["usage"].latency_ms == 90
-    assert captured["usage"].prompt_tokens == 10
-    assert captured["usage"].completion_tokens == 5
+    assert captured["ttft_ms"] == 25
+    assert captured["latency_ms"] == 90
+    assert captured["prompt_tokens"] == 10
+    assert captured["completion_tokens"] == 5

@@ -17,9 +17,9 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 
 from config.app import CONFIG, MODEL_MAP, PROVIDER_MAP, ProviderConfig
-from .costs import calculate_costs
-from .database import Usage, init_db, log_usage, resolve_base_url_id
-from .utils import extract_usage, extract_stream_usage, build_usage_record
+from .database import init_db
+from .recorder import record_usage
+from .utils import extract_usage, extract_stream_usage
 
 REQUEST_TIMEOUT_SECONDS = 300
 PROXY_USER_AGENT_DIR = os.path.join(
@@ -128,14 +128,6 @@ def parse_json_body(body: bytes) -> dict[str, Any]:
     return json.loads(body)
 
 
-def resolve_provider_base_url_id(provider: ProviderConfig) -> int | None:
-    return resolve_base_url_id(
-        base_url=provider.base_url,
-        provider_name=provider.name,
-        source="proxy_config",
-    )
-
-
 async def stream_upstream_response(
     *,
     url: str,
@@ -181,27 +173,23 @@ async def stream_upstream_response(
                         continue
     finally:
         latency_ms = int((time.monotonic() - started_at) * 1000)
-        log_usage(
-            Usage(
-                **build_usage_record(
-                    provider_name=provider.name,
-                    model=model,
-                    client_source=client_source,
-                    endpoint=path,
-                    latency_ms=latency_ms,
-                    ttft_ms=ttft_ms,
-                    status=status,
-                    usage_fields=usage_fields,
-                )
-                | calculate_costs(
-                    prompt_tokens=usage_fields.get("prompt_tokens"),
-                    completion_tokens=usage_fields.get("completion_tokens"),
-                    cached_tokens=usage_fields.get("cached_tokens"),
-                    provider=provider.name,
-                    model=model,
-                )
-                | {"base_url_id": resolve_provider_base_url_id(provider)}
-            ),
+        record_usage(
+            provider=provider.name,
+            model=model,
+            client_source=client_source,
+            session_id=None,
+            endpoint=path,
+            prompt_tokens=usage_fields.get("prompt_tokens"),
+            completion_tokens=usage_fields.get("completion_tokens"),
+            cached_tokens=usage_fields.get("cached_tokens"),
+            reasoning_tokens=usage_fields.get("reasoning_tokens"),
+            total_tokens=usage_fields.get("total_tokens"),
+            latency_ms=latency_ms,
+            ttft_ms=ttft_ms,
+            status=status,
+            base_url=provider.base_url,
+            base_url_provider=provider.name,
+            base_url_source="proxy_config",
         )
 
 
@@ -248,27 +236,23 @@ async def forward(request: Request, path: str):
     latency_ms = int((time.monotonic() - started_at) * 1000)
     response_json = response.json()
     usage_fields = extract_usage(response_json.get("usage", {}))
-    log_usage(
-        Usage(
-            **build_usage_record(
-                provider_name=provider.name,
-                model=model,
-                client_source=client_source,
-                endpoint=path,
-                latency_ms=latency_ms,
-                ttft_ms=None,
-                status=response.status_code,
-                usage_fields=usage_fields,
-            )
-            | calculate_costs(
-                prompt_tokens=usage_fields.get("prompt_tokens"),
-                completion_tokens=usage_fields.get("completion_tokens"),
-                cached_tokens=usage_fields.get("cached_tokens"),
-                provider=provider.name,
-                model=model,
-            )
-            | {"base_url_id": resolve_provider_base_url_id(provider)}
-        ),
+    record_usage(
+        provider=provider.name,
+        model=model,
+        client_source=client_source,
+        session_id=None,
+        endpoint=path,
+        prompt_tokens=usage_fields.get("prompt_tokens"),
+        completion_tokens=usage_fields.get("completion_tokens"),
+        cached_tokens=usage_fields.get("cached_tokens"),
+        reasoning_tokens=usage_fields.get("reasoning_tokens"),
+        total_tokens=usage_fields.get("total_tokens"),
+        latency_ms=latency_ms,
+        ttft_ms=None,
+        status=response.status_code,
+        base_url=provider.base_url,
+        base_url_provider=provider.name,
+        base_url_source="proxy_config",
     )
 
     return JSONResponse(content=response_json, status_code=response.status_code)
