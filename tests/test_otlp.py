@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import json
-from decimal import Decimal
 from datetime import datetime, timezone
 from pathlib import Path
+from types import SimpleNamespace
 
 
 def _attrs(values: dict[str, int | str]) -> list[dict]:
@@ -18,36 +18,7 @@ def _attrs(values: dict[str, int | str]) -> list[dict]:
 
 
 def _capture_usage(target: dict):
-    return lambda usage, db_path=None: target.update(
-        {"db_path": db_path, "usage": usage}
-    )
-
-
-def _set_global_model_cost(
-    config_module, model: str, *, input: float, output: float, cache_read: float
-):
-    previous_model_costs = dict(config_module.MODEL_COSTS)
-    previous_provider_model_costs = {
-        provider: dict(costs)
-        for provider, costs in config_module.PROVIDER_MODEL_COSTS.items()
-    }
-    config_module.MODEL_COSTS.clear()
-    config_module.MODEL_COSTS[model] = config_module.ModelCost(
-        input=input,
-        output=output,
-        cache_read=cache_read,
-    )
-    config_module.PROVIDER_MODEL_COSTS.clear()
-    return previous_model_costs, previous_provider_model_costs
-
-
-def _restore_model_costs(
-    config_module, previous_model_costs, previous_provider_model_costs
-):
-    config_module.MODEL_COSTS.clear()
-    config_module.MODEL_COSTS.update(previous_model_costs)
-    config_module.PROVIDER_MODEL_COSTS.clear()
-    config_module.PROVIDER_MODEL_COSTS.update(previous_provider_model_costs)
+    return lambda **fields: target.update({"usage": SimpleNamespace(**fields)})
 
 
 def test_parse_gemini_record_merges_hook_ttft(
@@ -66,7 +37,7 @@ def test_parse_gemini_record_merges_hook_ttft(
     monkeypatch.setattr(otlp_module, "GEMINI_HOOK_DIR", str(hook_dir))
     monkeypatch.setattr(
         otlp_module,
-        "log_usage",
+        "record_usage",
         _capture_usage(captured),
     )
 
@@ -104,15 +75,9 @@ def test_parse_gemini_record_resolves_base_url_id_from_local_config(
     )
 
     captured = {}
-
-    def fake_resolve_base_url_id(**kwargs):
-        captured["resolve"] = kwargs
-        return 11
-
-    monkeypatch.setattr(otlp_module, "resolve_base_url_id", fake_resolve_base_url_id)
     monkeypatch.setattr(
         otlp_module,
-        "log_usage",
+        "record_usage",
         _capture_usage(captured),
     )
 
@@ -132,55 +97,134 @@ def test_parse_gemini_record_resolves_base_url_id_from_local_config(
 
     otlp_module._parse_gemini_record(record, attrs, "session-1")
 
-    assert captured["resolve"] == {
-        "base_url": "https://generativelanguage.googleapis.com",
-        "provider_name": "Google",
-        "source": "gemini_settings",
-    }
-    assert captured["usage"].base_url_id == 11
+    assert captured["usage"].base_url == "https://generativelanguage.googleapis.com"
+    assert captured["usage"].base_url_provider == "Google"
+    assert captured["usage"].base_url_source == "gemini_settings"
     assert captured["usage"].provider == "Google"
     assert captured["usage"].status == 429
 
 
-def test_parse_gemini_record_persists_costs(otlp_module, config_module, monkeypatch):
-    previous_model_costs, previous_provider_model_costs = _set_global_model_cost(
-        config_module,
-        "gemini-3-flash-preview",
-        input=2.0,
-        output=6.0,
-        cache_read=0.5,
+def test_extract_gemini_fields_basic(otlp_module):
+    attrs = _attrs(
+        {
+            "input_token_count": 100,
+            "output_token_count": 50,
+            "thoughts_token_count": 10,
+            "tool_token_count": 5,
+            "model": "gemini-2.5-pro",
+            "role": "main",
+            "duration_ms": 500,
+            "status_code": 200,
+            "total_token_count": 165,
+        }
     )
-    captured = {}
-    monkeypatch.setattr(otlp_module, "log_usage", _capture_usage(captured))
+    record = {"timeUnixNano": "1800000000000000000"}
 
-    try:
-        record_ts = datetime(2026, 4, 19, 20, 5, 1, 614000, tzinfo=timezone.utc)
-        record = {"timeUnixNano": str(int(record_ts.timestamp() * 1_000_000_000))}
-        attrs = _attrs(
-            {
-                "model": "gemini-3-flash-preview",
-                "role": "main",
-                "session.id": "session-1",
-                "input_token_count": 793,
-                "output_token_count": 1359,
-                "total_token_count": 2152,
-            }
-        )
+    fields = otlp_module._extract_gemini_fields(record, attrs, "sess-1")
 
-        otlp_module._parse_gemini_record(record, attrs, "session-1")
+    assert fields["provider"] is not None
+    assert fields["model"] == "gemini-2.5-pro"
+    assert fields["prompt_tokens"] == 100
+    assert fields["completion_tokens"] == 65
+    assert fields["reasoning_tokens"] == 10
+    assert fields["tool_tokens"] == 5
+    assert fields["total_tokens"] == 165
+    assert fields["latency_ms"] == 500
+    assert fields["status"] == 200
+    assert fields["client_source"] == "gemini-cli"
+    assert fields["endpoint"] == "generate-otlp"
 
-        assert captured["usage"].input_cost_usd == Decimal("0.001586")
-        assert captured["usage"].output_cost_usd == Decimal("0.008154")
-        assert captured["usage"].total_cost_usd == Decimal("0.00974")
-    finally:
-        _restore_model_costs(
-            config_module, previous_model_costs, previous_provider_model_costs
-        )
+
+def test_extract_claude_fields_basic(otlp_module):
+    attrs = _attrs(
+        {
+            "input_tokens": 80,
+            "output_tokens": 40,
+            "cache_read_tokens": 20,
+            "cache_creation_tokens": 10,
+            "model": "claude-sonnet-4-20250514",
+            "status_code": 200,
+            "duration_ms": 300,
+            "session.id": "claude-sess-1",
+        }
+    )
+    record = {"timeUnixNano": "1800000000000000000"}
+
+    fields = otlp_module._extract_claude_fields(record, attrs, "sess-1")
+
+    assert fields["model"] == "claude-sonnet-4-20250514"
+    assert fields["prompt_tokens"] == 100
+    assert fields["completion_tokens"] == 40
+    assert fields["cached_tokens"] == 20
+    assert fields["cache_creation_tokens"] == 10
+    assert fields["client_source"] == "claude-code"
+    assert fields["session_id"] == "claude-sess-1"
+
+
+def test_extract_codex_fields_basic(otlp_module):
+    attrs = _attrs(
+        {
+            "event.kind": "response.completed",
+            "input_token_count": 200,
+            "output_token_count": 100,
+            "cached_token_count": 50,
+            "reasoning_token_count": 30,
+            "tool_token_count": 10,
+            "duration_ms": 800,
+            "http.response.status_code": 200,
+            "model": "o3",
+            "conversation.id": "codex-conv-1",
+        }
+    )
+    record = {"timeUnixNano": "1800000000000000000"}
+    otlp_module.codex_state["codex-conv-1"] = {
+        "ts": 0.0,
+        "duration_ms": 800,
+        "ttft_ms": 200,
+    }
+
+    fields = otlp_module._extract_codex_fields(record, attrs, "codex_cli_rs")
+
+    assert fields["model"] == "o3"
+    assert fields["prompt_tokens"] == 200
+    assert fields["completion_tokens"] == 100
+    assert fields["cached_tokens"] == 50
+    assert fields["reasoning_tokens"] == 30
+    assert fields["tool_tokens"] == 10
+    assert fields["latency_ms"] == 800
+    assert fields["ttft_ms"] == 200
+    assert fields["client_source"] == "codex"
+
+
+def test_extract_gemini_fields_resolves_base_url_from_local_config(
+    otlp_module, isolated_home: Path
+):
+    settings = isolated_home / ".gemini" / "settings.json"
+    settings.parent.mkdir(parents=True, exist_ok=True)
+    settings.write_text(
+        json.dumps({"base_url": "https://generativelanguage.googleapis.com"}),
+        encoding="utf-8",
+    )
+
+    record = {"timeUnixNano": "1800000000000000000"}
+    attrs = _attrs({"model": "gemini-test", "status_code": 429})
+
+    fields = otlp_module._extract_gemini_fields(record, attrs, "session-1")
+
+    assert {
+        "base_url": fields["base_url"],
+        "provider_name": fields["base_url_provider"],
+        "source": fields["base_url_source"],
+    } == {
+        "base_url": "https://generativelanguage.googleapis.com",
+        "provider_name": "Google",
+        "source": "gemini_settings",
+    }
 
 
 def test_parse_gemini_record_falls_back_to_http_status_code(otlp_module, monkeypatch):
     captured = {}
-    monkeypatch.setattr(otlp_module, "log_usage", _capture_usage(captured))
+    monkeypatch.setattr(otlp_module, "record_usage", _capture_usage(captured))
 
     record_ts = datetime(2026, 4, 19, 20, 5, 1, 614000, tzinfo=timezone.utc)
     record = {"timeUnixNano": str(int(record_ts.timestamp() * 1_000_000_000))}
@@ -207,8 +251,8 @@ def test_parse_gemini_record_prefers_log_session_id_over_resource(
     captured = {}
     monkeypatch.setattr(
         otlp_module,
-        "log_usage",
-        lambda usage: captured.setdefault("usage", usage),
+        "record_usage",
+        lambda **fields: captured.setdefault("usage", SimpleNamespace(**fields)),
     )
     monkeypatch.setattr(
         otlp_module,
@@ -240,8 +284,8 @@ def test_parse_gemini_record_falls_back_to_resource_session_id(
     captured = {}
     monkeypatch.setattr(
         otlp_module,
-        "log_usage",
-        lambda usage: captured.setdefault("usage", usage),
+        "record_usage",
+        lambda **fields: captured.setdefault("usage", SimpleNamespace(**fields)),
     )
     monkeypatch.setattr(
         otlp_module,
@@ -309,7 +353,7 @@ def test_parse_claude_record_uses_prompt_length_from_prior_prompt_event(
     captured = {}
     monkeypatch.setattr(
         otlp_module,
-        "log_usage",
+        "record_usage",
         _capture_usage(captured),
     )
 
@@ -352,51 +396,9 @@ def test_parse_claude_record_uses_prompt_length_from_prior_prompt_event(
     assert captured["usage"].status is None
 
 
-def test_parse_claude_record_persists_costs(otlp_module, config_module, monkeypatch):
-    previous_model_costs, previous_provider_model_costs = _set_global_model_cost(
-        config_module,
-        "claude-test",
-        input=3.0,
-        output=15.0,
-        cache_read=0.3,
-    )
-    captured = {}
-    monkeypatch.setattr(otlp_module, "log_usage", _capture_usage(captured))
-
-    try:
-        response_ts = datetime(2026, 4, 22, 21, 0, 0, tzinfo=timezone.utc)
-        response_record = {
-            "timeUnixNano": str(int(response_ts.timestamp() * 1_000_000_000)),
-            "attributes": _attrs(
-                {
-                    "event.name": "api_request",
-                    "session.id": "claude-session-1",
-                    "model": "claude-test",
-                    "input_tokens": 120,
-                    "output_tokens": 20,
-                    "cache_read_tokens": 5,
-                    "cache_creation_tokens": 0,
-                    "duration_ms": 900,
-                }
-            ),
-        }
-
-        otlp_module._parse_log_record(
-            response_record, "claude-code", "claude-session-1"
-        )
-
-        assert captured["usage"].input_cost_usd == Decimal("0.0003615")
-        assert captured["usage"].output_cost_usd == Decimal("0.0003")
-        assert captured["usage"].total_cost_usd == Decimal("0.0006615")
-    finally:
-        _restore_model_costs(
-            config_module, previous_model_costs, previous_provider_model_costs
-        )
-
-
 def test_parse_claude_record_uses_otlp_status_code(otlp_module, monkeypatch):
     captured = {}
-    monkeypatch.setattr(otlp_module, "log_usage", _capture_usage(captured))
+    monkeypatch.setattr(otlp_module, "record_usage", _capture_usage(captured))
 
     response_ts = datetime(2026, 4, 22, 21, 0, 0, tzinfo=timezone.utc)
     response_record = {
@@ -428,7 +430,7 @@ def test_parse_codex_record_uses_prompt_length_from_prior_prompt_event(
     captured = {}
     monkeypatch.setattr(
         otlp_module,
-        "log_usage",
+        "record_usage",
         _capture_usage(captured),
     )
 
@@ -476,7 +478,7 @@ def test_parse_codex_exec_record_uses_same_usage_parser(otlp_module, monkeypatch
     captured = {}
     monkeypatch.setattr(
         otlp_module,
-        "log_usage",
+        "record_usage",
         _capture_usage(captured),
     )
 
@@ -539,7 +541,7 @@ def test_parse_codex_record_persists_integer_conversation_id_as_string(
     monkeypatch,
 ):
     captured = {}
-    monkeypatch.setattr(otlp_module, "log_usage", _capture_usage(captured))
+    monkeypatch.setattr(otlp_module, "record_usage", _capture_usage(captured))
 
     response_ts = datetime(2026, 4, 22, 21, 5, 0, tzinfo=timezone.utc)
     response_record = {
@@ -561,51 +563,9 @@ def test_parse_codex_record_persists_integer_conversation_id_as_string(
     assert captured["usage"].session_id == "123"
 
 
-def test_parse_codex_record_persists_costs(otlp_module, config_module, monkeypatch):
-    previous_model_costs, previous_provider_model_costs = _set_global_model_cost(
-        config_module,
-        "gpt-5.4",
-        input=1.25,
-        output=10.0,
-        cache_read=0.125,
-    )
-    captured = {}
-    monkeypatch.setattr(otlp_module, "log_usage", _capture_usage(captured))
-
-    try:
-        response_ts = datetime(2026, 4, 22, 21, 5, 0, tzinfo=timezone.utc)
-        response_record = {
-            "timeUnixNano": str(int(response_ts.timestamp() * 1_000_000_000)),
-            "attributes": _attrs(
-                {
-                    "event.name": "codex.sse_event",
-                    "event.kind": "response.completed",
-                    "conversation.id": "conv-1",
-                    "model": "gpt-5.4",
-                    "input_token_count": 500,
-                    "output_token_count": 100,
-                    "cached_token_count": 10,
-                    "reasoning_token_count": 20,
-                    "tool_token_count": 5,
-                    "duration_ms": 2000,
-                }
-            ),
-        }
-
-        otlp_module._parse_log_record(response_record, "codex_cli_rs", "")
-
-        assert captured["usage"].input_cost_usd == Decimal("0.00061375")
-        assert captured["usage"].output_cost_usd == Decimal("0.001")
-        assert captured["usage"].total_cost_usd == Decimal("0.00161375")
-    finally:
-        _restore_model_costs(
-            config_module, previous_model_costs, previous_provider_model_costs
-        )
-
-
 def test_parse_codex_record_uses_http_response_status_code(otlp_module, monkeypatch):
     captured = {}
-    monkeypatch.setattr(otlp_module, "log_usage", _capture_usage(captured))
+    monkeypatch.setattr(otlp_module, "record_usage", _capture_usage(captured))
 
     response_ts = datetime(2026, 4, 22, 21, 5, 0, tzinfo=timezone.utc)
     response_record = {
@@ -638,7 +598,7 @@ def test_parse_gemini_record_uses_prompt_length_from_prior_prompt_event(
     captured = {}
     monkeypatch.setattr(
         otlp_module,
-        "log_usage",
+        "record_usage",
         _capture_usage(captured),
     )
 
@@ -682,8 +642,8 @@ def test_inline_prompt_length_is_not_queued_for_next_request(otlp_module, monkey
     captured = []
     monkeypatch.setattr(
         otlp_module,
-        "log_usage",
-        lambda usage, db_path=None: captured.append(usage),
+        "record_usage",
+        lambda **fields: captured.append(SimpleNamespace(**fields)),
     )
 
     response_ts_1 = datetime(2026, 4, 22, 21, 15, 0, tzinfo=timezone.utc)

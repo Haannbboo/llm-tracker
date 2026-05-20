@@ -7,9 +7,9 @@ from datetime import datetime, timezone
 
 from fastapi import FastAPI, Request
 
-from .costs import calculate_costs
-from .database import Usage, init_db, log_usage, resolve_base_url_id
+from .database import init_db
 from .provider_parser import parse_provider_metadata
+from .recorder import record_usage
 
 GEMINI_EVENT = "gemini_cli.api_response"
 CLAUDE_EVENT = "claude_code.api_request"
@@ -211,11 +211,12 @@ def _consume_hook_ttft(hook_dir: str, session_id: str) -> tuple[int | None, int 
     )
 
 
-def _parse_gemini_record(
+def _extract_gemini_fields(
     record: dict,
     attrs: list,
     session_id: str,
-) -> None:
+) -> dict:
+    """Extract normalized usage fields from a Gemini OTLP record."""
     time_ns = record.get("timeUnixNano", "0")
     ts = datetime.fromtimestamp(int(time_ns) / 1e9, tz=timezone.utc).isoformat()
 
@@ -244,46 +245,40 @@ def _parse_gemini_record(
     metadata = parse_provider_metadata("gemini")
     cached_tokens = _attr(attrs, "cached_content_token_count")
 
-    log_usage(
-        Usage(
-            ts=ts,
-            provider=metadata.provider,
-            model=model,
-            client_source="gemini-cli",
-            session_id=sid,
-            endpoint="generate-otlp",
-            prompt_tokens=prompt_tokens,
-            prompt_length=prompt_length,
-            completion_tokens=completion_total,
-            cached_tokens=cached_tokens,
-            reasoning_tokens=thoughts_tokens,
-            tool_tokens=tool_tokens,
-            total_tokens=_attr(attrs, "total_token_count"),
-            latency_ms=latency_ms if latency_ms is not None else hook_latency_ms,
-            ttft_ms=ttft_ms,
-            cache_creation_tokens=None,
-            **calculate_costs(
-                prompt_tokens=prompt_tokens,
-                completion_tokens=completion_total,
-                cached_tokens=cached_tokens,
-                provider=metadata.provider,
-                model=model,
-            ),
-            status=status,
-            base_url_id=resolve_base_url_id(
-                base_url=metadata.base_url,
-                provider_name=metadata.provider,
-                source=metadata.source,
-            ),
-        ),
-    )
+    return {
+        "ts": ts,
+        "provider": metadata.provider,
+        "model": model,
+        "client_source": "gemini-cli",
+        "session_id": sid,
+        "endpoint": "generate-otlp",
+        "prompt_tokens": prompt_tokens,
+        "prompt_length": prompt_length,
+        "completion_tokens": completion_total,
+        "cached_tokens": cached_tokens,
+        "reasoning_tokens": thoughts_tokens,
+        "tool_tokens": tool_tokens,
+        "total_tokens": _attr(attrs, "total_token_count"),
+        "latency_ms": latency_ms if latency_ms is not None else hook_latency_ms,
+        "ttft_ms": ttft_ms,
+        "cache_creation_tokens": None,
+        "status": status,
+        "base_url": metadata.base_url,
+        "base_url_provider": metadata.provider,
+        "base_url_source": metadata.source,
+    }
 
 
-def _parse_claude_record(
+def _parse_gemini_record(record: dict, attrs: list, session_id: str) -> None:
+    record_usage(**_extract_gemini_fields(record, attrs, session_id))
+
+
+def _extract_claude_fields(
     record: dict,
     attrs: list,
     session_id: str,
-) -> None:
+) -> dict:
+    """Extract normalized usage fields from a Claude OTLP record."""
     time_ns = record.get("timeUnixNano", "0")
     ts = datetime.fromtimestamp(int(time_ns) / 1e9, tz=timezone.utc).isoformat()
 
@@ -304,57 +299,53 @@ def _parse_claude_record(
     usage_session_id = _attr(attrs, "session.id") or session_id or None
 
     total = prompt_tokens + int(output_tokens or 0) + int(cache_create or 0)
-    log_usage(
-        Usage(
-            ts=ts,
-            provider=metadata.provider,
-            model=_attr(attrs, "model") or "claude-unknown",
-            client_source="claude-code",
-            session_id=usage_session_id,
-            endpoint="generate-otlp",
-            prompt_tokens=prompt_tokens,
-            prompt_length=prompt_length,
-            completion_tokens=completion_tokens,
-            cached_tokens=cached_tokens,
-            cache_creation_tokens=int(cache_create)
-            if cache_create is not None
-            else None,
-            reasoning_tokens=None,
-            tool_tokens=None,
-            total_tokens=total,
-            latency_ms=_attr(attrs, "duration_ms"),
-            ttft_ms=None,
-            **calculate_costs(
-                prompt_tokens=prompt_tokens,
-                completion_tokens=completion_tokens,
-                cached_tokens=cached_tokens,
-                provider=metadata.provider,
-                model=_attr(attrs, "model") or "claude-unknown",
-            ),
-            status=status,
-            base_url_id=resolve_base_url_id(
-                base_url=metadata.base_url,
-                provider_name=metadata.provider,
-                source=metadata.source,
-            ),
-        ),
-    )
+    return {
+        "ts": ts,
+        "provider": metadata.provider,
+        "model": _attr(attrs, "model") or "claude-unknown",
+        "client_source": "claude-code",
+        "session_id": usage_session_id,
+        "endpoint": "generate-otlp",
+        "prompt_tokens": prompt_tokens,
+        "prompt_length": prompt_length,
+        "completion_tokens": completion_tokens,
+        "cached_tokens": cached_tokens,
+        "cache_creation_tokens": int(cache_create)
+        if cache_create is not None
+        else None,
+        "reasoning_tokens": None,
+        "tool_tokens": None,
+        "total_tokens": total,
+        "latency_ms": _attr(attrs, "duration_ms"),
+        "ttft_ms": None,
+        "status": status,
+        "base_url": metadata.base_url,
+        "base_url_provider": metadata.provider,
+        "base_url_source": metadata.source,
+    }
 
 
-def _parse_codex_api_request(record: dict, attrs: list) -> None:
-    conv_id = _attr(attrs, "conversation.id")
-    duration = _attr(attrs, "duration_ms")
-    state_key = _state_key(conv_id)
-    if state_key and duration is not None:
-        if state_key not in codex_state:
-            codex_state[state_key] = {"ts": time.time()}
-        codex_state[state_key]["duration_ms"] = int(duration)
+def _parse_claude_record(record: dict, attrs: list, session_id: str) -> None:
+    record_usage(**_extract_claude_fields(record, attrs, session_id))
 
 
-def _parse_codex_record(record: dict, attrs: list, service_name: str) -> None:
+def _handle_codex_state_event(attrs: list) -> bool:
+    """Handle Codex state-only events.
+
+    Returns True when the event was consumed without producing a usage row.
+    """
     event_kind = _attr(attrs, "event.kind")
+    event_name = _attr(attrs, "event.name")
     conv_id = _attr(attrs, "conversation.id")
-    usage_session_id = str(conv_id) if conv_id is not None else None
+
+    if event_kind == CODEX_API_REQUEST_EVENT or event_name == CODEX_API_REQUEST_EVENT:
+        duration = _attr(attrs, "duration_ms")
+        state_key = _state_key(conv_id)
+        if state_key and duration is not None:
+            if state_key not in codex_state:
+                codex_state[state_key] = {"ts": time.time()}
+            codex_state[state_key]["duration_ms"] = int(duration)
+        return True
 
     if event_kind == "response.created":
         duration = _attr(attrs, "duration_ms")
@@ -363,15 +354,30 @@ def _parse_codex_record(record: dict, attrs: list, service_name: str) -> None:
             if state_key not in codex_state:
                 codex_state[state_key] = {"ts": time.time()}
             codex_state[state_key]["ttft_ms"] = int(duration)
-        return
+        return True
+
+    return False
+
+
+def _parse_codex_api_request(record: dict, attrs: list) -> None:
+    _handle_codex_state_event(attrs)
+
+
+def _extract_codex_fields(
+    record: dict,
+    attrs: list,
+    service_name: str,
+) -> dict | None:
+    """Extract normalized usage fields from a Codex OTLP response.completed record."""
+    event_kind = _attr(attrs, "event.kind")
 
     if event_kind != "response.completed":
-        return
+        return None
 
     # Only parse if we have token counts (to avoid the other response.completed event)
     input_tokens = _attr(attrs, "input_token_count")
     if input_tokens is None:
-        return
+        return None
 
     time_ns = record.get("timeUnixNano", "0")
     if time_ns == "0":
@@ -379,6 +385,8 @@ def _parse_codex_record(record: dict, attrs: list, service_name: str) -> None:
 
     ts = datetime.fromtimestamp(int(time_ns) / 1e9, tz=timezone.utc).isoformat()
 
+    conv_id = _attr(attrs, "conversation.id")
+    usage_session_id = str(conv_id) if conv_id is not None else None
     output_tokens = _attr(attrs, "output_token_count")
     cached_tokens = _attr(attrs, "cached_token_count")
     reasoning_tokens = _attr(attrs, "reasoning_token_count")
@@ -406,41 +414,38 @@ def _parse_codex_record(record: dict, attrs: list, service_name: str) -> None:
     metadata = parse_provider_metadata("codex")
     model = _attr(attrs, "model") or "codex-unknown"
 
-    log_usage(
-        Usage(
-            ts=ts,
-            provider=metadata.provider,
-            model=model,
-            client_source="codex",
-            session_id=usage_session_id,
-            endpoint="generate-otlp",
-            prompt_tokens=prompt_tokens,
-            prompt_length=prompt_length,
-            completion_tokens=completion_tokens,
-            cached_tokens=int(cached_tokens) if cached_tokens is not None else None,
-            reasoning_tokens=int(reasoning_tokens)
-            if reasoning_tokens is not None
-            else None,
-            tool_tokens=int(tool_tokens) if tool_tokens is not None else None,
-            total_tokens=total_tokens,
-            latency_ms=int(latency_ms) if latency_ms is not None else None,
-            ttft_ms=int(ttft_ms) if ttft_ms is not None else None,
-            cache_creation_tokens=None,
-            **calculate_costs(
-                prompt_tokens=prompt_tokens,
-                completion_tokens=completion_tokens,
-                cached_tokens=int(cached_tokens) if cached_tokens is not None else None,
-                provider=metadata.provider,
-                model=model,
-            ),
-            status=status,
-            base_url_id=resolve_base_url_id(
-                base_url=metadata.base_url,
-                provider_name=metadata.provider,
-                source=metadata.source,
-            ),
-        ),
-    )
+    return {
+        "ts": ts,
+        "provider": metadata.provider,
+        "model": model,
+        "client_source": "codex",
+        "session_id": usage_session_id,
+        "endpoint": "generate-otlp",
+        "prompt_tokens": prompt_tokens,
+        "prompt_length": prompt_length,
+        "completion_tokens": completion_tokens,
+        "cached_tokens": int(cached_tokens) if cached_tokens is not None else None,
+        "reasoning_tokens": int(reasoning_tokens)
+        if reasoning_tokens is not None
+        else None,
+        "tool_tokens": int(tool_tokens) if tool_tokens is not None else None,
+        "total_tokens": total_tokens,
+        "latency_ms": int(latency_ms) if latency_ms is not None else None,
+        "ttft_ms": int(ttft_ms) if ttft_ms is not None else None,
+        "cache_creation_tokens": None,
+        "status": status,
+        "base_url": metadata.base_url,
+        "base_url_provider": metadata.provider,
+        "base_url_source": metadata.source,
+    }
+
+
+def _parse_codex_record(record: dict, attrs: list, service_name: str) -> None:
+    if _handle_codex_state_event(attrs):
+        return
+    fields = _extract_codex_fields(record, attrs, service_name)
+    if fields is not None:
+        record_usage(**fields)
 
 
 def _parse_log_record(
@@ -462,15 +467,21 @@ def _parse_log_record(
     event_name = _attr(attrs, "event.name") or ""
 
     if event_name == GEMINI_EVENT:
-        _parse_gemini_record(record, attrs, usage_session_id or "")
+        fields = _extract_gemini_fields(record, attrs, usage_session_id or "")
+        record_usage(**fields)
     elif (
         event_name == CLAUDE_EVENT or event_name == "api_request"
     ) and service_name == "claude-code":
-        _parse_claude_record(record, attrs, usage_session_id or "")
+        fields = _extract_claude_fields(record, attrs, usage_session_id or "")
+        record_usage(**fields)
     elif event_name == CODEX_EVENT and service_name in CODEX_SERVICE_NAMES:
-        _parse_codex_record(record, attrs, service_name)
+        if _handle_codex_state_event(attrs):
+            return
+        fields = _extract_codex_fields(record, attrs, service_name)
+        if fields is not None:
+            record_usage(**fields)
     elif event_name == CODEX_API_REQUEST_EVENT and service_name in CODEX_SERVICE_NAMES:
-        _parse_codex_api_request(record, attrs)
+        _handle_codex_state_event(attrs)
     elif (
         service_name not in KNOWN_SERVICE_NAMES
         and attrs
