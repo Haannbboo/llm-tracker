@@ -281,6 +281,10 @@ export type PricingEntry = {
   cache_write: number | null
   source: PricingSource
   scope: string
+  effective_input?: number
+  effective_output?: number
+  effective_cache_read?: number
+  multiplier?: number
 }
 
 export type PricingMap = Record<string, PricingEntry>

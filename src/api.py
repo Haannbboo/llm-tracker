@@ -610,8 +610,24 @@ async def update_config(update: ConfigUpdate):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+def _pricing_entry(resolved_cost, scope: str, multiplier: float) -> dict:
+    cost = resolved_cost.cost
+    return {
+        "input": cost.input,
+        "output": cost.output,
+        "cache_read": cost.cache_read,
+        "cache_write": cost.cache_write,
+        "source": resolved_cost.source,
+        "scope": scope,
+        "effective_input": cost.input * multiplier,
+        "effective_output": cost.output * multiplier,
+        "effective_cache_read": cost.cache_read * multiplier,
+        "multiplier": multiplier,
+    }
+
+
 @app.get("/pricing")
-async def get_pricing():
+async def get_pricing(provider: str | None = None):
     """Return all models with resolved pricing and source metadata."""
     from config.app import resolve_all_costs
     from config.pricing import get_remote_pricing
@@ -622,26 +638,28 @@ async def get_pricing():
     resolved = resolve_all_costs(config_snapshot, get_remote_pricing())
     result: dict[str, dict] = {}
 
+    if provider is not None:
+        provider_config = config_snapshot.get("providers", {}).get(provider, {})
+        multiplier = (
+            float(provider_config.get("price_multiplier", 1.0))
+            if isinstance(provider_config, dict)
+            else 1.0
+        )
+
+        for key, resolved_cost in resolved.global_costs.items():
+            result[key] = _pricing_entry(resolved_cost, "global", multiplier)
+
+        for key, resolved_cost in resolved.provider_costs.get(provider, {}).items():
+            result[key] = _pricing_entry(resolved_cost, provider, multiplier)
+
+        return result
+
     for key, resolved_cost in resolved.global_costs.items():
-        result[key] = {
-            "input": resolved_cost.cost.input,
-            "output": resolved_cost.cost.output,
-            "cache_read": resolved_cost.cost.cache_read,
-            "cache_write": resolved_cost.cost.cache_write,
-            "source": resolved_cost.source,
-            "scope": "global",
-        }
+        result[key] = _pricing_entry(resolved_cost, "global", 1.0)
 
     for provider_name, costs in resolved.provider_costs.items():
         for key, resolved_cost in costs.items():
-            result[key] = {
-                "input": resolved_cost.cost.input,
-                "output": resolved_cost.cost.output,
-                "cache_read": resolved_cost.cost.cache_read,
-                "cache_write": resolved_cost.cost.cache_write,
-                "source": resolved_cost.source,
-                "scope": provider_name,
-            }
+            result[key] = _pricing_entry(resolved_cost, provider_name, 1.0)
 
     return result
 

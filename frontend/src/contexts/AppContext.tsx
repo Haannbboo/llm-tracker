@@ -64,22 +64,17 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setTheme(toggleTheme())
   }, [])
 
-  // Fetch config and pricing on mount
+  // Fetch config on mount. Settings owns pricing fetches because pricing scope
+  // depends on the selected provider.
   useEffect(() => {
     const controller = new AbortController()
     async function fetchInitialData() {
       try {
-        const [configResp, pricingResp] = await Promise.all([
-          fetch('/config', { signal: controller.signal }),
-          fetch('/pricing', { signal: controller.signal }),
-        ])
+        const configResp = await fetch('/config', { signal: controller.signal })
         if (configResp.ok) {
           const data = await configResp.json()
           setConfigContent(data.content)
           setConfigParsed(data.parsed)
-        }
-        if (pricingResp.ok) {
-          setPricingData(await pricingResp.json())
         }
       } catch (err) {
         console.error('Failed to load initial data:', err)

@@ -1,4 +1,4 @@
-import { useState, useCallback, useMemo } from 'react'
+import { useState, useCallback, useMemo, useEffect } from 'react'
 import yaml from 'js-yaml'
 import { t } from '../i18n/index.ts'
 import { useApp } from '../contexts/AppContext'
@@ -9,6 +9,25 @@ export function useSettingsData() {
 
   const [selectedPricingProvider, setSelectedPricingProvider] = useState('global')
   const [pricingSearch, setPricingSearch] = useState('')
+
+  useEffect(() => {
+    const pricingUrl = selectedPricingProvider === 'global' ? '/pricing' : `/pricing?provider=${encodeURIComponent(selectedPricingProvider)}`
+    const controller = new AbortController()
+
+    async function fetchPricing() {
+      try {
+        const response = await fetch(pricingUrl, { signal: controller.signal })
+        if (response.ok) setPricingData(await response.json())
+      } catch (err) {
+        if (!(err instanceof DOMException && err.name === 'AbortError')) {
+          console.error('Failed to load pricing:', err)
+        }
+      }
+    }
+
+    void fetchPricing()
+    return () => controller.abort()
+  }, [selectedPricingProvider, setPricingData])
 
   const filteredPricingModels = useMemo(() => {
     if (!pricingData) return []
@@ -48,7 +67,8 @@ export function useSettingsData() {
         setTimeout(() => setConfigStatus('idle'), 3000)
         // Re-fetch pricing to update source tags after save
         try {
-          const pricingResp = await fetch('/pricing')
+          const pricingUrl = selectedPricingProvider === 'global' ? '/pricing' : `/pricing?provider=${encodeURIComponent(selectedPricingProvider)}`
+          const pricingResp = await fetch(pricingUrl)
           if (pricingResp.ok) setPricingData(await pricingResp.json())
         } catch { /* non-critical */ }
       } else {
@@ -60,7 +80,7 @@ export function useSettingsData() {
       setError(t('Connection error while saving config'))
       setConfigStatus('error')
     }
-  }, [configContent, setConfigStatus, setError])
+  }, [configContent, selectedPricingProvider, setConfigStatus, setError, setPricingData])
 
   const handleRunTest = useCallback(async () => {
     setIsTesting(true)

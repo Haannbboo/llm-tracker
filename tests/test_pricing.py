@@ -485,6 +485,202 @@ def test_pricing_endpoint_provider_display_overwrites_global_same_key(
     assert data["test-model"]["input"] == 5.0
 
 
+def test_pricing_with_multiplier(api_module, monkeypatch):
+    api_module.CONFIG.clear()
+    api_module.CONFIG.update(
+        {
+            "models": {
+                "fallback-model": {
+                    "cost": {"input": 1.0, "output": 2.0, "cacheRead": 0.25}
+                },
+            },
+            "providers": {
+                "prov-a": {
+                    "base_url": "https://a.com",
+                    "price_multiplier": 1.5,
+                    "models": {
+                        "override-model": {
+                            "cost": {
+                                "input": 5.0,
+                                "output": 10.0,
+                                "cacheRead": 0.5,
+                                "cacheWrite": 6.0,
+                            }
+                        },
+                    },
+                },
+            },
+        }
+    )
+    monkeypatch.setattr("config.pricing.get_remote_pricing", lambda: {})
+
+    response = TestClient(api_module.app).get("/pricing?provider=prov-a")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["override-model"]["input"] == 5.0
+    assert data["override-model"]["output"] == 10.0
+    assert data["override-model"]["cache_read"] == 0.5
+    assert data["override-model"]["cache_write"] == 6.0
+    assert data["override-model"]["scope"] == "prov-a"
+    assert data["override-model"]["multiplier"] == 1.5
+    assert data["override-model"]["effective_input"] == 7.5
+    assert data["override-model"]["effective_output"] == 15.0
+    assert data["override-model"]["effective_cache_read"] == 0.75
+
+
+def test_pricing_without_provider_shows_all(api_module, monkeypatch):
+    api_module.CONFIG.clear()
+    api_module.CONFIG.update(
+        {
+            "models": {
+                "test-model": {"cost": {"input": 1.0, "output": 2.0, "cacheRead": 0.1}},
+            },
+            "providers": {
+                "prov-a": {
+                    "base_url": "https://a.com",
+                    "price_multiplier": 2.0,
+                    "models": {
+                        "test-model": {
+                            "cost": {"input": 5.0, "output": 10.0, "cacheRead": 0.5}
+                        },
+                    },
+                },
+                "prov-b": {
+                    "base_url": "https://b.com",
+                    "models": {
+                        "other-model": {
+                            "cost": {"input": 7.0, "output": 14.0, "cacheRead": 0.7}
+                        },
+                    },
+                },
+            },
+        }
+    )
+    monkeypatch.setattr(
+        "config.pricing.get_remote_pricing",
+        lambda: {"remote-model": ModelCost(input=3.0, output=6.0, cache_read=0.3)},
+    )
+
+    response = TestClient(api_module.app).get("/pricing")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["test-model"]["scope"] == "prov-a"
+    assert data["test-model"]["input"] == 5.0
+    assert data["test-model"]["effective_input"] == 5.0
+    assert data["test-model"]["multiplier"] == 1.0
+    assert data["other-model"]["scope"] == "prov-b"
+    assert data["remote-model"]["scope"] == "global"
+
+
+def test_pricing_unknown_provider_defaults_multiplier_1(api_module, monkeypatch):
+    api_module.CONFIG.clear()
+    api_module.CONFIG.update(
+        {
+            "models": {
+                "global-model": {
+                    "cost": {"input": 1.0, "output": 2.0, "cacheRead": 0.1}
+                },
+            },
+            "providers": {},
+        }
+    )
+    monkeypatch.setattr("config.pricing.get_remote_pricing", lambda: {})
+
+    response = TestClient(api_module.app).get("/pricing?provider=missing")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["global-model"]["scope"] == "global"
+    assert data["global-model"]["multiplier"] == 1.0
+    assert data["global-model"]["effective_input"] == 1.0
+    assert data["global-model"]["effective_output"] == 2.0
+    assert data["global-model"]["effective_cache_read"] == 0.1
+
+
+def test_pricing_two_providers_same_model_route_correctly(api_module, monkeypatch):
+    api_module.CONFIG.clear()
+    api_module.CONFIG.update(
+        {
+            "models": {},
+            "providers": {
+                "prov-a": {
+                    "base_url": "https://a.com",
+                    "price_multiplier": 2.0,
+                    "models": {
+                        "shared-model": {
+                            "cost": {"input": 1.0, "output": 2.0, "cacheRead": 0.1}
+                        },
+                    },
+                },
+                "prov-b": {
+                    "base_url": "https://b.com",
+                    "price_multiplier": 3.0,
+                    "models": {
+                        "shared-model": {
+                            "cost": {"input": 4.0, "output": 8.0, "cacheRead": 0.4}
+                        },
+                    },
+                },
+            },
+        }
+    )
+    monkeypatch.setattr("config.pricing.get_remote_pricing", lambda: {})
+
+    prov_a = TestClient(api_module.app).get("/pricing?provider=prov-a").json()
+    prov_b = TestClient(api_module.app).get("/pricing?provider=prov-b").json()
+
+    assert prov_a["shared-model"]["scope"] == "prov-a"
+    assert prov_a["shared-model"]["input"] == 1.0
+    assert prov_a["shared-model"]["effective_input"] == 2.0
+    assert prov_b["shared-model"]["scope"] == "prov-b"
+    assert prov_b["shared-model"]["input"] == 4.0
+    assert prov_b["shared-model"]["effective_input"] == 12.0
+
+
+def test_pricing_provider_override_beats_global_and_fallback_gets_multiplier(
+    api_module, monkeypatch
+):
+    api_module.CONFIG.clear()
+    api_module.CONFIG.update(
+        {
+            "models": {
+                "shared-model": {
+                    "cost": {"input": 1.0, "output": 2.0, "cacheRead": 0.1}
+                },
+                "global-only": {
+                    "cost": {"input": 3.0, "output": 6.0, "cacheRead": 0.3}
+                },
+            },
+            "providers": {
+                "prov-a": {
+                    "base_url": "https://a.com",
+                    "price_multiplier": 2.0,
+                    "models": {
+                        "shared-model": {
+                            "cost": {"input": 5.0, "output": 10.0, "cacheRead": 0.5}
+                        },
+                    },
+                },
+            },
+        }
+    )
+    monkeypatch.setattr("config.pricing.get_remote_pricing", lambda: {})
+
+    response = TestClient(api_module.app).get("/pricing?provider=prov-a")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["shared-model"]["scope"] == "prov-a"
+    assert data["shared-model"]["input"] == 5.0
+    assert data["shared-model"]["effective_input"] == 10.0
+    assert data["global-only"]["scope"] == "global"
+    assert data["global-only"]["input"] == 3.0
+    assert data["global-only"]["multiplier"] == 2.0
+    assert data["global-only"]["effective_input"] == 6.0
+
+
 # --- Claude 3.x alias ---
 
 

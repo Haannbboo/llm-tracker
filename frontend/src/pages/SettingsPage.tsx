@@ -58,6 +58,21 @@ export function SettingsPage({ providerColors }: Props) {
       ? `${setupMatchingAgents}/${setupLocalAgentTotal}`
       : t('No local Agent')
     : t('Unknown')
+  const pricingMultiplier = selectedPricingProvider === 'global'
+    ? 1
+    : filteredPricingModels.find(model => typeof model.multiplier === 'number')?.multiplier
+      ?? Number(configParsed?.providers?.[selectedPricingProvider]?.price_multiplier ?? 1)
+  const formatPrice = (value: number | null | undefined) => (
+    typeof value === 'number' ? value.toFixed(3) : '—'
+  )
+  const providerPriceDetail = (base: number, effective: number | undefined) => (
+    selectedPricingProvider !== 'global' && effective !== undefined ? (
+      <div style={{ marginTop: '4px', fontSize: '11px', color: 'var(--text-muted)', lineHeight: 1.4 }}>
+        <div style={{ color: 'var(--text-secondary)', fontWeight: 600 }}>{t('Effective:')} {formatPrice(effective)}</div>
+        <div>{t('Base:')} {formatPrice(base)}</div>
+      </div>
+    ) : null
+  )
 
   return (
     <div className="settings-page" style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
@@ -278,6 +293,11 @@ export function SettingsPage({ providerColors }: Props) {
                 <option key={p} value={p}>{t('Provider:')} {p}</option>
               ))}
             </select>
+            {selectedPricingProvider !== 'global' && (
+              <span style={{ fontSize: '11px', color: 'var(--text-secondary)', fontWeight: 600 }}>
+                {t('Multiplier:')} {pricingMultiplier.toFixed(3)}x
+              </span>
+            )}
           </div>
         </div>
         <div style={{ padding: '8px 16px' }}>
@@ -351,9 +371,18 @@ export function SettingsPage({ providerColors }: Props) {
                         {hasProviderOverride && <span title={t('Provider Override')} style={{ fontSize: '10px' }}>💰</span>}
                       </div>
                     </td>
-                    <td><input {...inputProps('input')} /></td>
-                    <td><input {...inputProps('output')} /></td>
-                    <td><input {...inputProps('cacheRead')} /></td>
+                    <td>
+                      <input {...inputProps('input')} />
+                      {providerPriceDetail(model.input, model.effective_input)}
+                    </td>
+                    <td>
+                      <input {...inputProps('output')} />
+                      {providerPriceDetail(model.output, model.effective_output)}
+                    </td>
+                    <td>
+                      <input {...inputProps('cacheRead')} />
+                      {providerPriceDetail(model.cache_read, model.effective_cache_read)}
+                    </td>
                     <td>
                       <span style={{
                         fontSize: '10px',
