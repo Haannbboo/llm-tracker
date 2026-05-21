@@ -8,11 +8,13 @@ logs/
 
 # LLM related
 DESIGN.md
-AGENTS.md
-CLAUDE.md
-.superpowers/
+AGENTS.local.md
+CLAUDE.local.md
 .claude/
+.claude/*.local.md
 .superset/
+.agents/private/
+.superpowers/*
 
 # Project specific
 todo.md
