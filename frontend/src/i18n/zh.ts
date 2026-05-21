@@ -215,6 +215,8 @@ export const zh: Record<string, string> = {
   'Failed to fetch log data': '获取日志数据失败',
   'Unknown error': '未知错误',
   'Failed to save config': '保存配置失败',
+  'Failed to refresh config after save': '保存后刷新配置失败',
+  'Config root must be a YAML mapping': '配置根节点必须是 YAML 映射',
   'Connection error while saving config': '保存配置时连接错误',
   'Test failed': '测试失败',
 

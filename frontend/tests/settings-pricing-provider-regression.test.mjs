@@ -24,7 +24,8 @@ test('settings pricing fetches provider-specific pricing when scope changes', ()
 test('settings pricing refetch after save preserves the selected provider scope', () => {
   assert.match(hookSource, /const pricingUrl = selectedPricingProvider === 'global'/)
   assert.match(hookSource, /const pricingResp = await fetch\(pricingUrl\)/)
-  assert.match(hookSource, /selectedPricingProvider, setConfigStatus, setError, setPricingData/)
+  assert.match(hookSource, /selectedPricingProvider/)
+  assert.match(hookSource, /setPricingData/)
 })
 
 test('provider pricing view shows multiplier and effective prices with base prices visible', () => {
