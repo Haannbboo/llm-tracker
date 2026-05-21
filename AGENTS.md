@@ -35,6 +35,7 @@ Workflow details: `.agents/commands/feature-pr.md`.
 Verification workflow: `.agents/commands/verify.md`.
 Independent review: `.agents/commands/review.md`.
 Open PR workflow: `.agents/commands/open-pr.md`.
+PR follow-up / CI / CodeRabbit: `.agents/commands/pr-follow-up.md`.
 Respond to review comments: `.agents/commands/respond-to-pr-comments.md`.
 Pre-PR checklist: `.agents/commands/pre-pr.md`.
 Project rules: `.agents/commands/llm-tracker.md`.
@@ -70,13 +71,15 @@ docs: add provider adapter workflow
 Backend:
 
 ```bash
-./.venv/bin/python -m pytest -q
+uv run python -m pytest -q
 ```
+
+If `uv` is unavailable but the bootstrap-created virtualenv exists, use `./.venv/bin/python -m pytest -q` as a fallback.
 
 Script-specific changes:
 
 ```bash
-python3 -m pytest tests/scripts/ -q
+uv run python -m pytest tests/scripts/ -q
 ```
 
 Frontend:
