@@ -298,8 +298,10 @@ bash scripts/start.sh
 Run backend tests:
 
 ```bash
-./.venv/bin/python -m pytest -q
+uv run python -m pytest -q
 ```
+
+If `uv` is unavailable but the bootstrap-created virtualenv exists, use `./.venv/bin/python -m pytest -q` as a fallback.
 
 Run frontend tests and build:
 
