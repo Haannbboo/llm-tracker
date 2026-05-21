@@ -77,7 +77,9 @@ def _iter_provider_models(provider: dict[str, Any]) -> list[str]:
     return []
 
 
-def _parse_model_cost(model_config: Any) -> ModelCost | None:
+def _parse_model_cost(
+    model_config: Any, base: ModelCost | None = None
+) -> ModelCost | None:
     if not isinstance(model_config, dict):
         return None
 
@@ -86,10 +88,16 @@ def _parse_model_cost(model_config: Any) -> ModelCost | None:
         return None
 
     return ModelCost(
-        input=float(cost.get("input", 0)),
-        output=float(cost.get("output", 0)),
-        cache_read=float(cost.get("cacheRead", 0)),
-        cache_write=float(cost["cacheWrite"]) if "cacheWrite" in cost else None,
+        input=float(cost.get("input", base.input if base else 0)),
+        output=float(cost.get("output", base.output if base else 0)),
+        cache_read=float(cost.get("cacheRead", base.cache_read if base else 0)),
+        cache_write=(
+            float(cost["cacheWrite"])
+            if "cacheWrite" in cost
+            else base.cache_write
+            if base
+            else None
+        ),
     )
 
 
@@ -159,11 +167,23 @@ def resolve_all_costs(
     """Resolve global and provider model costs with source metadata."""
     global_costs: dict[str, ResolvedCost] = {}
     provider_costs: dict[str, dict[str, ResolvedCost]] = {}
+    remote_costs = remote_costs or {}
+
+    for key, cost in remote_costs.items():
+        global_costs[key] = ResolvedCost(
+            cost=cost,
+            source="litellm",
+        )
 
     for model_name, model_config in config.get("models", {}).items():
-        model_cost = _parse_model_cost(model_config)
+        normalized_model = normalize_model_cost_key(model_name)
+        base_cost = global_costs.get(normalized_model)
+        model_cost = _parse_model_cost(
+            model_config,
+            base_cost.cost if base_cost is not None else None,
+        )
         if model_cost is not None:
-            global_costs[normalize_model_cost_key(model_name)] = ResolvedCost(
+            global_costs[normalized_model] = ResolvedCost(
                 cost=model_cost,
                 source="yaml",
             )
@@ -174,22 +194,19 @@ def resolve_all_costs(
         models = provider.get("models", {})
         if isinstance(models, dict):
             for model_name, model_config in models.items():
-                model_cost = _parse_model_cost(model_config)
-                if model_cost is not None:
-                    provider_costs.setdefault(provider_name, {})[
-                        normalize_model_cost_key(model_name)
-                    ] = ResolvedCost(
-                        cost=model_cost,
-                        source="yaml",
-                    )
-
-    if remote_costs:
-        for key, cost in remote_costs.items():
-            if key not in global_costs:
-                global_costs[key] = ResolvedCost(
-                    cost=cost,
-                    source="litellm",
+                normalized_model = normalize_model_cost_key(model_name)
+                base_cost = global_costs.get(normalized_model)
+                model_cost = _parse_model_cost(
+                    model_config,
+                    base_cost.cost if base_cost is not None else None,
                 )
+                if model_cost is not None:
+                    provider_costs.setdefault(provider_name, {})[normalized_model] = (
+                        ResolvedCost(
+                            cost=model_cost,
+                            source="yaml",
+                        )
+                    )
 
     return ResolvedCosts(global_costs=global_costs, provider_costs=provider_costs)
 

@@ -90,7 +90,6 @@ export function useSettingsData() {
     const search = pricingSearch.toLowerCase()
     const models: Array<{ name: string } & PricingEntry> = []
     for (const [name, data] of Object.entries(pricingData)) {
-      if (name.includes('/')) continue // skip provider-prefixed keys
       if (search && !name.toLowerCase().includes(search)) continue
       models.push({ name, ...data })
     }

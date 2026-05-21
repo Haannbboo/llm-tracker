@@ -284,6 +284,7 @@ export type PricingEntry = {
   effective_input?: number
   effective_output?: number
   effective_cache_read?: number
+  effective_cache_write?: number | null
   multiplier?: number
 }
 

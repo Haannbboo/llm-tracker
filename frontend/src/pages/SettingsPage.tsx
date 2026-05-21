@@ -65,7 +65,7 @@ export function SettingsPage({ providerColors }: Props) {
   const formatPrice = (value: number | null | undefined) => (
     typeof value === 'number' ? value.toFixed(3) : '—'
   )
-  const providerPriceDetail = (base: number, effective: number | undefined) => (
+  const providerPriceDetail = (base: number | null | undefined, effective: number | null | undefined) => (
     selectedPricingProvider !== 'global' && effective !== undefined ? (
       <div style={{ marginTop: '4px', fontSize: '11px', color: 'var(--text-muted)', lineHeight: 1.4 }}>
         <div style={{ color: 'var(--text-secondary)', fontWeight: 600 }}>{t('Effective:')} {formatPrice(effective)}</div>
@@ -326,6 +326,7 @@ export function SettingsPage({ providerColors }: Props) {
                 <th>{t('Input (per 1M)')}</th>
                 <th>{t('Output (per 1M)')}</th>
                 <th>{t('Cache Read (per 1M)')}</th>
+                <th>{t('Cache Write (per 1M)')}</th>
                 <th style={{ width: '60px' }}>{t('Source')}</th>
               </tr>
             </thead>
@@ -339,28 +340,36 @@ export function SettingsPage({ providerColors }: Props) {
                   : null;
                 const hasProviderOverride = providerCost !== null && Object.keys(providerCost).length > 0;
                 const activeCost = hasProviderOverride ? providerCost : globalCost;
+                const modelPrice = (field: string) => {
+                  if (field === 'cacheRead') return model.cache_read;
+                  if (field === 'cacheWrite') return model.cache_write;
+                  return model[field as keyof PricingEntry] as number | null | undefined;
+                };
 
-                const inputProps = (field: string) => ({
-                  type: "number",
-                  step: "0.001",
-                  value: activeCost[field] !== undefined ? activeCost[field] : "",
-                  placeholder: isYaml
-                    ? (activeCost[field] !== undefined ? String(activeCost[field]) : "0.000")
-                    : (model[field as keyof PricingEntry] !== undefined ? String(model[field as keyof PricingEntry]) : "—"),
-                  onChange: (e: React.ChangeEvent<HTMLInputElement>) => handleCostChange(name, field, e.target.value),
-                  style: {
-                    width: '100%',
-                    padding: '6px 8px',
-                    borderRadius: '4px',
-                    border: '1px solid transparent',
-                    background: !isYaml && activeCost[field] === undefined ? 'transparent' : 'var(--input-bg)',
-                    borderBottom: '1px solid var(--border-color)',
-                    fontSize: '13px',
-                    color: !isYaml && activeCost[field] === undefined ? 'var(--text-muted)' : 'var(--text-primary)',
-                    outline: 'none',
-                    textAlign: 'left' as const
-                  }
-                });
+                const inputProps = (field: string) => {
+                  const price = modelPrice(field);
+                  return {
+                    type: "number",
+                    step: "0.001",
+                    value: activeCost[field] !== undefined ? activeCost[field] : "",
+                    placeholder: activeCost[field] !== undefined
+                      ? String(activeCost[field])
+                      : price !== undefined && price !== null ? String(price) : "—",
+                    onChange: (e: React.ChangeEvent<HTMLInputElement>) => handleCostChange(name, field, e.target.value),
+                    style: {
+                      width: '100%',
+                      padding: '6px 8px',
+                      borderRadius: '4px',
+                      border: '1px solid transparent',
+                      background: !isYaml && activeCost[field] === undefined ? 'transparent' : 'var(--input-bg)',
+                      borderBottom: '1px solid var(--border-color)',
+                      fontSize: '13px',
+                      color: !isYaml && activeCost[field] === undefined ? 'var(--text-muted)' : 'var(--text-primary)',
+                      outline: 'none',
+                      textAlign: 'left' as const
+                    }
+                  };
+                };
 
                 return (
                   <tr key={name} style={{ background: hasProviderOverride ? 'var(--icon-yellow-bg)' : isYaml ? 'rgba(255, 215, 0, 0.05)' : 'transparent' }}>
@@ -384,6 +393,10 @@ export function SettingsPage({ providerColors }: Props) {
                       {providerPriceDetail(model.cache_read, model.effective_cache_read)}
                     </td>
                     <td>
+                      <input {...inputProps('cacheWrite')} />
+                      {providerPriceDetail(model.cache_write, model.effective_cache_write)}
+                    </td>
+                    <td>
                       <span style={{
                         fontSize: '10px',
                         fontWeight: 600,
@@ -399,7 +412,7 @@ export function SettingsPage({ providerColors }: Props) {
                 );
               }) : (
                 <tr>
-                  <td colSpan={5} style={{ textAlign: 'center', padding: '24px', color: 'var(--text-muted)' }}>
+                  <td colSpan={6} style={{ textAlign: 'center', padding: '24px', color: 'var(--text-muted)' }}>
                     {pricingSearch ? t('No models match your search.') : t('No pricing data available.')}
                   </td>
                 </tr>

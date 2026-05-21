@@ -434,6 +434,66 @@ def test_resolve_all_costs_yaml_wins_over_litellm(config_module):
     assert resolved.global_costs["test-model"].source == "yaml"
 
 
+def test_resolve_all_costs_partial_yaml_merges_with_litellm(config_module):
+    config = {
+        "models": {
+            "test-model": {"cost": {"input": 9.0}},
+        },
+        "providers": {},
+    }
+    remote = {
+        "test-model": ModelCost(
+            input=1.0,
+            output=2.0,
+            cache_read=0.1,
+            cache_write=0.25,
+        ),
+    }
+
+    resolved = config_module.resolve_all_costs(config, remote)
+
+    cost = resolved.global_costs["test-model"].cost
+    assert resolved.global_costs["test-model"].source == "yaml"
+    assert cost.input == 9.0
+    assert cost.output == 2.0
+    assert cost.cache_read == 0.1
+    assert cost.cache_write == 0.25
+
+
+def test_resolve_all_costs_partial_provider_yaml_merges_with_global(config_module):
+    config = {
+        "models": {
+            "test-model": {
+                "cost": {
+                    "input": 1.0,
+                    "output": 2.0,
+                    "cacheRead": 0.1,
+                    "cacheWrite": 0.25,
+                }
+            },
+        },
+        "providers": {
+            "prov-a": {
+                "base_url": "https://a.com",
+                "models": {
+                    "test-model": {
+                        "cost": {"input": 9.0},
+                    },
+                },
+            },
+        },
+    }
+
+    resolved = config_module.resolve_all_costs(config)
+
+    cost = resolved.provider_costs["prov-a"]["test-model"].cost
+    assert resolved.provider_costs["prov-a"]["test-model"].source == "yaml"
+    assert cost.input == 9.0
+    assert cost.output == 2.0
+    assert cost.cache_read == 0.1
+    assert cost.cache_write == 0.25
+
+
 def test_resolve_all_costs_both_scopes_coexist(config_module):
     config = {
         "models": {
@@ -563,6 +623,7 @@ def test_pricing_with_multiplier(api_module, monkeypatch):
     assert data["override-model"]["effective_input"] == 7.5
     assert data["override-model"]["effective_output"] == 15.0
     assert data["override-model"]["effective_cache_read"] == 0.75
+    assert data["override-model"]["effective_cache_write"] == 9.0
 
 
 def test_pricing_without_provider_shows_all(api_module, monkeypatch):

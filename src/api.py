@@ -689,6 +689,9 @@ def _pricing_entry(resolved_cost, scope: str, multiplier: float) -> dict:
         "effective_input": cost.input * multiplier,
         "effective_output": cost.output * multiplier,
         "effective_cache_read": cost.cache_read * multiplier,
+        "effective_cache_write": (
+            cost.cache_write * multiplier if cost.cache_write is not None else None
+        ),
         "multiplier": multiplier,
     }
 
