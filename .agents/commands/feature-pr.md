@@ -107,7 +107,7 @@ Use `.agents/commands/pr-template.md` for `/tmp/pr-body.md`.
 
 If a PR already exists for the branch, update it instead of opening a duplicate.
 
-Wait for CI and review feedback. Use `.agents/commands/respond-to-pr-comments.md` for CodeRabbit/human/bot review comments. Fix must-fix issues on the branch. Do not merge without approval.
+Wait for CI and review feedback. Use `.agents/commands/pr-follow-up.md` for CI failures, CodeRabbit, or human/bot review comments. Fix must-fix issues on the branch. Do not merge without approval.
 
 ## 6. Merge
 

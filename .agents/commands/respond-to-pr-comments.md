@@ -1,5 +1,7 @@
 # Respond to PR Comments Workflow
 
+Use this lightweight workflow for PR comments only. For the full opened-PR follow-up loop that includes CI, GitHub Actions logs, CodeRabbit, fixing, verification, push, and public reply rules, use `.agents/commands/pr-follow-up.md`.
+
 Use this to handle CodeRabbit, human reviewer, or CI bot comments on the current branch's PR.
 
 Do not push fixes or post replies without explicit approval.
