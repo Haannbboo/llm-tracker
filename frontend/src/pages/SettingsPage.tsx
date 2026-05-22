@@ -4,8 +4,8 @@ import { useSettingsData } from '../hooks/useSettingsData'
 import { CopyButton } from '../components/CopyButton'
 import { t } from '../i18n/index.ts'
 import { FIXED_PROVIDER_COLORS, getProviderColor, getModelIcon, getAgentDisplayName } from '../utils'
-import type { SetupDiagnostics, PricingEntry } from '../types'
-import type { LocalAgentInfo } from '../hooks/useDashboardAgents'
+import type { PricingEntry } from '../types'
+import { useDashboardAgents } from '../hooks/useDashboardAgents'
 
 type Props = {
   providerColors?: Record<string, string>
@@ -18,8 +18,7 @@ export function SettingsPage({ providerColors }: Props) {
     configParsed, configContent, setConfigContent,
     configStatus, error,
   } = useApp()
-  const localAgents = null as Record<string, LocalAgentInfo> | null
-  const setupDiagnostics = null as SetupDiagnostics | null
+  const { localAgents, setupDiagnostics } = useDashboardAgents()
 
   const {
     selectedPricingProvider, setSelectedPricingProvider,
