@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# scripts/start.sh
+# Start llm-tracker services via supervisord.
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -16,49 +18,60 @@ REQS_STAMP="${VENV_DIR}/.requirements.sha256"
 PORT_CHECKER="${ROOT_DIR}/scripts/check-service-ports.py"
 AUTO_PORT_ASSIGNER="${ROOT_DIR}/scripts/auto-assign-ports.py"
 
-# Verification: Check if environment is ready
+# ── Load terminal helpers ───────────────────────────────────────────
+source "${ROOT_DIR}/scripts/lib/terminal.sh"
+
+# Show banner only when run standalone (not from bootstrap.sh)
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+  banner
+  step_header "Starting services"
+fi
+
+# ── Verification ────────────────────────────────────────────────────
 if [[ ! -x "${PYTHON}" ]]; then
-  echo "ERROR: Virtual environment not found. Please run 'scripts/install.sh' first."
+  fail "Virtual environment not found — run scripts/install.sh first"
   exit 1
 fi
 
 if [[ ! -L "${HOME}/.local/bin/llm-tracker" ]]; then
-  echo "NOTE: 'llm-tracker' CLI symlink is missing. Run 'scripts/install.sh' to set it up."
+  info "NOTE: CLI symlink missing — run scripts/install.sh to set it up"
 fi
 
-# Install deps when requirements.txt changes
+# ── Install deps when requirements.txt changes ─────────────────────
 if command -v shasum >/dev/null 2>&1; then
   CURRENT_HASH="$(shasum -a 256 "${ROOT_DIR}/requirements.txt" | awk '{print $1}')"
 elif command -v sha256sum >/dev/null 2>&1; then
   CURRENT_HASH="$(sha256sum "${ROOT_DIR}/requirements.txt" | awk '{print $1}')"
 else
-  # Fallback to a less robust but likely available method if both are missing
   CURRENT_HASH="$(ls -l "${ROOT_DIR}/requirements.txt" | awk '{print $5 "_" $9}')"
 fi
 SAVED_HASH="$(cat "${REQS_STAMP}" 2>/dev/null || true)"
 if [[ "${CURRENT_HASH}" != "${SAVED_HASH}" ]]; then
-  echo "==> Installing dependencies..."
+  info "Installing dependencies..."
   uv pip install --python "${PYTHON}" -r "${ROOT_DIR}/requirements.txt"
   echo "${CURRENT_HASH}" > "${REQS_STAMP}"
+  pass "Dependencies installed"
 else
-  echo "==> Dependencies up to date"
+  pass "Dependencies up to date"
 fi
 
 mkdir -p "${ROOT_DIR}/logs" "${RUNTIME_DIR}"
 
+# ── Config ──────────────────────────────────────────────────────────
 CONFIG_WAS_CREATED=0
 if [[ -e "${CONFIG_PATH}" || -L "${CONFIG_PATH}" ]]; then
-  echo "==> Config already exists at ${CONFIG_PATH}"
+  pass "Config exists: ${CONFIG_PATH}"
 else
   cp "${ROOT_DIR}/config.example.yaml" "${CONFIG_PATH}"
   CONFIG_WAS_CREATED=1
-  echo "==> Config created at ${CONFIG_PATH}"
+  pass "Config created: ${CONFIG_PATH}"
 fi
 
 "${PYTHON}" "${ROOT_DIR}/scripts/sync-config.py" "${CONFIG_PATH}" "${ROOT_DIR}/config.example.yaml"
 
 OTLP_PORT=$("${PYTHON}" -c "import yaml; from pathlib import Path; p = Path('${CONFIG_PATH}'); c = yaml.safe_load(p.read_text()) or {}; print(c.get('server', {}).get('otlp_port', 4002))" 2>/dev/null || echo "4002")
 
+# ── Port check ──────────────────────────────────────────────────────
 if ! PORT_CHECK_OUTPUT="$("${PYTHON}" "${PORT_CHECKER}" \
   --strict \
   --config "${CONFIG_PATH}" \
@@ -71,34 +84,42 @@ if ! PORT_CHECK_OUTPUT="$("${PYTHON}" "${PORT_CHECKER}" \
       --config "${CONFIG_PATH}" \
       --supervisorctl "${SUPERVISORCTL}" \
       --supervisord-conf "${SUPERVISORD_CONF}"
+    pass "Ports auto-assigned"
   else
+    fail "Port check failed"
     printf "%s\n" "${PORT_CHECK_OUTPUT}"
     exit 1
   fi
+else
+  pass "Port check passed"
 fi
 
 OTLP_PORT=$("${PYTHON}" -c "import yaml; from pathlib import Path; p = Path('${CONFIG_PATH}'); c = yaml.safe_load(p.read_text()) or {}; print(c.get('server', {}).get('otlp_port', 4002))" 2>/dev/null || echo "4002")
 
-# Configure agent OTLP telemetry only for locally installed CLIs.
-# Re-running bootstrap after installing a new agent configures that agent then.
+# ── Configure agent OTLP telemetry ──────────────────────────────────
 if command -v codex >/dev/null 2>&1; then
   CODEX_CONFIG="${HOME}/.codex/config.toml"
   "${PYTHON}" "${ROOT_DIR}/scripts/configure-codex-settings.py" "${CODEX_CONFIG}" "${OTLP_PORT}"
+  pass "Codex configured"
 fi
 
 if command -v gemini >/dev/null 2>&1; then
   bash "${ROOT_DIR}/scripts/setup-gemini.sh" "${OTLP_PORT}"
+  pass "Gemini configured"
 fi
 
 if command -v claude >/dev/null 2>&1; then
   CLAUDE_SETTINGS="${HOME}/.claude/settings.json"
   "${PYTHON}" "${ROOT_DIR}/scripts/configure-claude-settings.py" "${CLAUDE_SETTINGS}" "${OTLP_PORT}"
+  pass "Claude configured"
 fi
 
-echo "==> Applying schema migrations..."
+# ── Schema migrations ───────────────────────────────────────────────
+info "Applying schema migrations..."
 "${PYTHON}" "${ROOT_DIR}/scripts/migrate_schema.py"
+pass "Migrations applied"
 
-# Generate supervisord.conf (references project gunicorn configs)
+# ── Supervisord ─────────────────────────────────────────────────────
 cat > "${SUPERVISORD_CONF}" <<EOF
 [unix_http_server]
 file=${SOCKET_PATH}
@@ -151,35 +172,42 @@ stdout_logfile=${ROOT_DIR}/logs/otlp.stdout.log
 stderr_logfile=${ROOT_DIR}/logs/otlp.stderr.log
 EOF
 
-# Reuse existing supervisord if alive, otherwise start fresh
+# ── Start/reload supervisord ────────────────────────────────────────
 EXISTING_PID="$(cat "${SUPERVISORD_PID}" 2>/dev/null || true)"
 if [[ -n "${EXISTING_PID}" ]] && kill -0 "${EXISTING_PID}" 2>/dev/null; then
-  echo "==> Reloading existing supervisord (pid ${EXISTING_PID})..."
+  info "Reloading supervisord (pid ${EXISTING_PID})..."
   "${SUPERVISORCTL}" -c "${SUPERVISORD_CONF}" reread
   "${SUPERVISORCTL}" -c "${SUPERVISORD_CONF}" update
-  # update already starts/restarts programs with autostart=true; wait briefly then
-  # start any that are still stopped (e.g. manually stopped before this run)
   sleep 1
+  pass "Supervisord reloaded"
 else
   rm -f "${SOCKET_PATH}" "${SUPERVISORD_PID}"
-  echo "==> Starting supervisord..."
+  info "Starting supervisord..."
   "${SUPERVISORD}" -c "${SUPERVISORD_CONF}"
   for _ in $(seq 10); do [[ -S "${SOCKET_PATH}" ]] && break; sleep 0.3; done
+  pass "Supervisord started"
 fi
 
-# Start any programs not yet running (autostart handles most cases; this catches manually-stopped ones)
+# ── Start any programs not yet running ──────────────────────────────
 for prog in llm-tracker-proxy llm-tracker-api llm-tracker-otlp; do
   status="$("${SUPERVISORCTL}" -c "${SUPERVISORD_CONF}" status "${prog}" 2>/dev/null | awk '{print $2}' || true)"
   case "${status}" in
-    RUNNING)  echo "==> ${prog}: running" ;;
-    STARTING) echo "==> ${prog}: starting" ;;
-    *)        echo "==> Starting ${prog}..."
-              "${SUPERVISORCTL}" -c "${SUPERVISORD_CONF}" start "${prog}" ;;
+    RUNNING)  pass "${prog}: running" ;;
+    STARTING) pass "${prog}: starting" ;;
+    *)        info "Starting ${prog}..."
+              "${SUPERVISORCTL}" -c "${SUPERVISORD_CONF}" start "${prog}"
+              pass "${prog}: started" ;;
   esac
 done
 
-# Restart API server so it picks up frontend/dist (static mount happens at import time)
+# ── Restart API if frontend is built ────────────────────────────────
 if [[ -d "${ROOT_DIR}/frontend/dist" ]]; then
   "${SUPERVISORCTL}" -c "${SUPERVISORD_CONF}" restart llm-tracker-api
-  echo "==> llm-tracker-api: restarted (frontend available)"
+  pass "llm-tracker-api: restarted (frontend available)"
+fi
+
+# ── Final status (only when run standalone) ─────────────────────────
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+  API_PORT=$("${PYTHON}" -c "import yaml; from pathlib import Path; p = Path('${CONFIG_PATH}'); c = yaml.safe_load(p.read_text()) or {}; print(c.get('server', {}).get('api_port', c.get('server', {}).get('port', 4000) + 1))" 2>/dev/null || echo "4001")
+  final_status_ok "http://127.0.0.1:${API_PORT}"
 fi

@@ -20,6 +20,10 @@ def _make_fake_bootstrap_repo(
     shutil.copy2(repo_root / "scripts" / "bootstrap.sh", scripts_dir / "bootstrap.sh")
     (scripts_dir / "bootstrap.sh").chmod(0o755)
 
+    lib_dir = scripts_dir / "lib"
+    lib_dir.mkdir(parents=True)
+    shutil.copy2(repo_root / "scripts" / "lib" / "terminal.sh", lib_dir / "terminal.sh")
+
     (scripts_dir / "install.sh").write_text(
         textwrap.dedent(
             f"""
@@ -212,7 +216,7 @@ def test_bootstrap_succeeds_when_install_start_and_post_checks_pass(tmp_path):
 
     output = result.stdout + result.stderr
     assert result.returncode == 0, output
-    assert "✅ llm-tracker bootstrap complete" in output
+    assert "llm-tracker is LIVE" in output
     assert f"API running: http://127.0.0.1:{ports[1]}" in output
     assert f"Proxy listening: http://127.0.0.1:{ports[0]}" in output
     assert f"OTLP listening: http://127.0.0.1:{ports[2]}" in output
@@ -250,11 +254,11 @@ def test_bootstrap_reports_local_setup_health_ready_and_skipped_agents(tmp_path)
 
     output = result.stdout + result.stderr
     assert result.returncode == 0, output
-    assert "Agent tracking verification" in output
+    assert "Verifying agent tracking" in output
     assert "Claude: skipped" in output
     assert "Codex: skipped" in output
     assert "Gemini: ready" in output
-    assert "Agent tracking: 1 ready, 2 skipped, 0 failed" in output
+    assert "Agents: 1 ready, 2 skipped, 0 failed" in output
 
 
 def test_bootstrap_fails_when_detected_agent_setup_health_is_not_ready(tmp_path):
@@ -309,11 +313,11 @@ def test_bootstrap_fails_when_detected_agent_setup_health_is_not_ready(tmp_path)
 
     output = result.stdout + result.stderr
     assert result.returncode != 0, output
-    assert "Agent tracking verification" in output
+    assert "Verifying agent tracking" in output
     assert "Claude: OTLP not configured" in output
-    assert "Codex: configured endpoint mismatch" in output
+    assert "Codex: endpoint mismatch" in output
     assert "Gemini: ready" in output
-    assert "Agent tracking: 1 ready, 0 skipped, 2 failed" in output
+    assert "Agents: 1 ready, 0 skipped, 2 failed" in output
     assert secret_endpoint not in output
 
 
@@ -353,7 +357,7 @@ def test_bootstrap_skips_gemini_when_settings_file_exists_but_cli_is_missing(tmp
     assert "Claude: skipped" in output
     assert "Codex: skipped" in output
     assert "Gemini: skipped" in output
-    assert "Agent tracking: 0 ready, 3 skipped, 0 failed" in output
+    assert "Agents: 0 ready, 3 skipped, 0 failed" in output
 
 
 def test_bootstrap_exits_nonzero_when_post_start_checks_fail(tmp_path):
@@ -372,7 +376,7 @@ def test_bootstrap_exits_nonzero_when_post_start_checks_fail(tmp_path):
 
     output = result.stdout + result.stderr
     assert result.returncode != 0, output
-    assert "llm-tracker bootstrap finished with" in output
+    assert "llm-tracker started with" in output
     assert "not responding" in output
 
 
@@ -407,4 +411,4 @@ def test_bootstrap_skips_undetected_agent_even_when_setup_health_is_ready(tmp_pa
     assert result.returncode == 0, output
     assert "Gemini: skipped" in output
     assert "Gemini: ready" not in output
-    assert "Agent tracking: 0 ready, 3 skipped, 0 failed" in output
+    assert "Agents: 0 ready, 3 skipped, 0 failed" in output

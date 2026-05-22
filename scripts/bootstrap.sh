@@ -15,10 +15,10 @@ CONFIG_PATH="${HOME}/.llm-tracker/config.yaml"
 CLI_WRAPPER="${SCRIPTS_DIR}/llm-tracker"
 CLI_SYMLINK="${HOME}/.local/bin/llm-tracker"
 
-# ── Helpers ─────────────────────────────────────────────────────────
-_pass() { printf "  ✅ %s\n" "$*"; }
-_fail() { printf "  ❌ %s\n" "$*"; }
+# ── Load terminal helpers ───────────────────────────────────────────
+source "${SCRIPTS_DIR}/lib/terminal.sh"
 
+# ── Helpers ─────────────────────────────────────────────────────────
 _python_cmd() {
   if [[ -x "${ROOT_DIR}/.venv/bin/python" ]]; then
     echo "${ROOT_DIR}/.venv/bin/python"
@@ -30,13 +30,9 @@ _python_cmd() {
 }
 
 _port_listening() {
-  # Test if a TCP port is reachable (short timeout).
-  # Returns 0 if something is listening, 1 otherwise.
   local host="$1" port="$2"
   if command -v curl >/dev/null 2>&1; then
     curl --connect-timeout 3 -sf "http://${host}:${port}/" >/dev/null 2>&1 && return 0
-    # curl exits non-200 on 404/405 etc., but connection succeeded → port is open.
-    # Retry without -f to catch services that return error codes but are alive.
     curl --connect-timeout 3 -s -o /dev/null -w '%{http_code}' "http://${host}:${port}/" 2>/dev/null | grep -qE '^[2-5]' && return 0
     return 1
   elif command -v python3 >/dev/null 2>&1; then
@@ -52,7 +48,6 @@ except Exception:
 " && return 0
     return 1
   else
-    # Fallback: /dev/tcp (bash built-in)
     (echo >/dev/tcp/"${host}"/"${port}") 2>/dev/null && return 0
     return 1
   fi
@@ -64,13 +59,11 @@ _fetch_setup_health() {
     curl --connect-timeout 3 -sS "${url}"
     return
   fi
-
   local python
   python="$(_python_cmd)" || return 1
   "${python}" -c '
 import sys
 import urllib.request
-
 url = sys.argv[1]
 try:
     with urllib.request.urlopen(url, timeout=3) as response:
@@ -88,17 +81,16 @@ _verify_agent_setup_health() {
   local codex_detected=0
   local gemini_detected=0
 
-  echo ""
-  echo "==> Agent tracking verification (/local/setup-health)..."
+  step_header "Verifying agent tracking"
 
   python="$(_python_cmd)" || {
-    _fail "Agent tracking: Python not available for setup-health verification"
+    fail "Agent tracking: Python not available"
     CHECKS_FAIL=$((CHECKS_FAIL + 1))
     return
   }
 
   if ! health_json="$(_fetch_setup_health "${url}" 2>/dev/null)"; then
-    _fail "Agent tracking: could not read ${url}"
+    fail "Agent tracking: could not read ${url}"
     CHECKS_FAIL=$((CHECKS_FAIL + 1))
     return
   fi
@@ -119,12 +111,12 @@ import sys
 try:
     data = json.loads(sys.stdin.read())
 except Exception:
-    print("  ❌ Agent tracking: invalid setup-health response")
+    print("  ✗ Agent tracking: invalid setup-health response")
     sys.exit(1)
 
 agents = data.get("agents")
 if not isinstance(agents, dict):
-    print("  ❌ Agent tracking: setup-health response is missing agents")
+    print("  ✗ Agent tracking: setup-health response is missing agents")
     sys.exit(1)
 
 ready = 0
@@ -134,7 +126,7 @@ for key, label in (("claude", "Claude"), ("codex", "Codex"), ("gemini", "Gemini"
     agent = agents.get(key)
     if not isinstance(agent, dict):
         failed += 1
-        print(f"  ❌ {label}: setup health unavailable")
+        print(f"  ✗ {label}: setup health unavailable")
         continue
 
     status = agent.get("status")
@@ -144,22 +136,22 @@ for key, label in (("claude", "Claude"), ("codex", "Codex"), ("gemini", "Gemini"
 
     if not detected:
         skipped += 1
-        print(f"  ✅ {label}: skipped")
+        print(f"  ✓ {label}: skipped")
     elif status == "ready" and endpoint_matches:
         ready += 1
-        print(f"  ✅ {label}: ready")
+        print(f"  ✓ {label}: ready")
     elif status == "wrong_endpoint" or (configured and not endpoint_matches):
         failed += 1
-        print(f"  ❌ {label}: configured endpoint mismatch with current llm-tracker OTLP endpoint")
+        print(f"  ✗ {label}: endpoint mismatch")
     elif status == "missing_config":
         failed += 1
-        print(f"  ❌ {label}: OTLP not configured")
+        print(f"  ✗ {label}: OTLP not configured")
     else:
         failed += 1
-        print(f"  ❌ {label}: setup health unavailable")
+        print(f"  ✗ {label}: setup health unavailable")
 
-icon = "✅" if failed == 0 else "❌"
-print(f"  {icon} Agent tracking: {ready} ready, {skipped} skipped, {failed} failed")
+icon = "✓" if failed == 0 else "✗"
+print(f"  {icon} Agents: {ready} ready, {skipped} skipped, {failed} failed")
 sys.exit(1 if failed else 0)
 '
   then
@@ -169,19 +161,19 @@ sys.exit(1 if failed else 0)
   fi
 }
 
+# ── Banner ──────────────────────────────────────────────────────────
+banner
+
 # ── Step 1: Install ─────────────────────────────────────────────────
-echo ""
-echo "==> [1/3] Installing dependencies and CLI..."
+step_header "Installing dependencies & CLI"
 bash "${SCRIPTS_DIR}/install.sh"
 
 # ── Step 2: Start services ──────────────────────────────────────────
-echo ""
-echo "==> [2/3] Starting services..."
+step_header "Starting services"
 bash "${SCRIPTS_DIR}/start.sh"
 
 # ── Step 3: Post-start checks ──────────────────────────────────────
-echo ""
-echo "==> [3/3] Running post-start checks..."
+step_header "Running post-start checks"
 
 # Read configured ports (fallback to defaults)
 PROXY_PORT=4000
@@ -206,57 +198,58 @@ fi
 HOST="127.0.0.1"
 CHECKS_PASS=0
 CHECKS_FAIL=0
+
 # Config file
 if [[ -f "${CONFIG_PATH}" ]]; then
-  _pass "Config: ${CONFIG_PATH}"
+  pass "Config: ${CONFIG_PATH}"
   CHECKS_PASS=$((CHECKS_PASS + 1))
 else
-  _fail "Config: ${CONFIG_PATH} (not found)"
+  fail "Config: ${CONFIG_PATH} (not found)"
   CHECKS_FAIL=$((CHECKS_FAIL + 1))
 fi
 
 # CLI wrapper
 if [[ -x "${CLI_WRAPPER}" ]]; then
-  _pass "CLI wrapper: scripts/llm-tracker"
+  pass "CLI wrapper: scripts/llm-tracker"
   CHECKS_PASS=$((CHECKS_PASS + 1))
 else
-  _fail "CLI wrapper: scripts/llm-tracker (not executable)"
+  fail "CLI wrapper: scripts/llm-tracker (not executable)"
   CHECKS_FAIL=$((CHECKS_FAIL + 1))
 fi
 
 # CLI symlink
 if [[ -L "${CLI_SYMLINK}" ]]; then
-  _pass "CLI symlink: ${CLI_SYMLINK}"
+  pass "CLI symlink: ${CLI_SYMLINK}"
   CHECKS_PASS=$((CHECKS_PASS + 1))
 else
-  _fail "CLI symlink: ${CLI_SYMLINK} (not found)"
+  fail "CLI symlink: ${CLI_SYMLINK} (not found)"
   CHECKS_FAIL=$((CHECKS_FAIL + 1))
 fi
 
 # API reachable
 if _port_listening "${HOST}" "${API_PORT}"; then
-  _pass "API running: http://${HOST}:${API_PORT}"
+  pass "API running: http://${HOST}:${API_PORT}"
   CHECKS_PASS=$((CHECKS_PASS + 1))
 else
-  _fail "API reachable: http://${HOST}:${API_PORT} (not responding)"
+  fail "API reachable: http://${HOST}:${API_PORT} (not responding)"
   CHECKS_FAIL=$((CHECKS_FAIL + 1))
 fi
 
 # Proxy listening
 if _port_listening "${HOST}" "${PROXY_PORT}"; then
-  _pass "Proxy listening: http://${HOST}:${PROXY_PORT}"
+  pass "Proxy listening: http://${HOST}:${PROXY_PORT}"
   CHECKS_PASS=$((CHECKS_PASS + 1))
 else
-  _fail "Proxy listening: http://${HOST}:${PROXY_PORT} (not responding)"
+  fail "Proxy listening: http://${HOST}:${PROXY_PORT} (not responding)"
   CHECKS_FAIL=$((CHECKS_FAIL + 1))
 fi
 
 # OTLP listening
 if _port_listening "${HOST}" "${OTLP_PORT}"; then
-  _pass "OTLP listening: http://${HOST}:${OTLP_PORT}"
+  pass "OTLP listening: http://${HOST}:${OTLP_PORT}"
   CHECKS_PASS=$((CHECKS_PASS + 1))
 else
-  _fail "OTLP listening: http://${HOST}:${OTLP_PORT} (not responding)"
+  fail "OTLP listening: http://${HOST}:${OTLP_PORT} (not responding)"
   CHECKS_FAIL=$((CHECKS_FAIL + 1))
 fi
 
@@ -264,33 +257,24 @@ fi
 if command -v curl >/dev/null 2>&1; then
   _dash_ct="$(curl --connect-timeout 3 -s -o /dev/null -w '%{content_type}' "http://${HOST}:${API_PORT}/" 2>/dev/null || true)"
   if [[ "${_dash_ct}" == text/html* ]]; then
-    _pass "Dashboard: http://${HOST}:${API_PORT}"
+    pass "Dashboard: http://${HOST}:${API_PORT}"
     CHECKS_PASS=$((CHECKS_PASS + 1))
   else
-    _fail "Dashboard: http://${HOST}:${API_PORT} (frontend not served — run: cd frontend && npm run build)"
+    fail "Dashboard: http://${HOST}:${API_PORT} (frontend not served)"
     CHECKS_FAIL=$((CHECKS_FAIL + 1))
   fi
 else
-  _pass "Dashboard: http://${HOST}:${API_PORT} (curl not available, skipped check)"
+  pass "Dashboard: http://${HOST}:${API_PORT} (curl not available, skipped)"
   CHECKS_PASS=$((CHECKS_PASS + 1))
 fi
 
 _verify_agent_setup_health
 
 # ── Final report ────────────────────────────────────────────────────
-echo ""
 if [[ "${CHECKS_FAIL}" -eq 0 ]]; then
-  echo "✅ llm-tracker bootstrap complete"
+  final_status_ok "http://${HOST}:${API_PORT}"
+  exit 0
 else
-  echo "⚠️  llm-tracker bootstrap finished with ${CHECKS_FAIL} issue(s)"
+  final_status_warn "http://${HOST}:${API_PORT}" "${CHECKS_FAIL}"
+  exit 1
 fi
-
-exit_code=0
-if [[ "${CHECKS_FAIL}" -ne 0 ]]; then
-  exit_code=1
-fi
-
-echo ""
-echo "Dashboard: http://${HOST}:${API_PORT}"
-
-exit "${exit_code}"
