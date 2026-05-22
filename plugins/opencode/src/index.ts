@@ -3,6 +3,7 @@ import type { Plugin } from "@opencode-ai/plugin"
 const DEFAULT_ENDPOINT = "http://localhost:4002/v1/logs"
 const MAX_TRACKED_MESSAGES = 10_000
 const processed = new Set<string>()
+const pending = new Set<string>()
 const userMessages = new Set<string>()
 const promptPartLengths = new Map<string, Map<string, number>>()
 const firstAssistantPartStart = new Map<string, number>()
@@ -10,6 +11,39 @@ const firstAssistantPartStart = new Map<string, number>()
 function getEndpoint(options?: Record<string, unknown>): string {
   if (options?.endpoint && typeof options.endpoint === "string") return options.endpoint
   return DEFAULT_ENDPOINT
+}
+
+function finiteNumber(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : null
+}
+
+function statusCodeValue(value: unknown): number | null {
+  if (typeof value === "number" && Number.isFinite(value)) return Math.trunc(value)
+  if (typeof value !== "string") return null
+
+  const parsed = Number.parseInt(value, 10)
+  return Number.isFinite(parsed) ? parsed : null
+}
+
+function errorObject(error: unknown): Record<string, unknown> | null {
+  if (!error || typeof error !== "object") return null
+  return error as Record<string, unknown>
+}
+
+function errorName(error: unknown): string | null {
+  const err = errorObject(error)
+  return typeof err?.name === "string" ? err.name : null
+}
+
+function statusCodeFromError(error: unknown): number | null {
+  const err = errorObject(error)
+  if (!err) return null
+
+  const directStatus = statusCodeValue(err.statusCode)
+  if (directStatus != null) return directStatus
+
+  const data = errorObject(err.data)
+  return statusCodeValue(data?.statusCode)
 }
 
 type PromptPart = {
@@ -114,14 +148,16 @@ function buildOtlpPayload(params: {
   model: string
   provider: string
   promptLength: number | null
-  inputTokens: number
-  outputTokens: number
+  inputTokens: number | null
+  outputTokens: number | null
   reasoningTokens: number | null
   cachedTokens: number | null
   cacheCreationTokens: number | null
-  totalTokens: number
-  durationMs: number
+  totalTokens: number | null
+  durationMs: number | null
   ttftMs: number | null
+  statusCode: number | null
+  errorName: string | null
   timestampMs: number
 }): Record<string, unknown> {
   const timeUnixNano = String(params.timestampMs * 1_000_000)
@@ -132,14 +168,29 @@ function buildOtlpPayload(params: {
     { key: "message.id", value: { stringValue: params.messageId } },
     { key: "model", value: { stringValue: params.model } },
     { key: "provider", value: { stringValue: params.provider } },
-    { key: "input_token_count", value: { intValue: params.inputTokens } },
-    { key: "output_token_count", value: { intValue: params.outputTokens } },
-    { key: "total_token_count", value: { intValue: params.totalTokens } },
-    { key: "duration_ms", value: { intValue: params.durationMs } },
   ]
 
+  if (params.inputTokens != null) {
+    attrs.push({ key: "input_token_count", value: { intValue: params.inputTokens } })
+  }
+  if (params.outputTokens != null) {
+    attrs.push({ key: "output_token_count", value: { intValue: params.outputTokens } })
+  }
+  if (params.totalTokens != null) {
+    attrs.push({ key: "total_token_count", value: { intValue: params.totalTokens } })
+  }
+  if (params.durationMs != null) {
+    attrs.push({ key: "duration_ms", value: { intValue: params.durationMs } })
+  }
   if (params.reasoningTokens != null) {
     attrs.push({ key: "reasoning_token_count", value: { intValue: params.reasoningTokens } })
+  }
+  if (params.statusCode != null) {
+    attrs.push({ key: "http.response.status_code", value: { intValue: params.statusCode } })
+    attrs.push({ key: "status_code", value: { intValue: params.statusCode } })
+  }
+  if (params.errorName != null) {
+    attrs.push({ key: "error.type", value: { stringValue: params.errorName } })
   }
   if (params.ttftMs != null) {
     attrs.push({ key: "ttft_ms", value: { intValue: params.ttftMs } })
@@ -174,15 +225,21 @@ function buildOtlpPayload(params: {
   }
 }
 
-async function emitOtlp(payload: Record<string, unknown>, endpoint: string): Promise<void> {
+async function emitOtlp(payload: Record<string, unknown>, endpoint: string): Promise<boolean> {
   try {
-    await fetch(endpoint, {
+    const response = await fetch(endpoint, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
     })
+    if (!response.ok) {
+      console.error(`[llm-tracker] OTLP emission failed: collector returned ${response.status}`)
+      return false
+    }
+    return true
   } catch (err) {
     console.error("[llm-tracker] OTLP emission failed:", err)
+    return false
   }
 }
 
@@ -192,7 +249,8 @@ const plugin: Plugin = async (input, options) => {
   return {
     event: async ({ event }) => {
       if (event.type === "message.part.updated") {
-        const part = event.properties.part
+        const part = event.properties?.part
+        if (!part) return
         rememberPromptPart(part)
         rememberFirstAssistantPart(part, Date.now())
         return
@@ -209,53 +267,70 @@ const plugin: Plugin = async (input, options) => {
       }
 
       if (info.role !== "assistant") return
-      if (!info.time?.completed || !info.tokens) return
 
-      if (processed.has(info.id)) return
-      processed.add(info.id)
-
-      if (processed.size > 10_000) {
-        const entries = Array.from(processed)
-        for (let i = 0; i < entries.length / 2; i++) {
-          processed.delete(entries[i])
-        }
-      }
+      if (processed.has(info.id) || pending.has(info.id)) return
 
       const provider = info.providerID || "unknown"
       const model = info.modelID || "unknown"
+      const knownStatus = statusCodeFromError(info.error)
+      const statusCode = knownStatus ?? (info.error ? 500 : null)
+      const completedAt = finiteNumber(info.time?.completed)
+      if (completedAt == null && statusCode == null) return
+      if (!info.tokens && statusCode == null) return
+      pending.add(info.id)
 
-      const createdAt: number = info.time.created ?? Date.now()
-      const completedAt: number = info.time.completed
-      const durationMs = completedAt - createdAt
-      const firstPartStart = firstAssistantPartStart.get(info.id)
-      const ttftMs =
-        firstPartStart != null ? Math.max(0, Math.round(firstPartStart - createdAt)) : null
+      try {
+        const createdAt: number = finiteNumber(info.time?.created) ?? Date.now()
+        const timestampMs = completedAt ?? Date.now()
+        const durationMs = completedAt != null ? completedAt - createdAt : null
+        const firstPartStart = firstAssistantPartStart.get(info.id)
+        const ttftMs =
+          firstPartStart != null ? Math.max(0, Math.round(firstPartStart - createdAt)) : null
 
-      const totalTokens: number =
-        (info.tokens.input ?? 0) + (info.tokens.output ?? 0) + (info.tokens.reasoning ?? 0)
-      const promptLength =
-        (userMessages.has(info.parentID) ? promptLengthForMessage(info.parentID) : null) ??
-        (await fetchPromptLength(input.client, info.sessionID, info.parentID))
+        const inputTokens = finiteNumber(info.tokens?.input)
+        const outputTokens = finiteNumber(info.tokens?.output)
+        const reasoningTokens = finiteNumber(info.tokens?.reasoning)
+        const tokenValues = [inputTokens, outputTokens, reasoningTokens]
+        const totalTokens: number | null = tokenValues.some((value) => value != null)
+          ? tokenValues.reduce<number>((sum, value) => sum + (value ?? 0), 0)
+          : null
+        const promptLength =
+          (userMessages.has(info.parentID) ? promptLengthForMessage(info.parentID) : null) ??
+          (await fetchPromptLength(input.client, info.sessionID, info.parentID))
 
-      const payload = buildOtlpPayload({
-        sessionId: info.sessionID,
-        messageId: info.id,
-        model,
-        provider,
-        promptLength,
-        inputTokens: info.tokens.input ?? 0,
-        outputTokens: info.tokens.output ?? 0,
-        reasoningTokens: info.tokens.reasoning ?? null,
-        cachedTokens: info.tokens.cache?.read ?? null,
-        cacheCreationTokens: info.tokens.cache?.write ?? null,
-        totalTokens,
-        durationMs,
-        ttftMs,
-        timestampMs: completedAt,
-      })
+        const payload = buildOtlpPayload({
+          sessionId: info.sessionID,
+          messageId: info.id,
+          model,
+          provider,
+          promptLength,
+          inputTokens,
+          outputTokens,
+          reasoningTokens,
+          cachedTokens: finiteNumber(info.tokens?.cache?.read),
+          cacheCreationTokens: finiteNumber(info.tokens?.cache?.write),
+          totalTokens,
+          durationMs,
+          ttftMs,
+          statusCode,
+          errorName: errorName(info.error),
+          timestampMs,
+        })
 
-      await emitOtlp(payload, endpoint)
-      firstAssistantPartStart.delete(info.id)
+        const emitted = await emitOtlp(payload, endpoint)
+        if (!emitted) return
+
+        processed.add(info.id)
+        if (processed.size > 10_000) {
+          const entries = Array.from(processed)
+          for (let i = 0; i < entries.length / 2; i++) {
+            processed.delete(entries[i])
+          }
+        }
+        firstAssistantPartStart.delete(info.id)
+      } finally {
+        pending.delete(info.id)
+      }
     },
   }
 }

@@ -275,6 +275,65 @@ def test_parse_opencode_record_routes_to_record_usage(otlp_module, monkeypatch):
     assert captured["usage"].ttft_ms == 250
 
 
+def test_parse_opencode_record_uses_otlp_status_code(otlp_module, monkeypatch):
+    captured = {}
+    monkeypatch.setattr(
+        otlp_module,
+        "record_usage",
+        _capture_usage(captured),
+    )
+
+    record = {"timeUnixNano": "1800000000000000000"}
+    attrs = _attrs(
+        {
+            "event.name": "opencode.message_completed",
+            "session.id": "oc-sess-1",
+            "message.id": "msg-1",
+            "model": "claude-sonnet-4-5",
+            "provider": "anthropic",
+            "input_token_count": 0,
+            "output_token_count": 0,
+            "total_token_count": 0,
+            "duration_ms": 800,
+            "status_code": 429,
+        }
+    )
+    record["attributes"] = attrs
+
+    otlp_module._parse_log_record(record, "opencode", "oc-sess-1")
+
+    assert captured["usage"].client_source == "opencode"
+    assert captured["usage"].status == 429
+
+
+def test_parse_opencode_record_uses_http_response_status_code(otlp_module, monkeypatch):
+    captured = {}
+    monkeypatch.setattr(
+        otlp_module,
+        "record_usage",
+        _capture_usage(captured),
+    )
+
+    record = {"timeUnixNano": "1800000000000000000"}
+    attrs = _attrs(
+        {
+            "event.name": "opencode.message_completed",
+            "session.id": "oc-sess-1",
+            "message.id": "msg-1",
+            "model": "claude-sonnet-4-5",
+            "provider": "anthropic",
+            "duration_ms": 800,
+            "http.response.status_code": 500,
+        }
+    )
+    record["attributes"] = attrs
+
+    otlp_module._parse_log_record(record, "opencode", "oc-sess-1")
+
+    assert captured["usage"].client_source == "opencode"
+    assert captured["usage"].status == 500
+
+
 def test_extract_opencode_fields_derives_total_with_reasoning_when_missing(
     otlp_module,
 ):
