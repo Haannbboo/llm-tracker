@@ -39,7 +39,7 @@ banner() {
   width="$(_term_width)"
 
   printf "\n"
-  printf "%s" "${_T_PURPLE}${_T_BOLD}"
+  printf "%b" "${_T_PURPLE}${_T_BOLD}"
 
   if [[ ${width} -ge 95 ]]; then
     # Full ASCII art banner
@@ -57,12 +57,12 @@ banner() {
     printf '  █║║    █║║ ██║╚██╔╝██║\n'
     printf '  █║╚════█║╝ ██║ ╚═╝ ██║\n'
     printf '  ╚══════╝╚╝ ╚═╝     ╚═╝\n'
-    printf "%s" "${_T_RESET}"
-    printf "%s" "${_T_PURPLE}${_T_BOLD}"
+    printf "%b" "${_T_RESET}"
+    printf "%b" "${_T_PURPLE}${_T_BOLD}"
     printf '  ── tracker ──\n'
   fi
 
-  printf "%s" "${_T_RESET}"
+  printf "%b" "${_T_RESET}"
   printf "\n"
 }
 
