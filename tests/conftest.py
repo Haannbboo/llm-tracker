@@ -13,7 +13,7 @@ import pytest
 NO_REMOTE_PRICING_CONFIG = (
     Path(__file__).parent / "fixtures" / "no-remote-pricing-config.yaml"
 )
-os.environ["LLM_TRACKER_CONFIG"] = str(NO_REMOTE_PRICING_CONFIG)
+os.environ.setdefault("LLM_TRACKER_CONFIG", str(NO_REMOTE_PRICING_CONFIG))
 
 
 CONFIG_TEMPLATE = """
