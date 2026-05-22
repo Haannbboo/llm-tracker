@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import sqlite3
 
 
 def _insert_session_record(database_module, db_path, session_id: str, **overrides):
@@ -17,6 +18,50 @@ def _insert_session_record(database_module, db_path, session_id: str, **override
     with database_module.Session(database_module.get_engine(db_path)) as session:
         session.add(database_module.SessionRecord(**values))
         session.commit()
+
+
+def _write_opencode_transcript(home, session_id: str = "sess-opencode") -> None:
+    db_path = home / ".xdg-data" / "opencode" / "opencode.db"
+    db_path.parent.mkdir(parents=True)
+    with sqlite3.connect(db_path) as connection:
+        connection.execute(
+            """
+            CREATE TABLE message (
+                id text PRIMARY KEY,
+                session_id text NOT NULL,
+                time_created integer NOT NULL,
+                time_updated integer NOT NULL,
+                data text NOT NULL
+            )
+            """
+        )
+        connection.execute(
+            """
+            CREATE TABLE part (
+                id text PRIMARY KEY,
+                message_id text NOT NULL,
+                session_id text NOT NULL,
+                time_created integer NOT NULL,
+                time_updated integer NOT NULL,
+                data text NOT NULL
+            )
+            """
+        )
+        connection.execute(
+            "INSERT INTO message VALUES (?, ?, ?, ?, ?)",
+            ("msg-user", session_id, 1, 1, json.dumps({"role": "user"})),
+        )
+        connection.execute(
+            "INSERT INTO part VALUES (?, ?, ?, ?, ?, ?)",
+            (
+                "part-user",
+                "msg-user",
+                session_id,
+                1,
+                1,
+                json.dumps({"type": "text", "text": "Fix OpenCode sessions"}),
+            ),
+        )
 
 
 def test_select_auto_evaluation_candidates_filters_quiet_manual_active_and_local(
@@ -61,6 +106,31 @@ def test_select_auto_evaluation_candidates_filters_quiet_manual_active_and_local
     )
 
     assert [candidate["session_id"] for candidate in candidates] == ["eligible"]
+
+
+def test_select_auto_evaluation_candidates_includes_opencode_with_local_transcript(
+    evaluation_worker_module, database_module, isolated_home, monkeypatch
+):
+    db_path = str(isolated_home / "usage.db")
+    database_module.init_db(db_path)
+    monkeypatch.setenv("XDG_DATA_HOME", str(isolated_home / ".xdg-data"))
+    _write_opencode_transcript(isolated_home)
+    _insert_session_record(
+        database_module, db_path, "sess-opencode", client_source="opencode"
+    )
+    _insert_session_record(
+        database_module, db_path, "missing-opencode", client_source="opencode"
+    )
+
+    candidates = evaluation_worker_module.select_auto_evaluation_candidates(
+        quiet_delay_seconds=600,
+        limit=10,
+        now="2026-05-14T11:00:01+00:00",
+        db_path=db_path,
+    )
+
+    assert [candidate["session_id"] for candidate in candidates] == ["sess-opencode"]
+    assert candidates[0]["client_source"] == "opencode"
 
 
 def test_select_auto_evaluation_candidates_requires_stale_or_missing_evaluation(

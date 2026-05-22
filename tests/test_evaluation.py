@@ -1,9 +1,89 @@
 from __future__ import annotations
 
 import json
+import sqlite3
 import subprocess
 
 import pytest
+
+
+def _write_opencode_transcript(home, session_id: str = "sess-opencode") -> None:
+    db_path = home / ".xdg-data" / "opencode" / "opencode.db"
+    db_path.parent.mkdir(parents=True)
+    with sqlite3.connect(db_path) as connection:
+        connection.execute(
+            """
+            CREATE TABLE message (
+                id text PRIMARY KEY,
+                session_id text NOT NULL,
+                time_created integer NOT NULL,
+                time_updated integer NOT NULL,
+                data text NOT NULL
+            )
+            """
+        )
+        connection.execute(
+            """
+            CREATE TABLE part (
+                id text PRIMARY KEY,
+                message_id text NOT NULL,
+                session_id text NOT NULL,
+                time_created integer NOT NULL,
+                time_updated integer NOT NULL,
+                data text NOT NULL
+            )
+            """
+        )
+        connection.executemany(
+            "INSERT INTO message VALUES (?, ?, ?, ?, ?)",
+            [
+                (
+                    "msg-user",
+                    session_id,
+                    1,
+                    1,
+                    json.dumps({"role": "user"}),
+                ),
+                (
+                    "msg-assistant",
+                    session_id,
+                    2,
+                    2,
+                    json.dumps({"role": "assistant"}),
+                ),
+            ],
+        )
+        connection.executemany(
+            "INSERT INTO part VALUES (?, ?, ?, ?, ?, ?)",
+            [
+                (
+                    "part-user",
+                    "msg-user",
+                    session_id,
+                    1,
+                    1,
+                    json.dumps({"type": "text", "text": "Fix OpenCode sessions"}),
+                ),
+                (
+                    "part-reasoning",
+                    "msg-assistant",
+                    session_id,
+                    2,
+                    2,
+                    json.dumps(
+                        {"type": "reasoning", "text": "private reasoning omitted"}
+                    ),
+                ),
+                (
+                    "part-assistant",
+                    "msg-assistant",
+                    session_id,
+                    3,
+                    3,
+                    json.dumps({"type": "text", "text": "OpenCode sessions fixed"}),
+                ),
+            ],
+        )
 
 
 def test_build_evaluator_command_uses_central_codex_ephemeral(evaluation_module):
@@ -161,9 +241,23 @@ def test_load_gemini_transcript_reads_logs_for_session(
     assert "Ignore me" not in transcript
 
 
-def test_has_local_session_transcript_uses_path_or_metadata(
-    evaluation_module, isolated_home
+def test_load_opencode_transcript_reads_sqlite_message_parts(
+    evaluation_module, isolated_home, monkeypatch
 ):
+    monkeypatch.setenv("XDG_DATA_HOME", str(isolated_home / ".xdg-data"))
+    _write_opencode_transcript(isolated_home)
+
+    transcript = evaluation_module.load_session_transcript("opencode", "sess-opencode")
+
+    assert "USER:\nFix OpenCode sessions" in transcript
+    assert "ASSISTANT:\nOpenCode sessions fixed" in transcript
+    assert "private reasoning omitted" not in transcript
+
+
+def test_has_local_session_transcript_uses_path_or_metadata(
+    evaluation_module, isolated_home, monkeypatch
+):
+    monkeypatch.setenv("XDG_DATA_HOME", str(isolated_home / ".xdg-data"))
     codex_dir = isolated_home / ".codex" / "sessions" / "2026" / "05" / "14"
     codex_dir.mkdir(parents=True)
     (codex_dir / "rollout-2026-05-14T00-00-00-sess-codex.jsonl").write_text(
@@ -185,15 +279,34 @@ def test_has_local_session_transcript_uses_path_or_metadata(
         '{"sessionId":"other"}\n{"sessionId":"sess-hidden"}\n',
         encoding="utf-8",
     )
+    _write_opencode_transcript(isolated_home)
 
     assert evaluation_module.has_local_session_transcript("codex", "sess-codex")
     assert evaluation_module.has_local_session_transcript("claude-code", "sess-claude")
     assert evaluation_module.has_local_session_transcript("gemini-cli", "sess-gemini")
+    assert evaluation_module.has_local_session_transcript("opencode", "sess-opencode")
     assert not evaluation_module.has_local_session_transcript(
         "gemini-cli", "sess-hidden"
     )
     assert not evaluation_module.has_local_session_transcript(
         "proxy-client", "sess-any"
+    )
+
+
+def test_has_local_session_transcript_uses_index_for_opencode(evaluation_module):
+    index = evaluation_module.LocalSessionTranscriptIndex(
+        opencode_session_ids=frozenset({"sess-opencode"})
+    )
+
+    assert evaluation_module.has_local_session_transcript(
+        "opencode",
+        "sess-opencode",
+        local_index=index,
+    )
+    assert not evaluation_module.has_local_session_transcript(
+        "opencode",
+        "sess-missing",
+        local_index=index,
     )
 
 
@@ -577,6 +690,66 @@ def test_run_session_evaluation_job_saves_llm_evaluation_before_success(
     assert saved["confidence"] == pytest.approx(0.82)
     assert saved["task_title"] == "Fix dashboard"
     assert saved["task_title_zh"] == "修复仪表板"
+
+    polled = database_module.get_evaluation_job(job["job_id"], db_path=db_path)
+    assert polled is not None
+    assert polled["status"] == "succeeded"
+    assert polled["error"] is None
+
+
+def test_run_session_evaluation_job_saves_opencode_evaluation(
+    evaluation_module,
+    database_module,
+    isolated_home,
+    monkeypatch,
+):
+    db_path = str(isolated_home / "usage.db")
+    database_module.init_db(db_path)
+    monkeypatch.setenv("XDG_DATA_HOME", str(isolated_home / ".xdg-data"))
+    _write_opencode_transcript(isolated_home)
+
+    with database_module.Session(database_module.get_engine(db_path)) as session:
+        session.add(
+            database_module.SessionRecord(
+                session_id="sess-opencode",
+                client_source="opencode",
+                started="2026-05-11T10:00:00+00:00",
+                ended="2026-05-11T10:30:00+00:00",
+                updated_at="2026-05-11T10:30:00+00:00",
+            )
+        )
+        session.commit()
+
+    job = database_module.create_session_evaluation_job(
+        session_id="sess-opencode",
+        client_source="opencode",
+        db_path=db_path,
+    )
+
+    def fake_run(**kwargs):
+        assert "Return ONLY valid JSON" in kwargs["input"]
+        assert "Session source: opencode" in kwargs["input"]
+        assert "USER:\nFix OpenCode sessions" in kwargs["input"]
+        assert "ASSISTANT:\nOpenCode sessions fixed" in kwargs["input"]
+        assert "private reasoning omitted" not in kwargs["input"]
+        return subprocess.CompletedProcess(
+            args=kwargs["args"],
+            returncode=0,
+            stdout='{"task_title":"Fix OpenCode sessions","task_title_zh":"修复OpenCode会话","summary":"OpenCode session evaluation completed.","outcome":"solved","confidence":0.91,"evidence":["Transcript showed the fix was completed"],"failure_reason":null}',
+            stderr="",
+        )
+
+    monkeypatch.setattr(evaluation_module.subprocess, "run", fake_run)
+
+    evaluation_module.run_session_evaluation_job(job["job_id"], db_path=db_path)
+
+    saved = database_module.get_session_evaluation("sess-opencode", db_path=db_path)
+    assert saved is not None
+    assert saved["outcome"] == "solved"
+    assert saved["source"] == "llm"
+    assert saved["confidence"] == pytest.approx(0.91)
+    assert saved["task_title"] == "Fix OpenCode sessions"
+    assert saved["task_title_zh"] == "修复OpenCode会话"
 
     polled = database_module.get_evaluation_job(job["job_id"], db_path=db_path)
     assert polled is not None
