@@ -6,13 +6,17 @@ import subprocess
 import textwrap
 from pathlib import Path
 
+import pytest
+
 
 PLUGIN_DIR = Path(__file__).resolve().parents[2] / "plugins" / "opencode"
 
 
 def test_opencode_plugin_emits_status_for_failed_assistant_messages():
     if not shutil.which("npm") or not shutil.which("node"):
-        return
+        pytest.skip("node and npm are required for the OpenCode plugin runtime test")
+    if not (PLUGIN_DIR / "node_modules" / ".bin" / "tsc").exists():
+        pytest.skip("OpenCode plugin npm dependencies are not installed")
 
     build = subprocess.run(
         ["npm", "run", "build"],
