@@ -169,6 +169,7 @@ def parse_opencode_base_url(provider_id: str | None = None) -> Optional[str]:
                 url = options.get("baseURL") or options.get("base_url")
                 if url:
                     return str(url)
+        return None
 
     for provider_conf in provider_section.values():
         if not isinstance(provider_conf, dict):

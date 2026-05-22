@@ -124,6 +124,27 @@ class TestParseProvider:
     def test_opencode_no_config(self, provider_parser_module, isolated_home: Path):
         assert provider_parser_module.parse_provider("opencode") == "unknown"
 
+    def test_opencode_no_cross_provider_fallback(
+        self, provider_parser_module, isolated_home: Path
+    ):
+        config = isolated_home / ".config" / "opencode" / "opencode.json"
+        config.parent.mkdir(parents=True, exist_ok=True)
+        config.write_text(
+            json.dumps(
+                {
+                    "provider": {
+                        "openai": {"options": {}},
+                        "anthropic": {
+                            "options": {"baseURL": "https://api.anthropic.com"}
+                        },
+                    }
+                }
+            ),
+            encoding="utf-8",
+        )
+        result = provider_parser_module.parse_opencode_base_url("openai")
+        assert result is None
+
     def test_unknown_agent_fallback(self, provider_parser_module, isolated_home: Path):
         assert provider_parser_module.parse_provider("unknown-agent") == "unknown"
 

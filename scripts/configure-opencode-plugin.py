@@ -96,6 +96,8 @@ def main() -> int:
                 entry.append({"endpoint": endpoint})
             elif isinstance(entry[1], dict):
                 entry[1]["endpoint"] = endpoint
+            else:
+                entry[1] = {"endpoint": endpoint}
             already_registered = True
             break
 

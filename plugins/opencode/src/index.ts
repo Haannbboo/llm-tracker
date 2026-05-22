@@ -8,7 +8,7 @@ const userMessages = new Set<string>()
 const promptPartLengths = new Map<string, Map<string, number>>()
 const firstAssistantPartStart = new Map<string, number>()
 
-function getEndpoint(options?: Record<string, unknown>): string {
+function getEndpoint(options?: Record<string, any>): string {
   if (options?.endpoint && typeof options.endpoint === "string") return options.endpoint
   return DEFAULT_ENDPOINT
 }
@@ -25,9 +25,9 @@ function statusCodeValue(value: unknown): number | null {
   return Number.isFinite(parsed) ? parsed : null
 }
 
-function errorObject(error: unknown): Record<string, unknown> | null {
+function errorObject(error: unknown): Record<string, any> | null {
   if (!error || typeof error !== "object") return null
-  return error as Record<string, unknown>
+  return error as Record<string, any>
 }
 
 function errorName(error: unknown): string | null {
@@ -159,10 +159,10 @@ function buildOtlpPayload(params: {
   statusCode: number | null
   errorName: string | null
   timestampMs: number
-}): Record<string, unknown> {
+}): Record<string, any> {
   const timeUnixNano = String(params.timestampMs * 1_000_000)
 
-  const attrs: Record<string, unknown>[] = [
+  const attrs: Record<string, any>[] = [
     { key: "event.name", value: { stringValue: "opencode.message_completed" } },
     { key: "session.id", value: { stringValue: params.sessionId } },
     { key: "message.id", value: { stringValue: params.messageId } },
@@ -225,7 +225,7 @@ function buildOtlpPayload(params: {
   }
 }
 
-async function emitOtlp(payload: Record<string, unknown>, endpoint: string): Promise<boolean> {
+async function emitOtlp(payload: Record<string, any>, endpoint: string): Promise<boolean> {
   try {
     const response = await fetch(endpoint, {
       method: "POST",
