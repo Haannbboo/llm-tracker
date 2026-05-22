@@ -362,13 +362,13 @@ def _extract_opencode_fields(
         str(provider_from_attr) if provider_from_attr is not None else None,
     )
 
-    prompt_tokens = int(input_tokens) if input_tokens is not None else None
+    prompt_tokens = (int(input_tokens or 0)) + (int(cached or 0))
     completion_tokens = int(output_tokens) if output_tokens is not None else None
     cached_tokens = int(cached) if cached is not None else None
 
     if total is not None:
         total_tokens = int(total)
-    elif prompt_tokens is not None and completion_tokens is not None:
+    elif completion_tokens is not None:
         total_tokens = prompt_tokens + completion_tokens + int(reasoning or 0)
     else:
         total_tokens = None
