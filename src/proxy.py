@@ -91,15 +91,15 @@ def record_proxy_user_agent(path: str, user_agent: str) -> None:
 
 
 def resolve_provider(model: str) -> tuple[ProviderConfig, str]:
-    """Returns (provider, upstream_model). Strips provider prefix if present."""
+    """Returns (provider, upstream_model). Strips provider prefix if present and not explicitly mapped."""
+    if model in MODEL_MAP:
+        return MODEL_MAP[model], model
+
     for sep in ("/", "."):
         if sep in model:
             provider_name, upstream_model = model.split(sep, 1)
             if provider_name in PROVIDER_MAP:
                 return PROVIDER_MAP[provider_name], upstream_model
-
-    if model in MODEL_MAP:
-        return MODEL_MAP[model], model
 
     raise HTTPException(
         status_code=404,
