@@ -226,7 +226,40 @@ EOF
 )"
 ```
 
-## 10. Output
+## 10. Resolve review conversations
+
+After replying and pushing fixes, resolve addressed review threads via the GitHub GraphQL API.
+
+Fetch threads:
+
+```bash
+gh api graphql -f query='
+{
+  repository(owner: "OWNER", name: "REPO") {
+    pullRequest(number: PR_NUMBER) {
+      reviewThreads(first: 50) {
+        nodes {
+          id
+          isResolved
+          comments(first: 1) {
+            nodes { path line body }
+          }
+        }
+      }
+    }
+  }
+}'
+```
+
+For each thread that was addressed (fixed or legitimately rejected), resolve it:
+
+```bash
+gh api graphql -f query="mutation { resolveReviewThread(input: {threadId: \"THREAD_ID\"}) { thread { isResolved } } }"
+```
+
+Skip resolving threads that are still open questions or pending human decision.
+
+## 11. Output
 
 Return:
 
