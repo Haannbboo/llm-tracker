@@ -1,3 +1,6 @@
+import pytest
+
+
 def test_detect_port_issues_flags_preflight_conflict(runtime_ports_module):
     service_ports = [
         runtime_ports_module.ServicePort(
@@ -273,6 +276,7 @@ def test_start_and_restart_configure_agent_otlp_only_when_cli_is_installed():
         )
 
 
+@pytest.mark.slow
 def test_start_configures_only_installed_agent_clis_under_isolated_home(tmp_path):
     """Regression: start.sh must configure only installed agent CLIs under HOME.
 
@@ -397,6 +401,7 @@ def test_start_configures_only_installed_agent_clis_under_isolated_home(tmp_path
     assert not (home / ".gemini").exists()
 
 
+@pytest.mark.slow
 def test_start_configures_agents_with_reassigned_otlp_port_after_auto_assign(tmp_path):
     """Regression: fresh-config auto-port assignment must feed agent OTLP config."""
     import os

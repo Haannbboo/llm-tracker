@@ -4,6 +4,8 @@ import asyncio
 import json
 import sqlite3
 
+import pytest
+
 
 def _insert_session_record(database_module, db_path, session_id: str, **overrides):
     values = {
@@ -488,6 +490,7 @@ def test_run_evaluation_worker_once_respects_max_concurrent_jobs(
     assert database_module.count_running_evaluation_jobs(db_path=db_path) == 1
 
 
+@pytest.mark.slow
 def test_run_evaluation_worker_continues_after_failed_tick(
     evaluation_worker_module,
     monkeypatch,
@@ -522,6 +525,7 @@ def test_run_evaluation_worker_continues_after_failed_tick(
     assert "Evaluation worker tick failed" in caplog.text
 
 
+@pytest.mark.slow
 def test_run_evaluation_worker_continues_after_timed_out_tick(
     evaluation_worker_module,
     monkeypatch,
