@@ -265,7 +265,7 @@ final_status_fail() {
   printf "\n"
   separator
   if [[ ${_T_COLORS_ENABLED} -eq 1 ]]; then
-    printf "%s" "  ${_T_RED}${_T_BOLD}✗ llm-tracker bootstrap failed${_T_RESET}\n\n"
+    printf "%b" "  ${_T_RED}${_T_BOLD}✗ llm-tracker bootstrap failed${_T_RESET}\n\n"
   else
     printf "  ✗ llm-tracker bootstrap failed\n\n"
   fi
