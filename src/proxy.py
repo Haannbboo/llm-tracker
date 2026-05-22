@@ -11,6 +11,7 @@ import os
 import time
 from contextlib import asynccontextmanager
 from typing import Any
+from urllib.parse import urljoin
 
 import httpx
 from fastapi import FastAPI, HTTPException, Request
@@ -91,15 +92,15 @@ def record_proxy_user_agent(path: str, user_agent: str) -> None:
 
 
 def resolve_provider(model: str) -> tuple[ProviderConfig, str]:
-    """Returns (provider, upstream_model). Strips provider prefix if present."""
+    """Returns (provider, upstream_model). Strips provider prefix if present and not explicitly mapped."""
+    if model in MODEL_MAP:
+        return MODEL_MAP[model], model
+
     for sep in ("/", "."):
         if sep in model:
             provider_name, upstream_model = model.split(sep, 1)
             if provider_name in PROVIDER_MAP:
                 return PROVIDER_MAP[provider_name], upstream_model
-
-    if model in MODEL_MAP:
-        return MODEL_MAP[model], model
 
     raise HTTPException(
         status_code=404,
@@ -108,13 +109,15 @@ def resolve_provider(model: str) -> tuple[ProviderConfig, str]:
 
 
 def build_upstream_url(base_url: str, path: str) -> str:
+    """Normalize and combine base URL and request path for upstream request."""
     stripped_path = path.lstrip("/")
     if stripped_path.startswith("v1/"):
         stripped_path = stripped_path[3:]
-    return f"{base_url.rstrip('/')}/{stripped_path}"
+    return urljoin(base_url.rstrip("/") + "/", stripped_path)
 
 
 def build_forward_headers(request: Request) -> dict[str, str]:
+    """Filter and prepare headers for forwarding to upstream provider."""
     return {
         k: v
         for k, v in request.headers.items()
@@ -123,6 +126,7 @@ def build_forward_headers(request: Request) -> dict[str, str]:
 
 
 def parse_json_body(body: bytes) -> dict[str, Any]:
+    """Safely parse JSON request body, returning empty dict if empty."""
     if not body:
         return {}
     return json.loads(body)
@@ -139,6 +143,9 @@ async def stream_upstream_response(
     path: str,
     started_at: float,
 ):
+    """Forward a streaming request to upstream and record usage on completion."""
+    status = 200
+
     usage_fields = extract_usage({})
     status = 200
     ttft_ms: int | None = None
@@ -194,6 +201,7 @@ async def stream_upstream_response(
 
 
 async def forward(request: Request, path: str):
+    """Core proxy logic: resolve provider, forward request, and record usage."""
     body = await request.body()
     body_json = parse_json_body(body)
     user_agent = request.headers.get("user-agent", "")
@@ -235,6 +243,7 @@ async def forward(request: Request, path: str):
 
     latency_ms = int((time.monotonic() - started_at) * 1000)
     response_json = response.json()
+
     usage_fields = extract_usage(response_json.get("usage", {}))
     record_usage(
         provider=provider.name,
@@ -260,7 +269,8 @@ async def forward(request: Request, path: str):
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    init_db()
+    """Handle application startup and shutdown events."""
+    await init_db()
     yield
 
 
@@ -268,6 +278,7 @@ app = FastAPI(title="llm-tracker-proxy", lifespan=lifespan)
 
 
 def proxy_metadata() -> dict[str, Any]:
+    """Return metadata about the proxy and its supported endpoints."""
     return {
         "name": app.title,
         "supported_endpoints": [
@@ -289,18 +300,21 @@ def proxy_metadata() -> dict[str, Any]:
 @app.post("/chat/completions")
 @app.post("/v1/chat/completions")
 async def chat_completions(request: Request):
+    """OpenAI-compatible chat completions endpoint."""
     return await forward(request, "/v1/chat/completions")
 
 
 @app.post("/responses")
 @app.post("/v1/responses")
 async def responses(request: Request):
+    """Proxy for /responses endpoint."""
     return await forward(request, "/v1/responses")
 
 
 @app.post("/messages")
 @app.post("/v1/messages")
 async def messages(request: Request):
+    """Proxy for /messages endpoint."""
     return await forward(request, "/v1/messages")
 
 
@@ -308,6 +322,7 @@ async def messages(request: Request):
 @app.get("/v1/models")
 @app.get("/models")
 async def list_models():
+    """List available models supported by the proxy."""
     return {
         "object": "list",
         "data": [
@@ -317,9 +332,10 @@ async def list_models():
     }
 
 
-@app.get("/models/{model_id}")
-@app.get("/v1/models/{model_id}")
+@app.get("/models/{model_id:path}")
+@app.get("/v1/models/{model_id:path}")
 async def get_model(model_id: str):
+    """Get information about a specific model."""
     provider = MODEL_MAP.get(model_id)
     if provider is None:
         raise HTTPException(
@@ -337,11 +353,13 @@ async def get_model(model_id: str):
 @app.get("/v1/props")
 @app.get("/props")
 async def props():
+    """Return proxy metadata."""
     return proxy_metadata()
 
 
 @app.get("/version")
 async def version():
+    """Return proxy version information."""
     return {
         "name": app.title,
         "version": "dev",
