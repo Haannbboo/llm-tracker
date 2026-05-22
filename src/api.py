@@ -812,7 +812,7 @@ async def detect_local_agents():
     import shutil
 
     agents = {}
-    for name in ("claude", "codex", "gemini"):
+    for name in ("claude", "codex", "gemini", "opencode"):
         path = shutil.which(name)
         agents[name] = {"found": path is not None, "path": path}
     return agents
@@ -913,6 +913,31 @@ async def get_local_setup_health():
         gemini_endpoint, str
     )
 
+    opencode_config_path = home / ".config" / "opencode" / "opencode.json"
+    opencode_config = _read_json_file(opencode_config_path)
+    opencode_plugins = opencode_config.get("plugin", [])
+    opencode_endpoint = None
+    opencode_plugin_registered = False
+    opencode_plugin_suffix = "plugins/opencode/dist/index.js"
+    opencode_default_endpoint = "http://localhost:4002/v1/logs"
+    if isinstance(opencode_plugins, list):
+        for entry in opencode_plugins:
+            if isinstance(entry, str) and entry.endswith(opencode_plugin_suffix):
+                opencode_plugin_registered = True
+                opencode_endpoint = opencode_default_endpoint
+                break
+            if (
+                isinstance(entry, list)
+                and len(entry) >= 1
+                and str(entry[0]).endswith(opencode_plugin_suffix)
+            ):
+                opencode_plugin_registered = True
+                opts = (
+                    entry[1] if len(entry) >= 2 and isinstance(entry[1], dict) else {}
+                )
+                opencode_endpoint = opts.get("endpoint") or opencode_default_endpoint
+                break
+
     agents = {
         "claude": _agent_health(
             claude_configured,
@@ -928,6 +953,11 @@ async def get_local_setup_health():
             gemini_configured,
             gemini_endpoint if isinstance(gemini_endpoint, str) else None,
             expected["otlp_endpoint"],
+        ),
+        "opencode": _agent_health(
+            opencode_plugin_registered,
+            opencode_endpoint,
+            expected["otlp_logs_endpoint"],
         ),
     }
     return {

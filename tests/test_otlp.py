@@ -196,6 +196,133 @@ def test_extract_codex_fields_basic(otlp_module):
     assert fields["client_source"] == "codex"
 
 
+def test_extract_opencode_fields_basic(otlp_module):
+    attrs = _attrs(
+        {
+            "input_token_count": 150,
+            "output_token_count": 80,
+            "reasoning_token_count": 20,
+            "cached_token_count": 30,
+            "cache_creation_token_count": 5,
+            "total_token_count": 285,
+            "model": "claude-sonnet-4-5",
+            "provider": "anthropic",
+            "duration_ms": 1200,
+            "session.id": "oc-sess-1",
+            "message.id": "msg-1",
+        }
+    )
+    record = {"timeUnixNano": "1800000000000000000"}
+
+    fields = otlp_module._extract_opencode_fields(record, attrs, "oc-sess-1")
+
+    assert fields["model"] == "claude-sonnet-4-5"
+    assert fields["provider"] == "anthropic"
+    assert fields["prompt_tokens"] == 150
+    assert fields["completion_tokens"] == 80
+    assert fields["reasoning_tokens"] == 20
+    assert fields["cached_tokens"] == 30
+    assert fields["cache_creation_tokens"] == 5
+    assert fields["total_tokens"] == 285
+    assert fields["latency_ms"] == 1200
+    assert fields["client_source"] == "opencode"
+    assert fields["session_id"] == "oc-sess-1"
+    assert fields["endpoint"] == "generate-otlp"
+    assert fields["tool_tokens"] is None
+    assert fields["ttft_ms"] is None
+    assert fields["prompt_length"] == 0
+
+
+def test_parse_opencode_record_routes_to_record_usage(otlp_module, monkeypatch):
+    captured = {}
+    monkeypatch.setattr(
+        otlp_module,
+        "record_usage",
+        _capture_usage(captured),
+    )
+
+    record = {"timeUnixNano": "1800000000000000000"}
+    attrs = _attrs(
+        {
+            "event.name": "opencode.message_completed",
+            "session.id": "oc-sess-1",
+            "message.id": "msg-1",
+            "model": "claude-sonnet-4-5",
+            "provider": "anthropic",
+            "input_token_count": 100,
+            "output_token_count": 50,
+            "reasoning_token_count": 10,
+            "cached_token_count": 20,
+            "total_token_count": 180,
+            "duration_ms": 800,
+        }
+    )
+    record["attributes"] = attrs
+
+    otlp_module._parse_log_record(record, "opencode", "oc-sess-1")
+
+    assert captured["usage"].client_source == "opencode"
+    assert captured["usage"].model == "claude-sonnet-4-5"
+    assert captured["usage"].provider == "anthropic"
+    assert captured["usage"].prompt_tokens == 100
+    assert captured["usage"].completion_tokens == 50
+    assert captured["usage"].reasoning_tokens == 10
+    assert captured["usage"].cached_tokens == 20
+    assert captured["usage"].latency_ms == 800
+
+
+def test_extract_opencode_fields_derives_total_with_reasoning_when_missing(
+    otlp_module,
+):
+    attrs = _attrs(
+        {
+            "input_token_count": 150,
+            "output_token_count": 80,
+            "reasoning_token_count": 20,
+            "cache_creation_token_count": 5,
+        }
+    )
+    record = {"timeUnixNano": "1800000000000000000"}
+
+    fields = otlp_module._extract_opencode_fields(record, attrs, "oc-sess-1")
+
+    assert fields["total_tokens"] == 250
+
+
+def test_extract_opencode_fields_resolves_base_url_for_event_provider(
+    otlp_module, isolated_home: Path
+):
+    config_path = isolated_home / ".config" / "opencode" / "opencode.json"
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    config_path.write_text(
+        json.dumps(
+            {
+                "provider": {
+                    "anthropic": {"options": {"baseURL": "https://api.anthropic.com"}},
+                    "openai": {"options": {"baseURL": "https://api.openai.com/v1"}},
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    attrs = _attrs(
+        {
+            "provider": "openai",
+            "model": "gpt-5.4",
+            "input_token_count": 10,
+            "output_token_count": 5,
+        }
+    )
+    record = {"timeUnixNano": "1800000000000000000"}
+
+    fields = otlp_module._extract_opencode_fields(record, attrs, "oc-sess-1")
+
+    assert fields["provider"] == "openai"
+    assert fields["base_url"] == "https://api.openai.com/v1"
+    assert fields["base_url_provider"] == "OpenAI"
+    assert fields["base_url_source"] == "opencode_config"
+
+
 def test_extract_gemini_fields_resolves_base_url_from_local_config(
     otlp_module, isolated_home: Path
 ):

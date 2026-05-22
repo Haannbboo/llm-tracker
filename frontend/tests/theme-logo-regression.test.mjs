@@ -92,3 +92,18 @@ test('codex source badge text stays readable on the dark mode badge background',
   assert.equal(getSourceBadgeBg('codex'), '#dcdcdc90')
   assert.equal(getSourceBadgeText('codex'), '#0f172a')
 })
+
+test('opencode source badge uses green brand colors in light and dark mode', () => {
+  const {
+    getSourceBadgeBg,
+    getSourceBadgeText,
+  } = loadSourceModule('src/utils.tsx')
+
+  document.documentElement.dataset.theme = 'light'
+  assert.equal(getSourceBadgeBg('opencode'), '#10b98126')
+  assert.equal(getSourceBadgeText('opencode'), '#10b981')
+
+  document.documentElement.dataset.theme = 'dark'
+  assert.equal(getSourceBadgeBg('opencode'), '#10b98140')
+  assert.equal(getSourceBadgeText('opencode'), '#10b981')
+})

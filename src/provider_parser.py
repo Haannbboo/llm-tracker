@@ -151,14 +151,48 @@ def parse_gemini_base_url() -> Optional[str]:
     return _extract_url(config, "base_url", "url", "api_base_url")
 
 
+def parse_opencode_base_url(provider_id: str | None = None) -> Optional[str]:
+    """Parse OpenCode base URL from ~/.config/opencode/opencode.json."""
+    config_path = Path.home() / ".config" / "opencode" / "opencode.json"
+    config = _load_json(config_path)
+    if not config:
+        return None
+    provider_section = config.get("provider")
+    if not isinstance(provider_section, dict):
+        return None
+
+    if provider_id:
+        provider_conf = provider_section.get(provider_id)
+        if isinstance(provider_conf, dict):
+            options = provider_conf.get("options")
+            if isinstance(options, dict):
+                url = options.get("baseURL") or options.get("base_url")
+                if url:
+                    return str(url)
+
+    for provider_conf in provider_section.values():
+        if not isinstance(provider_conf, dict):
+            continue
+        options = provider_conf.get("options")
+        if not isinstance(options, dict):
+            continue
+        url = options.get("baseURL") or options.get("base_url")
+        if url:
+            return str(url)
+    return None
+
+
 PROVIDER_DEFAULTS: dict[str, str] = {
     "claude": "anthropic",
     "codex": "openai",
     "gemini": "google",
+    "opencode": "unknown",
 }
 
 
-def parse_provider_metadata(agent: str) -> ProviderMetadata:
+def parse_provider_metadata(
+    agent: str, provider_id: str | None = None
+) -> ProviderMetadata:
     """Parse provider/base URL metadata for a coding agent config."""
     if agent == "claude":
         base_url = parse_claude_base_url()
@@ -169,6 +203,9 @@ def parse_provider_metadata(agent: str) -> ProviderMetadata:
     elif agent == "gemini":
         base_url = parse_gemini_base_url()
         source = "gemini_settings"
+    elif agent == "opencode":
+        base_url = parse_opencode_base_url(provider_id)
+        source = "opencode_config"
     else:
         return ProviderMetadata(
             provider=PROVIDER_DEFAULTS.get(agent, "unknown"),

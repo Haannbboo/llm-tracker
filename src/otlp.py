@@ -15,10 +15,11 @@ GEMINI_EVENT = "gemini_cli.api_response"
 CLAUDE_EVENT = "claude_code.api_request"
 CODEX_EVENT = "codex.sse_event"
 CODEX_API_REQUEST_EVENT = "codex.api_request"
+OPENCODE_EVENT = "opencode.message_completed"
 CODEX_DEBUG_FILE = "/tmp/codex-otlp-debug.json"
 GEMINI_HOOK_DIR = os.path.join(os.environ.get("TMPDIR", "/tmp"), "llm-tracker-gemini")
 CODEX_SERVICE_NAMES = {"codex_cli_rs", "codex_exec"}
-KNOWN_SERVICE_NAMES = {"claude-code", "gemini-cli"} | CODEX_SERVICE_NAMES
+KNOWN_SERVICE_NAMES = {"claude-code", "gemini-cli", "opencode"} | CODEX_SERVICE_NAMES
 
 # State cache for merging Codex events: run/conversation key -> {duration_ms, ttft_ms, timestamp}
 codex_state = {}
@@ -329,6 +330,72 @@ def _parse_claude_record(record: dict, attrs: list, session_id: str) -> None:
     record_usage(**_extract_claude_fields(record, attrs, session_id))
 
 
+def _extract_opencode_fields(
+    record: dict,
+    attrs: list,
+    session_id: str,
+) -> dict:
+    """Extract normalized usage fields from an OpenCode OTLP record."""
+    time_ns = record.get("timeUnixNano", "0")
+    ts = datetime.fromtimestamp(int(time_ns) / 1e9, tz=timezone.utc).isoformat()
+
+    input_tokens = _attr(attrs, "input_token_count")
+    output_tokens = _attr(attrs, "output_token_count")
+    reasoning = _attr(attrs, "reasoning_token_count")
+    cached = _attr(attrs, "cached_token_count")
+    cache_create = _attr(attrs, "cache_creation_token_count")
+    total = _attr(attrs, "total_token_count")
+    duration_ms = _attr(attrs, "duration_ms")
+    provider_from_attr = _attr(attrs, "provider")
+    model = _attr(attrs, "model") or "opencode-unknown"
+    usage_session_id = _attr(attrs, "session.id") or session_id or None
+
+    metadata = parse_provider_metadata(
+        "opencode",
+        str(provider_from_attr) if provider_from_attr is not None else None,
+    )
+
+    prompt_tokens = int(input_tokens) if input_tokens is not None else None
+    completion_tokens = int(output_tokens) if output_tokens is not None else None
+    cached_tokens = int(cached) if cached is not None else None
+
+    if total is not None:
+        total_tokens = int(total)
+    elif prompt_tokens is not None and completion_tokens is not None:
+        total_tokens = prompt_tokens + completion_tokens + int(reasoning or 0)
+    else:
+        total_tokens = None
+
+    return {
+        "ts": ts,
+        "provider": provider_from_attr or metadata.provider,
+        "model": model,
+        "client_source": "opencode",
+        "session_id": usage_session_id,
+        "endpoint": "generate-otlp",
+        "prompt_tokens": prompt_tokens,
+        "prompt_length": 0,
+        "completion_tokens": completion_tokens,
+        "cached_tokens": cached_tokens,
+        "cache_creation_tokens": int(cache_create)
+        if cache_create is not None
+        else None,
+        "reasoning_tokens": int(reasoning) if reasoning is not None else None,
+        "tool_tokens": None,
+        "total_tokens": total_tokens,
+        "latency_ms": int(duration_ms) if duration_ms is not None else None,
+        "ttft_ms": None,
+        "status": None,
+        "base_url": metadata.base_url,
+        "base_url_provider": metadata.provider,
+        "base_url_source": metadata.source,
+    }
+
+
+def _parse_opencode_record(record: dict, attrs: list, session_id: str) -> None:
+    record_usage(**_extract_opencode_fields(record, attrs, session_id))
+
+
 def _handle_codex_state_event(attrs: list) -> bool:
     """Handle Codex state-only events.
 
@@ -482,6 +549,8 @@ def _parse_log_record(
             record_usage(**fields)
     elif event_name == CODEX_API_REQUEST_EVENT and service_name in CODEX_SERVICE_NAMES:
         _handle_codex_state_event(attrs)
+    elif event_name == OPENCODE_EVENT and service_name == "opencode":
+        _parse_opencode_record(record, attrs, usage_session_id or "")
     elif (
         service_name not in KNOWN_SERVICE_NAMES
         and attrs

@@ -118,6 +118,11 @@ if command -v claude >/dev/null 2>&1; then
   pass "Claude configured"
 fi
 
+if command -v opencode >/dev/null 2>&1; then
+  "${PYTHON}" "${ROOT_DIR}/scripts/configure-opencode-plugin.py" "${ROOT_DIR}" "${OTLP_PORT}"
+  pass "OpenCode configured"
+fi
+
 # ── Schema migrations ───────────────────────────────────────────────
 info "Applying schema migrations..."
 "${PYTHON}" "${ROOT_DIR}/scripts/migrate_schema.py"

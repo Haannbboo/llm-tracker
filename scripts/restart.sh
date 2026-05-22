@@ -121,6 +121,13 @@ else
   info "Claude: not installed, skipped"
 fi
 
+if command -v opencode >/dev/null 2>&1; then
+  "${PYTHON}" "${ROOT_DIR}/scripts/configure-opencode-plugin.py" "${ROOT_DIR}" "${OTLP_PORT}"
+  pass "OpenCode configured"
+else
+  info "OpenCode: not installed, skipped"
+fi
+
 # ── Schema migrations ───────────────────────────────────────────────
 step_header "Applying schema migrations"
 "${PYTHON}" "${ROOT_DIR}/scripts/migrate_schema.py"
