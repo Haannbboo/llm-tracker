@@ -11,6 +11,7 @@ import os
 import time
 from contextlib import asynccontextmanager
 from typing import Any
+from urllib.parse import urljoin
 
 import httpx
 from fastapi import FastAPI, HTTPException, Request
@@ -112,7 +113,7 @@ def build_upstream_url(base_url: str, path: str) -> str:
     stripped_path = path.lstrip("/")
     if stripped_path.startswith("v1/"):
         stripped_path = stripped_path[3:]
-    return os.path.join(base_url, stripped_path)
+    return urljoin(base_url.rstrip("/") + "/", stripped_path)
 
 
 def build_forward_headers(request: Request) -> dict[str, str]:
