@@ -91,15 +91,15 @@ def record_proxy_user_agent(path: str, user_agent: str) -> None:
 
 
 def resolve_provider(model: str) -> tuple[ProviderConfig, str]:
-    """Returns (provider, upstream_model). Strips provider prefix if present."""
+    """Returns (provider, upstream_model). Strips provider prefix if present and not explicitly mapped."""
+    if model in MODEL_MAP:
+        return MODEL_MAP[model], model
+
     for sep in ("/", "."):
         if sep in model:
             provider_name, upstream_model = model.split(sep, 1)
             if provider_name in PROVIDER_MAP:
                 return PROVIDER_MAP[provider_name], upstream_model
-
-    if model in MODEL_MAP:
-        return MODEL_MAP[model], model
 
     raise HTTPException(
         status_code=404,
@@ -235,6 +235,7 @@ async def forward(request: Request, path: str):
 
     latency_ms = int((time.monotonic() - started_at) * 1000)
     response_json = response.json()
+
     usage_fields = extract_usage(response_json.get("usage", {}))
     record_usage(
         provider=provider.name,
@@ -317,8 +318,8 @@ async def list_models():
     }
 
 
-@app.get("/models/{model_id}")
-@app.get("/v1/models/{model_id}")
+@app.get("/models/{model_id:path}")
+@app.get("/v1/models/{model_id:path}")
 async def get_model(model_id: str):
     provider = MODEL_MAP.get(model_id)
     if provider is None:
