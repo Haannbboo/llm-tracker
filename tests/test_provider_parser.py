@@ -40,6 +40,18 @@ def _write_gemini_settings(home: Path, base_url: str | None) -> None:
     settings.write_text(json.dumps({"base_url": base_url}), encoding="utf-8")
 
 
+def _write_opencode_config(home: Path, base_url: str | None) -> None:
+    config = home / ".config" / "opencode" / "opencode.json"
+    config.parent.mkdir(parents=True, exist_ok=True)
+    if base_url is None:
+        config.write_text("{}", encoding="utf-8")
+        return
+    config.write_text(
+        json.dumps({"provider": {"anthropic": {"options": {"baseURL": base_url}}}}),
+        encoding="utf-8",
+    )
+
+
 @pytest.mark.parametrize(
     "url, expected",
     [
@@ -89,6 +101,10 @@ class TestParseProvider:
         )
         assert provider_parser_module.parse_provider("gemini") == "Google"
 
+    def test_opencode_provider(self, provider_parser_module, isolated_home: Path):
+        _write_opencode_config(isolated_home, "https://api.anthropic.com")
+        assert provider_parser_module.parse_provider("opencode") == "Anthropic"
+
     def test_claude_fallback(self, provider_parser_module, isolated_home: Path):
         _write_claude_settings(isolated_home, None)
         assert provider_parser_module.parse_provider("claude") == "anthropic"
@@ -100,6 +116,34 @@ class TestParseProvider:
     def test_gemini_fallback(self, provider_parser_module, isolated_home: Path):
         _write_gemini_settings(isolated_home, None)
         assert provider_parser_module.parse_provider("gemini") == "google"
+
+    def test_opencode_fallback(self, provider_parser_module, isolated_home: Path):
+        _write_opencode_config(isolated_home, None)
+        assert provider_parser_module.parse_provider("opencode") == "unknown"
+
+    def test_opencode_no_config(self, provider_parser_module, isolated_home: Path):
+        assert provider_parser_module.parse_provider("opencode") == "unknown"
+
+    def test_opencode_no_cross_provider_fallback(
+        self, provider_parser_module, isolated_home: Path
+    ):
+        config = isolated_home / ".config" / "opencode" / "opencode.json"
+        config.parent.mkdir(parents=True, exist_ok=True)
+        config.write_text(
+            json.dumps(
+                {
+                    "provider": {
+                        "openai": {"options": {}},
+                        "anthropic": {
+                            "options": {"baseURL": "https://api.anthropic.com"}
+                        },
+                    }
+                }
+            ),
+            encoding="utf-8",
+        )
+        result = provider_parser_module.parse_opencode_base_url("openai")
+        assert result is None
 
     def test_unknown_agent_fallback(self, provider_parser_module, isolated_home: Path):
         assert provider_parser_module.parse_provider("unknown-agent") == "unknown"

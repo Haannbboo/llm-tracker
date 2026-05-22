@@ -4,7 +4,7 @@
 
 **Local-first observability for command-line LLM agents.**
 
-`llm-tracker` shows what your coding agents are doing: requests, token usage, cost estimates, latency, TTFT, models, sources, and session IDs across **Claude Code**, **Codex**, **Gemini CLI**, and OpenAI/Anthropic-compatible traffic.
+`llm-tracker` shows what your coding agents are doing: requests, token usage, cost estimates, latency, TTFT, models, sources, and session IDs across **Claude Code**, **Codex**, **Gemini CLI**, **OpenCode**, and OpenAI/Anthropic-compatible traffic.
 
 It is built for people who run multiple LLM agents locally and want one place to answer:
 
@@ -17,7 +17,7 @@ The default setup is local: config in `~/.llm-tracker/config.yaml`, usage data i
 
 ## What it does
 
-- **Tracks popular coding agents**: Claude Code, Codex, and Gemini CLI through local OTLP telemetry.
+- **Tracks popular coding agents**: Claude Code, Codex, Gemini CLI, and OpenCode through local OTLP telemetry.
 - **Tracks OpenAI/Anthropic-compatible clients**: route clients through the optional local proxy.
 - **Shows a dashboard**: usage, cost, latency, models, sources, request logs, setup health, and first-event onboarding.
 - **Prints command summaries**: run an agent through `llm-tracker` and get usage for that run.
@@ -29,7 +29,7 @@ The default setup is local: config in `~/.llm-tracker/config.yaml`, usage data i
 `llm-tracker` collects usage in two complementary ways:
 
 ```text
-Claude Code / Codex / Gemini CLI
+Claude Code / Codex / Gemini CLI / OpenCode
         │
         │ OTLP telemetry
         ▼
@@ -56,7 +56,7 @@ Agent telemetry is best for agent-specific fields such as sessions and tool/reas
 - macOS or Linux shell environment
 - Python 3.13, or `uv` so the installer can create it
 - Node.js 18+ if you want the dashboard built and served
-- Optional: `claude`, `codex`, or `gemini` installed locally
+- Optional: `claude`, `codex`, `gemini`, or `opencode` installed locally
 
 ### 1. Bootstrap everything
 
@@ -255,20 +255,22 @@ For streamed responses, the proxy records TTFT as time until the first upstream 
 
 ## Tracking coverage
 
-| Metric | Gemini CLI | Claude Code | Codex | Direct proxy |
-| --- | --- | --- | --- | --- |
-| Input tokens | OTLP | OTLP | OTLP | Response usage |
-| Output tokens | OTLP | OTLP | OTLP | Response usage |
-| Cached tokens read | OTLP | OTLP | OTLP | Response usage |
-| Cached tokens write | Not available | OTLP | Not available | Not available |
-| Reasoning tokens | OTLP | Not available | OTLP | Response usage |
-| Tool tokens | OTLP | Not available | OTLP | Not available |
-| Prompt length | OTLP | OTLP | OTLP | Not available |
-| Latency | Hook/OTLP | OTLP | OTLP | Proxy timing |
-| TTFT | Hook | Not available | OTLP | Streaming only |
-| Session ID | OTLP | OTLP | OTLP | Not available |
+| Metric | Gemini CLI | Claude Code | Codex | OpenCode | Direct proxy |
+| --- | --- | --- | --- | --- | --- |
+| Input tokens | OTLP | OTLP | OTLP | Plugin OTLP | Response usage |
+| Output tokens | OTLP | OTLP | OTLP | Plugin OTLP | Response usage |
+| Cached tokens read | OTLP | OTLP | OTLP | Plugin OTLP | Response usage |
+| Cached tokens write | Not available | OTLP | Not available | Plugin OTLP | Not available |
+| Reasoning tokens | OTLP | Not available | OTLP | Plugin OTLP | Response usage |
+| Tool tokens | OTLP | Not available | OTLP | Not available | Not available |
+| Prompt length | OTLP | OTLP | OTLP | Plugin OTLP | Not available |
+| Latency | Hook/OTLP | OTLP | OTLP | Plugin OTLP | Proxy timing |
+| TTFT | Hook | Not available | OTLP | Plugin OTLP | Streaming only |
+| Session ID | OTLP | OTLP | OTLP | Plugin OTLP | Not available |
 
 TTFT is an operational signal, not a billing-grade metric. Each agent exposes different timing data.
+
+OpenCode tracking is provided by `plugins/opencode`, a local plugin that emits one OTLP log record for each completed assistant message. `scripts/start.sh` and `scripts/restart.sh` run `scripts/configure-opencode-plugin.py` automatically when `opencode` is installed, registering the built plugin with the local OTLP logs endpoint.
 
 ## API
 

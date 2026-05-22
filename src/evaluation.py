@@ -6,9 +6,10 @@ import json
 import logging
 import os
 import re
+import sqlite3
 import subprocess
+from contextlib import closing
 from dataclasses import dataclass
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -79,6 +80,7 @@ class LocalSessionTranscriptIndex:
     codex_path_names: tuple[str, ...] = ()
     claude_session_ids: frozenset[str] = frozenset()
     gemini_session_ids: frozenset[str] = frozenset()
+    opencode_session_ids: frozenset[str] = frozenset()
 
 
 def _normalize_client_source(client_source: str | None) -> str:
@@ -89,6 +91,8 @@ def _normalize_client_source(client_source: str | None) -> str:
         return "claude"
     if normalized in {"gemini", "gemini-cli"}:
         return "gemini"
+    if normalized in {"opencode"}:
+        return "opencode"
     raise ValueError(f"Unsupported session source: {client_source or 'unknown'}")
 
 
@@ -321,6 +325,155 @@ def _load_gemini_transcript(session_id: str, client_source: str) -> str:
     )
 
 
+def _opencode_db_path() -> Path:
+    """Return OpenCode's local SQLite transcript database path."""
+    data_home = os.environ.get("XDG_DATA_HOME")
+    if data_home:
+        return Path(data_home) / "opencode" / "opencode.db"
+    return Path.home() / ".local" / "share" / "opencode" / "opencode.db"
+
+
+def _connect_opencode_db() -> sqlite3.Connection:
+    """Open OpenCode's transcript database read-only for local evaluation."""
+    db_path = _opencode_db_path()
+    if not db_path.exists():
+        raise TranscriptLoadError("OpenCode transcript database not found")
+    return sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, timeout=1.0)
+
+
+def _extract_opencode_part_text(value: Any) -> str | None:
+    """Extract user-visible text from one OpenCode message part."""
+    if not isinstance(value, dict):
+        return None
+    if value.get("type") != "text":
+        return None
+    if value.get("synthetic") or value.get("ignored"):
+        return None
+    return _extract_text(value.get("text"))
+
+
+def _load_opencode_transcript(session_id: str, client_source: str) -> str:
+    """Load user and assistant text turns for an OpenCode session."""
+    try:
+        with closing(_connect_opencode_db()) as connection:
+            rows = connection.execute(
+                """
+                SELECT m.id, m.data, p.data
+                FROM message m
+                LEFT JOIN part p ON p.message_id = m.id
+                WHERE m.session_id = ?
+                ORDER BY m.time_created, m.id, p.time_created, p.id
+                """,
+                (session_id,),
+            ).fetchall()
+    except sqlite3.Error as exc:
+        raise TranscriptLoadError(
+            f"OpenCode transcript not found: {session_id}"
+        ) from exc
+
+    turns: list[tuple[str, str]] = []
+    current_message_id: str | None = None
+    current_role: str | None = None
+    current_parts: list[str] = []
+
+    def flush_current() -> None:
+        if current_role in {"user", "assistant"} and current_parts:
+            turns.append((current_role, "\n".join(current_parts)))
+
+    for message_id, message_data, part_data in rows:
+        if message_id != current_message_id:
+            flush_current()
+            current_message_id = message_id
+            current_parts = []
+            current_role = None
+            try:
+                message_payload = json.loads(message_data)
+            except (TypeError, json.JSONDecodeError):
+                message_payload = {}
+            if isinstance(message_payload, dict):
+                role = message_payload.get("role")
+                current_role = role if role in {"user", "assistant"} else None
+
+        if current_role not in {"user", "assistant"} or part_data is None:
+            continue
+        try:
+            part_payload = json.loads(part_data)
+        except (TypeError, json.JSONDecodeError):
+            continue
+        text = _extract_opencode_part_text(part_payload)
+        if text:
+            current_parts.append(text)
+
+    flush_current()
+    return _format_transcript_turns(
+        client_source=client_source, session_id=session_id, turns=turns
+    )
+
+
+def _list_opencode_session_ids_with_text() -> frozenset[str]:
+    """Return OpenCode session IDs that have at least one text transcript part."""
+    try:
+        with closing(_connect_opencode_db()) as connection:
+            rows = connection.execute(
+                """
+                SELECT m.session_id, m.data, p.data
+                FROM message m
+                JOIN part p ON p.message_id = m.id
+                WHERE m.data LIKE '%role%'
+                  AND p.data LIKE '%text%'
+                """
+            ).fetchall()
+    except (TranscriptLoadError, sqlite3.Error):
+        return frozenset()
+
+    session_ids: set[str] = set()
+    for session_id, message_data, part_data in rows:
+        try:
+            message_payload = json.loads(message_data)
+            part_payload = json.loads(part_data)
+        except (TypeError, json.JSONDecodeError):
+            continue
+        if not isinstance(message_payload, dict):
+            continue
+        if message_payload.get("role") not in {"user", "assistant"}:
+            continue
+        if _extract_opencode_part_text(part_payload) and isinstance(session_id, str):
+            session_ids.add(session_id)
+    return frozenset(session_ids)
+
+
+def _opencode_session_has_turn_text(session_id: str) -> bool:
+    """Check whether one OpenCode session has local user/assistant text."""
+    try:
+        with closing(_connect_opencode_db()) as connection:
+            rows = connection.execute(
+                """
+                SELECT m.data, p.data
+                FROM message m
+                JOIN part p ON p.message_id = m.id
+                WHERE m.session_id = ?
+                  AND m.data LIKE '%role%'
+                  AND p.data LIKE '%text%'
+                """,
+                (session_id,),
+            ).fetchall()
+    except (TranscriptLoadError, sqlite3.Error):
+        return False
+    for message_data, part_data in rows:
+        try:
+            message_payload = json.loads(message_data)
+            part_payload = json.loads(part_data)
+        except (TypeError, json.JSONDecodeError):
+            continue
+        if not isinstance(message_payload, dict):
+            continue
+        if message_payload.get("role") not in {"user", "assistant"}:
+            continue
+        if _extract_opencode_part_text(part_payload):
+            return True
+    return False
+
+
 def build_local_session_transcript_index() -> LocalSessionTranscriptIndex:
     codex_dir = Path.home() / ".codex" / "sessions"
     codex_path_names = (
@@ -359,6 +512,7 @@ def build_local_session_transcript_index() -> LocalSessionTranscriptIndex:
         codex_path_names=codex_path_names,
         claude_session_ids=claude_session_ids,
         gemini_session_ids=frozenset(gemini_session_ids),
+        opencode_session_ids=_list_opencode_session_ids_with_text(),
     )
 
 
@@ -380,14 +534,18 @@ def has_local_session_transcript(
             )
         if agent == "claude":
             return session_id in local_index.claude_session_ids
-        return session_id in local_index.gemini_session_ids
+        if agent == "gemini":
+            return session_id in local_index.gemini_session_ids
+        return session_id in local_index.opencode_session_ids
 
     if agent == "codex":
         return _find_codex_session_path_by_name(session_id) is not None
     if agent == "claude":
         return _find_claude_session_path(session_id) is not None
-    path = _find_gemini_session_path(session_id)
-    return path is not None and _gemini_session_file_has_turn_text(path)
+    if agent == "gemini":
+        path = _find_gemini_session_path(session_id)
+        return path is not None and _gemini_session_file_has_turn_text(path)
+    return _opencode_session_has_turn_text(session_id)
 
 
 def load_session_transcript(client_source: str | None, session_id: str) -> str:
@@ -396,7 +554,9 @@ def load_session_transcript(client_source: str | None, session_id: str) -> str:
         return _load_codex_transcript(session_id, client_source or agent)
     if agent == "claude":
         return _load_claude_transcript(session_id, client_source or agent)
-    return _load_gemini_transcript(session_id, client_source or agent)
+    if agent == "gemini":
+        return _load_gemini_transcript(session_id, client_source or agent)
+    return _load_opencode_transcript(session_id, client_source or agent)
 
 
 def build_evaluator_invocation(transcript: str) -> AgentInvocation:

@@ -2113,6 +2113,43 @@ def test_fetch_sessions_filters_by_client_source(database_module, isolated_home)
     assert result[0]["session_id"] == "s2"
 
 
+def test_fetch_sessions_hide_noop_keeps_single_request_opencode(
+    database_module, isolated_home
+):
+    db_path = str(isolated_home / "usage.db")
+    database_module.init_db(db_path)
+
+    for source, sid in [("opencode", "oc-1"), ("codex", "codex-1")]:
+        database_module.log_usage(
+            database_module.Usage(
+                ts="2026-05-09T10:00:00+00:00",
+                provider="anthropic",
+                model="claude-sonnet-4-6",
+                client_source=source,
+                session_id=sid,
+                endpoint="generate-otlp",
+                prompt_tokens=100,
+                completion_tokens=50,
+                total_tokens=150,
+                input_cost_usd=0.001,
+                output_cost_usd=0.001,
+                total_cost_usd=0.002,
+                status=200,
+            ),
+            db_path=db_path,
+        )
+
+    database_module.upsert_session_evaluation(
+        "oc-1", "no_op", source="heuristic", db_path=db_path
+    )
+    result = database_module.fetch_sessions(hide_noop=True, db_path=db_path)
+    assert result == []
+
+    database_module.delete_session_evaluation("oc-1", db_path=db_path)
+    result = database_module.fetch_sessions(hide_noop=True, db_path=db_path)
+    assert [row["session_id"] for row in result] == ["oc-1"]
+
+
 def test_fetch_sessions_accepts_browser_iso_boundary_filters(
     database_module, isolated_home
 ):

@@ -263,6 +263,7 @@ export function getSourceBadgeBg(name: string): string {
   if (name === 'claude-code') return dark ? '#cc7c5e40' : '#cc7c5e26'
   if (name === 'gemini-cli') return dark ? '#528af240' : '#528af226'
   if (name === 'proxy') return dark ? '#8b5cf640' : '#8b5cf626'
+  if (name === 'opencode') return dark ? '#10b98140' : '#10b98126'
   return dark ? '#334155' : '#f1f5f9'
 }
 
@@ -272,6 +273,7 @@ export function getSourceBadgeText(name: string): string {
   if (name === 'claude-code') return '#cc7c5e'
   if (name === 'gemini-cli') return '#528af2'
   if (name === 'proxy') return '#8b5cf6'
+  if (name === 'opencode') return '#10b981'
   return dark ? '#94a3b8' : '#475569'
 }
 

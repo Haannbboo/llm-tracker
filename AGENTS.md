@@ -35,10 +35,10 @@ Workflow details: `.agents/commands/feature-pr.md`.
 Verification workflow: `.agents/commands/verify.md`.
 Independent review: `.agents/commands/review.md`.
 Open PR workflow: `.agents/commands/open-pr.md`.
-PR follow-up / CI / CodeRabbit: `.agents/commands/pr-follow-up.md`.
-Respond to review comments: `.agents/commands/respond-to-pr-comments.md`.
 Pre-PR checklist: `.agents/commands/pre-pr.md`.
 Project rules: `.agents/commands/llm-tracker.md`.
+
+When handling PR comments, CI failures, or CodeRabbit feedback, read `.agents/commands/pr-follow-up.md` before acting. For review comments only, read `.agents/commands/respond-to-pr-comments.md`. These are not optional — they cover reply style, fix scoping, verification, and resolving GitHub conversations.
 
 ## Git and PR rules
 

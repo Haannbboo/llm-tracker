@@ -354,14 +354,20 @@ def _session_filters(
     if until:
         filters.append(SessionRecord.ended <= _normalize_timestamp_filter(until))
     if hide_noop:
-        # Exclude no-op sessions and single-request sessions (noise filtering)
+        # OpenCode emits one usage row per assistant completion, so one-request
+        # OpenCode sessions can still be real user-visible sessions.
         filters.append(
             or_(
                 SessionRecord.outcome != "no_op",
                 SessionRecord.outcome.is_(None),
             )
         )
-        filters.append(SessionRecord.request_count > 1)
+        filters.append(
+            or_(
+                SessionRecord.request_count > 1,
+                SessionRecord.client_source == "opencode",
+            )
+        )
     return filters
 
 

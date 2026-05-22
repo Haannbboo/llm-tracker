@@ -164,27 +164,35 @@ def _setup_health(
     claude: dict,
     codex: dict,
     gemini: dict,
+    opencode: dict | None = None,
 ) -> dict:
     expected_logs_endpoint = f"http://localhost:{otlp_port}/v1/logs"
     expected_endpoint = f"http://localhost:{otlp_port}"
+    opencode = opencode or _agent_health(
+        status="missing_config",
+        expected_endpoint=expected_logs_endpoint,
+    )
     return {
         "expected": {
             "otlp_endpoint": expected_endpoint,
             "otlp_logs_endpoint": expected_logs_endpoint,
         },
         "summary": {
-            "total_agents": 3,
+            "total_agents": 4,
             "configured_agents": sum(
-                1 for agent in (claude, codex, gemini) if agent["configured"]
+                1 for agent in (claude, codex, gemini, opencode) if agent["configured"]
             ),
             "matching_agents": sum(
-                1 for agent in (claude, codex, gemini) if agent["endpoint_matches"]
+                1
+                for agent in (claude, codex, gemini, opencode)
+                if agent["endpoint_matches"]
             ),
         },
         "agents": {
             "claude": claude,
             "codex": codex,
             "gemini": gemini,
+            "opencode": opencode,
         },
     }
 
@@ -258,7 +266,8 @@ def test_bootstrap_reports_local_setup_health_ready_and_skipped_agents(tmp_path)
     assert "Claude: skipped" in output
     assert "Codex: skipped" in output
     assert "Gemini: ready" in output
-    assert "Agents: 1 ready, 2 skipped, 0 failed" in output
+    assert "OpenCode: skipped" in output
+    assert "Agents: 1 ready, 3 skipped, 0 failed" in output
 
 
 def test_bootstrap_fails_when_detected_agent_setup_health_is_not_ready(tmp_path):
@@ -317,7 +326,8 @@ def test_bootstrap_fails_when_detected_agent_setup_health_is_not_ready(tmp_path)
     assert "Claude: OTLP not configured" in output
     assert "Codex: endpoint mismatch" in output
     assert "Gemini: ready" in output
-    assert "Agents: 1 ready, 0 skipped, 2 failed" in output
+    assert "OpenCode: skipped" in output
+    assert "Agents: 1 ready, 1 skipped, 2 failed" in output
     assert secret_endpoint not in output
 
 
@@ -357,7 +367,8 @@ def test_bootstrap_skips_gemini_when_settings_file_exists_but_cli_is_missing(tmp
     assert "Claude: skipped" in output
     assert "Codex: skipped" in output
     assert "Gemini: skipped" in output
-    assert "Agents: 0 ready, 3 skipped, 0 failed" in output
+    assert "OpenCode: skipped" in output
+    assert "Agents: 0 ready, 4 skipped, 0 failed" in output
 
 
 def test_bootstrap_exits_nonzero_when_post_start_checks_fail(tmp_path):
@@ -411,4 +422,5 @@ def test_bootstrap_skips_undetected_agent_even_when_setup_health_is_ready(tmp_pa
     assert result.returncode == 0, output
     assert "Gemini: skipped" in output
     assert "Gemini: ready" not in output
-    assert "Agents: 0 ready, 3 skipped, 0 failed" in output
+    assert "OpenCode: skipped" in output
+    assert "Agents: 0 ready, 4 skipped, 0 failed" in output
