@@ -233,6 +233,8 @@ def test_update_config_refreshes_runtime_config(
         api_module.update_config(
             api_module.ConfigUpdate(
                 content="""
+pricing:
+  auto_fetch: false
 server:
   host: 0.0.0.0
   port: 4000

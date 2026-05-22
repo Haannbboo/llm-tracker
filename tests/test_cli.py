@@ -1094,6 +1094,7 @@ def test_install_symlinks_llm_tracker_cli_into_user_local_bin():
     assert 'ln -sf "${CLI_SOURCE}" "${CLI_LINK}"' in content
 
 
+@pytest.mark.slow
 def test_llm_tracker_script_invokes_cli_outside_repo_root(tmp_path):
     from pathlib import Path
 
@@ -1153,6 +1154,7 @@ def test_llm_tracker_help_lists_available_commands(tmp_path):
     assert "gemini ...               run Gemini CLI with tracking" in result.stdout
 
 
+@pytest.mark.slow
 def test_llm_tracker_script_injects_isolated_otlp_env_without_db_leak(
     isolated_home, tmp_path
 ):
@@ -1161,6 +1163,8 @@ def test_llm_tracker_script_injects_isolated_otlp_env_without_db_leak(
     config_path = isolated_home / ".llm-tracker" / "config.yaml"
     config_path.write_text(
         f"""
+pricing:
+  auto_fetch: false
 server:
   host: 127.0.0.1
   port: 4999

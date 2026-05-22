@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib
+import os
 import sys
 from collections.abc import Callable
 from pathlib import Path
@@ -9,7 +10,15 @@ from types import ModuleType
 import pytest
 
 
+NO_REMOTE_PRICING_CONFIG = (
+    Path(__file__).parent / "fixtures" / "no-remote-pricing-config.yaml"
+)
+os.environ.setdefault("LLM_TRACKER_CONFIG", str(NO_REMOTE_PRICING_CONFIG))
+
+
 CONFIG_TEMPLATE = """
+pricing:
+  auto_fetch: false
 server:
   host: 127.0.0.1
   port: 4000
@@ -80,12 +89,14 @@ def clear_project_modules() -> None:
 def isolated_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     config_dir = tmp_path / ".llm-tracker"
     config_dir.mkdir(parents=True, exist_ok=True)
-    (config_dir / "config.yaml").write_text(
+    config_path = config_dir / "config.yaml"
+    config_path.write_text(
         CONFIG_TEMPLATE.format(db_path=tmp_path / "usage.db"),
         encoding="utf-8",
     )
 
     monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("LLM_TRACKER_CONFIG", str(config_path))
     clear_project_modules()
     yield tmp_path
     clear_project_modules()

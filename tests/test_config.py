@@ -309,6 +309,8 @@ def test_refresh_runtime_config_updates_globals_in_place(
     monkeypatch.setenv("HOME", str(tmp_path))
     config_path.write_text(
         """
+pricing:
+  auto_fetch: false
 server:
   host: 127.0.0.1
 models:
