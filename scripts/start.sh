@@ -79,11 +79,15 @@ if ! PORT_CHECK_OUTPUT="$("${PYTHON}" "${PORT_CHECKER}" \
   --supervisord-conf "${SUPERVISORD_CONF}" 2>&1)"; then
   if [[ "${CONFIG_WAS_CREATED}" -eq 1 ]]; then
     "${PYTHON}" "${AUTO_PORT_ASSIGNER}" --config "${CONFIG_PATH}"
-    "${PYTHON}" "${PORT_CHECKER}" \
+    if ! PORT_CHECK_OUTPUT="$("${PYTHON}" "${PORT_CHECKER}" \
       --strict \
       --config "${CONFIG_PATH}" \
       --supervisorctl "${SUPERVISORCTL}" \
-      --supervisord-conf "${SUPERVISORD_CONF}"
+      --supervisord-conf "${SUPERVISORD_CONF}" 2>&1)"; then
+      fail "Port check failed after auto-assign"
+      printf "%s\n" "${PORT_CHECK_OUTPUT}"
+      exit 1
+    fi
     pass "Ports auto-assigned"
   else
     fail "Port check failed"
@@ -185,7 +189,12 @@ else
   info "Starting supervisord..."
   "${SUPERVISORD}" -c "${SUPERVISORD_CONF}"
   for _ in $(seq 10); do [[ -S "${SOCKET_PATH}" ]] && break; sleep 0.3; done
-  pass "Supervisord started"
+  if [[ -S "${SOCKET_PATH}" ]]; then
+    pass "Supervisord started"
+  else
+    info "Supervisord socket not ready at ${SOCKET_PATH} (may still be starting)"
+    pass "Supervisord started"
+  fi
 fi
 
 # ── Start any programs not yet running ──────────────────────────────

@@ -46,6 +46,14 @@ OTLP_PORT=""
 while [[ $# -gt 0 ]]; do
   case $1 in
     --otlp-port)
+      if [[ $# -lt 2 ]]; then
+        fail "Missing value for --otlp-port"
+        exit 1
+      fi
+      if [[ ! "$2" =~ ^[0-9]+$ ]] || (( $2 < 1 || $2 > 65535 )); then
+        fail "Invalid --otlp-port: $2 (expected 1-65535)"
+        exit 1
+      fi
       OTLP_PORT="$2"
       shift 2
       ;;
