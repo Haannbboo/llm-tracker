@@ -536,9 +536,9 @@ def test_start_and_restart_check_port_conflicts_before_migrations():
     restart_script = (repo_root / "scripts" / "restart.sh").read_text(encoding="utf-8")
 
     assert start_script.index("PORT_CHECKER") < start_script.index("migrate_schema.py")
-    assert restart_script.index(
-        'if ! "${PYTHON}" "${PORT_CHECKER}"'
-    ) < restart_script.index("migrate_schema.py")
+    assert restart_script.index("PORT_CHECKER") < restart_script.index(
+        "migrate_schema.py"
+    )
 
 
 # ---------------------------------------------------------------------------

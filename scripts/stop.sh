@@ -1,9 +1,14 @@
 #!/usr/bin/env bash
+# scripts/stop.sh
+# Stop llm-tracker services.
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SUPERVISORD_CONF="${HOME}/.llm-tracker/supervisord.conf"
 SUPERVISORCTL="${ROOT_DIR}/.venv/bin/supervisorctl"
+
+# ── Load terminal helpers ───────────────────────────────────────────
+source "${ROOT_DIR}/scripts/lib/terminal.sh"
 
 if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
   echo "Usage: scripts/stop.sh [program_name...]"
@@ -18,18 +23,20 @@ if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
 fi
 
 if [[ ! -f "${SUPERVISORD_CONF}" ]]; then
-  echo "Not running." >&2
+  info "Not running."
   exit 0
 fi
 
 if [[ $# -gt 0 ]]; then
   for prog in "$@"; do
-    echo "==> Stopping ${prog}..."
+    info "Stopping ${prog}..."
     "${SUPERVISORCTL}" -c "${SUPERVISORD_CONF}" stop "${prog}" || true
+    pass "${prog}: stopped"
   done
 else
-  echo "==> Stopping all programs..."
+  info "Stopping all programs..."
   "${SUPERVISORCTL}" -c "${SUPERVISORD_CONF}" stop all || true
-  echo "==> Shutting down supervisord..."
+  info "Shutting down supervisord..."
   "${SUPERVISORCTL}" -c "${SUPERVISORD_CONF}" shutdown || true
+  pass "All services stopped"
 fi

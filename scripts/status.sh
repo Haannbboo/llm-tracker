@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# scripts/status.sh
+# Show llm-tracker service status.
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -8,21 +10,25 @@ CONFIG_PATH="${HOME}/.llm-tracker/config.yaml"
 PYTHON="${ROOT_DIR}/.venv/bin/python"
 PORT_CHECKER="${ROOT_DIR}/scripts/check-service-ports.py"
 
+# ── Load terminal helpers ───────────────────────────────────────────
+source "${ROOT_DIR}/scripts/lib/terminal.sh"
+
+banner
+
 if [[ ! -f "${SUPERVISORD_CONF}" ]]; then
-  echo "Services are not configured or not running (missing supervisord.conf)." >&2
+  fail "Services not configured (missing supervisord.conf)"
+  exit 1
+fi
+
+step_header "Service Status"
+if [[ $# -gt 0 ]]; then
+  "${SUPERVISORCTL}" -c "${SUPERVISORD_CONF}" status "$@"
 else
-  echo "==> Service Status"
-  if [[ $# -gt 0 ]]; then
-    "${SUPERVISORCTL}" -c "${SUPERVISORD_CONF}" status "$@"
-  else
-    "${SUPERVISORCTL}" -c "${SUPERVISORD_CONF}" status
-  fi
+  "${SUPERVISORCTL}" -c "${SUPERVISORD_CONF}" status
 fi
 
 if [[ -f "${CONFIG_PATH}" ]]; then
-  echo
-  echo "==> Port Information"
-  # Extract ports using python to handle defaults consistently with the app
+  step_header "Port Information"
   "${PYTHON}" -c "
 import yaml
 import os
@@ -38,6 +44,7 @@ print(f'  API:   {h}:{a}')
 print(f'  OTLP:  {h}:{o}')
 "
 
+  step_header "Port Check"
   "${PYTHON}" "${PORT_CHECKER}" \
     --config "${CONFIG_PATH}" \
     --supervisorctl "${SUPERVISORCTL}" \
