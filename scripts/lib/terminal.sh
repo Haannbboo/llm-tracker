@@ -39,7 +39,7 @@ banner() {
   width="$(_term_width)"
 
   printf "\n"
-  printf "${_T_PURPLE}${_T_BOLD}"
+  printf "%s" "${_T_PURPLE}${_T_BOLD}"
 
   if [[ ${width} -ge 95 ]]; then
     # Full ASCII art banner
@@ -57,12 +57,12 @@ banner() {
     printf '  █║║    █║║ ██║╚██╔╝██║\n'
     printf '  █║╚════█║╝ ██║ ╚═╝ ██║\n'
     printf '  ╚══════╝╚╝ ╚═╝     ╚═╝\n'
-    printf "${_T_RESET}"
-    printf "${_T_PURPLE}${_T_BOLD}"
+    printf "%s" "${_T_RESET}"
+    printf "%s" "${_T_PURPLE}${_T_BOLD}"
     printf '  ── tracker ──\n'
   fi
 
-  printf "${_T_RESET}"
+  printf "%s" "${_T_RESET}"
   printf "\n"
 }
 
@@ -265,7 +265,7 @@ final_status_fail() {
   printf "\n"
   separator
   if [[ ${_T_COLORS_ENABLED} -eq 1 ]]; then
-    printf "  ${_T_RED}${_T_BOLD}✗ llm-tracker bootstrap failed${_T_RESET}\n\n"
+    printf "%s" "  ${_T_RED}${_T_BOLD}✗ llm-tracker bootstrap failed${_T_RESET}\n\n"
   else
     printf "  ✗ llm-tracker bootstrap failed\n\n"
   fi
