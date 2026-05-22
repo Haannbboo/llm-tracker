@@ -347,6 +347,7 @@ def _extract_opencode_fields(
     total = _attr(attrs, "total_token_count")
     prompt_length = _attr(attrs, "prompt_length")
     duration_ms = _attr(attrs, "duration_ms")
+    ttft_ms = _attr(attrs, "ttft_ms")
     provider_from_attr = _attr(attrs, "provider")
     model = _attr(attrs, "model") or "opencode-unknown"
     usage_session_id = _attr(attrs, "session.id") or session_id or None
@@ -385,7 +386,7 @@ def _extract_opencode_fields(
         "tool_tokens": None,
         "total_tokens": total_tokens,
         "latency_ms": int(duration_ms) if duration_ms is not None else None,
-        "ttft_ms": None,
+        "ttft_ms": int(ttft_ms) if ttft_ms is not None else None,
         "status": None,
         "base_url": metadata.base_url,
         "base_url_provider": metadata.provider,

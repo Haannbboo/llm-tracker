@@ -209,6 +209,7 @@ def test_extract_opencode_fields_basic(otlp_module):
             "model": "claude-sonnet-4-5",
             "provider": "anthropic",
             "duration_ms": 1200,
+            "ttft_ms": 345,
             "session.id": "oc-sess-1",
             "message.id": "msg-1",
         }
@@ -226,11 +227,11 @@ def test_extract_opencode_fields_basic(otlp_module):
     assert fields["cache_creation_tokens"] == 5
     assert fields["total_tokens"] == 285
     assert fields["latency_ms"] == 1200
+    assert fields["ttft_ms"] == 345
     assert fields["client_source"] == "opencode"
     assert fields["session_id"] == "oc-sess-1"
     assert fields["endpoint"] == "generate-otlp"
     assert fields["tool_tokens"] is None
-    assert fields["ttft_ms"] is None
     assert fields["prompt_length"] == 4321
 
 
@@ -256,6 +257,7 @@ def test_parse_opencode_record_routes_to_record_usage(otlp_module, monkeypatch):
             "cached_token_count": 20,
             "total_token_count": 180,
             "duration_ms": 800,
+            "ttft_ms": 250,
         }
     )
     record["attributes"] = attrs
@@ -270,6 +272,7 @@ def test_parse_opencode_record_routes_to_record_usage(otlp_module, monkeypatch):
     assert captured["usage"].reasoning_tokens == 10
     assert captured["usage"].cached_tokens == 20
     assert captured["usage"].latency_ms == 800
+    assert captured["usage"].ttft_ms == 250
 
 
 def test_extract_opencode_fields_derives_total_with_reasoning_when_missing(

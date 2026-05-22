@@ -5,6 +5,7 @@ const MAX_TRACKED_MESSAGES = 10_000
 const processed = new Set<string>()
 const userMessages = new Set<string>()
 const promptPartLengths = new Map<string, Map<string, number>>()
+const firstAssistantPartStart = new Map<string, number>()
 
 function getEndpoint(options?: Record<string, unknown>): string {
   if (options?.endpoint && typeof options.endpoint === "string") return options.endpoint
@@ -18,6 +19,10 @@ type PromptPart = {
   text?: string
   synthetic?: boolean
   ignored?: boolean
+  time?: {
+    start?: number
+    created?: number
+  }
 }
 
 type PromptClient = {
@@ -43,6 +48,14 @@ function trimPromptPartLengths(): void {
   }
 }
 
+function trimFirstAssistantPartStart(): void {
+  while (firstAssistantPartStart.size > MAX_TRACKED_MESSAGES) {
+    const oldest = firstAssistantPartStart.keys().next().value
+    if (!oldest) break
+    firstAssistantPartStart.delete(oldest)
+  }
+}
+
 function rememberPromptPart(part: PromptPart): void {
   if (part.type !== "text") return
   if (!part.messageID || !part.id || typeof part.text !== "string") return
@@ -52,6 +65,20 @@ function rememberPromptPart(part: PromptPart): void {
   parts.set(part.id, part.text.length)
   promptPartLengths.set(part.messageID, parts)
   trimPromptPartLengths()
+}
+
+function rememberFirstAssistantPart(part: PromptPart, observedAt: number): void {
+  if (part.type !== "text" && part.type !== "reasoning") return
+  if (!part.messageID) return
+  if (part.synthetic || part.ignored) return
+  if (firstAssistantPartStart.has(part.messageID)) return
+  const partStart = part.time?.start
+  const hasStartTime = typeof partStart === "number" && Number.isFinite(partStart)
+  const hasContent = typeof part.text === "string" && part.text.length > 0
+  if (!hasStartTime && !hasContent) return
+
+  firstAssistantPartStart.set(part.messageID, hasStartTime ? partStart : observedAt)
+  trimFirstAssistantPartStart()
 }
 
 function promptLengthForMessage(messageId: string): number | null {
@@ -94,6 +121,7 @@ function buildOtlpPayload(params: {
   cacheCreationTokens: number | null
   totalTokens: number
   durationMs: number
+  ttftMs: number | null
   timestampMs: number
 }): Record<string, unknown> {
   const timeUnixNano = String(params.timestampMs * 1_000_000)
@@ -112,6 +140,9 @@ function buildOtlpPayload(params: {
 
   if (params.reasoningTokens != null) {
     attrs.push({ key: "reasoning_token_count", value: { intValue: params.reasoningTokens } })
+  }
+  if (params.ttftMs != null) {
+    attrs.push({ key: "ttft_ms", value: { intValue: params.ttftMs } })
   }
   if (params.promptLength != null) {
     attrs.push({ key: "prompt_length", value: { intValue: params.promptLength } })
@@ -161,7 +192,9 @@ const plugin: Plugin = async (input, options) => {
   return {
     event: async ({ event }) => {
       if (event.type === "message.part.updated") {
-        rememberPromptPart(event.properties.part)
+        const part = event.properties.part
+        rememberPromptPart(part)
+        rememberFirstAssistantPart(part, Date.now())
         return
       }
 
@@ -194,6 +227,9 @@ const plugin: Plugin = async (input, options) => {
       const createdAt: number = info.time.created ?? Date.now()
       const completedAt: number = info.time.completed
       const durationMs = completedAt - createdAt
+      const firstPartStart = firstAssistantPartStart.get(info.id)
+      const ttftMs =
+        firstPartStart != null ? Math.max(0, Math.round(firstPartStart - createdAt)) : null
 
       const totalTokens: number =
         (info.tokens.input ?? 0) + (info.tokens.output ?? 0) + (info.tokens.reasoning ?? 0)
@@ -214,10 +250,12 @@ const plugin: Plugin = async (input, options) => {
         cacheCreationTokens: info.tokens.cache?.write ?? null,
         totalTokens,
         durationMs,
+        ttftMs,
         timestampMs: completedAt,
       })
 
       await emitOtlp(payload, endpoint)
+      firstAssistantPartStart.delete(info.id)
     },
   }
 }

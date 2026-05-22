@@ -265,7 +265,7 @@ For streamed responses, the proxy records TTFT as time until the first upstream 
 | Tool tokens | OTLP | Not available | OTLP | Not available | Not available |
 | Prompt length | OTLP | OTLP | OTLP | Plugin OTLP | Not available |
 | Latency | Hook/OTLP | OTLP | OTLP | Plugin OTLP | Proxy timing |
-| TTFT | Hook | Not available | OTLP | Not available | Streaming only |
+| TTFT | Hook | Not available | OTLP | Plugin OTLP | Streaming only |
 | Session ID | OTLP | OTLP | OTLP | Plugin OTLP | Not available |
 
 TTFT is an operational signal, not a billing-grade metric. Each agent exposes different timing data.
