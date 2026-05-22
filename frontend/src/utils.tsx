@@ -402,6 +402,7 @@ export function getAgentDisplayName(name: string) {
   if (normalized.includes('vectorengine') || normalized.includes('claude')) return 'Claude Code'
   if (normalized.includes('codesonline') || normalized.includes('codex')) return 'Codex'
   if (normalized.includes('gemini')) return 'Gemini CLI'
+  if (normalized.includes('opencode')) return 'OpenCode'
   return name
 }
 
