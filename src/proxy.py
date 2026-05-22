@@ -270,7 +270,7 @@ async def forward(request: Request, path: str):
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Handle application startup and shutdown events."""
-    await init_db()
+    init_db()
     yield
 
 
