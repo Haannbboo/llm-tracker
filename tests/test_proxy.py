@@ -1,4 +1,7 @@
 import pytest
+from fastapi.testclient import TestClient
+
+from config.models import ProviderConfig
 
 
 def test_proxy_registers_v1_and_compatibility_paths(proxy_module):
@@ -451,12 +454,8 @@ async def test_streaming_forward_logs_first_chunk_latency(proxy_module, monkeypa
     assert captured["completion_tokens"] == 5
 
 
-import pytest
-from fastapi.testclient import TestClient
-from config.models import ProviderConfig
-
-
 def test_resolve_provider_prioritizes_exact_matches(proxy_module, monkeypatch):
+    """Verify that MODEL_MAP (explicit config) takes precedence over heuristic stripping."""
     # Setup mock config with a collision
     test_provider = ProviderConfig(
         name="openrouter", base_url="https://openrouter.ai/api/v1"
@@ -473,6 +472,7 @@ def test_resolve_provider_prioritizes_exact_matches(proxy_module, monkeypatch):
 
 
 def test_get_model_supports_slashes_in_id(proxy_module, monkeypatch):
+    """Verify that model info endpoint correctly captures IDs with slashes using path converter."""
     test_provider = ProviderConfig(
         name="openrouter", base_url="https://openrouter.ai/api/v1"
     )
@@ -488,6 +488,7 @@ def test_get_model_supports_slashes_in_id(proxy_module, monkeypatch):
 
 
 def test_resolve_provider_falls_back_to_stripping(proxy_module, monkeypatch):
+    """Verify that heuristic prefix stripping still works for unmapped models."""
     test_provider = ProviderConfig(name="openai", base_url="https://api.openai.com/v1")
     monkeypatch.setattr(proxy_module, "PROVIDER_MAP", {"openai": test_provider})
     monkeypatch.setattr(proxy_module, "MODEL_MAP", {})  # No explicit match
