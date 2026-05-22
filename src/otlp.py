@@ -345,6 +345,7 @@ def _extract_opencode_fields(
     cached = _attr(attrs, "cached_token_count")
     cache_create = _attr(attrs, "cache_creation_token_count")
     total = _attr(attrs, "total_token_count")
+    prompt_length = _attr(attrs, "prompt_length")
     duration_ms = _attr(attrs, "duration_ms")
     provider_from_attr = _attr(attrs, "provider")
     model = _attr(attrs, "model") or "opencode-unknown"
@@ -374,7 +375,7 @@ def _extract_opencode_fields(
         "session_id": usage_session_id,
         "endpoint": "generate-otlp",
         "prompt_tokens": prompt_tokens,
-        "prompt_length": 0,
+        "prompt_length": int(prompt_length) if prompt_length is not None else 0,
         "completion_tokens": completion_tokens,
         "cached_tokens": cached_tokens,
         "cache_creation_tokens": int(cache_create)

@@ -263,7 +263,7 @@ For streamed responses, the proxy records TTFT as time until the first upstream 
 | Cached tokens write | Not available | OTLP | Not available | Plugin OTLP | Not available |
 | Reasoning tokens | OTLP | Not available | OTLP | Plugin OTLP | Response usage |
 | Tool tokens | OTLP | Not available | OTLP | Not available | Not available |
-| Prompt length | OTLP | OTLP | OTLP | Not available | Not available |
+| Prompt length | OTLP | OTLP | OTLP | Plugin OTLP | Not available |
 | Latency | Hook/OTLP | OTLP | OTLP | Plugin OTLP | Proxy timing |
 | TTFT | Hook | Not available | OTLP | Not available | Streaming only |
 | Session ID | OTLP | OTLP | OTLP | Plugin OTLP | Not available |

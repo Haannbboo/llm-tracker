@@ -205,6 +205,7 @@ def test_extract_opencode_fields_basic(otlp_module):
             "cached_token_count": 30,
             "cache_creation_token_count": 5,
             "total_token_count": 285,
+            "prompt_length": 4321,
             "model": "claude-sonnet-4-5",
             "provider": "anthropic",
             "duration_ms": 1200,
@@ -230,7 +231,7 @@ def test_extract_opencode_fields_basic(otlp_module):
     assert fields["endpoint"] == "generate-otlp"
     assert fields["tool_tokens"] is None
     assert fields["ttft_ms"] is None
-    assert fields["prompt_length"] == 0
+    assert fields["prompt_length"] == 4321
 
 
 def test_parse_opencode_record_routes_to_record_usage(otlp_module, monkeypatch):
@@ -287,6 +288,7 @@ def test_extract_opencode_fields_derives_total_with_reasoning_when_missing(
     fields = otlp_module._extract_opencode_fields(record, attrs, "oc-sess-1")
 
     assert fields["total_tokens"] == 250
+    assert fields["prompt_length"] == 0
 
 
 def test_extract_opencode_fields_resolves_base_url_for_event_provider(
