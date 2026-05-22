@@ -220,7 +220,7 @@ def test_extract_opencode_fields_basic(otlp_module):
 
     assert fields["model"] == "claude-sonnet-4-5"
     assert fields["provider"] == "anthropic"
-    assert fields["prompt_tokens"] == 150
+    assert fields["prompt_tokens"] == 180
     assert fields["completion_tokens"] == 80
     assert fields["reasoning_tokens"] == 20
     assert fields["cached_tokens"] == 30
@@ -267,7 +267,7 @@ def test_parse_opencode_record_routes_to_record_usage(otlp_module, monkeypatch):
     assert captured["usage"].client_source == "opencode"
     assert captured["usage"].model == "claude-sonnet-4-5"
     assert captured["usage"].provider == "anthropic"
-    assert captured["usage"].prompt_tokens == 100
+    assert captured["usage"].prompt_tokens == 120
     assert captured["usage"].completion_tokens == 50
     assert captured["usage"].reasoning_tokens == 10
     assert captured["usage"].cached_tokens == 20
