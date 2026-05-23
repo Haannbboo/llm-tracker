@@ -145,11 +145,25 @@ async def _forward_stream_or_error(
 ) -> StreamingResponse | JSONResponse:
     """Open an upstream streaming connection, check status, and relay or error."""
     client = httpx.AsyncClient(timeout=REQUEST_TIMEOUT_SECONDS)
-    req = client.build_request("POST", url, headers=headers, content=body)
-    upstream = await client.send(req, stream=True)
+    try:
+        req = client.build_request("POST", url, headers=headers, content=body)
+        upstream = await client.send(req, stream=True)
+    except Exception:
+        try:
+            await client.aclose()
+        except Exception:
+            pass
+        raise
 
     if upstream.status_code >= 400:
-        error_body = await upstream.aread()
+        try:
+            error_body = await upstream.aread()
+        except Exception:
+            try:
+                await client.aclose()
+            except Exception:
+                pass
+            raise
         await client.aclose()
         try:
             error_content = (
