@@ -132,7 +132,7 @@ def parse_json_body(body: bytes) -> dict[str, Any]:
     return json.loads(body)
 
 
-async def stream_upstream_response(
+async def _forward_stream_or_error(
     *,
     url: str,
     headers: dict[str, str],
@@ -142,62 +142,71 @@ async def stream_upstream_response(
     client_source: str | None,
     path: str,
     started_at: float,
-):
-    """Forward a streaming request to upstream and record usage on completion."""
-    status = 200
+) -> StreamingResponse | JSONResponse:
+    """Open an upstream streaming connection, check status, and relay or error."""
+    client = httpx.AsyncClient(timeout=REQUEST_TIMEOUT_SECONDS)
+    req = client.build_request("POST", url, headers=headers, content=body)
+    upstream = await client.send(req, stream=True)
 
-    usage_fields = extract_usage({})
-    status = 200
-    ttft_ms: int | None = None
+    if upstream.status_code >= 400:
+        error_body = await upstream.aread()
+        await client.aclose()
+        try:
+            error_content = (
+                json.loads(error_body) if error_body else {"error": "upstream error"}
+            )
+        except json.JSONDecodeError:
+            error_content = {"error": error_body.decode(errors="ignore")}
+        return JSONResponse(content=error_content, status_code=upstream.status_code)
 
-    try:
-        async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT_SECONDS) as client:
-            async with client.stream(
-                "POST", url, headers=headers, content=body
-            ) as response:
-                status = response.status_code
-                buffer = ""
+    async def _relay():
+        usage_fields = extract_usage({})
+        ttft_ms: int | None = None
+        buffer = ""
 
-                async for chunk in response.aiter_bytes():
-                    if ttft_ms is None:
-                        ttft_ms = int((time.monotonic() - started_at) * 1000)
-                    yield chunk
+        try:
+            async for chunk in upstream.aiter_bytes():
+                if ttft_ms is None:
+                    ttft_ms = int((time.monotonic() - started_at) * 1000)
+                yield chunk
 
-                    try:
-                        buffer += chunk.decode(errors="ignore")
-                        while "\n" in buffer:
-                            line, buffer = buffer.split("\n", 1)
-                            line = line.strip()
-                            if not line.startswith("data:") or "[DONE]" in line:
-                                continue
+                try:
+                    buffer += chunk.decode(errors="ignore")
+                    while "\n" in buffer:
+                        line, buffer = buffer.split("\n", 1)
+                        line = line.strip()
+                        if not line.startswith("data:") or "[DONE]" in line:
+                            continue
 
-                            payload = json.loads(line[5:].strip())
-                            stream_usage = extract_stream_usage(payload)
-                            if stream_usage is not None:
-                                usage_fields = stream_usage
-                    except Exception:
-                        # Ignore malformed SSE chunks and keep forwarding the stream.
-                        continue
-    finally:
-        latency_ms = int((time.monotonic() - started_at) * 1000)
-        record_usage(
-            provider=provider.name,
-            model=model,
-            client_source=client_source,
-            session_id=None,
-            endpoint=path,
-            prompt_tokens=usage_fields.get("prompt_tokens"),
-            completion_tokens=usage_fields.get("completion_tokens"),
-            cached_tokens=usage_fields.get("cached_tokens"),
-            reasoning_tokens=usage_fields.get("reasoning_tokens"),
-            total_tokens=usage_fields.get("total_tokens"),
-            latency_ms=latency_ms,
-            ttft_ms=ttft_ms,
-            status=status,
-            base_url=provider.base_url,
-            base_url_provider=provider.name,
-            base_url_source="proxy_config",
-        )
+                        payload = json.loads(line[5:].strip())
+                        stream_usage = extract_stream_usage(payload)
+                        if stream_usage is not None:
+                            usage_fields = stream_usage
+                except Exception:
+                    continue
+        finally:
+            await client.aclose()
+            latency_ms = int((time.monotonic() - started_at) * 1000)
+            record_usage(
+                provider=provider.name,
+                model=model,
+                client_source=client_source,
+                session_id=None,
+                endpoint=path,
+                prompt_tokens=usage_fields.get("prompt_tokens"),
+                completion_tokens=usage_fields.get("completion_tokens"),
+                cached_tokens=usage_fields.get("cached_tokens"),
+                reasoning_tokens=usage_fields.get("reasoning_tokens"),
+                total_tokens=usage_fields.get("total_tokens"),
+                latency_ms=latency_ms,
+                ttft_ms=ttft_ms,
+                status=upstream.status_code,
+                base_url=provider.base_url,
+                base_url_provider=provider.name,
+                base_url_source="proxy_config",
+            )
+
+    return StreamingResponse(_relay(), media_type="text/event-stream")
 
 
 async def forward(request: Request, path: str):
@@ -224,18 +233,15 @@ async def forward(request: Request, path: str):
             body_json["stream_options"] = {"include_usage": True}
             body = json.dumps(body_json).encode()
 
-        return StreamingResponse(
-            stream_upstream_response(
-                url=url,
-                headers=headers,
-                body=body,
-                provider=provider,
-                model=model,
-                client_source=client_source,
-                path=path,
-                started_at=started_at,
-            ),
-            media_type="text/event-stream",
+        return await _forward_stream_or_error(
+            url=url,
+            headers=headers,
+            body=body,
+            provider=provider,
+            model=model,
+            client_source=client_source,
+            path=path,
+            started_at=started_at,
         )
 
     async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT_SECONDS) as client:

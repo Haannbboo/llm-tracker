@@ -377,13 +377,8 @@ async def test_streaming_forward_logs_first_chunk_latency(proxy_module, monkeypa
     captured = {}
 
     class FakeStreamResponse:
-        status_code = 200
-
-        async def __aenter__(self):
-            return self
-
-        async def __aexit__(self, exc_type, exc, tb):
-            return False
+        def __init__(self, status_code=200):
+            self.status_code = status_code
 
         async def aiter_bytes(self):
             yield b'data: {"type":"response.output_text.delta"}\n\n'
@@ -391,20 +386,30 @@ async def test_streaming_forward_logs_first_chunk_latency(proxy_module, monkeypa
                 b'data: {"response":{"usage":{"input_tokens":10,"output_tokens":5}}}\n\n'
             )
 
+        async def aread(self):
+            return b""
+
+    class FakeRequest:
+        def __init__(self, method, url, headers, content):
+            self.method = method
+            self.url = url
+            self.headers = headers
+            self.content = content
+
     class FakeAsyncClient:
         def __init__(self, timeout):
             self.timeout = timeout
 
-        async def __aenter__(self):
-            return self
+        def build_request(self, method, url, headers=None, content=None):
+            return FakeRequest(method, url, headers, content)
 
-        async def __aexit__(self, exc_type, exc, tb):
-            return False
-
-        def stream(self, method, url, headers, content):
-            captured["method"] = method
-            captured["url"] = url
+        async def send(self, request, stream=False):
+            captured["method"] = request.method
+            captured["url"] = request.url
             return FakeStreamResponse()
+
+        async def aclose(self):
+            pass
 
     async def receive():
         return {
@@ -452,6 +457,71 @@ async def test_streaming_forward_logs_first_chunk_latency(proxy_module, monkeypa
     assert captured["latency_ms"] == 90
     assert captured["prompt_tokens"] == 10
     assert captured["completion_tokens"] == 5
+
+
+@pytest.mark.anyio
+async def test_streaming_forward_returns_upstream_error(proxy_module, monkeypatch):
+    """Verify that non-2xx upstream responses return a JSONResponse with the correct status and body."""
+    captured = {}
+
+    class FakeErrorStreamResponse:
+        status_code = 401
+
+        async def aiter_bytes(self):
+            yield b'{"error":{"message":"Missing Authentication header","code":401}}'
+
+        async def aread(self):
+            return b'{"error":{"message":"Missing Authentication header","code":401}}'
+
+    class FakeRequest:
+        def __init__(self, method, url, headers, content):
+            self.method = method
+            self.url = url
+            self.headers = headers
+            self.content = content
+
+    class FakeAsyncClient:
+        def __init__(self, timeout):
+            self.timeout = timeout
+
+        def build_request(self, method, url, headers=None, content=None):
+            return FakeRequest(method, url, headers, content)
+
+        async def send(self, request, stream=False):
+            captured["method"] = request.method
+            captured["url"] = request.url
+            return FakeErrorStreamResponse()
+
+        async def aclose(self):
+            pass
+
+    async def receive():
+        return {
+            "type": "http.request",
+            "body": b'{"model":"test-model","stream":true}',
+            "more_body": False,
+        }
+
+    monkeypatch.setattr(proxy_module.httpx, "AsyncClient", FakeAsyncClient)
+    monkeypatch.setattr(proxy_module, "record_proxy_user_agent", lambda path, ua: None)
+
+    request = proxy_module.Request(
+        {
+            "type": "http",
+            "method": "POST",
+            "path": "/v1/chat/completions",
+            "headers": [(b"content-type", b"application/json")],
+        },
+        receive,
+    )
+
+    response = await proxy_module.forward(request, "/v1/chat/completions")
+
+    assert response.status_code == 401
+    assert (
+        response.body
+        == b'{"error":{"message":"Missing Authentication header","code":401}}'
+    )
 
 
 def test_resolve_provider_prioritizes_exact_matches(proxy_module, monkeypatch):
