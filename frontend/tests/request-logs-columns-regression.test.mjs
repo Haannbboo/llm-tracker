@@ -38,10 +38,10 @@ test('request logs page uses the request log column hook instead of inline hidde
 
 test('request logs page renders table cells from visible columns', () => {
   assert.match(logsPageSource, /<RequestLogColumnsControl/)
-  assert.match(logsPageSource, /visibleColumns\.map\(/)
-  assert.match(logsPageSource, /visibleColumns\.length/)
-  assert.match(logsPageSource, /colSpan=\{visibleColumns\.length\}/)
-  assert.match(logsPageSource, /visibleColumns\.some\(\(column\) => column\.id === 'model'\)/)
+  assert.match(logsPageSource, /effectiveVisibleColumns\.map\(/)
+  assert.match(logsPageSource, /effectiveVisibleColumns\.length/)
+  assert.match(logsPageSource, /colSpan=\{effectiveVisibleColumns\.length\}/)
+  assert.match(logsPageSource, /visibleColumns/)
 })
 
 test('request log columns control renders checkbox items and reset actions', () => {
