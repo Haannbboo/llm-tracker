@@ -358,7 +358,7 @@ export function LogsPage({ initialSessionFilter, initialActiveFilter }: Props) {
               <div>{formatNumber(row.completion_tokens)}</div>
               {value(row.reasoning_tokens) > 0 && (
                 <div style={{ fontSize: '9px', color: 'var(--text-secondary)', fontWeight: 700 }}>
-                  {t('Reasoning')} {formatNumber(row.reasoning_tokens)} ({Math.round((value(row.reasoning_tokens) / (value(row.completion_tokens) || 1)) * 100)}%)
+                  {t('Reasoning')} {formatNumber(row.reasoning_tokens)} ({Math.min(Math.round((value(row.reasoning_tokens) / (value(row.completion_tokens) || 1)) * 100), 100)}%)
                 </div>
               )}
             </div>
@@ -379,7 +379,7 @@ export function LogsPage({ initialSessionFilter, initialActiveFilter }: Props) {
                   <div
                     title={`Reasoning: ${formatNumber(row.reasoning_tokens)} tokens`}
                     style={{
-                      width: `${(value(row.reasoning_tokens) / (value(row.completion_tokens) || 1)) * 100}%`,
+                      width: `${Math.min((value(row.reasoning_tokens) / (value(row.completion_tokens) || 1)) * 100, 100)}%`,
                       height: '100%',
                       background: '#64748b'
                     }}
