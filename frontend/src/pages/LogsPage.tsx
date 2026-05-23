@@ -1,4 +1,4 @@
-import { Fragment, useState, useEffect, type CSSProperties } from 'react'
+import { Fragment, useState, useEffect, useRef, useMemo, type CSSProperties } from 'react'
 import { useApp } from '../contexts/AppContext'
 import { useDashboardData } from '../hooks/useDashboardData'
 import { useLogsData } from '../hooks/useLogsData'
@@ -75,7 +75,58 @@ export function LogsPage({ initialSessionFilter, initialActiveFilter }: Props) {
   // Sessions data for the session filter dropdown
   const { sessions } = useSessionSelectorData({ activeSource, dateRange, customSince, customUntil })
 
-  const isModelColumnVisible = visibleColumns.some((column) => column.id === 'model')
+  const tableContainerRef = useRef<HTMLDivElement>(null)
+  const [tableWidth, setTableWidth] = useState(0)
+
+  useEffect(() => {
+    const container = tableContainerRef.current
+    if (!container) return
+    const observer = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        setTableWidth(entry.contentRect.width)
+      }
+    })
+    observer.observe(container)
+    return () => observer.disconnect()
+  }, [])
+
+  const effectiveVisibleColumns = useMemo(() => {
+    if (tableWidth === 0) return visibleColumns
+
+    const colWidths: Record<RequestLogColumnId, number> = {
+      time: 120,
+      model: modelColWidth,
+      provider: 120,
+      source: 110,
+      session: 120,
+      input: 220,
+      output: 130,
+      cost: 110,
+      latency: 130,
+      status: 80,
+    }
+
+    const hidePriority: RequestLogColumnId[] = [
+      'latency', 'session', 'source', 'cost', 'status',
+      'provider', 'output', 'time', 'input', 'model',
+    ]
+
+    const visibleIds = visibleColumns.map(c => c.id)
+    const totalWidth = visibleIds.reduce((sum, id) => sum + (colWidths[id] ?? 100), 0)
+    if (totalWidth <= tableWidth) return visibleColumns
+
+    const toRemove = new Set<RequestLogColumnId>()
+    let remaining = totalWidth
+    for (const col of hidePriority) {
+      if (!visibleIds.includes(col)) continue
+      if (toRemove.size >= visibleIds.length - 1) break
+      toRemove.add(col)
+      remaining -= colWidths[col] ?? 100
+      if (remaining <= tableWidth) break
+    }
+
+    return visibleColumns.filter(c => !toRemove.has(c.id))
+  }, [visibleColumns, modelColWidth, tableWidth])
 
   const getHeaderStyle = (columnId: RequestLogColumnId): CSSProperties => {
     switch (columnId) {
@@ -90,7 +141,7 @@ export function LogsPage({ initialSessionFilter, initialActiveFilter }: Props) {
       case 'session':
         return { width: '120px', padding: '12px 8px' }
       case 'input':
-        return { minWidth: '140px' }
+        return { minWidth: '220px' }
       case 'output':
         return { minWidth: '120px' }
       case 'cost':
@@ -570,14 +621,14 @@ export function LogsPage({ initialSessionFilter, initialActiveFilter }: Props) {
       )}
 
       <div className="panel">
-        <div className="panel-body" style={{ padding: 0 }}>
-          <table className="table" data-request-log-column-count={visibleColumns.length}>
+          <div ref={tableContainerRef} className="panel-body" style={{ padding: 0 }}>
+            <table className="table" data-request-log-column-count={effectiveVisibleColumns.length}>
             <thead>
               <tr>
-                {visibleColumns.map((column) => (
+                {effectiveVisibleColumns.map((column) => (
                   <th key={column.id} style={getHeaderStyle(column.id)}>
                     {renderHeaderContent(column.id, column.label)}
-                    {column.id === 'model' && isModelColumnVisible && (
+                    {column.id === 'model' && (
                       <div
                         onMouseDown={handleResizeStart}
                         style={{
@@ -602,7 +653,7 @@ export function LogsPage({ initialSessionFilter, initialActiveFilter }: Props) {
               {logsLoading ? (
                 Array.from({ length: 5 }, (_, i) => (
                   <tr key={`skeleton-${i}`}>
-                    {visibleColumns.map((column) => (
+                    {effectiveVisibleColumns.map((column) => (
                       <Fragment key={column.id}>{renderLoadingCell(column.id)}</Fragment>
                     ))}
                   </tr>
@@ -613,13 +664,13 @@ export function LogsPage({ initialSessionFilter, initialActiveFilter }: Props) {
                     className={`expandable-row${expandedRow === row.id ? ' expanded' : ''}`}
                     onClick={() => setExpandedRow(expandedRow === row.id ? null : row.id)}
                   >
-                    {visibleColumns.map((column) => (
+                    {effectiveVisibleColumns.map((column) => (
                       <Fragment key={column.id}>{renderRequestCell(row, column.id)}</Fragment>
                     ))}
                   </tr>
                   {expandedRow === row.id && (
                     <tr className="expanded-row">
-                      <td colSpan={visibleColumns.length}>
+                      <td colSpan={effectiveVisibleColumns.length}>
                         <div className="expanded-detail">
                           {row.session_id && (
                             <div className="detail-group">
@@ -667,7 +718,7 @@ export function LogsPage({ initialSessionFilter, initialActiveFilter }: Props) {
               ))}
               {usageRows.length === 0 && !logsLoading && (
                 <tr>
-                  <td colSpan={visibleColumns.length} style={{ textAlign: 'center', padding: '40px', color: 'var(--text-muted)' }}>
+                  <td colSpan={effectiveVisibleColumns.length} style={{ textAlign: 'center', padding: '40px', color: 'var(--text-muted)' }}>
                     {t('No requests found for the selected filters.')}
                   </td>
                 </tr>
