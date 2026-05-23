@@ -5,6 +5,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
 
+from fastapi.testclient import TestClient
+
 
 def _attrs(values: dict[str, int | str]) -> list[dict]:
     attrs = []
@@ -19,6 +21,16 @@ def _attrs(values: dict[str, int | str]) -> list[dict]:
 
 def _capture_usage(target: dict):
     return lambda **fields: target.update({"usage": SimpleNamespace(**fields)})
+
+
+def test_health_routes_return_service_status(otlp_module):
+    client = TestClient(otlp_module.app)
+
+    for path in ("/health", "/"):
+        response = client.get(path)
+
+        assert response.status_code == 200
+        assert response.json() == {"status": "ok", "service": "llm-tracker-otlp"}
 
 
 def test_parse_gemini_record_merges_hook_ttft(

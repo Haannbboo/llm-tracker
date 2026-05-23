@@ -576,6 +576,12 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="llm-tracker-otlp", lifespan=lifespan)
 
 
+@app.get("/")
+@app.get("/health")
+async def health():
+    return {"status": "ok", "service": app.title}
+
+
 @app.post("/v1/logs")
 async def receive_logs(request: Request):
     # Evict stale codex_state entries (older than 10 minutes)
