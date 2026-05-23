@@ -225,7 +225,7 @@ def test_extract_opencode_fields_basic(otlp_module):
     assert fields["reasoning_tokens"] == 20
     assert fields["cached_tokens"] == 30
     assert fields["cache_creation_tokens"] == 5
-    assert fields["total_tokens"] == 285
+    assert fields["total_tokens"] == 280
     assert fields["latency_ms"] == 1200
     assert fields["ttft_ms"] == 345
     assert fields["client_source"] == "opencode"
@@ -233,6 +233,30 @@ def test_extract_opencode_fields_basic(otlp_module):
     assert fields["endpoint"] == "generate-otlp"
     assert fields["tool_tokens"] is None
     assert fields["prompt_length"] == 4321
+
+
+def test_extract_opencode_fields_normalizes_total_when_raw_total_excludes_cache(
+    otlp_module,
+):
+    attrs = _attrs(
+        {
+            "input_token_count": 807_100,
+            "output_token_count": 0,
+            "reasoning_token_count": 0,
+            "cached_token_count": 10_000_000,
+            "total_token_count": 807_100,
+            "model": "deepseek-v4-flash-free",
+            "provider": "deepseek",
+            "session.id": "oc-sess-cache",
+        }
+    )
+    record = {"timeUnixNano": "1800000000000000000"}
+
+    fields = otlp_module._extract_opencode_fields(record, attrs, "oc-sess-cache")
+
+    assert fields["prompt_tokens"] == 10_807_100
+    assert fields["cached_tokens"] == 10_000_000
+    assert fields["total_tokens"] == 10_807_100
 
 
 def test_parse_opencode_record_routes_to_record_usage(otlp_module, monkeypatch):
