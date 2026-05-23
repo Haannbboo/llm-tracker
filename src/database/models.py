@@ -6,7 +6,6 @@ from decimal import Decimal
 
 from sqlalchemy import (
     BigInteger,
-    Float,
     ForeignKey,
     Index,
     Integer,

@@ -932,11 +932,11 @@ def _period_expression(granularity: str, tz_offset: str) -> Any:
             modifiers.append(f"{offset_hours:+d} hours")
         if offset_minutes:
             modifiers.append(f"{offset_minutes:+d} minutes")
-        return func.strftime(fmt, func.datetime(Usage.ts / 1000000, *modifiers))
+        return func.strftime(fmt, func.datetime(Usage.ts / 1_000_000, *modifiers))
 
     if dialect == "postgresql":
         pg_fmt = "YYYY-MM-DD HH24:00" if granularity == "hour" else "YYYY-MM-DD"
-        ts_cast = func.to_timestamp(Usage.ts / 1000000.0)
+        ts_cast = func.to_timestamp(Usage.ts / 1_000_000.0)
         parts: list[str] = []
         if offset_hours:
             parts.append(f"{offset_hours} hours")
@@ -949,7 +949,7 @@ def _period_expression(granularity: str, tz_offset: str) -> Any:
 
     if dialect == "mysql":
         fmt = "%Y-%m-%d %H:00" if granularity == "hour" else "%Y-%m-%d"
-        ts_parsed = func.from_unixtime(Usage.ts / 1000000.0)
+        ts_parsed = func.from_unixtime(Usage.ts / 1_000_000.0)
         mysql_parts: list[str] = []
         if offset_hours:
             mysql_parts.append(f"INTERVAL {offset_hours} HOUR")

@@ -56,7 +56,7 @@ def build_usage_record(
     usage_fields: dict[str, int],
 ) -> dict[str, Any]:
     return {
-        "ts": ts or time.time_ns() // 1000,
+        "ts": ts if ts is not None else time.time_ns() // 1000,
         "provider": provider_name,
         "model": model,
         "client_source": client_source,

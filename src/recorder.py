@@ -39,7 +39,7 @@ def record_usage(
     db_path: str | None = None,
 ) -> None:
     """Record a single LLM usage event."""
-    usage_ts = ts or time.time_ns() // 1000
+    usage_ts = ts if ts is not None else time.time_ns() // 1000
     costs = calculate_costs(
         prompt_tokens=prompt_tokens,
         completion_tokens=completion_tokens,
