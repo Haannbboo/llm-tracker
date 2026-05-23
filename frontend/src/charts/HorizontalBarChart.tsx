@@ -27,14 +27,12 @@ export function HorizontalBarChart({
   icon,
   items,
   metric,
-  maxCount = 6,
   children,
 }: {
   title: string
   icon: string
   items: BarItem[]
   metric: Metric
-  maxCount?: number
   children?: React.ReactNode
 }) {
   const [hoveredItem, setHoveredItem] = useState<string | null>(null)
@@ -49,7 +47,6 @@ export function HorizontalBarChart({
 
   const sorted = [...items]
     .sort((a, b) => getMetricValue(b) - getMetricValue(a))
-    .slice(0, maxCount)
 
   const maxValue = Math.max(
     ...sorted.map(getMetricValue),
@@ -63,7 +60,7 @@ export function HorizontalBarChart({
       <div className="widget-header">
         <span>{icon} {title}</span>
       </div>
-      <div style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '16px', position: 'relative' }}>
+      <div style={{ position: 'relative' }}>
         {metric === 'tokens' && hovered && (
           <ChartTooltip left="50%">
             <div style={{ fontWeight: 600, marginBottom: '8px', borderBottom: '1px solid var(--border-color)', paddingBottom: '4px', fontSize: '13px' }}>
@@ -85,9 +82,12 @@ export function HorizontalBarChart({
           </ChartTooltip>
         )}
         {sorted.length === 0 ? (
-          <div style={{ padding: '40px', textAlign: 'center', color: 'var(--text-muted)' }}>{t('No data available')}</div>
+          <div style={{ padding: '20px' }}>
+            <div style={{ padding: '40px', textAlign: 'center', color: 'var(--text-muted)' }}>{t('No data available')}</div>
+          </div>
         ) : (
-          sorted.map((s, index) => {
+          <div style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '16px', overflowY: 'auto', maxHeight: '300px' }}>
+          {sorted.map((s, index) => {
             const currentVal = getMetricValue(s)
             const percentage = (currentVal / maxValue) * 100
 
@@ -128,10 +128,12 @@ export function HorizontalBarChart({
                 </div>
               </div>
             )
-          })
+            })
+          }
+          </div>
         )}
-      </div>
       {children}
+    </div>
     </div>
   )
 }
