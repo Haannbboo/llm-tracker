@@ -280,6 +280,116 @@ def test_usage_endpoint_passes_client_source(api_module, monkeypatch):
     assert captured["client_source"] == "claude-code"
 
 
+def test_usage_endpoint_rejects_negative_offset(api_module, monkeypatch):
+    fetch_called = False
+
+    def fake_fetch(**kwargs):
+        nonlocal fetch_called
+        fetch_called = True
+        return []
+
+    monkeypatch.setattr(api_module, "fetch_recent_usage", fake_fetch)
+
+    response = TestClient(api_module.app).get("/usage", params={"offset": "-1"})
+
+    assert response.status_code == 422
+    assert fetch_called is False
+
+
+def test_usage_endpoint_rejects_unbounded_limit(api_module, monkeypatch):
+    fetch_called = False
+
+    def fake_fetch(**kwargs):
+        nonlocal fetch_called
+        fetch_called = True
+        return []
+
+    monkeypatch.setattr(api_module, "fetch_recent_usage", fake_fetch)
+
+    response = TestClient(api_module.app).get("/usage", params={"limit": "1001"})
+
+    assert response.status_code == 422
+    assert fetch_called is False
+
+
+def test_usage_endpoint_allows_zero_limit(api_module, monkeypatch):
+    captured = {}
+
+    def fake_fetch(**kwargs):
+        captured.update(kwargs)
+        return []
+
+    monkeypatch.setattr(api_module, "fetch_recent_usage", fake_fetch)
+
+    response = TestClient(api_module.app).get("/usage", params={"limit": "0"})
+
+    assert response.status_code == 200
+    assert captured["limit"] == 0
+
+
+def test_usage_endpoint_includes_cors_for_localhost_origin(api_module, monkeypatch):
+    monkeypatch.setattr(api_module, "fetch_recent_usage", lambda **kwargs: [])
+
+    response = TestClient(api_module.app).get(
+        "/usage",
+        headers={"Origin": "http://localhost:3000"},
+    )
+
+    assert response.status_code == 200
+    assert response.headers["access-control-allow-origin"] == "http://localhost:3000"
+
+
+def test_usage_endpoint_preflight_allows_localhost_origin(api_module):
+    response = TestClient(api_module.app).options(
+        "/usage",
+        headers={
+            "Origin": "http://localhost:3000",
+            "Access-Control-Request-Method": "GET",
+        },
+    )
+
+    assert response.status_code == 204
+    assert response.headers["access-control-allow-origin"] == "http://localhost:3000"
+    assert response.headers["access-control-allow-methods"] == "GET"
+
+
+def test_usage_endpoint_does_not_include_cors_for_untrusted_origin(
+    api_module, monkeypatch
+):
+    monkeypatch.setattr(api_module, "fetch_recent_usage", lambda **kwargs: [])
+
+    response = TestClient(api_module.app).get(
+        "/usage",
+        headers={"Origin": "https://example.com"},
+    )
+
+    assert response.status_code == 200
+    assert "access-control-allow-origin" not in response.headers
+
+
+def test_config_endpoint_does_not_include_cors_for_localhost_origin(api_module):
+    response = TestClient(api_module.app).get(
+        "/config",
+        headers={"Origin": "http://localhost:3000"},
+    )
+
+    assert response.status_code == 200
+    assert "access-control-allow-origin" not in response.headers
+
+
+def test_config_endpoint_preflight_does_not_allow_localhost_origin(api_module):
+    response = TestClient(api_module.app).options(
+        "/config",
+        headers={
+            "Origin": "http://localhost:3000",
+            "Access-Control-Request-Method": "GET",
+        },
+    )
+
+    assert response.status_code == 405
+    assert "access-control-allow-origin" not in response.headers
+
+
 def test_usage_count_endpoint_passes_client_source(api_module, monkeypatch):
     captured = {}
 
