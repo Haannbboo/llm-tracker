@@ -524,6 +524,121 @@ async def test_streaming_forward_returns_upstream_error(proxy_module, monkeypatc
     )
 
 
+@pytest.mark.anyio
+async def test_streaming_forward_closes_client_on_send_error(proxy_module, monkeypatch):
+    """Verify that client.aclose() is called when client.send() raises."""
+    closed = False
+
+    class FakeRequest:
+        def __init__(self, method, url, headers, content):
+            self.method = method
+            self.url = url
+            self.headers = headers
+            self.content = content
+
+    class FakeAsyncClient:
+        def __init__(self, timeout):
+            self.timeout = timeout
+
+        def build_request(self, method, url, headers=None, content=None):
+            return FakeRequest(method, url, headers, content)
+
+        async def send(self, request, stream=False):
+            raise RuntimeError("connection refused")
+
+        async def aclose(self):
+            nonlocal closed
+            closed = True
+
+    async def receive():
+        return {
+            "type": "http.request",
+            "body": b'{"model":"test-model","stream":true}',
+            "more_body": False,
+        }
+
+    monkeypatch.setattr(proxy_module.httpx, "AsyncClient", FakeAsyncClient)
+    monkeypatch.setattr(proxy_module, "record_proxy_user_agent", lambda path, ua: None)
+
+    request = proxy_module.Request(
+        {
+            "type": "http",
+            "method": "POST",
+            "path": "/v1/chat/completions",
+            "headers": [(b"content-type", b"application/json")],
+        },
+        receive,
+    )
+
+    with pytest.raises(RuntimeError, match="connection refused"):
+        await proxy_module.forward(request, "/v1/chat/completions")
+
+    assert closed, "client.aclose() was not called on send error"
+
+
+@pytest.mark.anyio
+async def test_streaming_forward_closes_client_on_aread_error(
+    proxy_module, monkeypatch
+):
+    """Verify that client.aclose() is called when upstream.aread() raises on error status."""
+    closed = False
+
+    class FakeErrorStreamResponse:
+        status_code = 502
+
+        async def aiter_bytes(self):
+            yield b""
+
+        async def aread(self):
+            raise RuntimeError("upstream read failed")
+
+    class FakeRequest:
+        def __init__(self, method, url, headers, content):
+            self.method = method
+            self.url = url
+            self.headers = headers
+            self.content = content
+
+    class FakeAsyncClient:
+        def __init__(self, timeout):
+            self.timeout = timeout
+
+        def build_request(self, method, url, headers=None, content=None):
+            return FakeRequest(method, url, headers, content)
+
+        async def send(self, request, stream=False):
+            return FakeErrorStreamResponse()
+
+        async def aclose(self):
+            nonlocal closed
+            closed = True
+
+    async def receive():
+        return {
+            "type": "http.request",
+            "body": b'{"model":"test-model","stream":true}',
+            "more_body": False,
+        }
+
+    monkeypatch.setattr(proxy_module.httpx, "AsyncClient", FakeAsyncClient)
+    monkeypatch.setattr(proxy_module, "record_proxy_user_agent", lambda path, ua: None)
+
+    request = proxy_module.Request(
+        {
+            "type": "http",
+            "method": "POST",
+            "path": "/v1/chat/completions",
+            "headers": [(b"content-type", b"application/json")],
+        },
+        receive,
+    )
+
+    with pytest.raises(RuntimeError, match="upstream read failed"):
+        await proxy_module.forward(request, "/v1/chat/completions")
+
+    assert closed, "client.aclose() was not called on aread error"
+
+
 def test_resolve_provider_prioritizes_exact_matches(proxy_module, monkeypatch):
     """Verify that MODEL_MAP (explicit config) takes precedence over heuristic stripping."""
     # Setup mock config with a collision
