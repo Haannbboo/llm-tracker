@@ -126,7 +126,11 @@ def _migrate_ts_to_float(engine: Engine) -> bool:
 
     usage_cols = {c["name"]: c for c in sa_inspect(engine).get_columns("usage")}
     col_type = str(usage_cols["ts"]["type"])
-    if "FLOAT" in col_type.upper() or "REAL" in col_type.upper():
+    if (
+        "FLOAT" in col_type.upper()
+        or "REAL" in col_type.upper()
+        or "INT" in col_type.upper()
+    ):
         return False
 
     dialect = engine.dialect.name
@@ -181,6 +185,69 @@ def _migrate_ts_to_float(engine: Engine) -> bool:
     return True
 
 
+def _migrate_ts_to_int(engine: Engine) -> bool:
+    """Convert usage.ts, sessions.started, sessions.ended from REAL/FLOAT to INTEGER microseconds.
+
+    Returns True if migration was applied, False if already migrated.
+    """
+    from sqlalchemy import inspect as sa_inspect
+
+    usage_cols = {c["name"]: c for c in sa_inspect(engine).get_columns("usage")}
+    col_type = str(usage_cols["ts"]["type"])
+    if "INT" in col_type.upper():
+        return False
+
+    has_sessions = _table_exists(engine, "sessions")
+    dialect = engine.dialect.name
+
+    with engine.begin() as connection:
+        if dialect == "postgresql":
+            connection.execute(
+                text(
+                    "ALTER TABLE usage ALTER COLUMN ts TYPE BIGINT "
+                    "USING ROUND(ts * 1000000)::BIGINT"
+                )
+            )
+            if has_sessions:
+                connection.execute(
+                    text(
+                        "ALTER TABLE sessions ALTER COLUMN started TYPE BIGINT "
+                        "USING ROUND(started * 1000000)::BIGINT"
+                    )
+                )
+                connection.execute(
+                    text(
+                        "ALTER TABLE sessions ALTER COLUMN ended TYPE BIGINT "
+                        "USING ROUND(ended * 1000000)::BIGINT"
+                    )
+                )
+        elif dialect == "sqlite":
+            _sqlite_recreate_with_int_ts(connection, "usage", "ts")
+            if has_sessions:
+                _sqlite_recreate_with_int_ts(connection, "sessions", "started")
+                _sqlite_recreate_with_int_ts(connection, "sessions", "ended")
+
+            if has_sessions:
+                for idx_sql in [
+                    "CREATE INDEX IF NOT EXISTS ix_sessions_started_desc "
+                    "ON sessions (started DESC)",
+                    "CREATE INDEX IF NOT EXISTS ix_sessions_client_source_started_desc "
+                    "ON sessions (client_source, started DESC)",
+                ]:
+                    connection.execute(text(idx_sql))
+        else:
+            raise ValueError(f"Unsupported dialect for ts_to_int migration: {dialect}")
+
+        index_name = "ix_usage_ts"
+        existing_indexes = {
+            idx["name"] for idx in sa_inspect(engine).get_indexes("usage")
+        }
+        if index_name not in existing_indexes:
+            connection.execute(text(f"CREATE INDEX {index_name} ON usage (ts)"))
+
+    return True
+
+
 def _sqlite_recreate_with_float_ts(
     connection, table_name: str, column_name: str
 ) -> None:
@@ -217,6 +284,56 @@ def _sqlite_recreate_with_float_ts(
     pk_cols = [c[1] for c in columns if c[5]]
     if pk_cols:
         # Remove individual PK from column defs, add at end
+        new_col_defs_clean = []
+        for d in new_col_defs:
+            col_name = d.split()[0]
+            if col_name in pk_cols:
+                new_col_defs_clean.append(d.replace(" PRIMARY KEY", ""))
+            else:
+                new_col_defs_clean.append(d)
+        new_col_defs_clean.append(f"PRIMARY KEY ({', '.join(pk_cols)})")
+        new_col_defs = new_col_defs_clean
+
+    new_table = f"{table_name}_new"
+    cols_sql = ", ".join(new_col_defs)
+    select_sql = ", ".join(select_parts)
+
+    connection.execute(text(f"CREATE TABLE {new_table} ({cols_sql})"))
+    connection.execute(
+        text(f"INSERT INTO {new_table} SELECT {select_sql} FROM {table_name}")
+    )
+    connection.execute(text(f"DROP TABLE {table_name}"))
+    connection.execute(text(f"ALTER TABLE {new_table} RENAME TO {table_name}"))
+
+
+def _sqlite_recreate_with_int_ts(connection, table_name: str, column_name: str) -> None:
+    """Recreate a SQLite table with a REAL column converted to INTEGER microseconds."""
+    result = connection.execute(text(f"PRAGMA table_info({table_name})"))
+    columns = result.fetchall()
+
+    new_col_defs = []
+    select_parts = []
+    for col in columns:
+        col_name = col[1]
+        col_type = col[2]
+        not_null = col[3]
+        default_val = col[4]
+
+        if col_name == column_name:
+            new_type = "INTEGER NOT NULL" if not_null else "INTEGER"
+            new_col_defs.append(f"{col_name} {new_type}")
+            select_parts.append(f"CAST(ROUND({col_name} * 1000000) AS INTEGER)")
+        else:
+            default_clause = (
+                f" DEFAULT {default_val}" if default_val is not None else ""
+            )
+            new_col_defs.append(
+                f"{col_name} {col_type}{' NOT NULL' if not_null else ''}{default_clause}"
+            )
+            select_parts.append(col_name)
+
+    pk_cols = [c[1] for c in columns if c[5]]
+    if pk_cols:
         new_col_defs_clean = []
         for d in new_col_defs:
             col_name = d.split()[0]
@@ -629,5 +746,9 @@ def migrate_database(db_path: str | None = None) -> list[str]:
     if _table_exists(engine, "usage"):
         if _migrate_ts_to_float(engine):
             applied.append("usage.ts_to_float")
+
+    if _table_exists(engine, "usage"):
+        if _migrate_ts_to_int(engine):
+            applied.append("usage.ts_to_int")
 
     return applied

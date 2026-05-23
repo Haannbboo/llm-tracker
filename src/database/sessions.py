@@ -5,6 +5,7 @@ Extracted from database/__init__.py during Phase 5 refactoring.
 
 from __future__ import annotations
 
+import calendar
 import json
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
@@ -315,13 +316,13 @@ _MODEL_EFFECTIVENESS_GROUPS = {"model", "provider", "source"}
 _EVALUATED_OUTCOMES = ("solved", "partial", "failed", "stuck")
 
 
-def _compute_duration_s(started: float | str | None, ended: float | str | None) -> int:
-    """Compute duration in seconds from epoch floats (or legacy ISO strings)."""
+def _compute_duration_s(started: int | str | None, ended: int | str | None) -> int:
+    """Compute duration in seconds from epoch microseconds (or legacy ISO strings)."""
     if not started or not ended:
         return 0
     try:
         if isinstance(started, (int, float)) and isinstance(ended, (int, float)):
-            return max(0, int(ended - started))
+            return max(0, int((ended - started) // 1_000_000))
         fmt = "%Y-%m-%dT%H:%M:%S"
         start = datetime.strptime(str(started)[:19], fmt)
         end = datetime.strptime(str(ended)[:19], fmt)
@@ -330,16 +331,19 @@ def _compute_duration_s(started: float | str | None, ended: float | str | None) 
         return 0
 
 
-def _normalize_timestamp_filter(value: str) -> float:
-    """Convert an ISO timestamp string to epoch float for column comparison."""
+def _normalize_timestamp_filter(value: str) -> int:
+    """Convert an ISO timestamp string to epoch microseconds for column comparison."""
     try:
         normalized = f"{value[:-1]}+00:00" if value.endswith(("Z", "z")) else value
         parsed = datetime.fromisoformat(normalized)
     except ValueError:
-        return float(value)
+        return int(float(value) * 1_000_000)
     if parsed.tzinfo is not None:
         parsed = parsed.astimezone(timezone.utc)
-    return parsed.timestamp()
+    else:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    epoch_s = calendar.timegm(parsed.timetuple())
+    return epoch_s * 1_000_000 + parsed.microsecond
 
 
 def _session_filters(
@@ -626,8 +630,8 @@ def daily_session_effectiveness_report(
     day_start = _parse_report_date(date)
     next_day_start = day_start + timedelta(days=1)
     started_filter = and_(
-        SessionRecord.started >= day_start.timestamp(),
-        SessionRecord.started < next_day_start.timestamp(),
+        SessionRecord.started >= calendar.timegm(day_start.timetuple()) * 1_000_000,
+        SessionRecord.started < calendar.timegm(next_day_start.timetuple()) * 1_000_000,
     )
 
     evaluated_count_expr = _count_when(SessionRecord.outcome.in_(_EVALUATED_OUTCOMES))

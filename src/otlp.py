@@ -75,7 +75,7 @@ class _PromptLengthState:
     """Queued prompt-length values waiting for the matching usage event."""
 
     values: list[int] = field(default_factory=list)
-    ts: float = 0.0
+    ts: int = 0
 
 
 class PromptLengthTracker:
@@ -105,7 +105,7 @@ class PromptLengthTracker:
             return
 
         state = self._state.setdefault(key, _PromptLengthState())
-        state.ts = time.time()
+        state.ts = time.time_ns() // 1000
         state.values.append(int(prompt_length))
 
     def consume_for_usage_event(
@@ -138,9 +138,11 @@ class PromptLengthTracker:
 
     def evict_stale(self, ttl_seconds: int = 600) -> None:
         """Drop old correlation entries so prompt-only events cannot accumulate forever."""
-        now = time.time()
+        now = time.time_ns() // 1000
         stale_keys = [
-            key for key, state in self._state.items() if now - state.ts > ttl_seconds
+            key
+            for key, state in self._state.items()
+            if now - state.ts > ttl_seconds * 1_000_000
         ]
         for key in stale_keys:
             del self._state[key]
@@ -217,7 +219,7 @@ def _extract_gemini_fields(
 ) -> dict:
     """Extract normalized usage fields from a Gemini OTLP record."""
     time_ns = record.get("timeUnixNano", "0")
-    ts = int(time_ns) / 1e9
+    ts = int(time_ns) // 1000
 
     input_tokens = _attr(attrs, "input_token_count")
     visible_tokens = _attr(attrs, "output_token_count")
@@ -279,7 +281,7 @@ def _extract_claude_fields(
 ) -> dict:
     """Extract normalized usage fields from a Claude OTLP record."""
     time_ns = record.get("timeUnixNano", "0")
-    ts = int(time_ns) / 1e9
+    ts = int(time_ns) // 1000
 
     input_tokens = _attr(attrs, "input_tokens")
     output_tokens = _attr(attrs, "output_tokens")
@@ -335,7 +337,7 @@ def _extract_opencode_fields(
 ) -> dict:
     """Extract normalized usage fields from an OpenCode OTLP record."""
     time_ns = record.get("timeUnixNano", "0")
-    ts = int(time_ns) / 1e9
+    ts = int(time_ns) // 1000
 
     input_tokens = _attr(attrs, "input_token_count")
     output_tokens = _attr(attrs, "output_token_count")
@@ -410,7 +412,7 @@ def _handle_codex_state_event(attrs: list) -> bool:
         state_key = _state_key(conv_id)
         if state_key and duration is not None:
             if state_key not in codex_state:
-                codex_state[state_key] = {"ts": time.time()}
+                codex_state[state_key] = {"ts": time.time_ns() // 1000}
             codex_state[state_key]["duration_ms"] = int(duration)
         return True
 
@@ -419,7 +421,7 @@ def _handle_codex_state_event(attrs: list) -> bool:
         state_key = _state_key(conv_id)
         if state_key and duration is not None:
             if state_key not in codex_state:
-                codex_state[state_key] = {"ts": time.time()}
+                codex_state[state_key] = {"ts": time.time_ns() // 1000}
             codex_state[state_key]["ttft_ms"] = int(duration)
         return True
 
@@ -450,7 +452,7 @@ def _extract_codex_fields(
     if time_ns == "0":
         time_ns = record.get("observedTimeUnixNano", "0")
 
-    ts = int(time_ns) / 1e9
+    ts = int(time_ns) // 1000
 
     conv_id = _attr(attrs, "conversation.id")
     usage_session_id = str(conv_id) if conv_id is not None else None
@@ -583,8 +585,10 @@ async def health():
 @app.post("/v1/logs")
 async def receive_logs(request: Request):
     # Evict stale codex_state entries (older than 10 minutes)
-    now = time.time()
-    stale_keys = [k for k, v in codex_state.items() if now - v.get("ts", 0) > 600]
+    now = time.time_ns() // 1000
+    stale_keys = [
+        k for k, v in codex_state.items() if now - v.get("ts", 0) > 600_000_000
+    ]
     for k in stale_keys:
         del codex_state[k]
     PROMPT_LENGTH_TRACKER.evict_stale()

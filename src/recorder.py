@@ -16,7 +16,7 @@ from .database.usage import log_usage
 
 def record_usage(
     *,
-    ts: float | None = None,
+    ts: int | None = None,
     provider: str,
     model: str,
     client_source: str | None = None,
@@ -39,7 +39,7 @@ def record_usage(
     db_path: str | None = None,
 ) -> None:
     """Record a single LLM usage event."""
-    usage_ts = ts or time.time()
+    usage_ts = ts or time.time_ns() // 1000
     costs = calculate_costs(
         prompt_tokens=prompt_tokens,
         completion_tokens=completion_tokens,
