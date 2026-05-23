@@ -2,6 +2,16 @@ import time
 from typing import Any
 
 
+def secs_to_micros(secs: int | float) -> int:
+    """Convert epoch seconds to integer microseconds."""
+    return int(secs * 1_000_000)
+
+
+def micros_to_secs(micros: int) -> float:
+    """Convert integer microseconds to epoch seconds."""
+    return micros / 1_000_000
+
+
 def extract_usage(usage: dict[str, Any]) -> dict[str, int]:
     """Normalize usage fields across chat completions and responses API formats."""
     prompt_tokens = usage.get("prompt_tokens") or usage.get("input_tokens", 0)

@@ -22,6 +22,7 @@ from sqlalchemy.orm import Session
 
 from .models import BaseUrl, Usage, UsageDaily
 from .engine import get_engine
+from ..utils import micros_to_secs, secs_to_micros
 
 
 def _iso_to_micros(value: str) -> int:
@@ -35,7 +36,7 @@ def _iso_to_micros(value: str) -> int:
     else:
         dt = dt.replace(tzinfo=timezone.utc)
     epoch_s = calendar.timegm(dt.timetuple())
-    return epoch_s * 1_000_000 + dt.microsecond
+    return secs_to_micros(epoch_s) + dt.microsecond
 
 
 # === Price helpers ===
@@ -87,7 +88,7 @@ def log_usage(usage: Usage, db_path: str | None = None) -> None:
 
 def upsert_daily_aggregate(usage: Usage, db_path: str | None = None) -> None:
     """Incrementally update the daily aggregation table for a single usage row."""
-    date = datetime.fromtimestamp(usage.ts / 1_000_000, tz=timezone.utc).strftime(
+    date = datetime.fromtimestamp(micros_to_secs(usage.ts), tz=timezone.utc).strftime(
         "%Y-%m-%d"
     )
     client_source = usage.client_source or ""

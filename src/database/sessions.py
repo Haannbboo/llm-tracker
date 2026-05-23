@@ -14,6 +14,8 @@ from typing import Any
 from sqlalchemy import and_, case, func, or_, select, text
 from sqlalchemy.orm import Session
 
+from ..utils import secs_to_micros
+
 from .models import (
     SessionRecord,
     Usage,
@@ -337,13 +339,13 @@ def _normalize_timestamp_filter(value: str) -> int:
         normalized = f"{value[:-1]}+00:00" if value.endswith(("Z", "z")) else value
         parsed = datetime.fromisoformat(normalized)
     except ValueError:
-        return int(float(value) * 1_000_000)
+        return secs_to_micros(float(value))
     if parsed.tzinfo is not None:
         parsed = parsed.astimezone(timezone.utc)
     else:
         parsed = parsed.replace(tzinfo=timezone.utc)
     epoch_s = calendar.timegm(parsed.timetuple())
-    return epoch_s * 1_000_000 + parsed.microsecond
+    return secs_to_micros(epoch_s) + parsed.microsecond
 
 
 def _session_filters(
@@ -630,8 +632,9 @@ def daily_session_effectiveness_report(
     day_start = _parse_report_date(date)
     next_day_start = day_start + timedelta(days=1)
     started_filter = and_(
-        SessionRecord.started >= calendar.timegm(day_start.timetuple()) * 1_000_000,
-        SessionRecord.started < calendar.timegm(next_day_start.timetuple()) * 1_000_000,
+        SessionRecord.started >= secs_to_micros(calendar.timegm(day_start.timetuple())),
+        SessionRecord.started
+        < secs_to_micros(calendar.timegm(next_day_start.timetuple())),
     )
 
     evaluated_count_expr = _count_when(SessionRecord.outcome.in_(_EVALUATED_OUTCOMES))

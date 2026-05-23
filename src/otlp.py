@@ -8,6 +8,7 @@ from fastapi import FastAPI, Request
 from .database import init_db
 from .provider_parser import parse_provider_metadata
 from .recorder import record_usage
+from .utils import secs_to_micros
 
 GEMINI_EVENT = "gemini_cli.api_response"
 CLAUDE_EVENT = "claude_code.api_request"
@@ -142,7 +143,7 @@ class PromptLengthTracker:
         stale_keys = [
             key
             for key, state in self._state.items()
-            if now - state.ts > ttl_seconds * 1_000_000
+            if now - state.ts > secs_to_micros(ttl_seconds)
         ]
         for key in stale_keys:
             del self._state[key]
@@ -587,7 +588,7 @@ async def receive_logs(request: Request):
     # Evict stale codex_state entries (older than 10 minutes)
     now = time.time_ns() // 1000
     stale_keys = [
-        k for k, v in codex_state.items() if now - v.get("ts", 0) > 600_000_000
+        k for k, v in codex_state.items() if now - v.get("ts", 0) > secs_to_micros(600)
     ]
     for k in stale_keys:
         del codex_state[k]
