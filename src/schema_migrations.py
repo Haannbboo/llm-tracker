@@ -151,7 +151,7 @@ def _migrate_ts_to_float(engine: Engine) -> bool:
                     "USING EXTRACT(EPOCH FROM ended::timestamptz)::DOUBLE PRECISION"
                 )
             )
-        else:
+        elif dialect == "sqlite":
             # SQLite: recreate table (no ALTER COLUMN TYPE)
             _sqlite_recreate_with_float_ts(connection, "usage", "ts")
             _sqlite_recreate_with_float_ts(connection, "sessions", "started")
@@ -165,6 +165,10 @@ def _migrate_ts_to_float(engine: Engine) -> bool:
                 "ON sessions (client_source, started DESC)",
             ]:
                 connection.execute(text(idx_sql))
+        else:
+            raise ValueError(
+                f"Unsupported dialect for ts_to_float migration: {dialect}"
+            )
 
         # Add index on usage.ts if not present
         index_name = "ix_usage_ts"
@@ -192,7 +196,6 @@ def _sqlite_recreate_with_float_ts(
         col_type = col[2]
         not_null = col[3]
         default_val = col[4]
-        pk = col[5]
 
         if col_name == column_name:
             new_type = "REAL NOT NULL" if not_null else "REAL"

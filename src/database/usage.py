@@ -918,8 +918,6 @@ def _period_expression(granularity: str, tz_offset: str) -> Any:
         return func.strftime(fmt, func.datetime(Usage.ts, *modifiers))
 
     if dialect == "postgresql":
-        from sqlalchemy import types as sa_types
-
         pg_fmt = "YYYY-MM-DD HH24:00" if granularity == "hour" else "YYYY-MM-DD"
         ts_cast = func.to_timestamp(Usage.ts)
         parts: list[str] = []
