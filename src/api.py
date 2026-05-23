@@ -2,13 +2,14 @@ import asyncio
 import json
 import logging
 import os
+import re
 import time
 import tomllib
 import yaml
 import httpx
 from decimal import Decimal
 from pathlib import Path
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Query, Request, Response
 from fastapi.staticfiles import StaticFiles
 from config.app import (
     CONFIG,
@@ -57,6 +58,8 @@ from typing import Literal
 
 logger = logging.getLogger(__name__)
 EVALUATION_WORKER_SHUTDOWN_TIMEOUT_SECONDS = 5
+USAGE_QUERY_LIMIT_MAX = 1000
+LOCAL_CORS_ORIGIN_RE = re.compile(r"^https?://(localhost|127\.0\.0\.1)(:\d+)?$")
 
 
 class ConfigUpdate(BaseModel):
@@ -180,10 +183,53 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="llm-tracker-api", lifespan=lifespan)
 
 
+def _is_usage_read_path(path: str) -> bool:
+    return path == "/usage" or path.startswith("/usage/")
+
+
+def _add_usage_cors_headers(response: Response, origin: str) -> Response:
+    response.headers["Access-Control-Allow-Origin"] = origin
+    vary = response.headers.get("Vary")
+    if vary:
+        vary_tokens = [token.strip() for token in vary.split(",") if token.strip()]
+        if "Origin" not in vary_tokens:
+            vary_tokens.append("Origin")
+        response.headers["Vary"] = ", ".join(vary_tokens)
+    else:
+        response.headers["Vary"] = "Origin"
+    return response
+
+
+@app.middleware("http")
+async def usage_read_cors(request: Request, call_next):
+    origin = request.headers.get("origin")
+    allow_origin = origin is not None and LOCAL_CORS_ORIGIN_RE.fullmatch(origin)
+    if not allow_origin or not _is_usage_read_path(request.url.path):
+        return await call_next(request)
+
+    if request.method == "OPTIONS":
+        requested_method = request.headers.get("access-control-request-method", "")
+        if requested_method.upper() == "GET":
+            response = Response(status_code=204)
+            _add_usage_cors_headers(response, origin)
+            response.headers["Access-Control-Allow-Methods"] = "GET"
+            response.headers["Access-Control-Allow-Headers"] = request.headers.get(
+                "access-control-request-headers",
+                "",
+            )
+            return response
+        return await call_next(request)
+
+    response = await call_next(request)
+    if request.method == "GET":
+        _add_usage_cors_headers(response, origin)
+    return response
+
+
 @app.get("/usage")
 async def get_usage(
-    limit: int = 100,
-    offset: int = 0,
+    limit: int = Query(100, ge=0, le=USAGE_QUERY_LIMIT_MAX),
+    offset: int = Query(0, ge=0),
     provider: str | None = None,
     model: str | None = None,
     client_source: str | None = None,
