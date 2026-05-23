@@ -1,9 +1,11 @@
-import { useState, useEffect } from 'react'
+import { Fragment, useState, useEffect, type CSSProperties } from 'react'
 import { useApp } from '../contexts/AppContext'
 import { useDashboardData } from '../hooks/useDashboardData'
 import { useLogsData } from '../hooks/useLogsData'
+import { useRequestLogColumns, type RequestLogColumnId } from '../hooks/useRequestLogColumns'
 import { useSessionSelectorData } from '../hooks/useSessionSelectorData'
 import { ModelSelector } from '../ModelSelector'
+import { RequestLogColumnsControl } from '../components/RequestLogColumnsControl'
 import { SessionSelector } from '../components/SessionSelector'
 import { ClickToCopy } from '../components/CopyButton'
 import { t } from '../i18n/index.ts'
@@ -36,6 +38,13 @@ export function LogsPage({ initialSessionFilter, initialActiveFilter }: Props) {
   const effectiveActiveFilter = initialActiveFilter ?? storedFilters?.activeFilter ?? null
 
   const { showToast, configParsed, requestUsageRefresh } = useApp()
+  const {
+    columns,
+    visibleColumns,
+    visibleColumnIds: selectedColumnIds,
+    setVisibleColumnIds: setSelectedColumnIds,
+    resetColumns,
+  } = useRequestLogColumns()
 
   // Dashboard data for filters and shared state
   const {
@@ -65,6 +74,379 @@ export function LogsPage({ initialSessionFilter, initialActiveFilter }: Props) {
 
   // Sessions data for the session filter dropdown
   const { sessions } = useSessionSelectorData({ activeSource, dateRange, customSince, customUntil })
+
+  const isModelColumnVisible = visibleColumns.some((column) => column.id === 'model')
+
+  const getHeaderStyle = (columnId: RequestLogColumnId): CSSProperties => {
+    switch (columnId) {
+      case 'time':
+        return { width: '120px' }
+      case 'model':
+        return { width: modelColWidth, padding: '12px 8px', position: 'relative' }
+      case 'provider':
+        return { width: '120px', padding: '12px 8px' }
+      case 'source':
+        return { width: '110px', padding: '12px 8px' }
+      case 'session':
+        return { width: '120px', padding: '12px 8px' }
+      case 'input':
+        return { minWidth: '140px' }
+      case 'output':
+        return { minWidth: '120px' }
+      case 'cost':
+        return { minWidth: '100px' }
+      case 'latency':
+        return { padding: '12px 8px' }
+      case 'status':
+        return { width: '80px' }
+      default:
+        return {}
+    }
+  }
+
+  const renderHeaderContent = (columnId: RequestLogColumnId, label: string) => {
+    if (columnId === 'latency') {
+      return (
+        <div className="has-tooltip">
+          TTFT / Latency
+          <div className="tooltip-text">
+            <b>Claude Code:</b> {t('Claude Code: No TTFT')}<br/>
+            <b>Gemini CLI:</b> {t('Gemini CLI: Time to first chunk')}<br/>
+            <b>Codex:</b> {t('Codex: Actual TTFT')}<br/>
+            <b>Proxy:</b> {t('Proxy: Time to first chunk')}
+          </div>
+        </div>
+      )
+    }
+
+    return t(label)
+  }
+
+  const renderLoadingCell = (columnId: RequestLogColumnId) => {
+    switch (columnId) {
+      case 'time':
+        return <td><div className="skeleton" style={{ width: 90, height: 14 }} /></td>
+      case 'model':
+        return <td><div className="skeleton" style={{ width: 120, height: 24, borderRadius: 6 }} /></td>
+      case 'provider':
+        return <td><div className="skeleton" style={{ width: 70, height: 20, borderRadius: 4 }} /></td>
+      case 'source':
+        return <td><div className="skeleton" style={{ width: 60, height: 20, borderRadius: 4 }} /></td>
+      case 'session':
+        return <td><div className="skeleton" style={{ width: 80, height: 20, borderRadius: 999 }} /></td>
+      case 'input':
+        return <td><div className="skeleton" style={{ width: 80, height: 14 }} /></td>
+      case 'output':
+        return <td><div className="skeleton" style={{ width: 60, height: 14 }} /></td>
+      case 'cost':
+        return <td><div className="skeleton" style={{ width: 50, height: 14 }} /></td>
+      case 'latency':
+        return <td><div className="skeleton" style={{ width: 100, height: 20, borderRadius: 999 }} /></td>
+      case 'status':
+        return <td><div className="skeleton" style={{ width: 40, height: 20, borderRadius: 6 }} /></td>
+      default:
+        return <td />
+    }
+  }
+
+  const renderRequestCell = (row: (typeof usageRows)[number], columnId: RequestLogColumnId) => {
+    switch (columnId) {
+      case 'time':
+        return <td style={{ color: 'var(--text-secondary)' }}>{formatTime(row.ts)}</td>
+      case 'model':
+        return (
+          <td style={{ padding: '8px' }}>
+            <div style={{
+              padding: '4px 6px',
+              borderRadius: '6px',
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '4px',
+              fontSize: '11px',
+              backgroundColor: getModelBadgeBackgroundColor(row.model),
+              color: getModelTextColor(row.model),
+              maxWidth: modelColWidth - 10,
+              fontWeight: 600,
+              cursor: 'pointer'
+            }} title={row.model}>
+              {getModelIcon(row.model)}
+              <span style={{
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap'
+              }}>
+                {row.model}
+              </span>
+            </div>
+          </td>
+        )
+      case 'provider':
+        return (
+          <td style={{ padding: '8px' }}>
+            <div style={{
+              padding: '2px 8px',
+              borderRadius: '4px',
+              display: 'inline-flex',
+              fontSize: '10px',
+              backgroundColor: getProviderColor(row.provider, providerColors) + '22',
+              color: getProviderColor(row.provider, providerColors),
+              width: 'fit-content',
+              border: `1px solid ${getProviderColor(row.provider, providerColors)}44`,
+              fontWeight: 600
+            }}>
+              {row.provider}
+            </div>
+          </td>
+        )
+      case 'source':
+        return (
+          <td style={{ padding: '8px' }}>
+            <div style={{
+              padding: '2px 8px',
+              borderRadius: '4px',
+              display: 'inline-flex',
+              fontSize: '10px',
+              backgroundColor: 'var(--tab-toggle-bg)',
+              color: 'var(--text-secondary)',
+              width: 'fit-content',
+              border: '1px solid var(--border-color)',
+              fontWeight: 600
+            }}>
+              {row.client_source || '—'}
+            </div>
+          </td>
+        )
+      case 'session':
+        return (
+          <td className="request-log-session-cell">
+            {row.session_id ? (() => {
+              const sessionId = row.session_id
+              return (
+                <div className="request-log-session-actions">
+                  <button
+                    type="button"
+                    className="request-log-session-filter"
+                    title={sessionId}
+                    aria-label={`${t('Filter logs by session')}: ${sessionId}`}
+                    onClick={(e) => { e.stopPropagation(); setSessionFilter(sessionId); resetPage() }}
+                  >
+                    {shortSessionId(sessionId)}
+                  </button>
+                </div>
+              )
+            })() : (
+              <span className="request-log-session-empty">&mdash;</span>
+            )}
+          </td>
+        )
+      case 'input':
+        return (
+          <td style={{ verticalAlign: 'top' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+              <div style={{ color: 'var(--text-secondary)', fontWeight: 600 }}>
+                {formatNumber(row.prompt_tokens)}
+                <span style={{ fontSize: '10px', fontWeight: 400, marginLeft: '4px', color: 'var(--text-secondary)' }}>{t('tokens')}</span>
+                {value(row.prompt_length) > 0 && (
+                  <span style={{ fontSize: '10px', fontWeight: 400, marginLeft: '6px', color: 'var(--text-muted)' }}>
+                    {t('(Prompt:')} {formatNumber(row.prompt_length)}{t(' chars)')}
+                  </span>
+                )}
+              </div>
+              {value(row.cached_tokens) > 0 && (
+                <div style={{ fontSize: '9px', color: 'var(--color-green)', fontWeight: 700 }}>
+                  {t('Cache read')} {formatNumber(row.cached_tokens)} ({Math.round((value(row.cached_tokens) / (value(row.prompt_tokens) || 1)) * 100)}%)
+                </div>
+              )}
+            </div>
+            <div className="has-tooltip" style={{ width: '100%', borderBottom: 'none' }}>
+              {(() => {
+                const promptUncached = Math.max(0, value(row.prompt_tokens) - value(row.cached_tokens));
+                const total = value(row.total_tokens) || 1;
+                return (
+                  <>
+                    <div style={{
+                      width: '100%',
+                      height: '3px',
+                      background: 'var(--progress-bg)',
+                      borderRadius: '2px',
+                      marginTop: '4px',
+                      overflow: 'hidden',
+                      border: '1px solid var(--border-color)',
+                      display: 'flex'
+                    }}>
+                      <div style={{ height: '100%', background: 'var(--color-green)', width: `${(value(row.cached_tokens) / total) * 100}%` }} />
+                      <div style={{ height: '100%', background: 'var(--color-blue)', width: `${(promptUncached / total) * 100}%`, opacity: 0.7 }} />
+                      <div style={{ height: '100%', background: 'var(--color-purple)', width: `${(value(row.completion_tokens) / total) * 100}%` }} />
+                    </div>
+                    <div className="tooltip-text">
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', gap: '12px' }}>
+                          <span style={{ color: 'var(--color-green)' }}>&bull; {t('Cached')}:</span>
+                          <span style={{ fontWeight: 600 }}>{formatNumber(row.cached_tokens)}</span>
+                        </div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', gap: '12px' }}>
+                          <span style={{ color: 'var(--color-blue)' }}>&bull; {t('Input')}:</span>
+                          <span style={{ fontWeight: 600 }}>{formatNumber(promptUncached)}</span>
+                        </div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', gap: '12px' }}>
+                          <span style={{ color: 'var(--color-purple)' }}>&bull; {t('Output')}:</span>
+                          <span style={{ fontWeight: 600 }}>{formatNumber(row.completion_tokens)}</span>
+                        </div>
+                      </div>
+                    </div>
+                  </>
+                );
+              })()}
+            </div>
+          </td>
+        )
+      case 'output':
+        return (
+          <td style={{ fontWeight: 600, color: 'var(--color-blue)', verticalAlign: 'top' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+              <div>{formatNumber(row.completion_tokens)}</div>
+              {value(row.reasoning_tokens) > 0 && (
+                <div style={{ fontSize: '9px', color: 'var(--text-secondary)', fontWeight: 700 }}>
+                  {t('Reasoning')} {formatNumber(row.reasoning_tokens)} ({Math.round((value(row.reasoning_tokens) / (value(row.completion_tokens) || 1)) * 100)}%)
+                </div>
+              )}
+            </div>
+            {value(row.reasoning_tokens) > 0 && (
+              <div
+                style={{
+                  width: '100%',
+                  height: '3px',
+                  background: 'var(--progress-bg)',
+                  borderRadius: '2px',
+                  marginTop: '4px',
+                  overflow: 'hidden',
+                  border: '1px solid var(--border-color)',
+                  display: 'flex'
+                }}
+              >
+                {value(row.reasoning_tokens) > 0 && (
+                  <div
+                    title={`Reasoning: ${formatNumber(row.reasoning_tokens)} tokens`}
+                    style={{
+                      width: `${(value(row.reasoning_tokens) / (value(row.completion_tokens) || 1)) * 100}%`,
+                      height: '100%',
+                      background: '#64748b'
+                    }}
+                  />
+                )}
+              </div>
+            )}
+          </td>
+        )
+      case 'cost':
+        return (
+          <td style={{ verticalAlign: 'top' }}>
+            {(() => {
+              const total = value(row.total_cost_usd);
+              if (total === 0) return <div style={{ color: 'var(--color-green)', fontWeight: 500 }}>$0.00</div>;
+
+              const prompt = value(row.prompt_tokens);
+              const cached = value(row.cached_tokens);
+              const inputCost = value(row.input_cost_usd);
+              const outputCost = value(row.output_cost_usd);
+
+              const cacheRatio = prompt > 0 ? (cached / prompt) : 0;
+              const cacheCost = inputCost * cacheRatio;
+              const actualInputCost = inputCost - cacheCost;
+
+              const uncachedTokens = Math.max(0, prompt - cached);
+              const completionTokens = value(row.completion_tokens);
+
+              const modelConfig = configParsed?.providers?.[row.provider]?.models?.[row.model]?.cost || configParsed?.models?.[row.model]?.cost;
+
+              return (
+                <div className="has-tooltip" style={{ borderBottom: 'none' }}>
+                  <div style={{ color: 'var(--color-green)', fontWeight: 500, cursor: 'pointer' }}>
+                    {formatCost(total)}
+                  </div>
+                  <div className="tooltip-text" style={{ width: '200px', marginLeft: '-100px' }}>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+                        <span style={{ color: 'rgba(255, 255, 255, 0.6)' }}>{t('Input:')}</span>
+                        <div style={{ textAlign: 'right' }}>
+                          <div>{formatCost(actualInputCost)}</div>
+                          {modelConfig?.input !== undefined && (
+                            <div style={{ fontSize: '9px', color: 'rgba(255, 255, 255, 0.4)' }}>{formatNumber(uncachedTokens)} tokens x {formatRate(modelConfig.input)}</div>
+                          )}
+                        </div>
+                      </div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+                        <span style={{ color: 'rgba(255, 255, 255, 0.6)' }}>{t('Output:')}</span>
+                        <div style={{ textAlign: 'right' }}>
+                          <div>{formatCost(outputCost)}</div>
+                          {modelConfig?.output !== undefined && (
+                            <div style={{ fontSize: '9px', color: 'rgba(255, 255, 255, 0.4)' }}>{formatNumber(completionTokens)} tokens x {formatRate(modelConfig.output)}</div>
+                          )}
+                        </div>
+                      </div>
+                      {cacheCost > 0 && (
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+                          <span style={{ color: 'rgba(255, 255, 255, 0.6)' }}>{t('Cache:')}</span>
+                          <div style={{ textAlign: 'right' }}>
+                            <div style={{ color: 'var(--color-green)' }}>{formatCost(cacheCost)}</div>
+                            {modelConfig?.cacheRead !== undefined && (
+                              <div style={{ fontSize: '9px', color: 'rgba(255, 255, 255, 0.4)' }}>{formatNumber(cached)} tokens x {formatRate(modelConfig.cacheRead)}</div>
+                            )}
+                          </div>
+                        </div>
+                      )}
+                      <div style={{ marginTop: '4px', paddingTop: '4px', borderTop: '1px solid #334155', display: 'flex', justifyContent: 'space-between', color: 'white' }}>
+                        <span style={{ color: 'rgba(255, 255, 255, 0.6)' }}>{t('Total:')}</span>
+                        <span>{formatCost(total)}</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              );
+            })()}
+          </td>
+        )
+      case 'latency':
+        return (
+          <td style={{ padding: '8px' }}>
+            <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+              {value(row.ttft_ms) > 0 && (
+                <div style={{
+                  backgroundColor: 'var(--badge-success-bg)',
+                  color: 'var(--badge-success-text)',
+                  padding: '2px 12px',
+                  borderRadius: '999px',
+                  fontSize: '12px',
+                  whiteSpace: 'nowrap'
+                }} title={t('Time To First Token')}>
+                  {formatLatency(row.ttft_ms)}
+                </div>
+              )}
+              <div style={{
+                backgroundColor: 'var(--badge-error-bg)',
+                color: 'var(--badge-error-text)',
+                padding: '2px 12px',
+                borderRadius: '999px',
+                fontSize: '12px',
+                whiteSpace: 'nowrap'
+              }} title={t('Total Latency')}>
+                {formatLatency(row.latency_ms)}
+              </div>
+            </div>
+          </td>
+        )
+      case 'status':
+        return (
+          <td>
+            <span className={`badge ${value(row.status) >= 400 ? 'badge-error' : 'badge-success'}`}>
+              {row.status ?? '200'}
+            </span>
+          </td>
+        )
+      default:
+        return <td />
+    }
+  }
 
   return (
     <div className="logs-page">
@@ -140,6 +522,12 @@ export function LogsPage({ initialSessionFilter, initialActiveFilter }: Props) {
         )}
 
         <div style={{ marginLeft: 'auto', display: 'flex', gap: '8px', alignItems: 'center', alignSelf: 'flex-end' }}>
+           <RequestLogColumnsControl
+            columns={columns}
+            selectedColumnIds={selectedColumnIds}
+            setSelectedColumnIds={setSelectedColumnIds}
+            resetColumns={resetColumns}
+           />
            <button
             className="btn-ghost btn-refresh"
             onClick={requestUsageRefresh}
@@ -183,386 +571,103 @@ export function LogsPage({ initialSessionFilter, initialActiveFilter }: Props) {
 
       <div className="panel">
         <div className="panel-body" style={{ padding: 0 }}>
-          <table className="table">
+          <table className="table" data-request-log-column-count={visibleColumns.length}>
             <thead>
               <tr>
-                <th style={{ width: '120px' }}>{t('Time')}</th>
-                <th style={{ width: modelColWidth, padding: '12px 8px', position: 'relative' }}>
-                  {t('Model')}
-                  <div
-                    onMouseDown={handleResizeStart}
-                    style={{
-                      position: 'absolute',
-                      right: 0,
-                      top: 0,
-                      bottom: 0,
-                      width: '3px',
-                      cursor: 'col-resize',
-                      userSelect: 'none',
-                      backgroundColor: 'rgba(128,128,128,0.2)',
-                    }}
-                    onMouseEnter={(e) => e.currentTarget.style.backgroundColor = 'rgba(128,128,128,0.5)'}
-                    onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'rgba(128,128,128,0.2)'}
-                  />
-                </th>
-                <th style={{ width: '120px', padding: '12px 8px' }}>{t('Provider')}</th>
-                <th style={{ width: '110px', padding: '12px 8px' }}>{t('Source')}</th>
-                <th style={{ width: '120px', padding: '12px 8px' }}>{t('Session')}</th>
-                <th style={{ minWidth: '140px' }}>{t('Input (Prompt)')}</th>
-                <th style={{ minWidth: '120px' }}>{t('Output')}</th>
-                <th style={{ minWidth: '100px' }}>{t('Cost')}</th>
-                <th style={{ padding: '12px 8px' }}>
-                  <div className="has-tooltip">
-                    TTFT / Latency
-                    <div className="tooltip-text">
-                      <b>Claude Code:</b> {t('Claude Code: No TTFT')}<br/>
-                      <b>Gemini CLI:</b> {t('Gemini CLI: Time to first chunk')}<br/>
-                      <b>Codex:</b> {t('Codex: Actual TTFT')}<br/>
-                      <b>Proxy:</b> {t('Proxy: Time to first chunk')}
-                    </div>
-                  </div>
-                </th>
-                <th style={{ width: '80px' }}>{t('Status')}</th>
+                {visibleColumns.map((column) => (
+                  <th key={column.id} style={getHeaderStyle(column.id)}>
+                    {renderHeaderContent(column.id, column.label)}
+                    {column.id === 'model' && isModelColumnVisible && (
+                      <div
+                        onMouseDown={handleResizeStart}
+                        style={{
+                          position: 'absolute',
+                          right: 0,
+                          top: 0,
+                          bottom: 0,
+                          width: '3px',
+                          cursor: 'col-resize',
+                          userSelect: 'none',
+                          backgroundColor: 'rgba(128,128,128,0.2)',
+                        }}
+                        onMouseEnter={(e) => e.currentTarget.style.backgroundColor = 'rgba(128,128,128,0.5)'}
+                        onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'rgba(128,128,128,0.2)'}
+                      />
+                    )}
+                  </th>
+                ))}
               </tr>
             </thead>
             <tbody>
               {logsLoading ? (
                 Array.from({ length: 5 }, (_, i) => (
                   <tr key={`skeleton-${i}`}>
-                    <td><div className="skeleton" style={{ width: 90, height: 14 }} /></td>
-                    <td><div className="skeleton" style={{ width: 120, height: 24, borderRadius: 6 }} /></td>
-                    <td><div className="skeleton" style={{ width: 70, height: 20, borderRadius: 4 }} /></td>
-                    <td><div className="skeleton" style={{ width: 60, height: 20, borderRadius: 4 }} /></td>
-                    <td><div className="skeleton" style={{ width: 80, height: 20, borderRadius: 999 }} /></td>
-                    <td><div className="skeleton" style={{ width: 80, height: 14 }} /></td>
-                    <td><div className="skeleton" style={{ width: 60, height: 14 }} /></td>
-                    <td><div className="skeleton" style={{ width: 50, height: 14 }} /></td>
-                    <td><div className="skeleton" style={{ width: 100, height: 20, borderRadius: 999 }} /></td>
-                    <td><div className="skeleton" style={{ width: 40, height: 20, borderRadius: 6 }} /></td>
+                    {visibleColumns.map((column) => (
+                      <Fragment key={column.id}>{renderLoadingCell(column.id)}</Fragment>
+                    ))}
                   </tr>
                 ))
               ) : usageRows.map(row => (
-                <>
-                <tr
-                  key={row.id}
-                  className={`expandable-row${expandedRow === row.id ? ' expanded' : ''}`}
-                  onClick={() => setExpandedRow(expandedRow === row.id ? null : row.id)}
-                >
-                  <td style={{ color: 'var(--text-secondary)' }}>{formatTime(row.ts)}</td>
-                  <td style={{ padding: '8px' }}>
-                    <div style={{
-                      padding: '4px 6px',
-                      borderRadius: '6px',
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      gap: '4px',
-                      fontSize: '11px',
-                      backgroundColor: getModelBadgeBackgroundColor(row.model),
-                      color: getModelTextColor(row.model),
-                      maxWidth: modelColWidth - 10,
-                      fontWeight: 600,
-                      cursor: 'pointer'
-                    }} title={row.model}>
-                      {getModelIcon(row.model)}
-                      <span style={{
-                        overflow: 'hidden',
-                        textOverflow: 'ellipsis',
-                        whiteSpace: 'nowrap'
-                      }}>
-                        {row.model}
-                      </span>
-                    </div>
-                  </td>
-                  <td style={{ padding: '8px' }}>
-                    <div style={{
-                      padding: '2px 8px',
-                      borderRadius: '4px',
-                      display: 'inline-flex',
-                      fontSize: '10px',
-                      backgroundColor: getProviderColor(row.provider, providerColors) + '22',
-                      color: getProviderColor(row.provider, providerColors),
-                      width: 'fit-content',
-                      border: `1px solid ${getProviderColor(row.provider, providerColors)}44`,
-                      fontWeight: 600
-                    }}>
-                      {row.provider}
-                    </div>
-                  </td>
-                  <td style={{ padding: '8px' }}>
-                    <div style={{
-                      padding: '2px 8px',
-                      borderRadius: '4px',
-                      display: 'inline-flex',
-                      fontSize: '10px',
-                      backgroundColor: 'var(--tab-toggle-bg)',
-                      color: 'var(--text-secondary)',
-                      width: 'fit-content',
-                      border: '1px solid var(--border-color)',
-                      fontWeight: 600
-                    }}>
-                      {row.client_source || '—'}
-                    </div>
-                  </td>
-                  <td className="request-log-session-cell">
-                    {row.session_id ? (() => {
-                      const sessionId = row.session_id
-                      return (
-                        <div className="request-log-session-actions">
-                          <button
-                            type="button"
-                            className="request-log-session-filter"
-                            title={sessionId}
-                            aria-label={`${t('Filter logs by session')}: ${sessionId}`}
-                            onClick={(e) => { e.stopPropagation(); setSessionFilter(sessionId); resetPage() }}
-                          >
-                            {shortSessionId(sessionId)}
-                          </button>
-                        </div>
-                      )
-                    })() : (
-                      <span className="request-log-session-empty">&mdash;</span>
-                    )}
-                  </td>                          <td style={{ verticalAlign: 'top' }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
-                      <div style={{ color: 'var(--text-secondary)', fontWeight: 600 }}>
-                        {formatNumber(row.prompt_tokens)}
-                        <span style={{ fontSize: '10px', fontWeight: 400, marginLeft: '4px', color: 'var(--text-secondary)' }}>{t('tokens')}</span>
-                        {value(row.prompt_length) > 0 && (
-                          <span style={{ fontSize: '10px', fontWeight: 400, marginLeft: '6px', color: 'var(--text-muted)' }}>
-                            {t('(Prompt:')} {formatNumber(row.prompt_length)}{t(' chars)')}
-                          </span>
-                        )}
-                      </div>
-                      {value(row.cached_tokens) > 0 && (
-                        <div style={{ fontSize: '9px', color: 'var(--color-green)', fontWeight: 700 }}>
-                          {t('Cache read')} {formatNumber(row.cached_tokens)} ({Math.round((value(row.cached_tokens) / (value(row.prompt_tokens) || 1)) * 100)}%)
-                        </div>
-                      )}
-                    </div>
-                    <div className="has-tooltip" style={{ width: '100%', borderBottom: 'none' }}>
-                      {(() => {
-                        const promptUncached = Math.max(0, value(row.prompt_tokens) - value(row.cached_tokens));
-                        const total = value(row.total_tokens) || 1;
-                        return (
-                          <>
-                            <div style={{
-                              width: '100%',
-                              height: '3px',
-                              background: 'var(--progress-bg)',
-                              borderRadius: '2px',
-                              marginTop: '4px',
-                              overflow: 'hidden',
-                              border: '1px solid var(--border-color)',
-                              display: 'flex'
-                            }}>
-                              <div style={{ height: '100%', background: 'var(--color-green)', width: `${(value(row.cached_tokens) / total) * 100}%` }} />
-                              <div style={{ height: '100%', background: 'var(--color-blue)', width: `${(promptUncached / total) * 100}%`, opacity: 0.7 }} />
-                              <div style={{ height: '100%', background: 'var(--color-purple)', width: `${(value(row.completion_tokens) / total) * 100}%` }} />
-                            </div>
-                            <div className="tooltip-text">
-                              <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                                <div style={{ display: 'flex', justifyContent: 'space-between', gap: '12px' }}>
-                                  <span style={{ color: 'var(--color-green)' }}>&bull; {t('Cached')}:</span>
-                                  <span style={{ fontWeight: 600 }}>{formatNumber(row.cached_tokens)}</span>
-                                </div>
-                                <div style={{ display: 'flex', justifyContent: 'space-between', gap: '12px' }}>
-                                  <span style={{ color: 'var(--color-blue)' }}>&bull; {t('Input')}:</span>
-                                  <span style={{ fontWeight: 600 }}>{formatNumber(promptUncached)}</span>
-                                </div>
-                                <div style={{ display: 'flex', justifyContent: 'space-between', gap: '12px' }}>
-                                  <span style={{ color: 'var(--color-purple)' }}>&bull; {t('Output')}:</span>
-                                  <span style={{ fontWeight: 600 }}>{formatNumber(row.completion_tokens)}</span>
-                                </div>
-                              </div>
-                            </div>
-                          </>
-                        );
-                      })()}
-                    </div>
-                  </td>
-                  <td style={{ fontWeight: 600, color: 'var(--color-blue)', verticalAlign: 'top' }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
-                      <div>{formatNumber(row.completion_tokens)}</div>
-                      {value(row.reasoning_tokens) > 0 && (
-                        <div style={{ fontSize: '9px', color: 'var(--text-secondary)', fontWeight: 700 }}>
-                          {t('Reasoning')} {formatNumber(row.reasoning_tokens)} ({Math.round((value(row.reasoning_tokens) / (value(row.completion_tokens) || 1)) * 100)}%)
-                        </div>
-                      )}
-                    </div>
-                    {value(row.reasoning_tokens) > 0 && (
-                      <div
-                        style={{
-                          width: '100%',
-                          height: '3px',
-                          background: 'var(--progress-bg)',
-                          borderRadius: '2px',
-                          marginTop: '4px',
-                          overflow: 'hidden',
-                          border: '1px solid var(--border-color)',
-                          display: 'flex'
-                        }}
-                      >
-                        {value(row.reasoning_tokens) > 0 && (
-                          <div
-                            title={`Reasoning: ${formatNumber(row.reasoning_tokens)} tokens`}
-                            style={{
-                              width: `${(value(row.reasoning_tokens) / (value(row.completion_tokens) || 1)) * 100}%`,
-                              height: '100%',
-                              background: '#64748b'
-                            }}
-                          />
-                        )}
-                      </div>
-                    )}
-                  </td>
-                  <td style={{ verticalAlign: 'top' }}>
-                    {(() => {
-                      const total = value(row.total_cost_usd);
-                      if (total === 0) return <div style={{ color: 'var(--color-green)', fontWeight: 500 }}>$0.00</div>;
-
-                      const prompt = value(row.prompt_tokens);
-                      const cached = value(row.cached_tokens);
-                      const inputCost = value(row.input_cost_usd);
-                      const outputCost = value(row.output_cost_usd);
-
-                      const cacheRatio = prompt > 0 ? (cached / prompt) : 0;
-                      const cacheCost = inputCost * cacheRatio;
-                      const actualInputCost = inputCost - cacheCost;
-
-                      const uncachedTokens = Math.max(0, prompt - cached);
-                      const completionTokens = value(row.completion_tokens);
-
-                      const modelConfig = configParsed?.providers?.[row.provider]?.models?.[row.model]?.cost || configParsed?.models?.[row.model]?.cost;
-
-                      return (
-                        <div className="has-tooltip" style={{ borderBottom: 'none' }}>
-                          <div style={{ color: 'var(--color-green)', fontWeight: 500, cursor: 'pointer' }}>
-                            {formatCost(total)}
-                          </div>
-                          <div className="tooltip-text" style={{ width: '200px', marginLeft: '-100px' }}>
-                            <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
-                                <span style={{ color: 'rgba(255, 255, 255, 0.6)' }}>{t('Input:')}</span>
-                                <div style={{ textAlign: 'right' }}>
-                                  <div>{formatCost(actualInputCost)}</div>
-                                  {modelConfig?.input !== undefined && (
-                                    <div style={{ fontSize: '9px', color: 'rgba(255, 255, 255, 0.4)' }}>{formatNumber(uncachedTokens)} tokens x {formatRate(modelConfig.input)}</div>
-                                  )}
-                                </div>
-                              </div>
-                              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
-                                <span style={{ color: 'rgba(255, 255, 255, 0.6)' }}>{t('Output:')}</span>
-                                <div style={{ textAlign: 'right' }}>
-                                  <div>{formatCost(outputCost)}</div>
-                                  {modelConfig?.output !== undefined && (
-                                    <div style={{ fontSize: '9px', color: 'rgba(255, 255, 255, 0.4)' }}>{formatNumber(completionTokens)} tokens x {formatRate(modelConfig.output)}</div>
-                                  )}
-                                </div>
-                              </div>
-                              {cacheCost > 0 && (
-                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
-                                  <span style={{ color: 'rgba(255, 255, 255, 0.6)' }}>{t('Cache:')}</span>
-                                  <div style={{ textAlign: 'right' }}>
-                                    <div style={{ color: 'var(--color-green)' }}>{formatCost(cacheCost)}</div>
-                                    {modelConfig?.cacheRead !== undefined && (
-                                      <div style={{ fontSize: '9px', color: 'rgba(255, 255, 255, 0.4)' }}>{formatNumber(cached)} tokens x {formatRate(modelConfig.cacheRead)}</div>
-                                    )}
-                                  </div>
-                                </div>
-                              )}
-                              <div style={{ marginTop: '4px', paddingTop: '4px', borderTop: '1px solid #334155', display: 'flex', justifyContent: 'space-between', color: 'white' }}>
-                                <span style={{ color: 'rgba(255, 255, 255, 0.6)' }}>{t('Total:')}</span>
-                                <span>{formatCost(total)}</span>
-                              </div>
-                            </div>
-                          </div>
-                        </div>
-                      );
-                    })()}
-                  </td>
-                  <td style={{ padding: '8px' }}>
-                    <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
-                      {value(row.ttft_ms) > 0 && (
-                        <div style={{
-                          backgroundColor: 'var(--badge-success-bg)',
-                          color: 'var(--badge-success-text)',
-                          padding: '2px 12px',
-                          borderRadius: '999px',
-                          fontSize: '12px',
-                          whiteSpace: 'nowrap'
-                        }} title={t('Time To First Token')}>
-                          {formatLatency(row.ttft_ms)}
-                        </div>
-                      )}
-                      <div style={{
-                        backgroundColor: 'var(--badge-error-bg)',
-                        color: 'var(--badge-error-text)',
-                        padding: '2px 12px',
-                        borderRadius: '999px',
-                        fontSize: '12px',
-                        whiteSpace: 'nowrap'
-                      }} title={t('Total Latency')}>
-                        {formatLatency(row.latency_ms)}
-                      </div>
-                    </div>
-                  </td>
-                  <td>
-                    <span className={`badge ${value(row.status) >= 400 ? 'badge-error' : 'badge-success'}`}>
-                      {row.status ?? '200'}
-                    </span>
-                  </td>
-                </tr>
-                {expandedRow === row.id && (
-                  <tr className="expanded-row">
-                    <td colSpan={10}>
-                      <div className="expanded-detail">
-                        {row.session_id && (
-                          <div className="detail-group">
-                            <span className="detail-label">{t('Session ID')}</span>
-                            <span className="detail-value">
-                              <ClickToCopy text={row.session_id} onCopy={showToast}>
-                                {row.session_id}
-                              </ClickToCopy>
-                            </span>
-                          </div>
-                        )}
-                        <div className="detail-group">
-                          <span className="detail-label">{t('Request ID')}</span>
-                          <span className="detail-value">#{row.id}</span>
-                        </div>
-                        <div className="detail-group">
-                          <span className="detail-label">{t('Full Timestamp')}</span>
-                          <span className="detail-value">{row.ts}</span>
-                        </div>
-                        <div className="detail-group">
-                          <span className="detail-label">{t('Endpoint')}</span>
-                          <span className="detail-value">{row.endpoint}</span>
-                        </div>
-                        <div className="detail-group">
-                          <span className="detail-label">{t('Total Tokens')}</span>
-                          <span className="detail-value">{formatNumber(row.total_tokens ?? (value(row.prompt_tokens) + value(row.completion_tokens)))}</span>
-                        </div>
-                        {value(row.tool_tokens) > 0 && (
-                          <div className="detail-group">
-                            <span className="detail-label">{t('Tool Tokens')}</span>
-                            <span className="detail-value">{formatNumber(row.tool_tokens)}</span>
-                          </div>
-                        )}
-                        {value(row.prompt_length) > 0 && (
-                          <div className="detail-group">
-                            <span className="detail-label">{t('Prompt Length')}</span>
-                            <span className="detail-value">{formatNumber(row.prompt_length)} {t('chars')}</span>
-                          </div>
-                        )}
-                      </div>
-                    </td>
+                <Fragment key={row.id}>
+                  <tr
+                    className={`expandable-row${expandedRow === row.id ? ' expanded' : ''}`}
+                    onClick={() => setExpandedRow(expandedRow === row.id ? null : row.id)}
+                  >
+                    {visibleColumns.map((column) => (
+                      <Fragment key={column.id}>{renderRequestCell(row, column.id)}</Fragment>
+                    ))}
                   </tr>
-                )}
-                </>
+                  {expandedRow === row.id && (
+                    <tr className="expanded-row">
+                      <td colSpan={visibleColumns.length}>
+                        <div className="expanded-detail">
+                          {row.session_id && (
+                            <div className="detail-group">
+                              <span className="detail-label">{t('Session ID')}</span>
+                              <span className="detail-value">
+                                <ClickToCopy text={row.session_id} onCopy={showToast}>
+                                  {row.session_id}
+                                </ClickToCopy>
+                              </span>
+                            </div>
+                          )}
+                          <div className="detail-group">
+                            <span className="detail-label">{t('Request ID')}</span>
+                            <span className="detail-value">#{row.id}</span>
+                          </div>
+                          <div className="detail-group">
+                            <span className="detail-label">{t('Full Timestamp')}</span>
+                            <span className="detail-value">{row.ts}</span>
+                          </div>
+                          <div className="detail-group">
+                            <span className="detail-label">{t('Endpoint')}</span>
+                            <span className="detail-value">{row.endpoint}</span>
+                          </div>
+                          <div className="detail-group">
+                            <span className="detail-label">{t('Total Tokens')}</span>
+                            <span className="detail-value">{formatNumber(row.total_tokens ?? (value(row.prompt_tokens) + value(row.completion_tokens)))}</span>
+                          </div>
+                          {value(row.tool_tokens) > 0 && (
+                            <div className="detail-group">
+                              <span className="detail-label">{t('Tool Tokens')}</span>
+                              <span className="detail-value">{formatNumber(row.tool_tokens)}</span>
+                            </div>
+                          )}
+                          {value(row.prompt_length) > 0 && (
+                            <div className="detail-group">
+                              <span className="detail-label">{t('Prompt Length')}</span>
+                              <span className="detail-value">{formatNumber(row.prompt_length)} {t('chars')}</span>
+                            </div>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  )}
+                </Fragment>
               ))}
               {usageRows.length === 0 && !logsLoading && (
                 <tr>
-                  <td colSpan={10} style={{ textAlign: 'center', padding: '40px', color: 'var(--text-muted)' }}>
+                  <td colSpan={visibleColumns.length} style={{ textAlign: 'center', padding: '40px', color: 'var(--text-muted)' }}>
                     {t('No requests found for the selected filters.')}
                   </td>
                 </tr>

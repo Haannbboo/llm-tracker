@@ -119,6 +119,9 @@ export const zh: Record<string, string> = {
   'Last 24h': '最近 24 小时',
   'Filter logs by session': '按会话筛选日志',
   'Clear session filter': '清除会话筛选',
+  'Columns': '列',
+  'Reset columns': '重置列',
+  'All columns': '全部列',
 
   // Table headers
   'Time': '时间',

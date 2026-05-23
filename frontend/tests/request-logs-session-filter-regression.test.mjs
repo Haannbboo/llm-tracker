@@ -7,13 +7,15 @@ import { dirname, join } from 'node:path'
 const here = join(dirname(fileURLToPath(import.meta.url)), '..')
 const logsSource = readFileSync(join(here, 'src', 'pages', 'LogsPage.tsx'), 'utf-8')
 const useLogsSource = readFileSync(join(here, 'src', 'hooks', 'useLogsData.ts'), 'utf-8')
+const requestLogColumnsSource = readFileSync(join(here, 'src', 'hooks', 'useRequestLogColumns.ts'), 'utf-8')
 const cssSource = readFileSync(join(here, 'src', 'App.css'), 'utf-8')
 const zhSource = readFileSync(join(here, 'src', 'i18n', 'zh.ts'), 'utf-8')
 
 const logsSection = logsSource
 
 test('request logs render a compact session column without dumping full ids in rows', () => {
-  assert.match(logsSection, /<th[^>]*>\{t\('Session'\)\}<\/th>/)
+  assert.match(requestLogColumnsSource, /id: 'session'[\s\S]*label: 'Session'/)
+  assert.match(logsSection, /renderHeaderContent\(column\.id, column\.label\)/)
   assert.match(logsSection, /className="request-log-session-cell"/)
   assert.match(logsSection, /const sessionId = row\.session_id/)
   assert.match(logsSection, /shortSessionId\(sessionId\)/)
