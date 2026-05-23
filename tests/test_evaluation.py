@@ -427,8 +427,8 @@ def test_run_session_evaluation_job_sanitizes_agent_failure_errors(
             database_module.SessionRecord(
                 session_id="sess-secret",
                 client_source="codex",
-                started="2026-05-11T10:00:00+00:00",
-                ended="2026-05-11T10:30:00+00:00",
+                started=1778493600.0,
+                ended=1778495400.0,
                 updated_at="2026-05-11T10:30:00+00:00",
             )
         )
@@ -501,8 +501,8 @@ def test_start_session_evaluation_job_rejects_manual_evaluation(
             database_module.SessionRecord(
                 session_id="manual-protected",
                 client_source="codex",
-                started="2026-05-11T10:00:00+00:00",
-                ended="2026-05-11T10:30:00+00:00",
+                started=1778493600.0,
+                ended=1778495400.0,
                 updated_at="2026-05-11T10:30:00+00:00",
                 source="manual",
                 outcome="solved",
@@ -531,8 +531,8 @@ def test_start_session_evaluation_job_queues_without_running(
             database_module.SessionRecord(
                 session_id="sess-queued",
                 client_source="codex",
-                started="2026-05-11T10:00:00+00:00",
-                ended="2026-05-11T10:30:00+00:00",
+                started=1778493600.0,
+                ended=1778495400.0,
                 updated_at="2026-05-11T10:30:00+00:00",
             )
         )
@@ -561,8 +561,8 @@ def test_start_session_evaluation_job_promotes_queued_auto_job(
             database_module.SessionRecord(
                 session_id="sess-promote",
                 client_source="codex",
-                started="2026-05-11T10:00:00+00:00",
-                ended="2026-05-11T10:30:00+00:00",
+                started=1778493600.0,
+                ended=1778495400.0,
                 updated_at="2026-05-11T10:30:00+00:00",
             )
         )
@@ -605,8 +605,8 @@ def test_run_session_evaluation_job_saves_llm_evaluation_before_success(
             database_module.SessionRecord(
                 session_id="sess-llm",
                 client_source="codex",
-                started="2026-05-11T10:00:00+00:00",
-                ended="2026-05-11T10:30:00+00:00",
+                started=1778493600.0,
+                ended=1778495400.0,
                 updated_at="2026-05-11T10:30:00+00:00",
             )
         )
@@ -713,8 +713,8 @@ def test_run_session_evaluation_job_saves_opencode_evaluation(
             database_module.SessionRecord(
                 session_id="sess-opencode",
                 client_source="opencode",
-                started="2026-05-11T10:00:00+00:00",
-                ended="2026-05-11T10:30:00+00:00",
+                started=1778493600.0,
+                ended=1778495400.0,
                 updated_at="2026-05-11T10:30:00+00:00",
             )
         )
@@ -771,8 +771,8 @@ def test_summarize_session_with_llm_marks_evaluator_session_no_op(
             database_module.SessionRecord(
                 session_id="sess-evaluator",
                 client_source="codex",
-                started="2026-05-11T10:00:00+00:00",
-                ended="2026-05-11T10:30:00+00:00",
+                started=1778493600.0,
+                ended=1778495400.0,
                 updated_at="2026-05-11T10:30:00+00:00",
             )
         )
@@ -834,8 +834,8 @@ def test_execute_session_evaluation_job_does_not_overwrite_later_manual_evaluati
             database_module.SessionRecord(
                 session_id="sess-manual-race",
                 client_source="codex",
-                started="2026-05-11T10:00:00+00:00",
-                ended="2026-05-11T10:30:00+00:00",
+                started=1778493600.0,
+                ended=1778495400.0,
                 updated_at="2026-05-11T10:30:00+00:00",
             )
         )
@@ -910,8 +910,8 @@ def test_run_session_evaluation_job_returns_when_job_cannot_start(
             database_module.SessionRecord(
                 session_id="sess-stale-job",
                 client_source="codex",
-                started="2026-05-11T10:00:00+00:00",
-                ended="2026-05-11T10:30:00+00:00",
+                started=1778493600.0,
+                ended=1778495400.0,
                 updated_at="2026-05-11T10:30:00+00:00",
             )
         )
@@ -966,8 +966,8 @@ def test_run_session_evaluation_job_saves_unknown_when_transcript_missing(
             database_module.SessionRecord(
                 session_id="sess-missing",
                 client_source="codex",
-                started="2026-05-11T10:00:00+00:00",
-                ended="2026-05-11T10:30:00+00:00",
+                started=1778493600.0,
+                ended=1778495400.0,
                 updated_at="2026-05-11T10:30:00+00:00",
             )
         )
@@ -1022,8 +1022,8 @@ def test_run_session_evaluation_job_marks_claude_mem_sessions_no_op(
             database_module.SessionRecord(
                 session_id="sess-mem",
                 client_source="claude-code",
-                started="2026-05-11T10:00:00+00:00",
-                ended="2026-05-11T10:30:00+00:00",
+                started=1778493600.0,
+                ended=1778495400.0,
                 updated_at="2026-05-11T10:30:00+00:00",
             )
         )

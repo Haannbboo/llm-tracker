@@ -1,5 +1,5 @@
+import time
 from typing import Any
-from datetime import datetime, timezone
 
 
 def extract_usage(usage: dict[str, Any]) -> dict[str, int]:
@@ -45,7 +45,7 @@ def extract_stream_usage(message: dict[str, Any]) -> dict[str, int] | None:
 
 def build_usage_record(
     *,
-    ts: str | None = None,
+    ts: float | None = None,
     provider_name: str,
     model: str,
     client_source: str | None,
@@ -56,7 +56,7 @@ def build_usage_record(
     usage_fields: dict[str, int],
 ) -> dict[str, Any]:
     return {
-        "ts": ts or datetime.now(timezone.utc).isoformat(),
+        "ts": ts or time.time(),
         "provider": provider_name,
         "model": model,
         "client_source": client_source,

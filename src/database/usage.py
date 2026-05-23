@@ -5,6 +5,7 @@ Extracted from database/__init__.py during Phase 5 refactoring.
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any
 
@@ -71,7 +72,7 @@ def log_usage(usage: Usage, db_path: str | None = None) -> None:
 
 def upsert_daily_aggregate(usage: Usage, db_path: str | None = None) -> None:
     """Incrementally update the daily aggregation table for a single usage row."""
-    date = usage.ts[:10]
+    date = datetime.fromtimestamp(usage.ts, tz=timezone.utc).strftime("%Y-%m-%d")
     client_source = usage.client_source or ""
     is_success = usage.status is None or usage.status < 400
     latency = usage.latency_ms or 0
@@ -347,9 +348,9 @@ def _usage_filters(
     if session_id:
         filters.append(Usage.session_id == session_id)
     if since:
-        filters.append(Usage.ts >= since)
+        filters.append(Usage.ts >= datetime.fromisoformat(since).timestamp())
     if until:
-        filters.append(Usage.ts <= until)
+        filters.append(Usage.ts <= datetime.fromisoformat(until).timestamp())
     if only_failed:
         filters.append(Usage.status >= 400)
     if status_429:
@@ -615,9 +616,9 @@ def summarize_usage_window(
     if until_id is not None:
         filters.append(Usage.id <= until_id)
     if since:
-        filters.append(Usage.ts >= since)
+        filters.append(Usage.ts >= datetime.fromisoformat(since).timestamp())
     if until:
-        filters.append(Usage.ts <= until)
+        filters.append(Usage.ts <= datetime.fromisoformat(until).timestamp())
     if client_source:
         filters.append(Usage.client_source == client_source)
     if session_id:
@@ -899,24 +900,26 @@ def _parse_tz_offset(tz_offset: str) -> tuple[int, int]:
 
 
 def _period_expression(granularity: str, tz_offset: str) -> Any:
-    """Return a dialect-aware SQL expression that buckets Usage.ts into period strings."""
+    """Return a dialect-aware SQL expression that buckets Usage.ts into period strings.
+
+    Usage.ts is stored as epoch seconds (float). This function converts to a
+    datetime with timezone offset, then formats to the requested granularity.
+    """
     dialect = get_engine().dialect.name
     offset_hours, offset_minutes = _parse_tz_offset(tz_offset)
 
     if dialect == "sqlite":
         fmt = "%Y-%m-%d %H:00" if granularity == "hour" else "%Y-%m-%d"
-        modifiers: list[str] = []
+        modifiers: list[str] = ["unixepoch"]
         if offset_hours:
             modifiers.append(f"{offset_hours:+d} hours")
         if offset_minutes:
             modifiers.append(f"{offset_minutes:+d} minutes")
-        return func.strftime(fmt, Usage.ts, *modifiers)
+        return func.strftime(fmt, func.datetime(Usage.ts, *modifiers))
 
     if dialect == "postgresql":
-        from sqlalchemy import types as sa_types
-
         pg_fmt = "YYYY-MM-DD HH24:00" if granularity == "hour" else "YYYY-MM-DD"
-        ts_cast = func.cast(Usage.ts, sa_types.DateTime(timezone=True))
+        ts_cast = func.to_timestamp(Usage.ts)
         parts: list[str] = []
         if offset_hours:
             parts.append(f"{offset_hours} hours")
@@ -929,7 +932,7 @@ def _period_expression(granularity: str, tz_offset: str) -> Any:
 
     if dialect == "mysql":
         fmt = "%Y-%m-%d %H:00" if granularity == "hour" else "%Y-%m-%d"
-        ts_parsed = func.str_to_date(func.left(Usage.ts, 19), "%Y-%m-%dT%H:%i:%s")
+        ts_parsed = func.from_unixtime(Usage.ts)
         mysql_parts: list[str] = []
         if offset_hours:
             mysql_parts.append(f"INTERVAL {offset_hours} HOUR")

@@ -17,7 +17,7 @@ def test_record_usage_inserts_row(test_db):
     from src.recorder import record_usage
 
     record_usage(
-        ts="2026-05-19T00:00:00+00:00",
+        ts=1779148800.0,
         provider="openai",
         model="gpt-4",
         client_source="test",

@@ -127,4 +127,5 @@ def test_build_usage_record_includes_provider_metadata(utils_module):
     assert record["ttft_ms"] == 11
     assert record["status"] == 201
     assert record["total_tokens"] == 15
-    datetime.fromisoformat(record["ts"])
+    assert isinstance(record["ts"], float)
+    assert record["ts"] > 0

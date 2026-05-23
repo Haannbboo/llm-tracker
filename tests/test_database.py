@@ -1,5 +1,37 @@
 import pytest
 
+# Epoch constants for test timestamps
+TS_2026_04_17_00 = 1776384000.0  # 2026-04-17T00:00:00+00:00
+TS_2026_04_17_00_01 = 1776384060.0  # 2026-04-17T00:01:00+00:00
+TS_2026_04_17_00_02 = 1776384120.0  # 2026-04-17T00:02:00+00:00
+TS_2026_04_17_00_10 = 1776384600.0  # 2026-04-17T00:10:00+00:00
+TS_2026_04_17_00_20 = 1776385200.0  # 2026-04-17T00:20:00+00:00
+TS_2026_04_17_01 = 1776387600.0  # 2026-04-17T01:00:00+00:00
+TS_2026_04_17_10 = 1776420000.0  # 2026-04-17T10:00:00+00:00
+TS_2026_04_17_11 = 1776423600.0  # 2026-04-17T11:00:00+00:00
+TS_2026_04_18_00 = 1776470400.0  # 2026-04-18T00:00:00+00:00
+TS_2026_04_18_10 = 1776506400.0  # 2026-04-18T10:00:00+00:00
+TS_2026_04_20_10 = 1776679200.0  # 2026-04-20T10:00:00+00:00
+TS_2026_05_03_18 = 1777831200.0  # 2026-05-03T18:00:00+00:00
+TS_2026_05_05_03_30 = 1777951800.0  # 2026-05-05T03:30:00+00:00
+TS_2026_05_05_10 = 1777975200.0  # 2026-05-05T10:00:00+00:00
+TS_2026_05_05_10_01 = 1777975260.0  # 2026-05-05T10:01:00+00:00
+TS_2026_05_05_10_02 = 1777975320.0  # 2026-05-05T10:02:00+00:00
+TS_2026_05_05_10_15 = 1777976100.0  # 2026-05-05T10:15:00+00:00
+TS_2026_05_05_10_30 = 1777977000.0  # 2026-05-05T10:30:00+00:00
+TS_2026_05_05_10_45 = 1777977900.0  # 2026-05-05T10:45:00+00:00
+TS_2026_05_05_11_45 = 1777981500.0  # 2026-05-05T11:45:00+00:00
+TS_2026_05_07_10 = 1778148000.0  # 2026-05-07T10:00:00+00:00
+TS_2026_05_08_10 = 1778234400.0  # 2026-05-08T10:00:00+00:00
+TS_2026_05_09_10 = 1778320800.0  # 2026-05-09T10:00:00+00:00
+TS_2026_05_09_10_01 = 1778320860.0  # 2026-05-09T10:01:00+00:00
+TS_2026_05_09_10_02 = 1778320920.0  # 2026-05-09T10:02:00+00:00
+TS_2026_05_09_10_05 = 1778321100.0  # 2026-05-09T10:05:00+00:00
+TS_2026_05_09_11 = 1778324400.0  # 2026-05-09T11:00:00+00:00
+TS_2026_05_19_00 = 1779148800.0  # 2026-05-19T00:00:00+00:00
+TS_2024_01_01_00 = 1704067200.0  # 2024-01-01T00:00:00Z
+TS_2024_01_01_01 = 1704067201.0  # 2024-01-01T00:00:01Z
+
 
 def test_init_db_log_usage_and_fetch_rows(database_module, isolated_home):
     db_path = str(isolated_home / "usage.db")
@@ -14,7 +46,7 @@ def test_init_db_log_usage_and_fetch_rows(database_module, isolated_home):
 
     database_module.log_usage(
         database_module.Usage(
-            ts="2026-04-17T00:00:00+00:00",
+            ts=TS_2026_04_17_00,
             provider="test-provider",
             model="test-model",
             client_source="proxy-client",
@@ -43,7 +75,7 @@ def test_init_db_log_usage_and_fetch_rows(database_module, isolated_home):
     assert rows == [
         {
             "id": 1,
-            "ts": "2026-04-17T00:00:00+00:00",
+            "ts": TS_2026_04_17_00,
             "provider": "test-provider",
             "model": "test-model",
             "client_source": "proxy-client",
@@ -75,7 +107,7 @@ def test_fetch_recent_usage_returns_expected_row_shape(database_module, isolated
 
     database_module.log_usage(
         database_module.Usage(
-            ts="2026-04-17T00:00:00+00:00",
+            ts=TS_2026_04_17_00,
             provider="test-provider",
             model="test-model",
             client_source="proxy-client",
@@ -136,7 +168,7 @@ def test_usage_filters_includes_client_source(database_module, isolated_home):
     for source in ["claude-code", "codex"]:
         database_module.log_usage(
             database_module.Usage(
-                ts="2026-04-17T00:00:00+00:00",
+                ts=TS_2026_04_17_00,
                 provider="anthropic",
                 model="claude-sonnet-4-20250514",
                 client_source=source,
@@ -183,7 +215,7 @@ def test_count_usage_filters_by_client_source(database_module, isolated_home):
     for source in ["claude-code", "claude-code", "codex"]:
         database_module.log_usage(
             database_module.Usage(
-                ts="2026-04-17T00:00:00+00:00",
+                ts=TS_2026_04_17_00,
                 provider="anthropic",
                 model="claude-sonnet-4-20250514",
                 client_source=source,
@@ -219,8 +251,8 @@ def test_aggregate_usage_by_period_filters_by_client_source(
     database_module.init_db(db_path)
 
     for ts, source, tokens in [
-        ("2026-04-17T00:00:00+00:00", "claude-code", 150),
-        ("2026-04-18T00:00:00+00:00", "codex", 300),
+        (TS_2026_04_17_00, "claude-code", 150),
+        (TS_2026_04_18_00, "codex", 300),
     ]:
         database_module.log_usage(
             database_module.Usage(
@@ -264,7 +296,7 @@ def test_summarize_usage_daily_includes_avg_effective_price(
 
     database_module.log_usage(
         database_module.Usage(
-            ts="2026-04-17T00:00:00+00:00",
+            ts=TS_2026_04_17_00,
             provider="test-provider",
             model="test-model",
             client_source="proxy-client",
@@ -289,7 +321,7 @@ def test_summarize_usage_daily_includes_avg_effective_price(
     )
     database_module.log_usage(
         database_module.Usage(
-            ts="2026-04-17T01:00:00+00:00",
+            ts=TS_2026_04_17_01,
             provider="test-provider",
             model="test-model",
             client_source="proxy-client",
@@ -329,7 +361,7 @@ def test_summarize_usage_by_provider_includes_avg_effective_price(
     ]:
         database_module.log_usage(
             database_module.Usage(
-                ts="2026-04-17T00:00:00+00:00",
+                ts=TS_2026_04_17_00,
                 provider="test-provider",
                 model=model,
                 client_source="proxy-client",
@@ -510,7 +542,7 @@ def test_get_usage_high_watermark_returns_latest_id(database_module, isolated_ho
 
     database_module.log_usage(
         database_module.Usage(
-            ts="2026-04-17T00:00:00+00:00",
+            ts=TS_2026_04_17_00,
             provider="test-provider",
             model="test-model",
             client_source="codex",
@@ -583,7 +615,7 @@ def test_merge_usage_database_copies_usage_and_base_url_metadata(
     )
     database_module.log_usage(
         database_module.Usage(
-            ts="2026-05-03T18:00:00+00:00",
+            ts=TS_2026_05_03_18,
             provider="test-provider",
             model="test-model",
             client_source="codex",
@@ -637,7 +669,7 @@ def test_summarize_usage_window_groups_by_session_source_and_model(
 
     rows = [
         database_module.Usage(
-            ts="2026-04-17T00:00:00+00:00",
+            ts=TS_2026_04_17_00,
             provider="openai",
             model="gpt-test",
             client_source="codex",
@@ -660,7 +692,7 @@ def test_summarize_usage_window_groups_by_session_source_and_model(
             base_url_id=None,
         ),
         database_module.Usage(
-            ts="2026-04-17T00:01:00+00:00",
+            ts=TS_2026_04_17_00_01,
             provider="openai",
             model="gpt-test",
             client_source="codex",
@@ -683,7 +715,7 @@ def test_summarize_usage_window_groups_by_session_source_and_model(
             base_url_id=None,
         ),
         database_module.Usage(
-            ts="2026-04-17T00:02:00+00:00",
+            ts=TS_2026_04_17_00_02,
             provider="anthropic",
             model="claude-test",
             client_source="claude-code",
@@ -751,7 +783,7 @@ def test_summarize_usage_window_filters_after_and_until_ids(
     for index in range(3):
         database_module.log_usage(
             database_module.Usage(
-                ts=f"2026-04-17T00:0{index}:00+00:00",
+                ts=TS_2026_04_17_00 + index * 60,
                 provider="test-provider",
                 model="test-model",
                 client_source="codex",
@@ -795,7 +827,7 @@ def test_summarize_usage_window_filters_metadata_and_includes_rows(
 
     rows = [
         database_module.Usage(
-            ts="2026-04-17T00:00:00+00:00",
+            ts=TS_2026_04_17_00,
             provider="openai",
             model="gpt-test",
             client_source="codex",
@@ -818,7 +850,7 @@ def test_summarize_usage_window_filters_metadata_and_includes_rows(
             base_url_id=None,
         ),
         database_module.Usage(
-            ts="2026-04-18T00:00:00+00:00",
+            ts=TS_2026_04_18_00,
             provider="openai",
             model="gpt-other",
             client_source="codex",
@@ -887,7 +919,7 @@ def test_aggregate_usage_by_period_includes_cost_totals(database_module, isolate
 
     database_module.log_usage(
         database_module.Usage(
-            ts="2026-04-17T00:10:00+00:00",
+            ts=TS_2026_04_17_00_10,
             provider="test-provider",
             model="test-model",
             endpoint="/v1/responses",
@@ -910,7 +942,7 @@ def test_aggregate_usage_by_period_includes_cost_totals(database_module, isolate
     )
     database_module.log_usage(
         database_module.Usage(
-            ts="2026-04-17T00:20:00+00:00",
+            ts=TS_2026_04_17_00_20,
             provider="test-provider",
             model="test-model",
             endpoint="/v1/responses",
@@ -1140,7 +1172,7 @@ def test_upsert_daily_aggregate_inserts_and_updates(database_module, isolated_ho
     database_module.init_db(db_path)
 
     usage1 = database_module.Usage(
-        ts="2026-04-17T10:00:00+00:00",
+        ts=TS_2026_04_17_10,
         provider="anthropic",
         model="claude-sonnet-4-6",
         client_source="claude-code",
@@ -1176,7 +1208,7 @@ def test_upsert_daily_aggregate_inserts_and_updates(database_module, isolated_ho
 
     # Same date, provider, model, client_source -> upsert
     usage2 = database_module.Usage(
-        ts="2026-04-17T11:00:00+00:00",
+        ts=TS_2026_04_17_11,
         provider="anthropic",
         model="claude-sonnet-4-6",
         client_source="claude-code",
@@ -1219,7 +1251,7 @@ def test_upsert_daily_aggregate_handles_null_client_source(
     database_module.init_db(db_path)
 
     usage = database_module.Usage(
-        ts="2026-04-17T10:00:00+00:00",
+        ts=TS_2026_04_17_10,
         provider="openai",
         model="gpt-4",
         client_source=None,
@@ -1254,7 +1286,7 @@ def test_upsert_daily_aggregate_separates_by_date(database_module, isolated_home
     db_path = str(isolated_home / "usage.db")
     database_module.init_db(db_path)
 
-    for ts in ["2026-04-17T10:00:00+00:00", "2026-04-18T10:00:00+00:00"]:
+    for ts in [TS_2026_04_17_10, TS_2026_04_18_10]:
         usage = database_module.Usage(
             ts=ts,
             provider="anthropic",
@@ -1293,7 +1325,7 @@ def test_log_usage_automaticaly_upserts_daily_aggregate(database_module, isolate
 
     database_module.log_usage(
         database_module.Usage(
-            ts="2026-04-17T10:00:00+00:00",
+            ts=TS_2026_04_17_10,
             provider="anthropic",
             model="claude-sonnet-4-6",
             client_source="claude-code",
@@ -1337,7 +1369,7 @@ def test_summarize_usage_daily_reads_from_aggregate_table(
         (200, 100, 300, 500),
     ]:
         usage = database_module.Usage(
-            ts="2026-04-17T10:00:00+00:00",
+            ts=TS_2026_04_17_10,
             provider="anthropic",
             model="claude-sonnet-4-6",
             client_source="claude-code",
@@ -1380,8 +1412,8 @@ def test_summarize_usage_daily_filters_by_provider(database_module, isolated_hom
     database_module.init_db(db_path)
 
     for provider, model, ts in [
-        ("anthropic", "claude-sonnet-4-6", "2026-04-17T10:00:00+00:00"),
-        ("openai", "gpt-4", "2026-04-17T11:00:00+00:00"),
+        ("anthropic", "claude-sonnet-4-6", TS_2026_04_17_10),
+        ("openai", "gpt-4", TS_2026_04_17_11),
     ]:
         usage = database_module.Usage(
             ts=ts,
@@ -1417,7 +1449,7 @@ def test_summarize_usage_daily_filters_by_since(database_module, isolated_home):
     db_path = str(isolated_home / "usage.db")
     database_module.init_db(db_path)
 
-    for ts in ["2026-04-17T10:00:00+00:00", "2026-04-20T10:00:00+00:00"]:
+    for ts in [TS_2026_04_17_10, TS_2026_04_20_10]:
         usage = database_module.Usage(
             ts=ts,
             provider="anthropic",
@@ -1455,9 +1487,9 @@ def test_aggregate_daily_by_period_reads_from_aggregate_table(
     database_module.init_db(db_path)
 
     for ts, tokens in [
-        ("2026-04-17T10:00:00+00:00", 100),
-        ("2026-04-17T11:00:00+00:00", 200),
-        ("2026-04-18T10:00:00+00:00", 300),
+        (TS_2026_04_17_10, 100),
+        (TS_2026_04_17_11, 200),
+        (TS_2026_04_18_10, 300),
     ]:
         usage = database_module.Usage(
             ts=ts,
@@ -1502,7 +1534,7 @@ def test_aggregate_daily_by_period_filters_by_provider(database_module, isolated
 
     for provider, model in [("anthropic", "claude-sonnet-4-6"), ("openai", "gpt-4")]:
         usage = database_module.Usage(
-            ts="2026-04-17T10:00:00+00:00",
+            ts=TS_2026_04_17_10,
             provider=provider,
             model=model,
             client_source=None,
@@ -1723,8 +1755,8 @@ def test_aggregate_usage_by_period_hourly_with_tz_offset(
 
     # Two rows 1 hour apart in UTC
     for ts, tokens in [
-        ("2026-05-05T10:30:00+00:00", 100),
-        ("2026-05-05T11:45:00+00:00", 200),
+        (TS_2026_05_05_10_30, 100),
+        (TS_2026_05_05_11_45, 200),
     ]:
         database_module.log_usage(
             database_module.Usage(
@@ -1773,8 +1805,8 @@ def test_aggregate_usage_by_period_hourly_merges_same_hour(
 
     # Two rows in the same UTC hour
     for ts, prompt, completion in [
-        ("2026-05-05T10:15:00+00:00", 50, 50),
-        ("2026-05-05T10:45:00+00:00", 30, 70),
+        (TS_2026_05_05_10_15, 50, 50),
+        (TS_2026_05_05_10_45, 30, 70),
     ]:
         database_module.log_usage(
             database_module.Usage(
@@ -1819,9 +1851,9 @@ def test_aggregate_usage_by_period_hourly_counts_failures(
     database_module.init_db(db_path)
 
     for ts, status in [
-        ("2026-05-05T10:00:00+00:00", 200),
-        ("2026-05-05T10:01:00+00:00", 500),
-        ("2026-05-05T10:02:00+00:00", 200),
+        (TS_2026_05_05_10, 200),
+        (TS_2026_05_05_10_01, 500),
+        (TS_2026_05_05_10_02, 200),
     ]:
         database_module.log_usage(
             database_module.Usage(
@@ -1864,7 +1896,7 @@ def test_aggregate_usage_by_period_hourly_negative_tz_offset(
 
     database_module.log_usage(
         database_module.Usage(
-            ts="2026-05-05T03:30:00+00:00",
+            ts=TS_2026_05_05_03_30,
             provider="anthropic",
             model="claude-sonnet-4-20250514",
             client_source=None,
@@ -1898,6 +1930,42 @@ def test_aggregate_usage_by_period_hourly_negative_tz_offset(
     assert result[0]["total_tokens"] == 20
 
 
+def test_aggregate_usage_by_period_with_epoch_ts(database_module, isolated_home):
+    db_path = str(isolated_home / "usage.db")
+    database_module.init_db(db_path)
+
+    database_module.log_usage(
+        database_module.Usage(
+            ts=1776384000.0,  # 2026-04-17T00:00:00 UTC
+            provider="anthropic",
+            model="claude-sonnet-4-20250514",
+            client_source="claude-code",
+            session_id=None,
+            endpoint="/v1/messages",
+            prompt_tokens=100,
+            completion_tokens=50,
+            reasoning_tokens=None,
+            cached_tokens=None,
+            total_tokens=150,
+            latency_ms=100,
+            ttft_ms=None,
+            tool_tokens=None,
+            cache_creation_tokens=None,
+            input_cost_usd=0.002,
+            output_cost_usd=0.003,
+            total_cost_usd=0.005,
+            status=200,
+            base_url_id=None,
+        ),
+        db_path=db_path,
+    )
+
+    result = database_module.aggregate_usage_by_period(granularity="day")
+    assert len(result) == 1
+    assert result[0]["period"] == "2026-04-17"
+    assert result[0]["requests"] == 1
+
+
 def test_aggregate_daily_by_dimension_groups_by_model(database_module, isolated_home):
     """aggregate_daily_by_dimension returns daily data grouped by model."""
     db_path = str(isolated_home / "usage.db")
@@ -1905,9 +1973,9 @@ def test_aggregate_daily_by_dimension_groups_by_model(database_module, isolated_
 
     # Insert test data across 2 days for 2 models
     for ts, provider, model, tokens, cost in [
-        ("2026-05-07T10:00:00+00:00", "anthropic", "claude-sonnet-4-6", 1000, 0.01),
-        ("2026-05-08T10:00:00+00:00", "anthropic", "claude-sonnet-4-6", 2000, 0.02),
-        ("2026-05-07T10:00:00+00:00", "openai", "gpt-4o", 500, 0.005),
+        (TS_2026_05_07_10, "anthropic", "claude-sonnet-4-6", 1000, 0.01),
+        (TS_2026_05_08_10, "anthropic", "claude-sonnet-4-6", 2000, 0.02),
+        (TS_2026_05_07_10, "openai", "gpt-4o", 500, 0.005),
     ]:
         database_module.log_usage(
             database_module.Usage(
@@ -1961,8 +2029,8 @@ def test_aggregate_daily_by_dimension_groups_by_provider(
     database_module.init_db(db_path)
 
     for ts, provider, model, tokens, cost in [
-        ("2026-05-07T10:00:00+00:00", "anthropic", "claude-sonnet-4-6", 1000, 0.01),
-        ("2026-05-07T10:00:00+00:00", "openai", "gpt-4o", 500, 0.005),
+        (TS_2026_05_07_10, "anthropic", "claude-sonnet-4-6", 1000, 0.01),
+        (TS_2026_05_07_10, "openai", "gpt-4o", 500, 0.005),
     ]:
         database_module.log_usage(
             database_module.Usage(
@@ -2009,7 +2077,7 @@ def test_fetch_sessions_groups_by_session_id(database_module, isolated_home):
     for i in range(3):
         database_module.log_usage(
             database_module.Usage(
-                ts=f"2026-05-09T10:0{i}:00+00:00",
+                ts=TS_2026_05_09_10 + i * 60,
                 provider="anthropic",
                 model="claude-sonnet-4-6",
                 client_source="claude-code",
@@ -2030,7 +2098,7 @@ def test_fetch_sessions_groups_by_session_id(database_module, isolated_home):
 
     database_module.log_usage(
         database_module.Usage(
-            ts="2026-05-09T11:00:00+00:00",
+            ts=TS_2026_05_09_11,
             provider="openai",
             model="gpt-4o",
             client_source="codex",
@@ -2065,7 +2133,7 @@ def test_fetch_sessions_excludes_null_session_id(database_module, isolated_home)
 
     database_module.log_usage(
         database_module.Usage(
-            ts="2026-05-09T10:00:00+00:00",
+            ts=TS_2026_05_09_10,
             provider="anthropic",
             model="claude-sonnet-4-6",
             client_source="claude-code",
@@ -2092,7 +2160,7 @@ def test_fetch_sessions_filters_by_client_source(database_module, isolated_home)
     for source, sid in [("claude-code", "s1"), ("codex", "s2")]:
         database_module.log_usage(
             database_module.Usage(
-                ts="2026-05-09T10:00:00+00:00",
+                ts=TS_2026_05_09_10,
                 provider="anthropic",
                 model="claude-sonnet-4-6",
                 client_source=source,
@@ -2122,7 +2190,7 @@ def test_fetch_sessions_hide_noop_keeps_single_request_opencode(
     for source, sid in [("opencode", "oc-1"), ("codex", "codex-1")]:
         database_module.log_usage(
             database_module.Usage(
-                ts="2026-05-09T10:00:00+00:00",
+                ts=TS_2026_05_09_10,
                 provider="anthropic",
                 model="claude-sonnet-4-6",
                 client_source=source,
@@ -2158,7 +2226,7 @@ def test_fetch_sessions_accepts_browser_iso_boundary_filters(
 
     database_module.log_usage(
         database_module.Usage(
-            ts="2026-05-09T10:00:00+00:00",
+            ts=TS_2026_05_09_10,
             provider="anthropic",
             model="claude-sonnet-4-6",
             client_source="claude-code",
@@ -2190,7 +2258,7 @@ def test_fetch_sessions_sorting(database_module, isolated_home):
     for i, sid in enumerate(["s-low", "s-high"]):
         database_module.log_usage(
             database_module.Usage(
-                ts=f"2026-05-09T1{i}:00:00+00:00",
+                ts=TS_2026_05_09_10 + i * 3600,
                 provider="anthropic",
                 model="claude-sonnet-4-6",
                 client_source="claude-code",
@@ -2220,7 +2288,7 @@ def test_fetch_sessions_sort_by_duration(database_module, isolated_home):
     # Short session: single request
     database_module.log_usage(
         database_module.Usage(
-            ts="2026-05-09T10:00:00+00:00",
+            ts=TS_2026_05_09_10,
             provider="anthropic",
             model="claude-sonnet-4-6",
             client_source="claude-code",
@@ -2240,7 +2308,7 @@ def test_fetch_sessions_sort_by_duration(database_module, isolated_home):
     for i in range(2):
         database_module.log_usage(
             database_module.Usage(
-                ts=f"2026-05-09T10:0{i * 5}:00+00:00",
+                ts=TS_2026_05_09_10 + i * 300,
                 provider="anthropic",
                 model="claude-sonnet-4-6",
                 client_source="claude-code",
@@ -2270,7 +2338,7 @@ def test_fetch_sessions_pagination(database_module, isolated_home):
     for i in range(5):
         database_module.log_usage(
             database_module.Usage(
-                ts=f"2026-05-09T1{i}:00:00+00:00",
+                ts=TS_2026_05_09_10 + i * 3600,
                 provider="anthropic",
                 model="claude-sonnet-4-6",
                 client_source="claude-code",
@@ -2298,7 +2366,7 @@ def test_fetch_session_selector_rows_returns_only_dropdown_fields(
 
     database_module.log_usage(
         database_module.Usage(
-            ts="2026-05-09T10:00:00+00:00",
+            ts=TS_2026_05_09_10,
             provider="anthropic",
             model="claude-sonnet-4-6",
             client_source="claude-code",
@@ -2321,7 +2389,7 @@ def test_fetch_session_selector_rows_returns_only_dropdown_fields(
             "session_id": "sess-selector",
             "client_source": "claude-code",
             "request_count": 1,
-            "started": "2026-05-09T10:00:00+00:00",
+            "started": TS_2026_05_09_10,
         }
     ]
     assert "total_tokens" not in result[0]
@@ -2337,7 +2405,7 @@ def test_fetch_session_selector_rows_applies_filters_sort_and_pagination(
     for index, source in enumerate(["claude-code", "codex", "codex"]):
         database_module.log_usage(
             database_module.Usage(
-                ts=f"2026-05-09T1{index}:00:00+00:00",
+                ts=TS_2026_05_09_10 + index * 3600,
                 provider="anthropic",
                 model="claude-sonnet-4-6",
                 client_source=source,
@@ -2373,7 +2441,7 @@ def test_count_sessions(database_module, isolated_home):
     for sid in ["s1", "s2", "s1"]:
         database_module.log_usage(
             database_module.Usage(
-                ts="2026-05-09T10:00:00+00:00",
+                ts=TS_2026_05_09_10,
                 provider="anthropic",
                 model="claude-sonnet-4-6",
                 client_source="claude-code",
@@ -2399,7 +2467,7 @@ def test_count_usage_with_session_id(database_module, isolated_home):
     for sid in ["s1", "s1", "s2"]:
         database_module.log_usage(
             database_module.Usage(
-                ts="2026-05-09T10:00:00+00:00",
+                ts=TS_2026_05_09_10,
                 provider="anthropic",
                 model="claude-sonnet-4-6",
                 client_source="claude-code",
@@ -2428,7 +2496,7 @@ def test_count_usage_with_session_id_and_other_filters(database_module, isolated
     for provider in ["anthropic", "openai"]:
         database_module.log_usage(
             database_module.Usage(
-                ts="2026-05-09T10:00:00+00:00",
+                ts=TS_2026_05_09_10,
                 provider=provider,
                 model="test-model",
                 client_source="claude-code",
@@ -2472,7 +2540,7 @@ def test_summarize_sessions(database_module, isolated_home):
     for i in range(3):
         database_module.log_usage(
             database_module.Usage(
-                ts=f"2026-05-09T10:0{i}:00+00:00",
+                ts=TS_2026_05_09_10 + i * 60,
                 provider="anthropic",
                 model="claude-sonnet-4-6",
                 client_source="claude-code",
@@ -2491,7 +2559,7 @@ def test_summarize_sessions(database_module, isolated_home):
 
     database_module.log_usage(
         database_module.Usage(
-            ts="2026-05-09T11:00:00+00:00",
+            ts=TS_2026_05_09_11,
             provider="openai",
             model="gpt-4o",
             client_source="codex",
@@ -2523,7 +2591,7 @@ def test_fetch_recent_usage_only_failed_filter(database_module, isolated_home):
     with database_module.Session(database_module.get_engine(db_path)) as session:
         session.add(
             database_module.Usage(
-                ts="2024-01-01T00:00:00Z",
+                ts=TS_2024_01_01_00,
                 provider="p1",
                 model="m1",
                 endpoint="/chat",
@@ -2532,7 +2600,7 @@ def test_fetch_recent_usage_only_failed_filter(database_module, isolated_home):
         )
         session.add(
             database_module.Usage(
-                ts="2024-01-01T00:00:01Z",
+                ts=TS_2024_01_01_01,
                 provider="p1",
                 model="m1",
                 endpoint="/chat",
@@ -2561,7 +2629,7 @@ def test_usage_daily_status_breakdown(database_module, isolated_home):
     codes = [200, 429, 403, 500]
     for i, code in enumerate(codes):
         usage = database_module.Usage(
-            ts=f"2024-01-01T00:00:{i:02d}Z",
+            ts=TS_2024_01_01_00 + i,
             provider="p1",
             model="m1",
             endpoint="/chat",
@@ -2651,7 +2719,7 @@ def test_session_record_created_from_usage_ingestion(database_module, isolated_h
 
     database_module.log_usage(
         database_module.Usage(
-            ts="2026-05-09T10:00:00+00:00",
+            ts=TS_2026_05_09_10,
             provider="anthropic",
             model="claude-sonnet-4-6",
             client_source="claude-code",
@@ -2672,7 +2740,7 @@ def test_session_record_created_from_usage_ingestion(database_module, isolated_h
 
     database_module.log_usage(
         database_module.Usage(
-            ts="2026-05-09T10:05:00+00:00",
+            ts=TS_2026_05_09_10_05,
             provider="anthropic",
             model="claude-sonnet-4-6",
             client_source="claude-code",
@@ -2708,8 +2776,8 @@ def test_session_record_created_from_usage_ingestion(database_module, isolated_h
     assert session.prompt_tokens == 300
     assert session.completion_tokens == 150
     assert float(session.total_cost_usd) == pytest.approx(0.009, abs=1e-6)
-    assert session.started == "2026-05-09T10:00:00+00:00"
-    assert session.ended == "2026-05-09T10:05:00+00:00"
+    assert session.started == TS_2026_05_09_10
+    assert session.ended == TS_2026_05_09_10_05
     assert session.successful_requests == 2
     assert session.failed_requests == 0
 
@@ -2723,7 +2791,7 @@ def test_session_record_primary_model_picks_higher_cost(database_module, isolate
     # Model A: cost 0.003
     database_module.log_usage(
         database_module.Usage(
-            ts="2026-05-09T10:00:00+00:00",
+            ts=TS_2026_05_09_10,
             provider="anthropic",
             model="claude-sonnet-4-6",
             client_source="claude-code",
@@ -2745,7 +2813,7 @@ def test_session_record_primary_model_picks_higher_cost(database_module, isolate
     # Model B: cost 0.015 (higher)
     database_module.log_usage(
         database_module.Usage(
-            ts="2026-05-09T10:01:00+00:00",
+            ts=TS_2026_05_09_10_01,
             provider="openai",
             model="gpt-4o",
             client_source="claude-code",
@@ -2801,8 +2869,8 @@ def test_fetch_sessions_reads_from_persisted_table(database_module, isolated_hom
             database_module.SessionRecord(
                 session_id="manual-sess",
                 client_source="claude-code",
-                started="2026-05-09T08:00:00+00:00",
-                ended="2026-05-09T09:00:00+00:00",
+                started=1778313600.0,
+                ended=1778317200.0,
                 request_count=5,
                 successful_requests=5,
                 failed_requests=0,
@@ -2843,7 +2911,7 @@ def test_rebuild_sessions_from_usage(database_module, isolated_home):
     for i in range(3):
         database_module.log_usage(
             database_module.Usage(
-                ts=f"2026-05-09T10:0{i}:00+00:00",
+                ts=TS_2026_05_09_10 + i * 60,
                 provider="anthropic",
                 model="claude-sonnet-4-6",
                 client_source="claude-code",
@@ -2864,7 +2932,7 @@ def test_rebuild_sessions_from_usage(database_module, isolated_home):
 
     database_module.log_usage(
         database_module.Usage(
-            ts="2026-05-09T11:00:00+00:00",
+            ts=TS_2026_05_09_11,
             provider="openai",
             model="gpt-4o",
             client_source="codex",
@@ -2895,8 +2963,8 @@ def test_rebuild_sessions_from_usage(database_module, isolated_home):
     assert s1["request_count"] == 3
     assert s1["total_tokens"] == 450
     assert float(s1["total_cost_usd"]) == pytest.approx(0.009, abs=1e-6)
-    assert s1["started"] == "2026-05-09T10:00:00+00:00"
-    assert s1["ended"] == "2026-05-09T10:02:00+00:00"
+    assert s1["started"] == TS_2026_05_09_10
+    assert s1["ended"] == TS_2026_05_09_10_02
     assert s1["successful_requests"] == 3
 
     s2 = by_id["sess-2"]
@@ -2917,8 +2985,8 @@ def _insert_session_record(database_module, db_path, session_id="sess-1", **over
     values = {
         "session_id": session_id,
         "client_source": "test",
-        "started": "2026-05-11T10:00:00+00:00",
-        "ended": "2026-05-11T10:30:00+00:00",
+        "started": 1778493600.0,
+        "ended": 1778495400.0,
         "updated_at": "2026-05-11T10:30:00+00:00",
     }
     values.update(overrides)
@@ -3249,8 +3317,8 @@ def test_model_effectiveness_groups_by_source_and_filters(
         db_path,
         "sess-in-range",
         client_source="codex",
-        started="2026-05-11T10:00:00+00:00",
-        ended="2026-05-11T10:20:00+00:00",
+        started=1778493600.0,
+        ended=1778494800.0,
         total_cost_usd=0.25,
         outcome="solved",
         source="manual",
@@ -3260,8 +3328,8 @@ def test_model_effectiveness_groups_by_source_and_filters(
         db_path,
         "sess-other-source",
         client_source="claude-code",
-        started="2026-05-11T11:00:00+00:00",
-        ended="2026-05-11T11:30:00+00:00",
+        started=1778497200.0,
+        ended=1778499000.0,
         total_cost_usd=0.25,
         outcome="failed",
         source="manual",
@@ -3271,8 +3339,8 @@ def test_model_effectiveness_groups_by_source_and_filters(
         db_path,
         "sess-out-of-range",
         client_source="codex",
-        started="2026-05-10T10:00:00+00:00",
-        ended="2026-05-10T10:30:00+00:00",
+        started=1778407200.0,
+        ended=1778409000.0,
         total_cost_usd=0.25,
         outcome="failed",
         source="manual",
@@ -3349,8 +3417,8 @@ def test_daily_effectiveness_report_aggregates_day_metrics_in_sql(
         "sess-solved",
         client_source="codex",
         primary_model="gpt-5.5",
-        started="2026-05-10T09:00:00+00:00",
-        ended="2026-05-10T09:20:00+00:00",
+        started=1778403600.0,
+        ended=1778404800.0,
         total_cost_usd=0.40,
         outcome="solved",
         source="manual",
@@ -3361,8 +3429,8 @@ def test_daily_effectiveness_report_aggregates_day_metrics_in_sql(
         "sess-stuck",
         client_source="gemini",
         primary_model="gemini-flash",
-        started="2026-05-10T10:00:00+00:00",
-        ended="2026-05-10T10:20:00+00:00",
+        started=1778407200.0,
+        ended=1778408400.0,
         total_cost_usd=0.10,
         outcome="stuck",
         source="llm",
@@ -3373,8 +3441,8 @@ def test_daily_effectiveness_report_aggregates_day_metrics_in_sql(
         "sess-no-op",
         client_source="claude-code",
         primary_model="claude-sonnet",
-        started="2026-05-10T11:00:00+00:00",
-        ended="2026-05-10T11:05:00+00:00",
+        started=1778410800.0,
+        ended=1778411100.0,
         total_cost_usd=0.05,
         outcome="no_op",
         source="llm",
@@ -3385,8 +3453,8 @@ def test_daily_effectiveness_report_aggregates_day_metrics_in_sql(
         "sess-unknown",
         client_source="codex",
         primary_model="gpt-5.5",
-        started="2026-05-10T12:00:00+00:00",
-        ended="2026-05-10T12:05:00+00:00",
+        started=1778414400.0,
+        ended=1778414700.0,
         total_cost_usd=0.05,
     )
     _insert_session_record(
@@ -3395,8 +3463,8 @@ def test_daily_effectiveness_report_aggregates_day_metrics_in_sql(
         "sess-other-day",
         client_source="codex",
         primary_model="gpt-5.5",
-        started="2026-05-11T09:00:00+00:00",
-        ended="2026-05-11T09:20:00+00:00",
+        started=1778490000.0,
+        ended=1778491200.0,
         total_cost_usd=9.00,
         outcome="failed",
         source="manual",
@@ -3433,7 +3501,7 @@ def test_daily_effectiveness_report_returns_sql_model_source_groups(
         "sess-gpt-solved",
         client_source="codex",
         primary_model="gpt-5.5",
-        started="2026-05-10T09:00:00+00:00",
+        started=1778403600.0,
         total_cost_usd=0.20,
         outcome="solved",
         source="manual",
@@ -3444,7 +3512,7 @@ def test_daily_effectiveness_report_returns_sql_model_source_groups(
         "sess-gpt-failed",
         client_source="codex",
         primary_model="gpt-5.5",
-        started="2026-05-10T10:00:00+00:00",
+        started=1778407200.0,
         total_cost_usd=0.30,
         outcome="failed",
         source="manual",
@@ -3455,7 +3523,7 @@ def test_daily_effectiveness_report_returns_sql_model_source_groups(
         "sess-claude-solved",
         client_source="claude-code",
         primary_model="claude-sonnet",
-        started="2026-05-10T11:00:00+00:00",
+        started=1778410800.0,
         total_cost_usd=0.60,
         outcome="solved",
         source="manual",
@@ -4150,3 +4218,86 @@ def test_migrate_database_adds_evaluation_job_trigger(
     assert "trigger" in schema_migrations_module._table_column_names(
         engine, "evaluation_jobs"
     )
+
+
+def test_upsert_daily_aggregate_with_epoch_ts(database_module, isolated_home):
+    db_path = str(isolated_home / "usage.db")
+    database_module.init_db(db_path)
+
+    database_module.log_usage(
+        database_module.Usage(
+            ts=1776384000.0,  # 2026-04-17T00:00:00+00:00
+            provider="test-provider",
+            model="test-model",
+            client_source=None,
+            session_id=None,
+            endpoint="/v1/chat/completions",
+            prompt_tokens=10,
+            completion_tokens=5,
+            reasoning_tokens=None,
+            cached_tokens=None,
+            total_tokens=15,
+            latency_ms=100,
+            ttft_ms=None,
+            tool_tokens=None,
+            cache_creation_tokens=None,
+            input_cost_usd=0.002,
+            output_cost_usd=0.003,
+            total_cost_usd=0.005,
+            status=200,
+            base_url_id=None,
+        ),
+        db_path=db_path,
+    )
+
+    # Daily aggregate should have been created
+    from sqlalchemy.orm import Session
+    from src.database.models import UsageDaily
+    from src.database.engine import get_engine
+
+    with Session(get_engine(db_path)) as session:
+        daily = session.query(UsageDaily).first()
+        assert daily is not None
+        assert daily.date == "2026-04-17"
+
+
+def test_fetch_recent_usage_filters_by_since_until_with_epoch_ts(
+    database_module, isolated_home
+):
+    db_path = str(isolated_home / "usage.db")
+    database_module.init_db(db_path)
+
+    # Insert two rows at different times
+    for ts_val in [1776384000.0, 1776470400.0]:  # Apr 17, Apr 18
+        database_module.log_usage(
+            database_module.Usage(
+                ts=ts_val,
+                provider="test-provider",
+                model="test-model",
+                client_source=None,
+                session_id=None,
+                endpoint="/v1/chat/completions",
+                prompt_tokens=10,
+                completion_tokens=5,
+                reasoning_tokens=None,
+                cached_tokens=None,
+                total_tokens=15,
+                latency_ms=100,
+                ttft_ms=None,
+                tool_tokens=None,
+                cache_creation_tokens=None,
+                input_cost_usd=0.002,
+                output_cost_usd=0.003,
+                total_cost_usd=0.005,
+                status=200,
+                base_url_id=None,
+            ),
+            db_path=db_path,
+        )
+
+    # Filter with ISO string since/until (API boundary stays ISO)
+    since_iso = "2026-04-17T12:00:00+00:00"
+    rows = database_module.fetch_recent_usage(
+        limit=100, since=since_iso, db_path=db_path
+    )
+    assert len(rows) == 1  # only Apr 18 row

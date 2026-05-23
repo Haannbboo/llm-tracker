@@ -315,28 +315,31 @@ _MODEL_EFFECTIVENESS_GROUPS = {"model", "provider", "source"}
 _EVALUATED_OUTCOMES = ("solved", "partial", "failed", "stuck")
 
 
-def _compute_duration_s(started: str | None, ended: str | None) -> int:
-    """Compute duration in seconds from ISO timestamps."""
+def _compute_duration_s(started: float | str | None, ended: float | str | None) -> int:
+    """Compute duration in seconds from epoch floats (or legacy ISO strings)."""
     if not started or not ended:
         return 0
     try:
+        if isinstance(started, (int, float)) and isinstance(ended, (int, float)):
+            return max(0, int(ended - started))
         fmt = "%Y-%m-%dT%H:%M:%S"
-        start = datetime.strptime(started[:19], fmt)
-        end = datetime.strptime(ended[:19], fmt)
+        start = datetime.strptime(str(started)[:19], fmt)
+        end = datetime.strptime(str(ended)[:19], fmt)
         return max(0, int((end - start).total_seconds()))
     except (ValueError, TypeError):
         return 0
 
 
-def _normalize_timestamp_filter(value: str) -> str:
+def _normalize_timestamp_filter(value: str) -> float:
+    """Convert an ISO timestamp string to epoch float for column comparison."""
     try:
         normalized = f"{value[:-1]}+00:00" if value.endswith(("Z", "z")) else value
         parsed = datetime.fromisoformat(normalized)
     except ValueError:
-        return value
+        return float(value)
     if parsed.tzinfo is not None:
         parsed = parsed.astimezone(timezone.utc)
-    return parsed.isoformat()
+    return parsed.timestamp()
 
 
 def _session_filters(
@@ -623,8 +626,8 @@ def daily_session_effectiveness_report(
     day_start = _parse_report_date(date)
     next_day_start = day_start + timedelta(days=1)
     started_filter = and_(
-        SessionRecord.started >= day_start.isoformat(),
-        SessionRecord.started < next_day_start.isoformat(),
+        SessionRecord.started >= day_start.timestamp(),
+        SessionRecord.started < next_day_start.timestamp(),
     )
 
     evaluated_count_expr = _count_when(SessionRecord.outcome.in_(_EVALUATED_OUTCOMES))

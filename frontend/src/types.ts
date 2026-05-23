@@ -71,7 +71,7 @@ export type SourceUsage = {
 
 export type UsageRow = {
   id: number
-  ts: string
+  ts: number
   provider: string
   model: string
   client_source: string | null
@@ -158,8 +158,8 @@ export type SessionSummary = {
   session_id: string
   client_source: string
   model: string
-  started: string
-  ended: string
+  started: number
+  ended: number
   duration_s: number
   request_count: number
   total_tokens: number
@@ -183,7 +183,7 @@ export type SessionSelectorRow = {
   session_id: string
   client_source: string
   request_count: number
-  started: string
+  started: number
 }
 
 export type SessionsSummary = {
