@@ -344,7 +344,6 @@ def _extract_opencode_fields(
     reasoning = _attr(attrs, "reasoning_token_count")
     cached = _attr(attrs, "cached_token_count")
     cache_create = _attr(attrs, "cache_creation_token_count")
-    total = _attr(attrs, "total_token_count")
     prompt_length = _attr(attrs, "prompt_length")
     duration_ms = _attr(attrs, "duration_ms")
     ttft_ms = _attr(attrs, "ttft_ms")
@@ -366,12 +365,8 @@ def _extract_opencode_fields(
     completion_tokens = int(output_tokens) if output_tokens is not None else None
     cached_tokens = int(cached) if cached is not None else None
 
-    if total is not None:
-        total_tokens = int(total)
-    elif completion_tokens is not None:
-        total_tokens = prompt_tokens + completion_tokens + int(reasoning or 0)
-    else:
-        total_tokens = None
+    # OpenCode raw totals may exclude cache reads, so derive from normalized fields.
+    normalized_total = prompt_tokens + int(completion_tokens or 0) + int(reasoning or 0)
 
     return {
         "ts": ts,
@@ -389,7 +384,7 @@ def _extract_opencode_fields(
         else None,
         "reasoning_tokens": int(reasoning) if reasoning is not None else None,
         "tool_tokens": None,
-        "total_tokens": total_tokens,
+        "total_tokens": normalized_total,
         "latency_ms": int(duration_ms) if duration_ms is not None else None,
         "ttft_ms": int(ttft_ms) if ttft_ms is not None else None,
         "status": int(status) if status is not None else None,
