@@ -1,5 +1,4 @@
 import asyncio
-from decimal import Decimal
 
 from fastapi.testclient import TestClient
 
@@ -142,31 +141,7 @@ def test_usage_run_summary_route_parses_query_filters(api_module, monkeypatch):
     assert response.json()["summary"]["requests"] == 1
 
 
-def test_usage_ingest_route_persists_usage(api_module, monkeypatch):
-    captured = {}
-
-    def fake_log_usage(usage):
-        captured["usage"] = usage
-
-    def fake_resolve_base_url_id(**kwargs):
-        captured["base_url"] = kwargs
-        return 7
-
-    monkeypatch.setattr(api_module, "log_usage", fake_log_usage, raising=False)
-    monkeypatch.setattr(
-        api_module, "resolve_base_url_id", fake_resolve_base_url_id, raising=False
-    )
-    monkeypatch.setattr(
-        api_module,
-        "calculate_costs",
-        lambda **kwargs: {
-            "input_cost_usd": Decimal("0.01000000"),
-            "output_cost_usd": Decimal("0.02000000"),
-            "total_cost_usd": Decimal("0.03000000"),
-        },
-        raising=False,
-    )
-
+def test_usage_ingest_route_is_not_available(api_module):
     response = TestClient(api_module.app).post(
         "/usage",
         json={
@@ -188,26 +163,7 @@ def test_usage_ingest_route_persists_usage(api_module, monkeypatch):
         },
     )
 
-    assert response.status_code == 201
-    assert response.json() == {"status": "success"}
-    usage = captured["usage"]
-    assert usage.provider == "codesonline"
-    assert usage.model == "gpt-5.5"
-    assert usage.client_source == "codex"
-    assert usage.session_id == "codex-session-1"
-    assert usage.prompt_tokens == 21742
-    assert usage.completion_tokens == 6
-    assert usage.cached_tokens == 6528
-    assert usage.total_tokens == 21748
-    assert usage.input_cost_usd == Decimal("0.01000000")
-    assert usage.output_cost_usd == Decimal("0.02000000")
-    assert usage.total_cost_usd == Decimal("0.03000000")
-    assert usage.base_url_id == 7
-    assert captured["base_url"] == {
-        "base_url": "https://free.codesonline.dev",
-        "provider_name": "codesonline",
-        "source": "codex_config",
-    }
+    assert response.status_code == 405
 
 
 def test_get_config_returns_raw_content_for_malformed_yaml(
