@@ -9,7 +9,10 @@ const zhSource = readFileSync(join(root, 'src', 'i18n', 'zh.ts'), 'utf-8')
 const logsPageSource = readFileSync(join(root, 'src', 'pages', 'LogsPage.tsx'), 'utf-8')
 const requestLogColumnsSource = readFileSync(join(root, 'src', 'hooks', 'useRequestLogColumns.ts'), 'utf-8')
 const controlPath = join(root, 'src', 'components', 'RequestLogColumnsControl.tsx')
-const controlSource = existsSync(controlPath) ? readFileSync(controlPath, 'utf-8') : ''
+if (!existsSync(controlPath)) {
+  throw new Error(`Required file not found: ${controlPath}`)
+}
+const controlSource = readFileSync(controlPath, 'utf-8')
 
 test('request log column hook provides a persisted registry with validation', () => {
   assert.match(requestLogColumnsSource, /const REQUEST_LOG_COLUMN_KEY = 'llm-tracker-request-log-columns'/)
@@ -18,11 +21,11 @@ test('request log column hook provides a persisted registry with validation', ()
   assert.match(requestLogColumnsSource, /localStorage\.setItem\(REQUEST_LOG_COLUMN_KEY, JSON\.stringify/)
   assert.match(requestLogColumnsSource, /function normalizeRequestLogColumnIds\(/)
   assert.match(requestLogColumnsSource, /const requestedColumnIds = new Set\(/)
-  assert.match(requestLogColumnsSource, /REQUEST_LOG_COLUMNS\s*\n\s*\.filter\(\(\{ id \}\) => requestedColumnIds\.has\(id\)\)/)
+  assert.match(requestLogColumnsSource, /REQUEST_LOG_COLUMNS[\s\S]*?\.filter\(\(\{ id \}\) => requestedColumnIds\.has\(id\)\)/)
   assert.match(requestLogColumnsSource, /\.map\(\(\{ id \}\) => id\)/)
   assert.match(requestLogColumnsSource, /normalizedColumnIds\.length > 0 \? normalizedColumnIds : DEFAULT_REQUEST_LOG_COLUMNS/)
   assert.match(requestLogColumnsSource, /return normalizeRequestLogColumnIds\(parsed\)/)
-  assert.match(requestLogColumnsSource, /setRawVisibleColumnIds\(\(current\) =>\s*\n\s*normalizeRequestLogColumnIds\(/)
+  assert.match(requestLogColumnsSource, /setRawVisibleColumnIds\(\(current\) =>[\s\S]*?normalizeRequestLogColumnIds\(/)
   assert.doesNotMatch(requestLogColumnsSource, /from '\.\.\/i18n\/index\.ts'/)
   assert.doesNotMatch(requestLogColumnsSource, /\bt\(/)
 })

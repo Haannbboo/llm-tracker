@@ -14,7 +14,7 @@ const zhSource = readFileSync(join(here, 'src', 'i18n', 'zh.ts'), 'utf-8')
 const logsSection = logsSource
 
 test('request logs render a compact session column without dumping full ids in rows', () => {
-  assert.match(requestLogColumnsSource, /id: 'session'[\s\S]*label: 'Session'/)
+  assert.match(requestLogColumnsSource, /\{\s*id:\s*'session'[^}]*label:\s*'Session'/)
   assert.match(logsSection, /renderHeaderContent\(column\.id, column\.label\)/)
   assert.match(logsSection, /className="request-log-session-cell"/)
   assert.match(logsSection, /const sessionId = row\.session_id/)

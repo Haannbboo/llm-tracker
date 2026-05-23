@@ -108,12 +108,12 @@ export function LogsPage({ initialSessionFilter, initialActiveFilter }: Props) {
     if (columnId === 'latency') {
       return (
         <div className="has-tooltip">
-          TTFT / Latency
+          {t(label)}
           <div className="tooltip-text">
-            <b>Claude Code:</b> {t('Claude Code: No TTFT')}<br/>
-            <b>Gemini CLI:</b> {t('Gemini CLI: Time to first chunk')}<br/>
-            <b>Codex:</b> {t('Codex: Actual TTFT')}<br/>
-            <b>Proxy:</b> {t('Proxy: Time to first chunk')}
+            {t('Claude Code: No TTFT')}<br/>
+            {t('Gemini CLI: Time to first chunk')}<br/>
+            {t('Codex: Actual TTFT')}<br/>
+            {t('Proxy: Time to first chunk')}
           </div>
         </div>
       )

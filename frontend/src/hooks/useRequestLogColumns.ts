@@ -38,6 +38,7 @@ function normalizeRequestLogColumnIds(columnIds: unknown): RequestLogColumnId[] 
   if (!Array.isArray(columnIds)) return DEFAULT_REQUEST_LOG_COLUMNS
 
   const requestedColumnIds = new Set(columnIds)
+  // Iterate the registry so saved preferences cannot reorder table columns.
   const normalizedColumnIds = REQUEST_LOG_COLUMNS
     .filter(({ id }) => requestedColumnIds.has(id))
     .map(({ id }) => id)
