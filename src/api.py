@@ -6,7 +6,6 @@ import time
 import tomllib
 import yaml
 import httpx
-from decimal import Decimal
 from pathlib import Path
 from fastapi import FastAPI, HTTPException
 from fastapi.staticfiles import StaticFiles
@@ -17,11 +16,9 @@ from config.app import (
     _config_lock,
     refresh_runtime_config,
 )
-from .costs import calculate_costs
 from .database import (
     VALID_OUTCOMES,
     VALID_SOURCES,
-    Usage,
     aggregate_daily_by_dimension,
     aggregate_daily_by_period,
     aggregate_model_effectiveness,
@@ -38,9 +35,7 @@ from .database import (
     get_session_evaluation,
     get_usage_high_watermark,
     init_db,
-    log_usage,
     list_active_evaluation_jobs_with_progress,
-    resolve_base_url_id,
     summarize_sessions,
     summarize_usage_by_provider,
     summarize_usage_by_source,
@@ -93,32 +88,6 @@ class ConnectivityTest(BaseModel):
     format: str  # "openai", "anthropic", "responses"
     model: str | None = None
     message: str | None = None
-
-
-class UsageIngest(BaseModel):
-    ts: str
-    provider: str
-    model: str
-    client_source: str | None = None
-    session_id: str | None = None
-    endpoint: str
-    prompt_tokens: int | None = None
-    prompt_length: int = 0
-    completion_tokens: int | None = None
-    reasoning_tokens: int | None = None
-    cached_tokens: int | None = None
-    total_tokens: int | None = None
-    latency_ms: int | None = None
-    ttft_ms: int | None = None
-    tool_tokens: int | None = None
-    cache_creation_tokens: int | None = None
-    status: int | None = None
-    input_cost_usd: Decimal | None = None
-    output_cost_usd: Decimal | None = None
-    total_cost_usd: Decimal | None = None
-    base_url: str | None = None
-    base_url_provider_name: str | None = None
-    base_url_source: str | None = None
 
 
 class SessionEvaluationUpdate(BaseModel):
@@ -209,55 +178,6 @@ async def get_usage(
         status_4xx=status_4xx,
         status_5xx=status_5xx,
     )
-
-
-@app.post("/usage", status_code=201)
-async def ingest_usage(usage: UsageIngest):
-    calculated_costs = calculate_costs(
-        prompt_tokens=usage.prompt_tokens,
-        completion_tokens=usage.completion_tokens,
-        cached_tokens=usage.cached_tokens,
-        provider=usage.provider,
-        model=usage.model,
-    )
-    base_url_id = resolve_base_url_id(
-        base_url=usage.base_url,
-        provider_name=usage.base_url_provider_name or usage.provider,
-        source=usage.base_url_source,
-    )
-
-    log_usage(
-        Usage(
-            ts=usage.ts,
-            provider=usage.provider,
-            model=usage.model,
-            client_source=usage.client_source,
-            session_id=usage.session_id,
-            endpoint=usage.endpoint,
-            prompt_tokens=usage.prompt_tokens,
-            prompt_length=usage.prompt_length,
-            completion_tokens=usage.completion_tokens,
-            reasoning_tokens=usage.reasoning_tokens,
-            cached_tokens=usage.cached_tokens,
-            total_tokens=usage.total_tokens,
-            latency_ms=usage.latency_ms,
-            ttft_ms=usage.ttft_ms,
-            tool_tokens=usage.tool_tokens,
-            cache_creation_tokens=usage.cache_creation_tokens,
-            input_cost_usd=usage.input_cost_usd
-            if usage.input_cost_usd is not None
-            else calculated_costs["input_cost_usd"],
-            output_cost_usd=usage.output_cost_usd
-            if usage.output_cost_usd is not None
-            else calculated_costs["output_cost_usd"],
-            total_cost_usd=usage.total_cost_usd
-            if usage.total_cost_usd is not None
-            else calculated_costs["total_cost_usd"],
-            status=usage.status,
-            base_url_id=base_url_id,
-        )
-    )
-    return {"status": "success"}
 
 
 @app.get("/usage/count")
