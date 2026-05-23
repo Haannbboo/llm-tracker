@@ -360,11 +360,16 @@ def _extract_opencode_fields(
     )
 
     prompt_tokens = (int(input_tokens or 0)) + (int(cached or 0))
-    completion_tokens = int(output_tokens) if output_tokens is not None else None
     cached_tokens = int(cached) if cached is not None else None
 
-    # OpenCode raw totals may exclude cache reads, so derive from normalized fields.
-    normalized_total = prompt_tokens + int(completion_tokens or 0) + int(reasoning or 0)
+    # Include reasoning in completion_tokens so reasoning_tokens is a subset,
+    # matching the codex/gemini convention (OpenAI-style).
+    if output_tokens is not None:
+        completion_tokens = int(output_tokens) + int(reasoning or 0)
+    else:
+        completion_tokens = None
+
+    normalized_total = prompt_tokens + int(completion_tokens or 0)
 
     return {
         "ts": ts,
