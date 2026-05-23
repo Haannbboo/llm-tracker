@@ -376,6 +376,61 @@
   color: var(--text-muted);
 }
 
+.request-log-columns {
+  position: relative;
+}
+
+.request-log-columns-trigger {
+  padding: 8px 12px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.request-log-columns-menu {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 6px);
+  z-index: 10;
+  min-width: 220px;
+  max-width: min(260px, calc(100vw - 48px));
+  padding: 10px;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  background: var(--card-bg);
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.18);
+}
+
+.request-log-columns-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.request-log-columns-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-primary);
+  font-size: 12px;
+}
+
+.request-log-columns-option input {
+  flex: 0 0 auto;
+}
+
+.request-log-columns-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.request-log-columns-action {
+  flex: 1;
+  justify-content: center;
+  padding: 6px 8px;
+  font-size: 11px;
+}
+
 .session-outcome-badge {
   display: inline-flex;
   align-items: center;
