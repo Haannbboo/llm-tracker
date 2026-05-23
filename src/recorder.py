@@ -6,7 +6,7 @@ resolution, Usage construction, and persistence.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+import time
 
 from .costs import calculate_costs
 from .database.base_url import resolve_base_url_id
@@ -16,7 +16,7 @@ from .database.usage import log_usage
 
 def record_usage(
     *,
-    ts: str | None = None,
+    ts: float | None = None,
     provider: str,
     model: str,
     client_source: str | None = None,
@@ -39,7 +39,7 @@ def record_usage(
     db_path: str | None = None,
 ) -> None:
     """Record a single LLM usage event."""
-    usage_ts = ts or datetime.now(timezone.utc).isoformat()
+    usage_ts = ts or time.time()
     costs = calculate_costs(
         prompt_tokens=prompt_tokens,
         completion_tokens=completion_tokens,

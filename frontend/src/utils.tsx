@@ -26,8 +26,9 @@ export function value(input: number | null | undefined) {
   return input ?? 0
 }
 
-export function timeAgo(iso: string): string {
-  const seconds = Math.floor((Date.now() - new Date(iso).getTime()) / 1000)
+export function timeAgo(input: string | number): string {
+  const date = typeof input === 'number' ? new Date(input * 1000) : new Date(input)
+  const seconds = Math.floor((Date.now() - date.getTime()) / 1000)
   if (seconds < 60) return 'just now'
   const minutes = Math.floor(seconds / 60)
   if (minutes < 60) return `${minutes}m ago`
@@ -88,9 +89,9 @@ export function formatThroughput(val: number | null | undefined): string {
   return `${val.toFixed(1)} t/s`
 }
 
-export function formatTime(input: string) {
-  const date = new Date(input)
-  if (Number.isNaN(date.valueOf())) return input
+export function formatTime(input: string | number) {
+  const date = typeof input === 'number' ? new Date(input * 1000) : new Date(input)
+  if (Number.isNaN(date.valueOf())) return String(input)
   return new Intl.DateTimeFormat(undefined, {
     month: 'short',
     day: 'numeric',

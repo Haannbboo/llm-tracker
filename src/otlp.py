@@ -3,8 +3,6 @@ import os
 import time
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
-
 from fastapi import FastAPI, Request
 
 from .database import init_db
@@ -219,7 +217,7 @@ def _extract_gemini_fields(
 ) -> dict:
     """Extract normalized usage fields from a Gemini OTLP record."""
     time_ns = record.get("timeUnixNano", "0")
-    ts = datetime.fromtimestamp(int(time_ns) / 1e9, tz=timezone.utc).isoformat()
+    ts = int(time_ns) / 1e9
 
     input_tokens = _attr(attrs, "input_token_count")
     visible_tokens = _attr(attrs, "output_token_count")
@@ -281,7 +279,7 @@ def _extract_claude_fields(
 ) -> dict:
     """Extract normalized usage fields from a Claude OTLP record."""
     time_ns = record.get("timeUnixNano", "0")
-    ts = datetime.fromtimestamp(int(time_ns) / 1e9, tz=timezone.utc).isoformat()
+    ts = int(time_ns) / 1e9
 
     input_tokens = _attr(attrs, "input_tokens")
     output_tokens = _attr(attrs, "output_tokens")
@@ -337,7 +335,7 @@ def _extract_opencode_fields(
 ) -> dict:
     """Extract normalized usage fields from an OpenCode OTLP record."""
     time_ns = record.get("timeUnixNano", "0")
-    ts = datetime.fromtimestamp(int(time_ns) / 1e9, tz=timezone.utc).isoformat()
+    ts = int(time_ns) / 1e9
 
     input_tokens = _attr(attrs, "input_token_count")
     output_tokens = _attr(attrs, "output_token_count")
@@ -452,7 +450,7 @@ def _extract_codex_fields(
     if time_ns == "0":
         time_ns = record.get("observedTimeUnixNano", "0")
 
-    ts = datetime.fromtimestamp(int(time_ns) / 1e9, tz=timezone.utc).isoformat()
+    ts = int(time_ns) / 1e9
 
     conv_id = _attr(attrs, "conversation.id")
     usage_session_id = str(conv_id) if conv_id is not None else None

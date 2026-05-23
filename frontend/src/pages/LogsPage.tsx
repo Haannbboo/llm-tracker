@@ -637,7 +637,7 @@ export function LogsPage({ initialSessionFilter, initialActiveFilter }: Props) {
                           </div>
                           <div className="detail-group">
                             <span className="detail-label">{t('Full Timestamp')}</span>
-                            <span className="detail-value">{row.ts}</span>
+                            <span className="detail-value">{formatTime(row.ts)}</span>
                           </div>
                           <div className="detail-group">
                             <span className="detail-label">{t('Endpoint')}</span>

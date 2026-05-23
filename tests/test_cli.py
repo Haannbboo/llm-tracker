@@ -95,8 +95,8 @@ def test_summary_command_evaluates_and_updates_session_by_default(
             database_module.SessionRecord(
                 session_id="sess-summary",
                 client_source="codex",
-                started="2026-05-14T10:00:00+00:00",
-                ended="2026-05-14T10:30:00+00:00",
+                started=1778752800.0,
+                ended=1778754600.0,
                 updated_at="2026-05-14T10:30:00+00:00",
             )
         )
@@ -194,8 +194,8 @@ def test_summary_command_no_update_prints_without_persisting(
             database_module.SessionRecord(
                 session_id="sess-preview",
                 client_source="codex",
-                started="2026-05-14T10:00:00+00:00",
-                ended="2026-05-14T10:30:00+00:00",
+                started=1778752800.0,
+                ended=1778754600.0,
                 updated_at="2026-05-14T10:30:00+00:00",
             )
         )
@@ -351,7 +351,7 @@ def test_run_with_isolated_tracking_summarizes_and_merges_run_db(
         run_db_url = run_db_urls[0]
         database_module.log_usage(
             database_module.Usage(
-                ts="2026-05-03T18:00:00+00:00",
+                ts=1777831200.0,
                 provider="test-provider",
                 model="test-model",
                 client_source="claude-code",
@@ -456,7 +456,7 @@ def test_isolated_tracking_merges_usage_when_child_exits_nonzero(
     def fake_run(command, env=None):
         database_module.log_usage(
             database_module.Usage(
-                ts="2026-05-03T18:01:00+00:00",
+                ts=1777831260.0,
                 provider="test-provider",
                 model="test-model",
                 client_source="claude-code",
@@ -516,7 +516,7 @@ def test_isolated_tracking_merges_usage_written_during_service_shutdown(
     def fake_stop_temp_service(service):
         database_module.log_usage(
             database_module.Usage(
-                ts="2026-05-03T18:02:00+00:00",
+                ts=1777831320.0,
                 provider="test-provider",
                 model="test-model",
                 client_source="claude-code",
@@ -766,7 +766,7 @@ def test_database_usage_client_summarizes_usage(
 
     database_module.log_usage(
         database_module.Usage(
-            ts="2026-05-03T18:00:00+00:00",
+            ts=1777831200.0,
             provider="test-provider",
             model="test-model",
             client_source="codex",

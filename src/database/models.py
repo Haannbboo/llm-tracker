@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from decimal import Decimal
 
-from sqlalchemy import ForeignKey, Index, Integer, Numeric, String, text
+from sqlalchemy import Float, ForeignKey, Index, Integer, Numeric, String, text
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
@@ -29,7 +29,7 @@ class Usage(Base):
     __tablename__ = "usage"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    ts: Mapped[str] = mapped_column(String, nullable=False)
+    ts: Mapped[float] = mapped_column(Float, nullable=False, index=True)
     provider: Mapped[str] = mapped_column(String, nullable=False)
     model: Mapped[str] = mapped_column(String, nullable=False)
     client_source: Mapped[str | None] = mapped_column(String, nullable=True)
@@ -137,8 +137,8 @@ class SessionRecord(Base):
 
     session_id: Mapped[str] = mapped_column(String, primary_key=True)
     client_source: Mapped[str | None] = mapped_column(String, nullable=True)
-    started: Mapped[str] = mapped_column(String, nullable=False)
-    ended: Mapped[str] = mapped_column(String, nullable=False)
+    started: Mapped[float] = mapped_column(Float, nullable=False)
+    ended: Mapped[float] = mapped_column(Float, nullable=False)
     request_count: Mapped[int] = mapped_column(
         Integer, nullable=False, server_default=text("0")
     )

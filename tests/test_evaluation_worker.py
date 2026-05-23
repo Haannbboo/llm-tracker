@@ -11,8 +11,8 @@ def _insert_session_record(database_module, db_path, session_id: str, **override
     values = {
         "session_id": session_id,
         "client_source": "codex",
-        "started": "2026-05-14T09:00:00+00:00",
-        "ended": "2026-05-14T09:30:00+00:00",
+        "started": 1778749200.0,
+        "ended": 1778751000.0,
         "updated_at": "2026-05-14T10:00:00+00:00",
     }
     values.update(overrides)
@@ -369,16 +369,16 @@ def test_classify_local_evaluator_sessions_marks_transcriptless_codex_job_teleme
         db_path,
         "evaluated-session",
         request_count=3,
-        started="2026-05-14T09:00:00+00:00",
-        ended="2026-05-14T09:05:00+00:00",
+        started=1778749200.0,
+        ended=1778749500.0,
     )
     _insert_session_record(
         database_module,
         db_path,
         "evaluator-telemetry",
         request_count=1,
-        started="2026-05-14T10:00:10+00:00",
-        ended="2026-05-14T10:00:10+00:00",
+        started=1778752810.0,
+        ended=1778752810.0,
         updated_at="2026-05-14T10:00:11+00:00",
     )
     _insert_session_record(
@@ -386,8 +386,8 @@ def test_classify_local_evaluator_sessions_marks_transcriptless_codex_job_teleme
         db_path,
         "outside-job-window",
         request_count=1,
-        started="2026-05-14T10:10:00+00:00",
-        ended="2026-05-14T10:10:00+00:00",
+        started=1778753400.0,
+        ended=1778753400.0,
         updated_at="2026-05-14T10:10:00+00:00",
     )
     _insert_session_record(
@@ -397,8 +397,8 @@ def test_classify_local_evaluator_sessions_marks_transcriptless_codex_job_teleme
         request_count=1,
         source="manual",
         outcome="solved",
-        started="2026-05-14T10:00:12+00:00",
-        ended="2026-05-14T10:00:12+00:00",
+        started=1778752812.0,
+        ended=1778752812.0,
         updated_at="2026-05-14T10:00:13+00:00",
     )
     with database_module.Session(database_module.get_engine(db_path)) as session:
