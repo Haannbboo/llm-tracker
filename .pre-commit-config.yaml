@@ -24,6 +24,8 @@ repos:
         language: system
         pass_filenames: false
 
+  - repo: local
+    hooks:
       - id: pytest
         name: pytest
         entry: uv run python -m pytest
