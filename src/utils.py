@@ -4,7 +4,7 @@ from typing import Any
 
 def secs_to_micros(secs: int | float) -> int:
     """Convert epoch seconds to integer microseconds."""
-    return int(secs * 1_000_000)
+    return round(secs * 1_000_000)
 
 
 def micros_to_secs(micros: int) -> float:

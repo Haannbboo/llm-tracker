@@ -320,7 +320,7 @@ _EVALUATED_OUTCOMES = ("solved", "partial", "failed", "stuck")
 
 def _compute_duration_s(started: int | str | None, ended: int | str | None) -> int:
     """Compute duration in seconds from epoch microseconds (or legacy ISO strings)."""
-    if not started or not ended:
+    if started is None or ended is None:
         return 0
     try:
         if isinstance(started, (int, float)) and isinstance(ended, (int, float)):
