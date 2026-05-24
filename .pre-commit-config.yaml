@@ -6,6 +6,7 @@ repos:
       - id: end-of-file-fixer
       - id: check-yaml
       - id: check-json
+        exclude: frontend/tsconfig.*\.json
       - id: check-added-large-files
 
   - repo: https://github.com/astral-sh/ruff-pre-commit
@@ -14,15 +15,15 @@ repos:
       - id: ruff-format
       - id: ruff
 
-  - repo: https://github.com/pre-commit/mirrors-mypy
-    rev: v2.1.0
-    hooks:
-      - id: mypy
-        args: [src/, config/, --ignore-missing-imports]
-        pass_filenames: false
-
   - repo: local
     hooks:
+      - id: mypy
+        name: mypy
+        entry: uv run python -m mypy
+        args: [src/, config/, --ignore-missing-imports]
+        language: system
+        pass_filenames: false
+
       - id: pytest
         name: pytest
         entry: uv run python -m pytest

@@ -445,13 +445,13 @@ def migrate_database(db_path: str | None = None) -> list[str]:
                     text(
                         """
                         UPDATE usage_daily
-                        SET 
+                        SET
                             status_429 = sub.s429,
                             status_4xx = sub.s4xx,
                             status_5xx = sub.s5xx,
                             status_unknown = 0
                         FROM (
-                            SELECT 
+                            SELECT
                                 SUBSTRING(ts, 1, 10) as date,
                                 provider, model, COALESCE(client_source, '') as client_source,
                                 SUM(CASE WHEN status = 429 THEN 1 ELSE 0 END) as s429,
@@ -460,9 +460,9 @@ def migrate_database(db_path: str | None = None) -> list[str]:
                             FROM usage
                             GROUP BY SUBSTRING(ts, 1, 10), provider, model, COALESCE(client_source, '')
                         ) AS sub
-                        WHERE usage_daily.date = sub.date 
-                          AND usage_daily.provider = sub.provider 
-                          AND usage_daily.model = sub.model 
+                        WHERE usage_daily.date = sub.date
+                          AND usage_daily.provider = sub.provider
+                          AND usage_daily.model = sub.model
                           AND usage_daily.client_source = sub.client_source
                     """
                     )
@@ -476,7 +476,7 @@ def migrate_database(db_path: str | None = None) -> list[str]:
                     text(
                         """
                         UPDATE usage_daily
-                        SET 
+                        SET
                             status_429 = (
                                 SELECT SUM(CASE WHEN status = 429 THEN 1 ELSE 0 END)
                                 FROM usage u
@@ -503,7 +503,7 @@ def migrate_database(db_path: str | None = None) -> list[str]:
                             ),
                             status_unknown = 0
                         WHERE EXISTS (
-                            SELECT 1 FROM usage u 
+                            SELECT 1 FROM usage u
                             WHERE substr(u.ts, 1, 10) = usage_daily.date
                               AND u.provider = usage_daily.provider
                               AND u.model = usage_daily.model

@@ -100,7 +100,7 @@ export function TopUsageChart({
       try {
         const url = new URL('/usage/daily-by-dimension', window.location.origin)
         url.searchParams.set('dimension', dimension === 'source' ? 'client_source' : dimension)
-        
+
         if (filterParams.provider) url.searchParams.set('provider', filterParams.provider)
         if (filterParams.model) url.searchParams.set('model', filterParams.model)
         if (filterParams.client_source) url.searchParams.set('client_source', filterParams.client_source)

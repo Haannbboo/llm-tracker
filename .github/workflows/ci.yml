@@ -41,7 +41,7 @@ jobs:
           cp config.example.yaml ~/.llm-tracker/config.yaml
 
       - name: Ruff format and lint
-        run: python -m ruff format --check . && python -m ruff check src/ config/ scripts/
+        run: python -m ruff format --check . && python -m ruff check src/ config/ scripts/ tests/
 
       - name: Mypy type check
         run: python -m mypy src/ config/ scripts/ --ignore-missing-imports

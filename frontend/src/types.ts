@@ -113,9 +113,9 @@ export type DailyUsage = {
   status_unknown: number | null
 }
 
-export type ActiveFilter = { 
-  provider: string; 
-  model: string | null; 
+export type ActiveFilter = {
+  provider: string;
+  model: string | null;
   only_failed?: boolean;
   status_429?: boolean;
   status_4xx?: boolean;

@@ -1,6 +1,3 @@
-from datetime import datetime
-
-
 def test_extract_usage_supports_responses_format_and_details(utils_module):
     usage = utils_module.extract_usage(
         {

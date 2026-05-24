@@ -9,7 +9,6 @@ from types import ModuleType
 
 import pytest
 
-
 NO_REMOTE_PRICING_CONFIG = (
     Path(__file__).parent / "fixtures" / "no-remote-pricing-config.yaml"
 )
