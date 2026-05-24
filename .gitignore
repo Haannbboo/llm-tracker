@@ -18,7 +18,7 @@ CLAUDE.local.md
 .agents/private/
 .superpowers/*
 
-.coverage
+.coverage*
 
 # Project specific
 todo.md
