@@ -47,7 +47,7 @@ jobs:
         run: python -m mypy src/ config/ scripts/ --ignore-missing-imports
 
       - name: Run backend tests with coverage
-        run: python -m pytest -q --cov=src --cov=config --cov=scripts --cov-report=term-missing --cov-fail-under=75
+        run: python -m pytest -q -n auto --cov=src --cov=config --cov=scripts --cov-report=term-missing --cov-fail-under=75
 
   frontend:
     name: Frontend
