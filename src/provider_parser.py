@@ -5,11 +5,12 @@ Reads agent config files to find base URLs, then maps them to provider names.
 
 import json
 import os
-import tomllib
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 from urllib.parse import urlparse
+
+import tomllib
 
 # URL-based provider mapping rules (checked in order)
 PROVIDER_RULES: list[tuple[str, str]] = [
@@ -27,7 +28,7 @@ PROVIDER_RULES: list[tuple[str, str]] = [
 ]
 
 
-def _load_json(path: Path) -> Optional[dict]:
+def _load_json(path: Path) -> dict | None:
     try:
         with open(path, encoding="utf-8") as f:
             return json.load(f)
@@ -35,7 +36,7 @@ def _load_json(path: Path) -> Optional[dict]:
         return None
 
 
-def _load_toml(path: Path) -> Optional[dict]:
+def _load_toml(path: Path) -> dict | None:
     try:
         with open(path, "rb") as f:
             return tomllib.load(f)
@@ -43,7 +44,7 @@ def _load_toml(path: Path) -> Optional[dict]:
         return None
 
 
-def _extract_url(config: dict, *keys: str) -> Optional[str]:
+def _extract_url(config: dict, *keys: str) -> str | None:
     # First try explicit dotted key paths (e.g. "env.ANTHROPIC_BASE_URL")
     for key in keys:
         val: Any = config
@@ -59,7 +60,7 @@ def _extract_url(config: dict, *keys: str) -> Optional[str]:
     return _find_url_in_nested(config, set(keys))
 
 
-def _find_url_in_nested(obj: dict, keys: set[str]) -> Optional[str]:
+def _find_url_in_nested(obj: dict, keys: set[str]) -> str | None:
     for key in keys:
         if key in obj:
             val = obj[key]
@@ -110,7 +111,7 @@ class ProviderMetadata:
     source: str | None
 
 
-def parse_claude_base_url() -> Optional[str]:
+def parse_claude_base_url() -> str | None:
     """Parse Claude Code base URL from ~/.claude/settings.json."""
     settings_path = Path.home() / ".claude" / "settings.json"
     config = _load_json(settings_path)
@@ -119,7 +120,7 @@ def parse_claude_base_url() -> Optional[str]:
     return _extract_url(config, "env.ANTHROPIC_BASE_URL", "base_url", "url")
 
 
-def _load_codex_config() -> Optional[dict]:
+def _load_codex_config() -> dict | None:
     """Load Codex config, merging $CODEX_HOME/config.toml over global."""
     config = _load_toml(Path.home() / ".codex" / "config.toml") or {}
     codex_home = os.environ.get("CODEX_HOME")
@@ -130,7 +131,7 @@ def _load_codex_config() -> Optional[dict]:
     return config or None
 
 
-def parse_codex_base_url() -> Optional[str]:
+def parse_codex_base_url() -> str | None:
     """Parse Codex base URL from config.toml.
 
     Reads ~/.codex/config.toml first, then merges $CODEX_HOME/config.toml
@@ -142,7 +143,7 @@ def parse_codex_base_url() -> Optional[str]:
     return _extract_url(config, "base_url", "url", "api_base_url")
 
 
-def parse_gemini_base_url() -> Optional[str]:
+def parse_gemini_base_url() -> str | None:
     """Parse Gemini CLI base URL from ~/.gemini/settings.json."""
     settings_path = Path.home() / ".gemini" / "settings.json"
     config = _load_json(settings_path)
@@ -151,7 +152,7 @@ def parse_gemini_base_url() -> Optional[str]:
     return _extract_url(config, "base_url", "url", "api_base_url")
 
 
-def parse_opencode_base_url(provider_id: str | None = None) -> Optional[str]:
+def parse_opencode_base_url(provider_id: str | None = None) -> str | None:
     """Parse OpenCode base URL from ~/.config/opencode/opencode.json."""
     config_path = Path.home() / ".config" / "opencode" / "opencode.json"
     config = _load_json(config_path)

@@ -17,6 +17,7 @@ timeout = 300
 
 def post_fork(server, worker):
     import logging
+
     from uvicorn.logging import AccessFormatter
 
     formatter = AccessFormatter(

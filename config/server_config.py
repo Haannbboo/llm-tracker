@@ -8,7 +8,6 @@ from urllib.parse import urlparse
 
 import yaml
 
-
 OTEL_EXPORTER_OTLP_LOGS_ENDPOINT_ENV = "OTEL_EXPORTER_OTLP_LOGS_ENDPOINT"
 
 

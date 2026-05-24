@@ -6,7 +6,6 @@ from dataclasses import dataclass
 from typing import Any
 from urllib.parse import urlparse
 
-
 OTEL_EXPORTER_OTLP_LOGS_ENDPOINT_ENV = "OTEL_EXPORTER_OTLP_LOGS_ENDPOINT"
 
 

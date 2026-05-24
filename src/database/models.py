@@ -30,7 +30,7 @@ class BaseUrl(Base):
     base_url: Mapped[str] = mapped_column(String, nullable=False, unique=True)
     provider_name: Mapped[str | None] = mapped_column(String, nullable=True)
     source: Mapped[str | None] = mapped_column(String, nullable=True)
-    usages: Mapped[list["Usage"]] = relationship(back_populates="base_url")
+    usages: Mapped[list[Usage]] = relationship(back_populates="base_url")
 
 
 class Usage(Base):

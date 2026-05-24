@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from typing import Any, Sequence
+from typing import Any
 
 from sqlalchemy import and_, exists, func, or_, select
 from sqlalchemy.orm import Session
@@ -35,7 +36,6 @@ from .evaluation import (
     is_local_evaluator_session,
     mark_evaluator_session_no_op,
 )
-
 
 logger = logging.getLogger(__name__)
 

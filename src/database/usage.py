@@ -20,9 +20,9 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import Session
 
-from .models import BaseUrl, Usage, UsageDaily
-from .engine import get_engine
 from ..utils import micros_to_secs, secs_to_micros
+from .engine import get_engine
+from .models import BaseUrl, Usage, UsageDaily
 
 
 def _iso_to_micros(value: str) -> int:

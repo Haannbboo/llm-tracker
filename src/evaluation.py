@@ -16,12 +16,12 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from .database import (
-    SessionRecord,
     VALID_OUTCOMES,
+    SessionRecord,
     create_session_evaluation_job,
     find_active_session_evaluation_job,
-    get_evaluation_job,
     get_engine,
+    get_evaluation_job,
     mark_evaluation_job_failed,
     mark_evaluation_job_running,
     mark_evaluation_job_succeeded,

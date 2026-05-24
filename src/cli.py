@@ -16,13 +16,14 @@ from typing import Any
 import httpx
 
 from config.app import CONFIG
+
+from . import evaluation as evaluation_module
 from .database import (
     get_usage_high_watermark,
     init_db,
     merge_usage_database,
     summarize_usage_window,
 )
-from . import evaluation as evaluation_module
 
 evaluation_subprocess = evaluation_module.subprocess
 
