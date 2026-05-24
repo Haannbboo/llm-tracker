@@ -72,33 +72,36 @@ def test_init_db_log_usage_and_fetch_rows(database_module, isolated_home):
 
     rows = database_module.fetch_recent_usage(limit=10)
 
-    assert rows == [
-        {
-            "id": 1,
-            "ts": TS_2026_04_17_00,
-            "provider": "test-provider",
-            "model": "test-model",
-            "client_source": "proxy-client",
-            "session_id": "session-1",
-            "endpoint": "/v1/responses",
-            "prompt_tokens": 10,
-            "prompt_length": 0,
-            "completion_tokens": 5,
-            "reasoning_tokens": 1,
-            "cached_tokens": 2,
-            "total_tokens": 15,
-            "latency_ms": 123,
-            "ttft_ms": None,
-            "tool_tokens": None,
-            "cache_creation_tokens": None,
-            "input_cost_usd": 2e-05,
-            "output_cost_usd": 3e-05,
-            "total_cost_usd": 5e-05,
-            "status": 200,
-            "base_url_id": base_url_id,
-            "base_url": "https://api.example.com/v1",
-        }
-    ]
+    assert len(rows) == 1
+    assert isinstance(rows[0]["id"], str)
+    assert len(rows[0]["id"]) == 36
+
+    expected = dict(rows[0])
+    expected.pop("id")
+    assert expected == {
+        "ts": TS_2026_04_17_00,
+        "provider": "test-provider",
+        "model": "test-model",
+        "client_source": "proxy-client",
+        "session_id": "session-1",
+        "endpoint": "/v1/responses",
+        "prompt_tokens": 10,
+        "prompt_length": 0,
+        "completion_tokens": 5,
+        "reasoning_tokens": 1,
+        "cached_tokens": 2,
+        "total_tokens": 15,
+        "latency_ms": 123,
+        "ttft_ms": None,
+        "tool_tokens": None,
+        "cache_creation_tokens": None,
+        "input_cost_usd": 2e-05,
+        "output_cost_usd": 3e-05,
+        "total_cost_usd": 5e-05,
+        "status": 200,
+        "base_url_id": base_url_id,
+        "base_url": "https://api.example.com/v1",
+    }
 
 
 def test_fetch_recent_usage_returns_expected_row_shape(database_module, isolated_home):
@@ -534,11 +537,11 @@ def test_migrate_database_adds_usage_columns(
     assert defaults["total_cost_usd"] == "0"
 
 
-def test_get_usage_high_watermark_returns_latest_id(database_module, isolated_home):
+def test_get_usage_high_watermark_ts_returns_latest_ts(database_module, isolated_home):
     db_path = str(isolated_home / "usage.db")
     database_module.init_db(db_path)
 
-    assert database_module.get_usage_high_watermark(db_path=db_path) == 0
+    assert database_module.get_usage_high_watermark_ts(db_path=db_path) == 0
 
     database_module.log_usage(
         database_module.Usage(
@@ -567,7 +570,9 @@ def test_get_usage_high_watermark_returns_latest_id(database_module, isolated_ho
         db_path=db_path,
     )
 
-    assert database_module.get_usage_high_watermark(db_path=db_path) == 1
+    assert (
+        database_module.get_usage_high_watermark_ts(db_path=db_path) == TS_2026_04_17_00
+    )
 
 
 def test_get_db_url_prefers_env_override_without_explicit_db(
@@ -742,11 +747,11 @@ def test_summarize_usage_window_groups_by_session_source_and_model(
     for row in rows:
         database_module.log_usage(row, db_path=db_path)
 
-    summary = database_module.summarize_usage_window(after_id=0, db_path=db_path)
+    summary = database_module.summarize_usage_window(after_ts=0, db_path=db_path)
 
     assert summary["window"] == {
-        "after_id": 0,
-        "until_id": 3,
+        "after_ts": 0,
+        "until_ts": TS_2026_04_17_00_02,
         "row_count": 3,
     }
     assert summary["summary"]["requests"] == 3
@@ -774,7 +779,7 @@ def test_summarize_usage_window_groups_by_session_source_and_model(
     assert summary["models"][1]["model"] == "gpt-test"
 
 
-def test_summarize_usage_window_filters_after_and_until_ids(
+def test_summarize_usage_window_filters_after_and_until_ts(
     database_module, isolated_home
 ):
     db_path = str(isolated_home / "usage.db")
@@ -809,8 +814,8 @@ def test_summarize_usage_window_filters_after_and_until_ids(
         )
 
     summary = database_module.summarize_usage_window(
-        after_id=1,
-        until_id=2,
+        after_ts=TS_2026_04_17_00,
+        until_ts=TS_2026_04_17_00_01,
         db_path=db_path,
     )
 
@@ -878,7 +883,7 @@ def test_summarize_usage_window_filters_metadata_and_includes_rows(
         database_module.log_usage(row, db_path=db_path)
 
     summary = database_module.summarize_usage_window(
-        after_id=0,
+        after_ts=0,
         since="2026-04-17T00:00:00+00:00",
         until="2026-04-17T23:59:59+00:00",
         client_source="codex",
@@ -899,11 +904,13 @@ def test_summarize_usage_window_empty_window(database_module, isolated_home):
     db_path = str(isolated_home / "usage.db")
     database_module.init_db(db_path)
 
-    summary = database_module.summarize_usage_window(after_id=12, db_path=db_path)
+    summary = database_module.summarize_usage_window(
+        after_ts=TS_2026_04_17_00, db_path=db_path
+    )
 
     assert summary["window"] == {
-        "after_id": 12,
-        "until_id": 12,
+        "after_ts": TS_2026_04_17_00,
+        "until_ts": TS_2026_04_17_00,
         "row_count": 0,
     }
     assert summary["summary"]["requests"] == 0

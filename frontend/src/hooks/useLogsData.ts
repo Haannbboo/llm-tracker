@@ -20,7 +20,7 @@ export function useLogsData(opts: {
   const [page, setPage] = useState(1)
   const [jumpPage, setJumpPage] = useState('')
   const [logsLoading, setLogsLoading] = useState(true)
-  const [expandedRow, setExpandedRow] = useState<number | null>(null)
+  const [expandedRow, setExpandedRow] = useState<string | null>(null)
   const [modelColWidth, setModelColWidth] = useState(135)
   const resizeRef = useRef<{ startX: number; startWidth: number } | null>(null)
 

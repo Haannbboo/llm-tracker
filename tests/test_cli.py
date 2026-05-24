@@ -255,10 +255,10 @@ class FakeClient:
         self.before_calls += 1
         return 10
 
-    def get_run_summary(self, *, after_id, until_id=None):
-        self.summary_calls.append({"after_id": after_id, "until_id": until_id})
+    def get_run_summary(self, *, after_ts, until_ts=None):
+        self.summary_calls.append({"after_ts": after_ts, "until_ts": until_ts})
         return {
-            "window": {"after_id": after_id, "until_id": 11, "row_count": 1},
+            "window": {"after_ts": after_ts, "until_ts": 11, "row_count": 1},
             "summary": {
                 "requests": 1,
                 "successful_requests": 1,
@@ -318,7 +318,7 @@ def test_run_command_preserves_child_exit_code(cli_module, monkeypatch, capsys):
     assert calls["command"] == ["fake-command", "--flag"]
     assert calls["env"] is None
     assert fake_client.before_calls == 1
-    assert fake_client.summary_calls == [{"after_id": 10, "until_id": None}]
+    assert fake_client.summary_calls == [{"after_ts": 10, "until_ts": None}]
     assert "requests: 1" in captured.err
 
 
@@ -389,7 +389,7 @@ def test_run_with_isolated_tracking_summarizes_and_merges_run_db(
 
     captured = capsys.readouterr()
     summary = json.loads(captured.err)
-    main_summary = database_module.summarize_usage_window(after_id=0, db_path=main_db)
+    main_summary = database_module.summarize_usage_window(after_ts=0, db_path=main_db)
 
     assert code == 0
     assert summary["summary"]["requests"] == 1
@@ -494,7 +494,7 @@ def test_isolated_tracking_merges_usage_when_child_exits_nonzero(
 
     captured = capsys.readouterr()
     summary = json.loads(captured.err)
-    main_summary = database_module.summarize_usage_window(after_id=0, db_path=main_db)
+    main_summary = database_module.summarize_usage_window(after_ts=0, db_path=main_db)
 
     assert code == 7
     assert summary["summary"]["requests"] == 1
@@ -556,7 +556,7 @@ def test_isolated_tracking_merges_usage_written_during_service_shutdown(
 
     captured = capsys.readouterr()
     summary = json.loads(captured.err)
-    main_summary = database_module.summarize_usage_window(after_id=0, db_path=main_db)
+    main_summary = database_module.summarize_usage_window(after_ts=0, db_path=main_db)
 
     assert code == 0
     assert summary["summary"]["requests"] == 1
@@ -591,7 +591,7 @@ def test_run_command_handles_unavailable_api_before_child(
 
 def test_high_watermark_malformed_response_raises_api_error(cli_module, monkeypatch):
     client = cli_module.UsageApiClient(base_url="http://example.test")
-    monkeypatch.setattr(client, "_get_json", lambda path: {"missing": "id"})
+    monkeypatch.setattr(client, "_get_json", lambda path: {"missing": "ts"})
 
     try:
         client.get_high_watermark()
@@ -791,14 +791,14 @@ def test_database_usage_client_summarizes_usage(
         db_path=db_url,
     )
 
-    summary = client.get_run_summary(after_id=0)
+    summary = client.get_run_summary(after_ts=0)
 
-    assert client.get_high_watermark() == 1
+    assert client.get_high_watermark() == 1777831200000000
     assert summary["summary"]["requests"] == 1
     assert summary["sessions"][0]["session_id"] == "codex-session-1"
 
 
-def test_api_client_passes_until_id_query_param(cli_module, monkeypatch):
+def test_api_client_passes_until_ts_query_param(cli_module, monkeypatch):
     captured = {}
     client = cli_module.UsageApiClient(base_url="http://example.test")
 
@@ -809,11 +809,11 @@ def test_api_client_passes_until_id_query_param(cli_module, monkeypatch):
 
     monkeypatch.setattr(client, "_get_json", fake_get_json)
 
-    client.get_run_summary(after_id=10, until_id=12)
+    client.get_run_summary(after_ts=10, until_ts=12)
 
     assert captured == {
         "path": "/usage/run-summary",
-        "params": {"after_id": 10, "until_id": 12},
+        "params": {"after_ts": 10, "until_ts": 12},
     }
 
 
@@ -831,14 +831,14 @@ def test_run_command_bounds_summary_after_wait(
             self.events.append("watermark")
             return self.watermarks.pop(0)
 
-        def get_run_summary(self, *, after_id, until_id=None):
-            self.events.append(f"summary:{until_id or 'open'}")
-            self.summary_calls.append({"after_id": after_id, "until_id": until_id})
-            if until_id is None:
+        def get_run_summary(self, *, after_ts, until_ts=None):
+            self.events.append(f"summary:{until_ts or 'open'}")
+            self.summary_calls.append({"after_ts": after_ts, "until_ts": until_ts})
+            if until_ts is None:
                 return {
                     "window": {
-                        "after_id": after_id,
-                        "until_id": after_id,
+                        "after_ts": after_ts,
+                        "until_ts": after_ts,
                         "row_count": 0,
                     },
                     "summary": {"requests": 0},
@@ -847,7 +847,7 @@ def test_run_command_bounds_summary_after_wait(
                     "models": [],
                 }
             return {
-                "window": {"after_id": after_id, "until_id": until_id, "row_count": 1},
+                "window": {"after_ts": after_ts, "until_ts": until_ts, "row_count": 1},
                 "summary": {"requests": 1},
                 "sessions": [],
                 "client_sources": [],
@@ -869,8 +869,8 @@ def test_run_command_bounds_summary_after_wait(
 
     assert code == 0
     assert client.summary_calls == [
-        {"after_id": 10, "until_id": None},
-        {"after_id": 10, "until_id": 12},
+        {"after_ts": 10, "until_ts": None},
+        {"after_ts": 10, "until_ts": 12},
     ]
     assert client.events == [
         "watermark",
@@ -888,12 +888,12 @@ def test_poll_summary_waits_until_deadline_for_later_run_rows(
         def __init__(self):
             self.requests = [1, 2]
 
-        def get_run_summary(self, *, after_id, until_id=None):
+        def get_run_summary(self, *, after_ts, until_ts=None):
             requests = self.requests.pop(0)
             return {
                 "window": {
-                    "after_id": after_id,
-                    "until_id": 10 + requests,
+                    "after_ts": after_ts,
+                    "until_ts": 10 + requests,
                     "row_count": requests,
                 },
                 "summary": {"requests": requests},
@@ -908,7 +908,7 @@ def test_poll_summary_waits_until_deadline_for_later_run_rows(
 
     summary = cli_module.poll_summary(
         DelayedClient(),
-        after_id=10,
+        after_ts=10,
         options=cli_module.RunOptions(wait_ms=300),
     )
 
@@ -928,13 +928,13 @@ def test_poll_summary_falls_back_to_watermark_when_open_window_has_no_rows(
             self.watermark_calls += 1
             return 12
 
-        def get_run_summary(self, *, after_id, until_id=None):
-            self.calls.append({"until_id": until_id})
-            if until_id is None:
+        def get_run_summary(self, *, after_ts, until_ts=None):
+            self.calls.append({"until_ts": until_ts})
+            if until_ts is None:
                 return {
                     "window": {
-                        "after_id": after_id,
-                        "until_id": after_id,
+                        "after_ts": after_ts,
+                        "until_ts": after_ts,
                         "row_count": 0,
                     },
                     "summary": {"requests": 0},
@@ -943,7 +943,7 @@ def test_poll_summary_falls_back_to_watermark_when_open_window_has_no_rows(
                     "models": [],
                 }
             return {
-                "window": {"after_id": after_id, "until_id": 11, "row_count": 1},
+                "window": {"after_ts": after_ts, "until_ts": 11, "row_count": 1},
                 "summary": {"requests": 1},
                 "sessions": [],
                 "client_sources": [],
@@ -955,19 +955,19 @@ def test_poll_summary_falls_back_to_watermark_when_open_window_has_no_rows(
 
     summary = cli_module.poll_summary(
         client,
-        after_id=10,
+        after_ts=10,
         options=cli_module.RunOptions(wait_ms=0),
     )
 
     assert summary["summary"]["requests"] == 1
     assert client.watermark_calls == 1
-    assert client.calls == [{"until_id": None}, {"until_id": 12}]
+    assert client.calls == [{"until_ts": None}, {"until_ts": 12}]
 
 
 def test_write_json_summary_to_file(cli_module, tmp_path):
     target = tmp_path / "summary.json"
     summary = {
-        "window": {"after_id": 1, "until_id": 2, "row_count": 1},
+        "window": {"after_ts": 1, "until_ts": 2, "row_count": 1},
         "summary": {"requests": 1},
         "sessions": [],
         "client_sources": [],

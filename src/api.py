@@ -40,7 +40,7 @@ from .database import (
     fetch_sessions,
     get_evaluation_job_progress,
     get_session_evaluation,
-    get_usage_high_watermark,
+    get_usage_high_watermark_ts,
     init_db,
     list_active_evaluation_jobs_with_progress,
     summarize_sessions,
@@ -251,7 +251,7 @@ async def get_usage_count(
 
 @app.get("/usage/high-watermark")
 async def usage_high_watermark():
-    return {"id": get_usage_high_watermark()}
+    return {"ts": get_usage_high_watermark_ts()}
 
 
 @app.get("/usage/sources")
@@ -264,8 +264,8 @@ async def usage_sources(
 
 @app.get("/usage/run-summary")
 async def usage_run_summary(
-    after_id: int = 0,
-    until_id: int | None = None,
+    after_ts: int = 0,
+    until_ts: int | None = None,
     since: str | None = None,
     until: str | None = None,
     client_source: str | None = None,
@@ -275,8 +275,8 @@ async def usage_run_summary(
     include_rows: bool = False,
 ):
     return summarize_usage_window(
-        after_id=after_id,
-        until_id=until_id,
+        after_ts=after_ts,
+        until_ts=until_ts,
         since=since,
         until=until,
         client_source=client_source,

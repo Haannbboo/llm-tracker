@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from decimal import Decimal
+from uuid import uuid4
 
 from sqlalchemy import (
     BigInteger,
@@ -36,7 +37,9 @@ class BaseUrl(Base):
 class Usage(Base):
     __tablename__ = "usage"
 
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    id: Mapped[str] = mapped_column(
+        String, primary_key=True, default=lambda: str(uuid4())
+    )
     ts: Mapped[int] = mapped_column(BigInteger, nullable=False, index=True)
     provider: Mapped[str] = mapped_column(String, nullable=False)
     model: Mapped[str] = mapped_column(String, nullable=False)
@@ -180,7 +183,7 @@ class SessionRecord(Base):
     primary_model: Mapped[str | None] = mapped_column(String, nullable=True)
     providers_json: Mapped[str | None] = mapped_column(String, nullable=True)
     models_json: Mapped[str | None] = mapped_column(String, nullable=True)
-    last_usage_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    last_usage_id: Mapped[str | None] = mapped_column(String, nullable=True)
     updated_at: Mapped[str] = mapped_column(String, nullable=False)
     # Evaluation columns (NULL = not evaluated)
     outcome: Mapped[str | None] = mapped_column(String, nullable=True)
