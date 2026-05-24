@@ -69,7 +69,8 @@ def load_evaluation_worker_config(
 
 def _parse_iso(value: str | int | float) -> datetime:
     if isinstance(value, (int, float)):
-        return datetime.fromtimestamp(value, tz=timezone.utc)
+        seconds, us = divmod(int(value), 1_000_000)
+        return datetime.fromtimestamp(seconds, tz=timezone.utc).replace(microsecond=us)
     normalized = f"{value[:-1]}+00:00" if value.endswith(("Z", "z")) else value
     parsed = datetime.fromisoformat(normalized)
     if parsed.tzinfo is None:

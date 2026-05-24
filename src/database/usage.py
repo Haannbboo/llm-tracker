@@ -5,6 +5,7 @@ Extracted from database/__init__.py during Phase 5 refactoring.
 
 from __future__ import annotations
 
+import calendar
 from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any
@@ -21,6 +22,21 @@ from sqlalchemy.orm import Session
 
 from .models import BaseUrl, Usage, UsageDaily
 from .engine import get_engine
+from ..utils import micros_to_secs, secs_to_micros
+
+
+def _iso_to_micros(value: str) -> int:
+    """Convert an ISO-8601 datetime string to integer microseconds since epoch.
+
+    Uses integer arithmetic to avoid float precision loss from .timestamp().
+    """
+    dt = datetime.fromisoformat(value)
+    if dt.tzinfo is not None:
+        dt = dt.astimezone(timezone.utc)
+    else:
+        dt = dt.replace(tzinfo=timezone.utc)
+    epoch_s = calendar.timegm(dt.timetuple())
+    return secs_to_micros(epoch_s) + dt.microsecond
 
 
 # === Price helpers ===
@@ -72,7 +88,9 @@ def log_usage(usage: Usage, db_path: str | None = None) -> None:
 
 def upsert_daily_aggregate(usage: Usage, db_path: str | None = None) -> None:
     """Incrementally update the daily aggregation table for a single usage row."""
-    date = datetime.fromtimestamp(usage.ts, tz=timezone.utc).strftime("%Y-%m-%d")
+    date = datetime.fromtimestamp(micros_to_secs(usage.ts), tz=timezone.utc).strftime(
+        "%Y-%m-%d"
+    )
     client_source = usage.client_source or ""
     is_success = usage.status is None or usage.status < 400
     latency = usage.latency_ms or 0
@@ -348,9 +366,9 @@ def _usage_filters(
     if session_id:
         filters.append(Usage.session_id == session_id)
     if since:
-        filters.append(Usage.ts >= datetime.fromisoformat(since).timestamp())
+        filters.append(Usage.ts >= _iso_to_micros(since))
     if until:
-        filters.append(Usage.ts <= datetime.fromisoformat(until).timestamp())
+        filters.append(Usage.ts <= _iso_to_micros(until))
     if only_failed:
         filters.append(Usage.status >= 400)
     if status_429:
@@ -616,9 +634,9 @@ def summarize_usage_window(
     if until_id is not None:
         filters.append(Usage.id <= until_id)
     if since:
-        filters.append(Usage.ts >= datetime.fromisoformat(since).timestamp())
+        filters.append(Usage.ts >= _iso_to_micros(since))
     if until:
-        filters.append(Usage.ts <= datetime.fromisoformat(until).timestamp())
+        filters.append(Usage.ts <= _iso_to_micros(until))
     if client_source:
         filters.append(Usage.client_source == client_source)
     if session_id:
@@ -902,7 +920,7 @@ def _parse_tz_offset(tz_offset: str) -> tuple[int, int]:
 def _period_expression(granularity: str, tz_offset: str) -> Any:
     """Return a dialect-aware SQL expression that buckets Usage.ts into period strings.
 
-    Usage.ts is stored as epoch seconds (float). This function converts to a
+    Usage.ts is stored as epoch microseconds (int). This function converts to a
     datetime with timezone offset, then formats to the requested granularity.
     """
     dialect = get_engine().dialect.name
@@ -915,11 +933,11 @@ def _period_expression(granularity: str, tz_offset: str) -> Any:
             modifiers.append(f"{offset_hours:+d} hours")
         if offset_minutes:
             modifiers.append(f"{offset_minutes:+d} minutes")
-        return func.strftime(fmt, func.datetime(Usage.ts, *modifiers))
+        return func.strftime(fmt, func.datetime(Usage.ts / 1_000_000, *modifiers))
 
     if dialect == "postgresql":
         pg_fmt = "YYYY-MM-DD HH24:00" if granularity == "hour" else "YYYY-MM-DD"
-        ts_cast = func.to_timestamp(Usage.ts)
+        ts_cast = func.to_timestamp(Usage.ts / 1_000_000.0)
         parts: list[str] = []
         if offset_hours:
             parts.append(f"{offset_hours} hours")
@@ -932,7 +950,7 @@ def _period_expression(granularity: str, tz_offset: str) -> Any:
 
     if dialect == "mysql":
         fmt = "%Y-%m-%d %H:00" if granularity == "hour" else "%Y-%m-%d"
-        ts_parsed = func.from_unixtime(Usage.ts)
+        ts_parsed = func.from_unixtime(Usage.ts / 1_000_000.0)
         mysql_parts: list[str] = []
         if offset_hours:
             mysql_parts.append(f"INTERVAL {offset_hours} HOUR")

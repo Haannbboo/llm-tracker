@@ -190,7 +190,7 @@ def test_extract_codex_fields_basic(otlp_module):
     )
     record = {"timeUnixNano": "1800000000000000000"}
     otlp_module.codex_state["codex-conv-1"] = {
-        "ts": 0.0,
+        "ts": 0,
         "duration_ms": 800,
         "ttft_ms": 200,
     }

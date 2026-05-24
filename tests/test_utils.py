@@ -127,5 +127,32 @@ def test_build_usage_record_includes_provider_metadata(utils_module):
     assert record["ttft_ms"] == 11
     assert record["status"] == 201
     assert record["total_tokens"] == 15
-    assert isinstance(record["ts"], float)
+    assert isinstance(record["ts"], int)
     assert record["ts"] > 0
+
+
+def test_secs_to_micros_integer(utils_module):
+    assert utils_module.secs_to_micros(1776384000) == 1776384000000000
+
+
+def test_secs_to_micros_float(utils_module):
+    assert utils_module.secs_to_micros(1776384000.5) == 1776384000500000
+
+
+def test_secs_to_micros_zero(utils_module):
+    assert utils_module.secs_to_micros(0) == 0
+
+
+def test_micros_to_secs(utils_module):
+    assert utils_module.micros_to_secs(1776384000000000) == 1776384000.0
+
+
+def test_micros_to_secs_zero(utils_module):
+    assert utils_module.micros_to_secs(0) == 0.0
+
+
+def test_secs_to_micros_roundtrip(utils_module):
+    original = 1776384000
+    assert utils_module.micros_to_secs(utils_module.secs_to_micros(original)) == float(
+        original
+    )
