@@ -138,7 +138,9 @@ def _drop_column(engine: Engine, table_name: str, column_name: str) -> bool:
 def _migrate_usage_id_to_uuid(engine: Engine) -> bool:
     """Convert usage.id from INTEGER autoincrement to TEXT UUID (client-generated).
 
-    Also converts sessions.last_usage_id from INTEGER to TEXT.
+    Also clears sessions.last_usage_id to NULL — it was an INTEGER ref to the old
+    usage.id and is no longer meaningful. The column type is also changed to TEXT
+    so future upserts (which write UUID strings) don't fail.
     Returns True if migration was applied, False if already migrated.
     """
     from sqlalchemy import inspect as sa_inspect
@@ -173,6 +175,7 @@ def _migrate_usage_id_to_uuid(engine: Engine) -> bool:
             connection.execute(text("ALTER TABLE usage ADD PRIMARY KEY (id)"))
 
             if has_sessions:
+                connection.execute(text("UPDATE sessions SET last_usage_id = NULL"))
                 sessions_cols = {
                     c["name"]: c for c in sa_inspect(engine).get_columns("sessions")
                 }
@@ -237,6 +240,7 @@ def _migrate_usage_id_to_uuid(engine: Engine) -> bool:
 
             # Migrate sessions.last_usage_id if needed
             if has_sessions:
+                connection.execute(text("UPDATE sessions SET last_usage_id = NULL"))
                 sessions_cols = {
                     c["name"]: c for c in sa_inspect(engine).get_columns("sessions")
                 }
