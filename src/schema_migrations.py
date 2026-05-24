@@ -233,7 +233,7 @@ def _migrate_usage_id_to_uuid(engine: Engine) -> bool:
                     row_dict,
                 )
 
-            connection.execute(text(f"DROP TABLE usage"))
+            connection.execute(text("DROP TABLE usage"))
             connection.execute(text(f"ALTER TABLE {new_table} RENAME TO usage"))
 
             # Recreate indexes on usage
