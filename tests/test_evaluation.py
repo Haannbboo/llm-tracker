@@ -86,6 +86,85 @@ def _write_opencode_transcript(home, session_id: str = "sess-opencode") -> None:
         )
 
 
+def _write_kilo_transcript(home, session_id: str = "sess-kilo") -> None:
+    db_path = home / ".xdg-data" / "kilo" / "kilo.db"
+    db_path.parent.mkdir(parents=True)
+    with sqlite3.connect(db_path) as connection:
+        connection.execute(
+            """
+            CREATE TABLE message (
+                id text PRIMARY KEY,
+                session_id text NOT NULL,
+                time_created integer NOT NULL,
+                time_updated integer NOT NULL,
+                data text NOT NULL
+            )
+            """
+        )
+        connection.execute(
+            """
+            CREATE TABLE part (
+                id text PRIMARY KEY,
+                message_id text NOT NULL,
+                session_id text NOT NULL,
+                time_created integer NOT NULL,
+                time_updated integer NOT NULL,
+                data text NOT NULL
+            )
+            """
+        )
+        connection.executemany(
+            "INSERT INTO message VALUES (?, ?, ?, ?, ?)",
+            [
+                (
+                    "msg-user",
+                    session_id,
+                    1,
+                    1,
+                    json.dumps({"role": "user"}),
+                ),
+                (
+                    "msg-assistant",
+                    session_id,
+                    2,
+                    2,
+                    json.dumps({"role": "assistant"}),
+                ),
+            ],
+        )
+        connection.executemany(
+            "INSERT INTO part VALUES (?, ?, ?, ?, ?, ?)",
+            [
+                (
+                    "part-user",
+                    "msg-user",
+                    session_id,
+                    1,
+                    1,
+                    json.dumps({"type": "text", "text": "Fix Kilo sessions"}),
+                ),
+                (
+                    "part-reasoning",
+                    "msg-assistant",
+                    session_id,
+                    2,
+                    2,
+                    json.dumps(
+                        {"type": "reasoning", "text": "private reasoning omitted"}
+                    ),
+                ),
+                (
+                    "part-assistant",
+                    "msg-assistant",
+                    session_id,
+                    3,
+                    3,
+                    json.dumps({"type": "text", "text": "Kilo sessions fixed"}),
+                ),
+            ],
+        )
+
+
 def test_build_evaluator_command_uses_central_codex_ephemeral(evaluation_module):
     invocation = evaluation_module.build_evaluator_invocation("Transcript text")
 
@@ -1049,6 +1128,109 @@ def test_run_session_evaluation_job_marks_claude_mem_sessions_no_op(
     assert saved["confidence"] == pytest.approx(1.0)
     assert saved["task_title"] is None
     assert saved["task_title_zh"] is None
+
+    polled = database_module.get_evaluation_job(job["job_id"], db_path=db_path)
+    assert polled is not None
+    assert polled["status"] == "succeeded"
+    assert polled["error"] is None
+
+
+def test_has_local_session_transcript_uses_index_for_kilo(evaluation_module):
+    index = evaluation_module.LocalSessionTranscriptIndex(
+        kilo_session_ids=frozenset({"sess-kilo"})
+    )
+
+    assert evaluation_module.has_local_session_transcript(
+        "kilo",
+        "sess-kilo",
+        local_index=index,
+    )
+    assert not evaluation_module.has_local_session_transcript(
+        "kilo",
+        "sess-missing",
+        local_index=index,
+    )
+
+
+def test_load_kilo_transcript_reads_sqlite_message_parts(
+    evaluation_module, isolated_home, monkeypatch
+):
+    monkeypatch.setenv("XDG_DATA_HOME", str(isolated_home / ".xdg-data"))
+    _write_kilo_transcript(isolated_home)
+
+    transcript = evaluation_module.load_session_transcript("kilo", "sess-kilo")
+
+    assert "USER:\nFix Kilo sessions" in transcript
+    assert "ASSISTANT:\nKilo sessions fixed" in transcript
+    assert "private reasoning omitted" not in transcript
+
+
+def test_has_local_session_transcript_uses_path_or_metadata_includes_kilo(
+    evaluation_module, isolated_home, monkeypatch
+):
+    monkeypatch.setenv("XDG_DATA_HOME", str(isolated_home / ".xdg-data"))
+    _write_kilo_transcript(isolated_home)
+
+    assert evaluation_module.has_local_session_transcript("kilo", "sess-kilo")
+
+
+def test_normalize_client_source_accepts_kilo(evaluation_module):
+    assert evaluation_module._normalize_client_source("kilo") == "kilo"
+
+
+def test_run_session_evaluation_job_saves_kilo_evaluation(
+    evaluation_module,
+    database_module,
+    isolated_home,
+    monkeypatch,
+):
+    db_path = str(isolated_home / "usage.db")
+    database_module.init_db(db_path)
+    monkeypatch.setenv("XDG_DATA_HOME", str(isolated_home / ".xdg-data"))
+    _write_kilo_transcript(isolated_home)
+
+    with database_module.Session(database_module.get_engine(db_path)) as session:
+        session.add(
+            database_module.SessionRecord(
+                session_id="sess-kilo",
+                client_source="kilo",
+                started=1778493600000000,
+                ended=1778495400000000,
+                updated_at="2026-05-11T10:30:00+00:00",
+            )
+        )
+        session.commit()
+
+    job = database_module.create_session_evaluation_job(
+        session_id="sess-kilo",
+        client_source="kilo",
+        db_path=db_path,
+    )
+
+    def fake_run(**kwargs):
+        assert "Return ONLY valid JSON" in kwargs["input"]
+        assert "Session source: kilo" in kwargs["input"]
+        assert "USER:\nFix Kilo sessions" in kwargs["input"]
+        assert "ASSISTANT:\nKilo sessions fixed" in kwargs["input"]
+        assert "private reasoning omitted" not in kwargs["input"]
+        return subprocess.CompletedProcess(
+            args=kwargs["args"],
+            returncode=0,
+            stdout='{"task_title":"Fix Kilo sessions","task_title_zh":"修复Kilo会话","summary":"Kilo session evaluation completed.","outcome":"solved","confidence":0.91,"evidence":["Transcript showed the fix was completed"],"failure_reason":null}',
+            stderr="",
+        )
+
+    monkeypatch.setattr(evaluation_module.subprocess, "run", fake_run)
+
+    evaluation_module.run_session_evaluation_job(job["job_id"], db_path=db_path)
+
+    saved = database_module.get_session_evaluation("sess-kilo", db_path=db_path)
+    assert saved is not None
+    assert saved["outcome"] == "solved"
+    assert saved["source"] == "llm"
+    assert saved["confidence"] == pytest.approx(0.91)
+    assert saved["task_title"] == "Fix Kilo sessions"
+    assert saved["task_title_zh"] == "修复Kilo会话"
 
     polled = database_module.get_evaluation_job(job["job_id"], db_path=db_path)
     assert polled is not None
