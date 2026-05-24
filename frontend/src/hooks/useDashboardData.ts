@@ -1,11 +1,11 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
-import type { ActiveFilter, DailyUsage, DateRangeOption, UsageSummary } from '../types'
+import type { DailyUsage, UsageSummary } from '../types'
 import { getSinceDate, getTimezoneOffset, FIXED_PROVIDER_COLORS, PALETTE } from '../utils'
 import { t } from '../i18n/index.ts'
 import { useApp } from '../contexts/AppContext'
 
 export function useDashboardData() {
-  const { refreshTrigger, setError } = useApp()
+  const { refreshTrigger, setError, activeFilter, activeSource, dateRange, customSince, customUntil } = useApp()
 
   const [summary, setSummary] = useState<UsageSummary[]>([])
   const [dailyUsage, setDailyUsage] = useState<DailyUsage[]>([])
@@ -14,12 +14,6 @@ export function useDashboardData() {
   const [sources, setSources] = useState<string[]>([])
   const [dashboardInitialLoading, setDashboardInitialLoading] = useState(true)
   const [dashboardRefreshing, setDashboardRefreshing] = useState(false)
-
-  const [activeFilter, setActiveFilter] = useState<ActiveFilter>(null)
-  const [activeSource, setActiveSource] = useState<string | null>(null)
-  const [dateRange, setDateRange] = useState<DateRangeOption>('24h')
-  const [customSince, setCustomSince] = useState('')
-  const [customUntil, setCustomUntil] = useState('')
 
   const dashboardRequestRef = useRef(0)
   const dashboardHasLoadedRef = useRef(false)
@@ -101,8 +95,12 @@ export function useDashboardData() {
         heatmapUrl.searchParams.set('granularity', 'day')
         heatmapUrl.searchParams.set('tz_offset', getTimezoneOffset())
         if (activeFilter) {
-          heatmapUrl.searchParams.set('provider', activeFilter.provider)
+          if (activeFilter.provider) heatmapUrl.searchParams.set('provider', activeFilter.provider)
           if (activeFilter.model) heatmapUrl.searchParams.set('model', activeFilter.model)
+          if (activeFilter.only_failed) heatmapUrl.searchParams.set('only_failed', 'true')
+          if (activeFilter.status_429) heatmapUrl.searchParams.set('status_429', 'true')
+          if (activeFilter.status_4xx) heatmapUrl.searchParams.set('status_4xx', 'true')
+          if (activeFilter.status_5xx) heatmapUrl.searchParams.set('status_5xx', 'true')
         }
         if (activeSource) heatmapUrl.searchParams.set('client_source', activeSource)
 
@@ -157,9 +155,7 @@ export function useDashboardData() {
   }, [dateRange, customSince, customUntil, refreshTrigger])
 
   const totals = useMemo(() => {
-    const data = activeFilter
-      ? summary.filter(s => s.provider === activeFilter.provider && (activeFilter.model === null || s.model === activeFilter.model))
-      : summary
+    const data = summary
 
     const requests = data.reduce((sum, row) => sum + (row.requests || 0), 0)
     const promptTokens = data.reduce((sum, row) => sum + (row.prompt_tokens || 0), 0)
@@ -199,13 +195,11 @@ export function useDashboardData() {
       successRate,
       statusBreakdown: { s429, s4xx, s5xx, sUnknown }
     }
-  }, [activeFilter, summary, dateRange])
+  }, [summary, dateRange])
 
   return {
     summary, dailyUsage, heatmapData, totalTrackedEvents, sources,
     dashboardInitialLoading, dashboardRefreshing,
-    activeFilter, setActiveFilter, activeSource, setActiveSource,
-    dateRange, setDateRange, customSince, setCustomSince, customUntil, setCustomUntil,
     providerColors, applyFilterParams, dashboardFilterParams, totals,
   }
 }

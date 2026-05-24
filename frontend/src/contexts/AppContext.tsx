@@ -2,19 +2,16 @@ import { createContext, useContext, useState, useCallback, useEffect } from 'rea
 import type { ReactNode } from 'react'
 import { toggleTheme, getTheme } from '../theme'
 import { useLang } from '../i18n/index.ts'
-import type { PricingMap } from '../types.ts'
+import type { ActiveFilter, DateRangeOption, PricingMap } from '../types.ts'
 
 type AppContextType = {
-  // Theme
   theme: 'light' | 'dark'
   setTheme: (t: 'light' | 'dark') => void
   toggleThemeHandler: () => void
 
-  // Language
   lang: 'en' | 'zh'
   setLang: (l: 'en' | 'zh') => void
 
-  // Config
   configContent: string
   setConfigContent: (c: string) => void
   configParsed: Record<string, any> | null
@@ -22,20 +19,27 @@ type AppContextType = {
   configStatus: 'idle' | 'saving' | 'saved' | 'error'
   setConfigStatus: (s: 'idle' | 'saving' | 'saved' | 'error') => void
 
-  // Pricing
   pricingData: PricingMap | null
   setPricingData: (p: PricingMap | null) => void
 
-  // Toast
   showToast: (message: string) => void
 
-  // Error
   error: string | null
   setError: (e: string | null) => void
 
-  // Refresh
   refreshTrigger: number
   requestUsageRefresh: () => void
+
+  activeFilter: ActiveFilter
+  setActiveFilter: (f: ActiveFilter) => void
+  activeSource: string | null
+  setActiveSource: (s: string | null) => void
+  dateRange: DateRangeOption
+  setDateRange: (d: DateRangeOption) => void
+  customSince: string
+  setCustomSince: (s: string) => void
+  customUntil: string
+  setCustomUntil: (s: string) => void
 }
 
 const AppContext = createContext<AppContextType | null>(null)
@@ -49,6 +53,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [pricingData, setPricingData] = useState<PricingMap | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [refreshTrigger, setRefreshTrigger] = useState(0)
+
+  const [activeFilter, setActiveFilter] = useState<ActiveFilter>(null)
+  const [activeSource, setActiveSource] = useState<string | null>(null)
+  const [dateRange, setDateRange] = useState<DateRangeOption>('24h')
+  const [customSince, setCustomSince] = useState('')
+  const [customUntil, setCustomUntil] = useState('')
 
   const [toast, setToast] = useState<{ message: string; visible: boolean }>({ message: '', visible: false })
   const showToast = useCallback((message: string) => {
@@ -93,6 +103,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
       showToast,
       error, setError,
       refreshTrigger, requestUsageRefresh,
+      activeFilter, setActiveFilter, activeSource, setActiveSource,
+      dateRange, setDateRange, customSince, setCustomSince, customUntil, setCustomUntil,
     }}>
       {children}
       <div className={`toast-container ${toast.visible ? 'visible' : ''}`}>

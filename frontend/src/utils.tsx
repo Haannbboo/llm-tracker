@@ -27,7 +27,7 @@ export function value(input: number | null | undefined) {
 }
 
 export function timeAgo(input: string | number): string {
-  const date = typeof input === 'number' ? new Date(input * 1000) : new Date(input)
+  const date = typeof input === 'number' ? new Date(input / 1000) : new Date(input)
   const seconds = Math.floor((Date.now() - date.getTime()) / 1000)
   if (seconds < 60) return 'just now'
   const minutes = Math.floor(seconds / 60)
@@ -90,7 +90,7 @@ export function formatThroughput(val: number | null | undefined): string {
 }
 
 export function formatTime(input: string | number) {
-  const date = typeof input === 'number' ? new Date(input * 1000) : new Date(input)
+  const date = typeof input === 'number' ? new Date(input / 1000) : new Date(input)
   if (Number.isNaN(date.valueOf())) return String(input)
   return new Intl.DateTimeFormat(undefined, {
     month: 'short',
