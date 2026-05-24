@@ -9,6 +9,6 @@ repos:
       - id: pytest
         name: pytest
         entry: uv run python -m pytest
-        args: ["-q", "-m", "not slow"]
+        args: ["-q", "-m", "not slow", "--cov=src", "--cov-fail-under=70"]
         language: system
         pass_filenames: false

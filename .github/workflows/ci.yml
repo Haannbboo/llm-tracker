@@ -43,8 +43,8 @@ jobs:
       - name: Ruff format check
         run: python -m ruff format --check .
 
-      - name: Run backend tests
-        run: python -m pytest -q
+      - name: Run backend tests with coverage
+        run: python -m pytest -q --cov=src --cov=config --cov=scripts --cov-report=term-missing --cov-fail-under=75
 
   frontend:
     name: Frontend
