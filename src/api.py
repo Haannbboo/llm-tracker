@@ -780,7 +780,7 @@ async def detect_local_agents():
     import shutil
 
     agents = {}
-    for name in ("claude", "codex", "gemini", "opencode"):
+    for name in ("claude", "codex", "gemini", "opencode", "kilo"):
         path = shutil.which(name)
         agents[name] = {"found": path is not None, "path": path}
     return agents
@@ -886,25 +886,71 @@ async def get_local_setup_health():
     opencode_plugins = opencode_config.get("plugin", [])
     opencode_endpoint = None
     opencode_plugin_registered = False
-    opencode_plugin_suffix = "plugins/opencode/dist/index.js"
-    opencode_default_endpoint = "http://localhost:4002/v1/logs"
+    opencode_plugin_suffixes = (
+        "plugins/opencode/dist/index.js",
+        "plugins/kilo/dist/index.js",
+    )
+    opencode_default_endpoint = "http://localhost:4005/v1/logs"
     if isinstance(opencode_plugins, list):
         for entry in opencode_plugins:
-            if isinstance(entry, str) and entry.endswith(opencode_plugin_suffix):
-                opencode_plugin_registered = True
+            entry_path = (
+                str(entry)
+                if isinstance(entry, str)
+                else str(entry[0])
+                if isinstance(entry, list) and len(entry) >= 1
+                else ""
+            )
+            matched_suffix = next(
+                (s for s in opencode_plugin_suffixes if entry_path.endswith(s)),
+                None,
+            )
+            if matched_suffix is None:
+                continue
+            opencode_plugin_registered = True
+            if isinstance(entry, str):
                 opencode_endpoint = opencode_default_endpoint
-                break
-            if (
+            elif (
                 isinstance(entry, list)
-                and len(entry) >= 1
-                and str(entry[0]).endswith(opencode_plugin_suffix)
+                and len(entry) >= 2
+                and isinstance(entry[1], dict)
             ):
-                opencode_plugin_registered = True
-                opts = (
-                    entry[1] if len(entry) >= 2 and isinstance(entry[1], dict) else {}
+                opencode_endpoint = (
+                    entry[1].get("endpoint") or opencode_default_endpoint
                 )
-                opencode_endpoint = opts.get("endpoint") or opencode_default_endpoint
-                break
+            else:
+                opencode_endpoint = opencode_default_endpoint
+            break
+
+    kilo_config_path = home / ".config" / "kilo" / "opencode.json"
+    kilo_config = _read_json_file(kilo_config_path)
+    kilo_plugins = kilo_config.get("plugin", [])
+    kilo_endpoint = None
+    kilo_plugin_registered = False
+    kilo_plugin_suffix = "plugins/kilo/dist/index.js"
+    kilo_default_endpoint = "http://localhost:4005/v1/logs"
+    if isinstance(kilo_plugins, list):
+        for entry in kilo_plugins:
+            entry_path = (
+                str(entry)
+                if isinstance(entry, str)
+                else str(entry[0])
+                if isinstance(entry, list) and len(entry) >= 1
+                else ""
+            )
+            if not entry_path.endswith(kilo_plugin_suffix):
+                continue
+            kilo_plugin_registered = True
+            if isinstance(entry, str):
+                kilo_endpoint = kilo_default_endpoint
+            elif (
+                isinstance(entry, list)
+                and len(entry) >= 2
+                and isinstance(entry[1], dict)
+            ):
+                kilo_endpoint = entry[1].get("endpoint") or kilo_default_endpoint
+            else:
+                kilo_endpoint = kilo_default_endpoint
+            break
 
     agents = {
         "claude": _agent_health(
@@ -925,6 +971,11 @@ async def get_local_setup_health():
         "opencode": _agent_health(
             opencode_plugin_registered,
             opencode_endpoint,
+            expected["otlp_logs_endpoint"],
+        ),
+        "kilo": _agent_health(
+            kilo_plugin_registered,
+            kilo_endpoint,
             expected["otlp_logs_endpoint"],
         ),
     }

@@ -123,6 +123,11 @@ if command -v opencode >/dev/null 2>&1; then
   pass "OpenCode configured"
 fi
 
+if command -v kilo >/dev/null 2>&1; then
+  "${PYTHON}" "${ROOT_DIR}/scripts/configure-kilo-plugin.py" "${ROOT_DIR}" "${OTLP_PORT}"
+  pass "Kilo Code configured"
+fi
+
 # ── Schema migrations ───────────────────────────────────────────────
 info "Applying schema migrations..."
 "${PYTHON}" "${ROOT_DIR}/scripts/migrate_schema.py"

@@ -16,10 +16,16 @@ CLAUDE_EVENT = "claude_code.api_request"
 CODEX_EVENT = "codex.sse_event"
 CODEX_API_REQUEST_EVENT = "codex.api_request"
 OPENCODE_EVENT = "opencode.message_completed"
+KILO_EVENT = "kilo.message_completed"
 CODEX_DEBUG_FILE = "/tmp/codex-otlp-debug.json"
 GEMINI_HOOK_DIR = os.path.join(os.environ.get("TMPDIR", "/tmp"), "llm-tracker-gemini")
 CODEX_SERVICE_NAMES = {"codex_cli_rs", "codex_exec"}
-KNOWN_SERVICE_NAMES = {"claude-code", "gemini-cli", "opencode"} | CODEX_SERVICE_NAMES
+KILO_SERVICE_NAMES = {"kilo"}
+KNOWN_SERVICE_NAMES = (
+    {"claude-code", "gemini-cli", "opencode", "kilo"}
+    | CODEX_SERVICE_NAMES
+    | KILO_SERVICE_NAMES
+)
 
 # State cache for merging Codex events: run/conversation key -> {duration_ms, ttft_ms, timestamp}
 codex_state: dict = {}
@@ -336,8 +342,9 @@ def _extract_opencode_fields(
     record: dict,
     attrs: list,
     session_id: str,
+    client_source: str = "opencode",
 ) -> dict:
-    """Extract normalized usage fields from an OpenCode OTLP record."""
+    """Extract normalized usage fields from an OpenCode or Kilo OTLP record."""
     time_ns = record.get("timeUnixNano", "0")
     ts = int(time_ns) // 1000
 
@@ -355,11 +362,11 @@ def _extract_opencode_fields(
     if status is None:
         status = _attr(attrs, "http.status_code")
     provider_from_attr = _attr(attrs, "provider")
-    model = _attr(attrs, "model") or "opencode-unknown"
+    model = _attr(attrs, "model") or f"{client_source}-unknown"
     usage_session_id = _attr(attrs, "session.id") or session_id or None
 
     metadata = parse_provider_metadata(
-        "opencode",
+        client_source,
         str(provider_from_attr) if provider_from_attr is not None else None,
     )
 
@@ -379,7 +386,7 @@ def _extract_opencode_fields(
         "ts": ts,
         "provider": provider_from_attr or metadata.provider,
         "model": model,
-        "client_source": "opencode",
+        "client_source": client_source,
         "session_id": usage_session_id,
         "endpoint": "generate-otlp",
         "prompt_tokens": prompt_tokens,
@@ -401,8 +408,14 @@ def _extract_opencode_fields(
     }
 
 
-def _parse_opencode_record(record: dict, attrs: list, session_id: str) -> None:
-    record_usage(**_extract_opencode_fields(record, attrs, session_id))
+def _parse_opencode_record(
+    record: dict, attrs: list, session_id: str, client_source: str = "opencode"
+) -> None:
+    record_usage(
+        **_extract_opencode_fields(
+            record, attrs, session_id, client_source=client_source
+        )
+    )
 
 
 def _handle_codex_state_event(attrs: list) -> bool:
@@ -563,6 +576,10 @@ def _parse_log_record(
         _handle_codex_state_event(attrs)
     elif event_name == OPENCODE_EVENT and service_name == "opencode":
         _parse_opencode_record(record, attrs, usage_session_id or "")
+    elif event_name == KILO_EVENT and service_name in KILO_SERVICE_NAMES:
+        _parse_opencode_record(
+            record, attrs, usage_session_id or "", client_source="kilo"
+        )
     elif (
         service_name not in KNOWN_SERVICE_NAMES
         and attrs

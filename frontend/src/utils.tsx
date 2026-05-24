@@ -404,6 +404,7 @@ export function getAgentDisplayName(name: string) {
   if (normalized.includes('codesonline') || normalized.includes('codex')) return 'Codex'
   if (normalized.includes('gemini')) return 'Gemini CLI'
   if (normalized.includes('opencode')) return 'OpenCode'
+  if (normalized.includes('kilo')) return 'Kilo Code'
   return name
 }
 

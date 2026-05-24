@@ -159,3 +159,5 @@ Default labels: `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-huma
 ### Domain docs
 
 Single-context repo. Use root README plus `.agents/commands/llm-tracker.md`; ADRs may live under `docs/adr/` only for durable architecture decisions.
+
+

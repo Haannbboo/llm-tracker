@@ -165,10 +165,15 @@ def _setup_health(
     codex: dict,
     gemini: dict,
     opencode: dict | None = None,
+    kilo: dict | None = None,
 ) -> dict:
     expected_logs_endpoint = f"http://localhost:{otlp_port}/v1/logs"
     expected_endpoint = f"http://localhost:{otlp_port}"
     opencode = opencode or _agent_health(
+        status="missing_config",
+        expected_endpoint=expected_logs_endpoint,
+    )
+    kilo = kilo or _agent_health(
         status="missing_config",
         expected_endpoint=expected_logs_endpoint,
     )
@@ -178,13 +183,15 @@ def _setup_health(
             "otlp_logs_endpoint": expected_logs_endpoint,
         },
         "summary": {
-            "total_agents": 4,
+            "total_agents": 5,
             "configured_agents": sum(
-                1 for agent in (claude, codex, gemini, opencode) if agent["configured"]
+                1
+                for agent in (claude, codex, gemini, opencode, kilo)
+                if agent["configured"]
             ),
             "matching_agents": sum(
                 1
-                for agent in (claude, codex, gemini, opencode)
+                for agent in (claude, codex, gemini, opencode, kilo)
                 if agent["endpoint_matches"]
             ),
         },
@@ -193,6 +200,7 @@ def _setup_health(
             "codex": codex,
             "gemini": gemini,
             "opencode": opencode,
+            "kilo": kilo,
         },
     }
 
