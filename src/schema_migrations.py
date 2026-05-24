@@ -7,6 +7,24 @@ from sqlalchemy.exc import SQLAlchemyError
 from .database import get_engine, init_db
 
 
+def _ts_date_expr(dialect: str, col: str = "ts") -> str:
+    """Return SQL expression that extracts a date string from ts.
+
+    Handles both ISO string and integer microsecond formats.
+    """
+    if dialect == "postgresql":
+        return (
+            f"CASE WHEN {col}::text ~ '^[0-9]{{10,}}$' "
+            f"THEN TO_TIMESTAMP({col} / 1000000.0)::date::text "
+            f"ELSE SUBSTRING({col}::text, 1, 10) END"
+        )
+    return (
+        f"CASE WHEN typeof({col}) = 'integer' "
+        f"THEN date({col} / 1000000, 'unixepoch') "
+        f"ELSE substr({col}, 1, 10) END"
+    )
+
+
 def _table_exists(engine: Engine, table_name: str) -> bool:
     return table_name in inspect(engine).get_table_names()
 
@@ -115,6 +133,189 @@ def _drop_column(engine: Engine, table_name: str, column_name: str) -> bool:
             if column_name in _table_column_names(engine, table_name):
                 raise
             return False
+
+
+def _migrate_usage_id_to_uuid(engine: Engine) -> bool:
+    """Convert usage.id from INTEGER autoincrement to TEXT UUID (client-generated).
+
+    Also converts sessions.last_usage_id from INTEGER to TEXT.
+    Returns True if migration was applied, False if already migrated.
+    """
+    from uuid import uuid4
+
+    from sqlalchemy import inspect as sa_inspect
+
+    usage_cols = {c["name"]: c for c in sa_inspect(engine).get_columns("usage")}
+    id_type = str(usage_cols["id"]["type"])
+    if "INT" not in id_type.upper():
+        return False
+
+    dialect = engine.dialect.name
+    has_sessions = _table_exists(engine, "sessions")
+
+    with engine.begin() as connection:
+        if dialect == "postgresql":
+            # Generate UUIDs for existing rows
+            connection.execute(text("ALTER TABLE usage ADD COLUMN id_new TEXT"))
+            rows = connection.execute(text("SELECT id FROM usage")).fetchall()
+            for (old_id,) in rows:
+                connection.execute(
+                    text("UPDATE usage SET id_new = :uuid WHERE id = :old_id"),
+                    {"uuid": str(uuid4()), "old_id": old_id},
+                )
+            # Find and drop the actual PK constraint name
+            pk_name = connection.execute(
+                text(
+                    "SELECT constraint_name FROM information_schema.table_constraints "
+                    "WHERE table_name = 'usage' AND constraint_type = 'PRIMARY KEY'"
+                )
+            ).scalar()
+            if pk_name:
+                connection.execute(text(f"ALTER TABLE usage DROP CONSTRAINT {pk_name}"))
+            connection.execute(text("ALTER TABLE usage DROP COLUMN id"))
+            connection.execute(text("ALTER TABLE usage RENAME COLUMN id_new TO id"))
+            connection.execute(text("ALTER TABLE usage ADD PRIMARY KEY (id)"))
+
+            if has_sessions:
+                sessions_cols = {
+                    c["name"]: c for c in sa_inspect(engine).get_columns("sessions")
+                }
+                lui_type = str(sessions_cols["last_usage_id"]["type"])
+                if "INT" in lui_type.upper() and "TEXT" not in lui_type.upper():
+                    connection.execute(
+                        text(
+                            "ALTER TABLE sessions ALTER COLUMN last_usage_id TYPE TEXT"
+                        )
+                    )
+        elif dialect == "sqlite":
+            # Get existing column info
+            result = connection.execute(text("PRAGMA table_info(usage)"))
+            columns = result.fetchall()
+
+            # Fetch existing rows to generate UUIDs
+            existing = connection.execute(text("SELECT * FROM usage")).fetchall()
+
+            # Build new table with TEXT id
+            new_col_defs = []
+            for col in columns:
+                col_name = col[1]
+                col_type = col[2]
+                not_null = col[3]
+                default_val = col[4]
+
+                if col_name == "id":
+                    new_col_defs.append("id TEXT PRIMARY KEY")
+                else:
+                    default_clause = (
+                        f" DEFAULT {default_val}" if default_val is not None else ""
+                    )
+                    new_col_defs.append(
+                        f"{col_name} {col_type}"
+                        f"{' NOT NULL' if not_null else ''}{default_clause}"
+                    )
+
+            new_table = "usage_new"
+            cols_sql = ", ".join(new_col_defs)
+            connection.execute(text(f"CREATE TABLE {new_table} ({cols_sql})"))
+
+            # Insert rows with generated UUIDs (id is column 0)
+            col_names = [c[1] for c in columns]
+            placeholders = ", ".join(f":{name}" for name in col_names)
+            col_names_sql = ", ".join(col_names)
+            for row in existing:
+                row_dict = dict(zip(col_names, row))
+                row_dict["id"] = str(uuid4())
+                connection.execute(
+                    text(
+                        f"INSERT INTO {new_table} ({col_names_sql}) "
+                        f"VALUES ({placeholders})"
+                    ),
+                    row_dict,
+                )
+
+            connection.execute(text("DROP TABLE usage"))
+            connection.execute(text(f"ALTER TABLE {new_table} RENAME TO usage"))
+
+            # Recreate indexes on usage
+            for idx_sql in [
+                "CREATE INDEX IF NOT EXISTS ix_usage_ts ON usage (ts)",
+            ]:
+                connection.execute(text(idx_sql))
+
+            # Migrate sessions.last_usage_id if needed
+            if has_sessions:
+                sessions_cols = {
+                    c["name"]: c for c in sa_inspect(engine).get_columns("sessions")
+                }
+                lui_type = str(sessions_cols["last_usage_id"]["type"])
+                if "INT" in lui_type.upper() and "TEXT" not in lui_type.upper():
+                    _sqlite_recreate_with_column_type_change(
+                        connection,
+                        "sessions",
+                        "last_usage_id",
+                        "TEXT",
+                    )
+        else:
+            raise ValueError(
+                f"Unsupported dialect for usage_id_to_uuid migration: {dialect}"
+            )
+
+    return True
+
+
+def _sqlite_recreate_with_column_type_change(
+    connection,
+    table_name: str,
+    column_name: str,
+    new_type: str,
+) -> None:
+    """Recreate a SQLite table with one column's type changed."""
+    result = connection.execute(text(f"PRAGMA table_info({table_name})"))
+    columns = result.fetchall()
+
+    new_col_defs = []
+    select_parts = []
+    for col in columns:
+        col_name = col[1]
+        col_type = col[2]
+        not_null = col[3]
+        default_val = col[4]
+
+        if col_name == column_name:
+            type_str = f"{new_type} NOT NULL" if not_null else new_type
+            new_col_defs.append(f"{col_name} {type_str}")
+            select_parts.append(f"CAST({col_name} AS {new_type})")
+        else:
+            default_clause = (
+                f" DEFAULT {default_val}" if default_val is not None else ""
+            )
+            new_col_defs.append(
+                f"{col_name} {col_type}{' NOT NULL' if not_null else ''}{default_clause}"
+            )
+            select_parts.append(col_name)
+
+    pk_cols = [c[1] for c in columns if c[5]]
+    if pk_cols:
+        new_col_defs_clean = []
+        for d in new_col_defs:
+            col_name = d.split()[0]
+            if col_name in pk_cols:
+                new_col_defs_clean.append(d.replace(" PRIMARY KEY", ""))
+            else:
+                new_col_defs_clean.append(d)
+        new_col_defs_clean.append(f"PRIMARY KEY ({', '.join(pk_cols)})")
+        new_col_defs = new_col_defs_clean
+
+    new_table = f"{table_name}_new"
+    cols_sql = ", ".join(new_col_defs)
+    select_sql = ", ".join(select_parts)
+
+    connection.execute(text(f"CREATE TABLE {new_table} ({cols_sql})"))
+    connection.execute(
+        text(f"INSERT INTO {new_table} SELECT {select_sql} FROM {table_name}")
+    )
+    connection.execute(text(f"DROP TABLE {table_name}"))
+    connection.execute(text(f"ALTER TABLE {new_table} RENAME TO {table_name}"))
 
 
 def _migrate_ts_to_int(engine: Engine) -> bool:
@@ -439,48 +640,46 @@ def migrate_database(db_path: str | None = None) -> list[str]:
 
     if status_cols_added:
         # Backfill existing records in usage_daily from the raw usage table
+        date_expr = _ts_date_expr(engine.dialect.name)
+        u_date_expr = _ts_date_expr(engine.dialect.name, "u.ts")
         with engine.begin() as connection:
             if engine.dialect.name == "postgresql":
                 connection.execute(
                     text(
-                        """
+                        f"""
                         UPDATE usage_daily
-                        SET 
+                        SET
                             status_429 = sub.s429,
                             status_4xx = sub.s4xx,
                             status_5xx = sub.s5xx,
                             status_unknown = 0
                         FROM (
-                            SELECT 
-                                SUBSTRING(ts, 1, 10) as date,
+                            SELECT
+                                {date_expr} as date,
                                 provider, model, COALESCE(client_source, '') as client_source,
                                 SUM(CASE WHEN status = 429 THEN 1 ELSE 0 END) as s429,
                                 SUM(CASE WHEN status >= 400 AND status < 500 AND status != 429 THEN 1 ELSE 0 END) as s4xx,
                                 SUM(CASE WHEN status >= 500 THEN 1 ELSE 0 END) as s5xx
                             FROM usage
-                            GROUP BY SUBSTRING(ts, 1, 10), provider, model, COALESCE(client_source, '')
+                            GROUP BY {date_expr}, provider, model, COALESCE(client_source, '')
                         ) AS sub
-                        WHERE usage_daily.date = sub.date 
-                          AND usage_daily.provider = sub.provider 
-                          AND usage_daily.model = sub.model 
+                        WHERE usage_daily.date = sub.date
+                          AND usage_daily.provider = sub.provider
+                          AND usage_daily.model = sub.model
                           AND usage_daily.client_source = sub.client_source
                     """
                     )
                 )
             else:
-                # SQLite-compatible update (supports UPDATE FROM in 3.33+, but we'll use a safer approach if possible)
-                # Actually, most modern SQLite environments for this app will have 3.33+.
-                # Let's use a standard correlated update for maximum compatibility if we're worried,
-                # but UPDATE FROM is much cleaner.
                 connection.execute(
                     text(
-                        """
+                        f"""
                         UPDATE usage_daily
-                        SET 
+                        SET
                             status_429 = (
                                 SELECT SUM(CASE WHEN status = 429 THEN 1 ELSE 0 END)
                                 FROM usage u
-                                WHERE substr(u.ts, 1, 10) = usage_daily.date
+                                WHERE {u_date_expr} = usage_daily.date
                                   AND u.provider = usage_daily.provider
                                   AND u.model = usage_daily.model
                                   AND COALESCE(u.client_source, '') = usage_daily.client_source
@@ -488,7 +687,7 @@ def migrate_database(db_path: str | None = None) -> list[str]:
                             status_4xx = (
                                 SELECT SUM(CASE WHEN status >= 400 AND status < 500 AND status != 429 THEN 1 ELSE 0 END)
                                 FROM usage u
-                                WHERE substr(u.ts, 1, 10) = usage_daily.date
+                                WHERE {u_date_expr} = usage_daily.date
                                   AND u.provider = usage_daily.provider
                                   AND u.model = usage_daily.model
                                   AND COALESCE(u.client_source, '') = usage_daily.client_source
@@ -496,15 +695,15 @@ def migrate_database(db_path: str | None = None) -> list[str]:
                             status_5xx = (
                                 SELECT SUM(CASE WHEN status >= 500 THEN 1 ELSE 0 END)
                                 FROM usage u
-                                WHERE substr(u.ts, 1, 10) = usage_daily.date
+                                WHERE {u_date_expr} = usage_daily.date
                                   AND u.provider = usage_daily.provider
                                   AND u.model = usage_daily.model
                                   AND COALESCE(u.client_source, '') = usage_daily.client_source
                             ),
                             status_unknown = 0
                         WHERE EXISTS (
-                            SELECT 1 FROM usage u 
-                            WHERE substr(u.ts, 1, 10) = usage_daily.date
+                            SELECT 1 FROM usage u
+                            WHERE {u_date_expr} = usage_daily.date
                               AND u.provider = usage_daily.provider
                               AND u.model = usage_daily.model
                               AND COALESCE(u.client_source, '') = usage_daily.client_source
@@ -520,9 +719,10 @@ def migrate_database(db_path: str | None = None) -> list[str]:
                 text("SELECT COUNT(*) FROM usage_daily")
             ).scalar()
         if count == 0:
+            date_expr = _ts_date_expr(engine.dialect.name)
             with engine.begin() as connection:
                 connection.execute(
-                    text("""
+                    text(f"""
                         INSERT INTO usage_daily (
                             date, provider, model, client_source,
                             request_count, prompt_tokens, completion_tokens,
@@ -534,7 +734,7 @@ def migrate_database(db_path: str | None = None) -> list[str]:
                             latency_sum_ms
                         )
                         SELECT
-                            substr(ts, 1, 10) as date,
+                            {date_expr} as date,
                             provider, model, COALESCE(client_source, ''),
                             COUNT(*),
                             COALESCE(SUM(prompt_tokens), 0),
@@ -556,7 +756,7 @@ def migrate_database(db_path: str | None = None) -> list[str]:
                             0, -- status_unknown
                             COALESCE(SUM(latency_ms), 0)
                         FROM usage
-                        GROUP BY substr(ts, 1, 10), provider, model, COALESCE(client_source, '')
+                        GROUP BY {date_expr}, provider, model, COALESCE(client_source, '')
                     """)
                 )
             applied.append("usage_daily.backfill")
@@ -620,5 +820,9 @@ def migrate_database(db_path: str | None = None) -> list[str]:
     if _table_exists(engine, "usage"):
         if _migrate_ts_to_int(engine):
             applied.append("usage.ts_to_int")
+
+    if _table_exists(engine, "usage"):
+        if _migrate_usage_id_to_uuid(engine):
+            applied.append("usage.id_to_uuid")
 
     return applied

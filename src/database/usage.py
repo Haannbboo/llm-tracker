@@ -184,6 +184,7 @@ def upsert_daily_aggregate(usage: Usage, db_path: str | None = None) -> None:
 
 
 USAGE_COPY_FIELDS = (
+    "id",
     "ts",
     "provider",
     "model",
@@ -610,8 +611,8 @@ def count_usage(
         return int(result or 0)
 
 
-def get_usage_high_watermark(*, db_path: str | None = None) -> int:
-    query = select(func.max(Usage.id))
+def get_usage_high_watermark_ts(*, db_path: str | None = None) -> int:
+    query = select(func.max(Usage.ts))
     with get_engine(db_path).connect() as connection:
         value = connection.execute(query).scalar_one()
     return int(value or 0)
@@ -619,8 +620,8 @@ def get_usage_high_watermark(*, db_path: str | None = None) -> int:
 
 def summarize_usage_window(
     *,
-    after_id: int = 0,
-    until_id: int | None = None,
+    after_ts: int = 0,
+    until_ts: int | None = None,
     since: str | None = None,
     until: str | None = None,
     client_source: str | None = None,
@@ -630,9 +631,9 @@ def summarize_usage_window(
     include_rows: bool = False,
     db_path: str | None = None,
 ) -> dict[str, Any]:
-    filters = [Usage.id > after_id]
-    if until_id is not None:
-        filters.append(Usage.id <= until_id)
+    filters = [Usage.ts > after_ts]
+    if until_ts is not None:
+        filters.append(Usage.ts <= until_ts)
     if since:
         filters.append(Usage.ts >= _iso_to_micros(since))
     if until:
@@ -670,7 +671,7 @@ def summarize_usage_window(
             Usage.status,
         )
         .where(and_(*filters))
-        .order_by(Usage.id.asc())
+        .order_by(Usage.ts.asc())
     )
 
     with get_engine(db_path).connect() as connection:
@@ -678,8 +679,8 @@ def summarize_usage_window(
 
     return _build_usage_window_summary(
         rows,
-        after_id=after_id,
-        until_id=until_id,
+        after_ts=after_ts,
+        until_ts=until_ts,
         include_rows=include_rows,
     )
 
@@ -687,8 +688,8 @@ def summarize_usage_window(
 def _build_usage_window_summary(
     rows: list[dict[str, Any]],
     *,
-    after_id: int,
-    until_id: int | None,
+    after_ts: int,
+    until_ts: int | None,
     include_rows: bool,
 ) -> dict[str, Any]:
     overall = _empty_usage_summary()
@@ -751,14 +752,14 @@ def _build_usage_window_summary(
         latency_values=overall_latencies,
         ttft_values=overall_ttfts,
     )
-    window_until_id = until_id
-    if window_until_id is None:
-        window_until_id = rows[-1]["id"] if rows else after_id
+    window_until_ts = until_ts
+    if window_until_ts is None:
+        window_until_ts = rows[-1]["ts"] if rows else after_ts
 
     result: dict[str, Any] = {
         "window": {
-            "after_id": after_id,
-            "until_id": window_until_id,
+            "after_ts": after_ts,
+            "until_ts": window_until_ts,
             "row_count": len(rows),
         },
         "summary": overall,

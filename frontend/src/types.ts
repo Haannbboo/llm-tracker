@@ -70,7 +70,7 @@ export type SourceUsage = {
 }
 
 export type UsageRow = {
-  id: number
+  id: string
   ts: number
   provider: string
   model: string
