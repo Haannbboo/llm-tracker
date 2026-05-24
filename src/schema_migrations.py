@@ -138,11 +138,11 @@ def _drop_column(engine: Engine, table_name: str, column_name: str) -> bool:
 def _migrate_usage_id_to_uuid(engine: Engine) -> bool:
     """Convert usage.id from INTEGER autoincrement to TEXT UUID (client-generated).
 
-    Also converts sessions.last_usage_id from INTEGER to TEXT.
+    Also clears sessions.last_usage_id to NULL — it was an INTEGER ref to the old
+    usage.id and is no longer meaningful. The column type is also changed to TEXT
+    so future upserts (which write UUID strings) don't fail.
     Returns True if migration was applied, False if already migrated.
     """
-    from uuid import uuid4
-
     from sqlalchemy import inspect as sa_inspect
 
     usage_cols = {c["name"]: c for c in sa_inspect(engine).get_columns("usage")}
@@ -155,14 +155,12 @@ def _migrate_usage_id_to_uuid(engine: Engine) -> bool:
 
     with engine.begin() as connection:
         if dialect == "postgresql":
-            # Generate UUIDs for existing rows
+            # Generate UUIDs for existing rows in a single UPDATE
             connection.execute(text("ALTER TABLE usage ADD COLUMN id_new TEXT"))
-            rows = connection.execute(text("SELECT id FROM usage")).fetchall()
-            for (old_id,) in rows:
-                connection.execute(
-                    text("UPDATE usage SET id_new = :uuid WHERE id = :old_id"),
-                    {"uuid": str(uuid4()), "old_id": old_id},
-                )
+            connection.execute(text("CREATE EXTENSION IF NOT EXISTS pgcrypto"))
+            connection.execute(
+                text("UPDATE usage SET id_new = gen_random_uuid()::text")
+            )
             # Find and drop the actual PK constraint name
             pk_name = connection.execute(
                 text(
@@ -177,6 +175,7 @@ def _migrate_usage_id_to_uuid(engine: Engine) -> bool:
             connection.execute(text("ALTER TABLE usage ADD PRIMARY KEY (id)"))
 
             if has_sessions:
+                connection.execute(text("UPDATE sessions SET last_usage_id = NULL"))
                 sessions_cols = {
                     c["name"]: c for c in sa_inspect(engine).get_columns("sessions")
                 }
@@ -192,11 +191,9 @@ def _migrate_usage_id_to_uuid(engine: Engine) -> bool:
             result = connection.execute(text("PRAGMA table_info(usage)"))
             columns = result.fetchall()
 
-            # Fetch existing rows to generate UUIDs
-            existing = connection.execute(text("SELECT * FROM usage")).fetchall()
-
-            # Build new table with TEXT id
+            # Build new table with TEXT id and bulk insert with SQL-level UUID gen
             new_col_defs = []
+            select_parts = []
             for col in columns:
                 col_name = col[1]
                 col_type = col[2]
@@ -205,6 +202,15 @@ def _migrate_usage_id_to_uuid(engine: Engine) -> bool:
 
                 if col_name == "id":
                     new_col_defs.append("id TEXT PRIMARY KEY")
+                    uuid_expr = (
+                        "lower(hex(randomblob(4))) || '-' || "
+                        "lower(hex(randomblob(2))) || '-4' || "
+                        "lower(substr(hex(randomblob(2)), 2)) || '-' || "
+                        "printf('%x', (abs(random()) % 4 + 8)) || "
+                        "lower(substr(hex(randomblob(2)), 2)) || '-' || "
+                        "lower(hex(randomblob(6)))"
+                    )
+                    select_parts.append(uuid_expr)
                 else:
                     default_clause = (
                         f" DEFAULT {default_val}" if default_val is not None else ""
@@ -213,25 +219,15 @@ def _migrate_usage_id_to_uuid(engine: Engine) -> bool:
                         f"{col_name} {col_type}"
                         f"{' NOT NULL' if not_null else ''}{default_clause}"
                     )
+                    select_parts.append(col_name)
 
             new_table = "usage_new"
             cols_sql = ", ".join(new_col_defs)
+            select_sql = ", ".join(select_parts)
             connection.execute(text(f"CREATE TABLE {new_table} ({cols_sql})"))
-
-            # Insert rows with generated UUIDs (id is column 0)
-            col_names = [c[1] for c in columns]
-            placeholders = ", ".join(f":{name}" for name in col_names)
-            col_names_sql = ", ".join(col_names)
-            for row in existing:
-                row_dict = dict(zip(col_names, row))
-                row_dict["id"] = str(uuid4())
-                connection.execute(
-                    text(
-                        f"INSERT INTO {new_table} ({col_names_sql}) "
-                        f"VALUES ({placeholders})"
-                    ),
-                    row_dict,
-                )
+            connection.execute(
+                text(f"INSERT INTO {new_table} SELECT {select_sql} FROM usage")
+            )
 
             connection.execute(text("DROP TABLE usage"))
             connection.execute(text(f"ALTER TABLE {new_table} RENAME TO usage"))
@@ -244,6 +240,7 @@ def _migrate_usage_id_to_uuid(engine: Engine) -> bool:
 
             # Migrate sessions.last_usage_id if needed
             if has_sessions:
+                connection.execute(text("UPDATE sessions SET last_usage_id = NULL"))
                 sessions_cols = {
                     c["name"]: c for c in sa_inspect(engine).get_columns("sessions")
                 }
