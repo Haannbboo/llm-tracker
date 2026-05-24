@@ -17,7 +17,7 @@
     "dev": "tsc --watch"
   },
   "dependencies": {
-    "@kilocode/plugin": "^1.0.0"
+    "@kilocode/plugin": "^7.3.8"
   },
   "devDependencies": {
     "typescript": "^5.5.0"
