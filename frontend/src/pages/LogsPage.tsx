@@ -14,30 +14,26 @@ import {
   value, getProviderColor, getModelIcon, shortSessionId,
 } from '../utils'
 import { getModelBadgeBackgroundColor, getModelTextColor } from '../model-badge'
-import type { ActiveFilter, DateRangeOption } from '../types'
+import type { DateRangeOption } from '../types'
 
 type Props = {
   initialSessionFilter?: string | null
-  initialActiveFilter?: ActiveFilter | null
 }
 
-export function LogsPage({ initialSessionFilter, initialActiveFilter }: Props) {
-  // Read initial filters from sessionStorage (set by DashboardPage navigation)
-  const storedFilters = (() => {
+export function LogsPage({ initialSessionFilter }: Props) {
+  // Read session filter from sessionStorage (set by Dashboard/Sessions tab navigation)
+  const storedSessionFilter = (() => {
     try {
       const raw = sessionStorage.getItem('llm-tracker-logs-filters')
       if (raw) {
         sessionStorage.removeItem('llm-tracker-logs-filters')
-        return JSON.parse(raw)
+        return JSON.parse(raw).sessionFilter ?? null
       }
     } catch { /* ignore */ }
     return null
   })()
 
-  const effectiveSessionFilter = initialSessionFilter ?? storedFilters?.sessionFilter ?? null
-  const effectiveActiveFilter = initialActiveFilter ?? storedFilters?.activeFilter ?? null
-
-  const { showToast, configParsed, requestUsageRefresh } = useApp()
+  const { showToast, configParsed, requestUsageRefresh, activeFilter, setActiveFilter, activeSource, setActiveSource, dateRange, setDateRange, customSince, setCustomSince, customUntil, setCustomUntil } = useApp()
   const {
     columns,
     visibleColumns,
@@ -46,23 +42,13 @@ export function LogsPage({ initialSessionFilter, initialActiveFilter }: Props) {
     resetColumns,
   } = useRequestLogColumns()
 
-  // Dashboard data for filters and shared state
+  // Dashboard data for summary/sources/providerColors
   const {
-    summary, sources,
-    activeFilter, setActiveFilter, activeSource, setActiveSource,
-    dateRange, setDateRange, customSince, setCustomSince, customUntil, setCustomUntil,
-    providerColors,
+    summary, sources, providerColors,
   } = useDashboardData()
 
   // Session filter state (local to logs view)
-  const [sessionFilter, setSessionFilter] = useState<string | null>(effectiveSessionFilter)
-
-  // Apply initial active filter from props
-  useEffect(() => {
-    if (effectiveActiveFilter) {
-      setActiveFilter(effectiveActiveFilter)
-    }
-  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+  const [sessionFilter, setSessionFilter] = useState<string | null>(initialSessionFilter ?? storedSessionFilter)
 
   // Logs data hook
   const {

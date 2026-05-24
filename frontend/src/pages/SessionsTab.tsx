@@ -11,14 +11,10 @@ import {
   shortSessionId, sessionAgentName, sessionDisplayName, sessionTaskTitle, getSinceDate,
 } from '../utils'
 import { getModelBadgeBackgroundColor, getModelTextColor } from '../model-badge'
-import type { ActiveFilter, DailyEffectivenessReport, DateRangeOption, EvaluationJobProgress, ModelEffectivenessGroup, SessionSummary, SessionsSummary } from '../types'
+import type { DailyEffectivenessReport, EvaluationJobProgress, ModelEffectivenessGroup, SessionSummary, SessionsSummary } from '../types'
 
 type SessionsTabProps = {
-  activeSource: string | null
-  dateRange: DateRangeOption
-  customSince: string
-  customUntil: string
-  onNavigateToLogs: (filters?: { sessionFilter?: string; activeFilter?: ActiveFilter }) => void
+  onNavigateToLogs: (filters?: { sessionFilter?: string }) => void
 }
 
 function getOutcomeBadge(outcome: string | null | undefined): { label: string; className: string } {
@@ -58,13 +54,9 @@ function getLocalDateKey(date: Date): string {
 }
 
 export function SessionsTab({
-  activeSource,
-  dateRange,
-  customSince,
-  customUntil,
   onNavigateToLogs,
 }: SessionsTabProps) {
-  const { lang, showToast, requestUsageRefresh, refreshTrigger, setError } = useApp()
+  const { lang, showToast, requestUsageRefresh, refreshTrigger, setError, activeSource, dateRange, customSince, customUntil, setActiveFilter } = useApp()
   const [hideNoop, setHideNoop] = useState(true)
   const {
     sessions,
@@ -254,20 +246,17 @@ export function SessionsTab({
   }
 
   const handleViewInLogs = (session: SessionSummary, filters?: { onlyFailed?: boolean; status429?: boolean; status4xx?: boolean; status5xx?: boolean }) => {
-    const navFilters: { sessionFilter: string; activeFilter?: ActiveFilter } = {
-      sessionFilter: session.session_id,
-    }
     if (filters) {
-      navFilters.activeFilter = {
+      setActiveFilter({
         provider: '',
         model: null,
         only_failed: filters.onlyFailed,
         status_429: filters.status429,
         status_4xx: filters.status4xx,
         status_5xx: filters.status5xx,
-      }
+      })
     }
-    onNavigateToLogs(navFilters)
+    onNavigateToLogs({ sessionFilter: session.session_id })
   }
 
   return (

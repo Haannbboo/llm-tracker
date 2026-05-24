@@ -442,7 +442,8 @@ export function OverviewTab({
                     style={{ color: totals.successRate < 100 ? 'var(--color-red)' : 'var(--color-green)', cursor: totals.successRate < 100 ? 'pointer' : 'default' }}
                     onClick={() => {
                       if (totals.successRate < 100) {
-                        onNavigateToLogs({ activeFilter: { provider: '', model: null, only_failed: true } })
+                        setActiveFilter({ provider: '', model: null, only_failed: true })
+                        onNavigateToLogs()
                       }
                     }}
                     title={totals.successRate < 100 ? t('View failed requests in logs') : undefined}
@@ -465,7 +466,8 @@ export function OverviewTab({
                     className="status-link"
                     onClick={(e) => {
                       e.stopPropagation();
-                      onNavigateToLogs({ activeFilter: { provider: '', model: null, status_429: true } });
+                      setActiveFilter({ provider: '', model: null, status_429: true })
+                      onNavigateToLogs()
                     }}
                   >
                     429: {totals.statusBreakdown.s429}
@@ -476,7 +478,8 @@ export function OverviewTab({
                     className="status-link"
                     onClick={(e) => {
                       e.stopPropagation();
-                      onNavigateToLogs({ activeFilter: { provider: '', model: null, status_5xx: true } });
+                      setActiveFilter({ provider: '', model: null, status_5xx: true })
+                      onNavigateToLogs()
                     }}
                   >
                     5xx: {totals.statusBreakdown.s5xx}
@@ -487,7 +490,8 @@ export function OverviewTab({
                     className="status-link"
                     onClick={(e) => {
                       e.stopPropagation();
-                      onNavigateToLogs({ activeFilter: { provider: '', model: null, status_4xx: true } });
+                      setActiveFilter({ provider: '', model: null, status_4xx: true })
+                      onNavigateToLogs()
                     }}
                   >
                     4xx: {totals.statusBreakdown.s4xx}

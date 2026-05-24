@@ -7,22 +7,22 @@ import { ModelSelector } from '../ModelSelector'
 import { OverviewTab } from './OverviewTab'
 import { SessionsTab } from './SessionsTab'
 import { t } from '../i18n/index.ts'
-import type { ActiveFilter } from '../types'
-
 type Props = {
-  onNavigateToLogs: (filters?: { sessionFilter?: string; activeFilter?: ActiveFilter }) => void
+  onNavigateToLogs: (filters?: { sessionFilter?: string }) => void
 }
 
 export function DashboardPage({ onNavigateToLogs }: Props) {
-  const { theme, error, requestUsageRefresh } = useApp()
+  const {
+    theme, error, requestUsageRefresh,
+    activeFilter, setActiveFilter, activeSource, setActiveSource,
+    dateRange, setDateRange,
+  } = useApp()
   const { localAgents, setupDiagnostics } = useDashboardAgents()
 
   // Dashboard data hook
   const {
     summary, dailyUsage, heatmapData, totalTrackedEvents, sources,
     dashboardInitialLoading, dashboardRefreshing,
-    activeFilter, setActiveFilter, activeSource, setActiveSource,
-    dateRange, setDateRange, customSince, customUntil,
     providerColors, dashboardFilterParams, totals,
   } = useDashboardData()
 
@@ -126,10 +126,6 @@ export function DashboardPage({ onNavigateToLogs }: Props) {
       )}
       {dashboardTab === 'sessions' && (
         <SessionsTab
-          activeSource={activeSource}
-          dateRange={dateRange}
-          customSince={customSince}
-          customUntil={customUntil}
           onNavigateToLogs={onNavigateToLogs}
         />
       )}

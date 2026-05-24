@@ -6,7 +6,7 @@ import { Navbar } from './components/Navbar'
 import { DashboardPage } from './pages/DashboardPage'
 import { LogsPage } from './pages/LogsPage'
 import { SettingsPage } from './pages/SettingsPage'
-import type { ActiveFilter } from './types'
+
 
 function AppLayout() {
   const navigate = useNavigate()
@@ -22,8 +22,8 @@ function AppLayout() {
     navigate(`/${view}`)
   }, [navigate])
 
-  const handleNavigateToLogs = useCallback((filters?: { sessionFilter?: string; activeFilter?: ActiveFilter }) => {
-    if (filters) {
+  const handleNavigateToLogs = useCallback((filters?: { sessionFilter?: string }) => {
+    if (filters?.sessionFilter) {
       sessionStorage.setItem('llm-tracker-logs-filters', JSON.stringify(filters))
     }
     navigate('/logs')
