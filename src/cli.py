@@ -17,7 +17,7 @@ import httpx
 
 from config.app import CONFIG
 from .database import (
-    get_usage_high_watermark,
+    get_usage_high_watermark_ts,
     init_db,
     merge_usage_database,
     summarize_usage_window,
@@ -57,23 +57,23 @@ class UsageApiClient:
     def get_high_watermark(self) -> int:
         try:
             data = self._get_json("/usage/high-watermark")
-            return int(data["id"])
+            return int(data["ts"])
         except (KeyError, TypeError, ValueError) as exc:
             raise ApiError(str(exc)) from exc
 
     def get_run_summary(
         self,
         *,
-        after_id: int,
-        until_id: int | None = None,
+        after_ts: int,
+        until_ts: int | None = None,
         client_source: str | None = None,
         session_id: str | None = None,
         provider: str | None = None,
         model: str | None = None,
     ) -> dict[str, Any]:
-        params: dict[str, Any] = {"after_id": after_id}
-        if until_id is not None:
-            params["until_id"] = until_id
+        params: dict[str, Any] = {"after_ts": after_ts}
+        if until_ts is not None:
+            params["until_ts"] = until_ts
         if client_source is not None:
             params["client_source"] = client_source
         if session_id is not None:
@@ -107,21 +107,21 @@ class DatabaseUsageClient:
         self.db_url = db_url
 
     def get_high_watermark(self) -> int:
-        return get_usage_high_watermark(db_path=self.db_url)
+        return get_usage_high_watermark_ts(db_path=self.db_url)
 
     def get_run_summary(
         self,
         *,
-        after_id: int,
-        until_id: int | None = None,
+        after_ts: int,
+        until_ts: int | None = None,
         client_source: str | None = None,
         session_id: str | None = None,
         provider: str | None = None,
         model: str | None = None,
     ) -> dict[str, Any]:
         return summarize_usage_window(
-            after_id=after_id,
-            until_id=until_id,
+            after_ts=after_ts,
+            until_ts=until_ts,
             client_source=client_source,
             session_id=session_id,
             provider=provider,
@@ -400,13 +400,13 @@ def run_with_watermark_tracking(
     options: RunOptions,
 ) -> int:
     try:
-        before_id = client.get_high_watermark()
+        before_ts = client.get_high_watermark()
     except ApiError:
         print(
             "llm-tracker API unavailable before command start.",
             file=sys.stderr,
         )
-        before_id = None
+        before_ts = None
 
     completed = subprocess.run(
         command,
@@ -418,13 +418,13 @@ def run_with_watermark_tracking(
     if options.no_summary:
         return child_code
 
-    if before_id is None:
+    if before_ts is None:
         print("No summary could be produced.", file=sys.stderr)
         return child_code
 
     summary = poll_summary(
         client,
-        after_id=before_id,
+        after_ts=before_ts,
         options=options,
     )
     if summary is None:
@@ -509,7 +509,7 @@ def run_with_isolated_tracking(
         for service in reversed(services):
             stop_temp_service(service)
         services.clear()
-        summary = summarize_usage_window(after_id=0, db_path=run_db_url)
+        summary = summarize_usage_window(after_ts=0, db_path=run_db_url)
 
         try:
             init_db(main_db_url)
@@ -564,7 +564,7 @@ def _normalize_return_code(returncode: int) -> int:
 def poll_summary(
     client: UsageApiClient,
     *,
-    after_id: int,
+    after_ts: int,
     options: RunOptions,
 ) -> dict[str, Any] | None:
     deadline = time.monotonic() + max(options.wait_ms, 0) / 1000
@@ -572,7 +572,7 @@ def poll_summary(
 
     while True:
         try:
-            summary = client.get_run_summary(after_id=after_id)
+            summary = client.get_run_summary(after_ts=after_ts)
         except ApiError:
             return latest_summary
 
@@ -585,14 +585,14 @@ def poll_summary(
         return latest_summary
 
     try:
-        until_id = client.get_high_watermark()
+        until_ts = client.get_high_watermark()
     except ApiError:
         return latest_summary
 
     try:
         return client.get_run_summary(
-            after_id=after_id,
-            until_id=until_id,
+            after_ts=after_ts,
+            until_ts=until_ts,
         )
     except ApiError:
         return None
@@ -600,7 +600,7 @@ def poll_summary(
 
 def wait_for_usage_flush(client: UsageApiClient, options: RunOptions) -> None:
     """Give OTLP exporters a bounded window to write final usage rows."""
-    poll_summary(client, after_id=0, options=options)
+    poll_summary(client, after_ts=0, options=options)
 
 
 def run_session_summary_command(

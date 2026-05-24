@@ -37,11 +37,13 @@ def test_api_defines_bounded_evaluation_worker_shutdown(api_module):
 
 
 def test_usage_high_watermark_endpoint(api_module, monkeypatch):
-    monkeypatch.setattr(api_module, "get_usage_high_watermark", lambda: 42)
+    monkeypatch.setattr(
+        api_module, "get_usage_high_watermark_ts", lambda: 1718000000000000
+    )
 
     result = asyncio.run(api_module.usage_high_watermark())
 
-    assert result == {"id": 42}
+    assert result == {"ts": 1718000000000000}
 
 
 def test_usage_run_summary_endpoint_passes_filters(api_module, monkeypatch):
@@ -50,7 +52,11 @@ def test_usage_run_summary_endpoint_passes_filters(api_module, monkeypatch):
     def fake_summary(**kwargs):
         captured.update(kwargs)
         return {
-            "window": {"after_id": 5, "until_id": 9, "row_count": 1},
+            "window": {
+                "after_ts": 1718000000000000,
+                "until_ts": 1718100000000000,
+                "row_count": 1,
+            },
             "summary": {"requests": 1},
             "sessions": [],
             "client_sources": [],
@@ -61,8 +67,8 @@ def test_usage_run_summary_endpoint_passes_filters(api_module, monkeypatch):
 
     result = asyncio.run(
         api_module.usage_run_summary(
-            after_id=5,
-            until_id=9,
+            after_ts=1718000000000000,
+            until_ts=1718100000000000,
             since="2026-04-17T00:00:00+00:00",
             until="2026-04-18T00:00:00+00:00",
             client_source="codex",
@@ -74,8 +80,8 @@ def test_usage_run_summary_endpoint_passes_filters(api_module, monkeypatch):
     )
 
     assert captured == {
-        "after_id": 5,
-        "until_id": 9,
+        "after_ts": 1718000000000000,
+        "until_ts": 1718100000000000,
         "since": "2026-04-17T00:00:00+00:00",
         "until": "2026-04-18T00:00:00+00:00",
         "client_source": "codex",
@@ -88,12 +94,14 @@ def test_usage_run_summary_endpoint_passes_filters(api_module, monkeypatch):
 
 
 def test_usage_high_watermark_route(api_module, monkeypatch):
-    monkeypatch.setattr(api_module, "get_usage_high_watermark", lambda: 42)
+    monkeypatch.setattr(
+        api_module, "get_usage_high_watermark_ts", lambda: 1718000000000000
+    )
 
     response = TestClient(api_module.app).get("/usage/high-watermark")
 
     assert response.status_code == 200
-    assert response.json() == {"id": 42}
+    assert response.json() == {"ts": 1718000000000000}
 
 
 def test_usage_run_summary_route_parses_query_filters(api_module, monkeypatch):
@@ -102,7 +110,11 @@ def test_usage_run_summary_route_parses_query_filters(api_module, monkeypatch):
     def fake_summary(**kwargs):
         captured.update(kwargs)
         return {
-            "window": {"after_id": 5, "until_id": 9, "row_count": 1},
+            "window": {
+                "after_ts": 1718000000000000,
+                "until_ts": 1718100000000000,
+                "row_count": 1,
+            },
             "summary": {"requests": 1},
             "sessions": [],
             "client_sources": [],
@@ -114,8 +126,8 @@ def test_usage_run_summary_route_parses_query_filters(api_module, monkeypatch):
     response = TestClient(api_module.app).get(
         "/usage/run-summary",
         params={
-            "after_id": "5",
-            "until_id": "9",
+            "after_ts": "1718000000000000",
+            "until_ts": "1718100000000000",
             "since": "2026-04-17T00:00:00+00:00",
             "until": "2026-04-18T00:00:00+00:00",
             "client_source": "codex",
@@ -128,8 +140,8 @@ def test_usage_run_summary_route_parses_query_filters(api_module, monkeypatch):
 
     assert response.status_code == 200
     assert captured == {
-        "after_id": 5,
-        "until_id": 9,
+        "after_ts": 1718000000000000,
+        "until_ts": 1718100000000000,
         "since": "2026-04-17T00:00:00+00:00",
         "until": "2026-04-18T00:00:00+00:00",
         "client_source": "codex",
