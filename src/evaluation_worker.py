@@ -6,7 +6,7 @@ import asyncio
 import logging
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from typing import Any
+from typing import Any, Sequence
 
 from sqlalchemy import and_, exists, func, or_, select
 from sqlalchemy.orm import Session
@@ -232,7 +232,7 @@ def classify_local_evaluator_sessions(
 
 def _record_overlaps_evaluation_job(
     record: SessionRecord,
-    jobs: list[EvaluationJob],
+    jobs: Sequence[EvaluationJob],
     *,
     now: datetime,
     grace_seconds: int,

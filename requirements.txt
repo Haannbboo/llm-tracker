@@ -7,6 +7,7 @@ pyyaml>=6.0
 ruamel.yaml>=0.18
 pytest>=8.0
 pytest-cov>=7.0
+mypy>=2.0
 ruff>=0.6
 supervisor>=4.2
 sqlalchemy>=2.0

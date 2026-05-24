@@ -16,7 +16,7 @@ def _table_column_names(engine: Engine, table_name: str) -> set[str]:
 
 
 def _index_names(engine: Engine, table_name: str) -> set[str]:
-    return {index["name"] for index in inspect(engine).get_indexes(table_name)}
+    return {index["name"] for index in inspect(engine).get_indexes(table_name)}  # type: ignore[misc]
 
 
 def _ensure_evaluation_jobs_active_unique_index(engine: Engine) -> bool:

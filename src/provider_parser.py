@@ -8,7 +8,7 @@ import os
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 from urllib.parse import urlparse
 
 # URL-based provider mapping rules (checked in order)
@@ -46,7 +46,7 @@ def _load_toml(path: Path) -> Optional[dict]:
 def _extract_url(config: dict, *keys: str) -> Optional[str]:
     # First try explicit dotted key paths (e.g. "env.ANTHROPIC_BASE_URL")
     for key in keys:
-        val = config
+        val: Any = config
         for part in key.split("."):
             if isinstance(val, dict):
                 val = val.get(part)

@@ -180,7 +180,7 @@ async def usage_read_cors(request: Request, call_next):
         requested_method = request.headers.get("access-control-request-method", "")
         if requested_method.upper() == "GET":
             response = Response(status_code=204)
-            _add_usage_cors_headers(response, origin)
+            _add_usage_cors_headers(response, origin)  # type: ignore[arg-type]
             response.headers["Access-Control-Allow-Methods"] = "GET"
             response.headers["Access-Control-Allow-Headers"] = request.headers.get(
                 "access-control-request-headers",
@@ -191,7 +191,7 @@ async def usage_read_cors(request: Request, call_next):
 
     response = await call_next(request)
     if request.method == "GET":
-        _add_usage_cors_headers(response, origin)
+        _add_usage_cors_headers(response, origin)  # type: ignore[arg-type]
     return response
 
 

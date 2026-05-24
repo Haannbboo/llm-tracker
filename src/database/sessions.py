@@ -791,7 +791,7 @@ def fetch_sessions(
     if sort_col is not None:
         order = sort_col.asc() if sort_order == "asc" else sort_col.desc()
     else:
-        order = SessionRecord.ended.desc()
+        order = SessionRecord.ended.desc()  # type: ignore[assignment]
 
     query = select(SessionRecord).order_by(order).limit(limit).offset(offset)
     if filters:
