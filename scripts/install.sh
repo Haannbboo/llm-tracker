@@ -33,7 +33,7 @@ FRONTEND_DIR="${ROOT_DIR}/frontend"
 if command -v node >/dev/null 2>&1 && command -v npm >/dev/null 2>&1; then
   NODE_VERSION=$(node -v | cut -d'v' -f2)
   NODE_MAJOR=$(echo "$NODE_VERSION" | cut -d'.' -f1)
-  
+
   if [[ "$NODE_MAJOR" -lt 18 ]]; then
     echo ""
     echo "⚠️  Node.js version $NODE_VERSION is too old (minimum v18 required)."

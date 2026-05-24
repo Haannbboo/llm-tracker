@@ -15,14 +15,13 @@ from sqlalchemy import and_, case, func, or_, select, text
 from sqlalchemy.orm import Session
 
 from ..utils import secs_to_micros
-
+from .engine import get_engine
 from .models import (
-    SessionRecord,
-    Usage,
     VALID_OUTCOMES,
     VALID_SOURCES,
+    SessionRecord,
+    Usage,
 )
-from .engine import get_engine
 
 
 def _successful_usage_count(usages: list[Usage]) -> int:
@@ -791,7 +790,7 @@ def fetch_sessions(
     if sort_col is not None:
         order = sort_col.asc() if sort_order == "asc" else sort_col.desc()
     else:
-        order = SessionRecord.ended.desc()
+        order = SessionRecord.ended.desc()  # type: ignore[assignment]
 
     query = select(SessionRecord).order_by(order).limit(limit).offset(offset)
     if filters:

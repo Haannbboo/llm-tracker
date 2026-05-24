@@ -6,8 +6,8 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from .models import BaseUrl
 from .engine import get_engine
+from .models import BaseUrl
 
 
 def _apply_base_url_updates(

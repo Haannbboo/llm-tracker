@@ -12,7 +12,6 @@ from config.pricing import (
     _strip_version_suffix,
 )
 
-
 # --- Key normalization ---
 
 

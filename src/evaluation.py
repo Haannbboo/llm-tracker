@@ -16,12 +16,12 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from .database import (
-    SessionRecord,
     VALID_OUTCOMES,
+    SessionRecord,
     create_session_evaluation_job,
     find_active_session_evaluation_job,
-    get_evaluation_job,
     get_engine,
+    get_evaluation_job,
     mark_evaluation_job_failed,
     mark_evaluation_job_running,
     mark_evaluation_job_succeeded,
@@ -120,7 +120,7 @@ def _extract_text(value: Any) -> str | None:
         if not isinstance(item, dict):
             continue
         if item.get("type") in {"text", "input_text", "output_text"}:
-            text = item.get("text")
+            text = item.get("text")  # type: ignore[assignment]
             if isinstance(text, str) and text.strip():
                 parts.append(text.strip())
     if not parts:

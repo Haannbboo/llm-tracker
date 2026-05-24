@@ -1024,8 +1024,9 @@ def test_get_or_create_base_url_reuses_exact_url_and_updates_metadata(
 def test_get_or_create_base_url_retries_in_fresh_transaction_after_duplicate_insert(
     database_module, monkeypatch
 ):
-    import src.database.base_url as base_url_mod
     from sqlalchemy.exc import IntegrityError
+
+    import src.database.base_url as base_url_mod
 
     class FakeRow:
         id = 7
@@ -4259,8 +4260,9 @@ def test_upsert_daily_aggregate_with_epoch_ts(database_module, isolated_home):
 
     # Daily aggregate should have been created
     from sqlalchemy.orm import Session
-    from src.database.models import UsageDaily
+
     from src.database.engine import get_engine
+    from src.database.models import UsageDaily
 
     with Session(get_engine(db_path)) as session:
         daily = session.query(UsageDaily).first()

@@ -18,9 +18,10 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 
 from config.app import CONFIG, MODEL_MAP, PROVIDER_MAP, ProviderConfig
+
 from .database import init_db
 from .recorder import record_usage
-from .utils import extract_usage, extract_stream_usage
+from .utils import extract_stream_usage, extract_usage
 
 REQUEST_TIMEOUT_SECONDS = 300
 PROXY_USER_AGENT_DIR = os.path.join(

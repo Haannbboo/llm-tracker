@@ -66,7 +66,7 @@ def sync_config_file_with_defaults(
     config_file = Path(config_path).expanduser()
     defaults_file = Path(default_config_path)
 
-    user_config = {}
+    user_config: dict = {}
     if config_file.exists():
         user_config = yaml.safe_load(config_file.read_text(encoding="utf-8")) or {}
 

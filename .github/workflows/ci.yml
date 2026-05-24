@@ -40,11 +40,14 @@ jobs:
           mkdir -p ~/.llm-tracker
           cp config.example.yaml ~/.llm-tracker/config.yaml
 
-      - name: Ruff format check
-        run: python -m ruff format --check .
+      - name: Ruff format and lint
+        run: python -m ruff format --check . && python -m ruff check src/ config/ scripts/ tests/
 
-      - name: Run backend tests
-        run: python -m pytest -q
+      - name: Mypy type check
+        run: python -m mypy src/ config/ scripts/ --ignore-missing-imports
+
+      - name: Run backend tests with coverage
+        run: python -m pytest -q -n auto --cov=src --cov=config --cov=scripts --cov-report=term-missing --cov-fail-under=75
 
   frontend:
     name: Frontend

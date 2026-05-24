@@ -5,19 +5,12 @@ The steady-state pattern in this module is:
 - `select(...)`-style projection queries for usage reporting and aggregation
 """
 
-from .models import (
-    Base,
-    BaseUrl,
-    EvaluationJob,
-    SessionRecord,
-    Usage,
-    UsageDaily,
-    VALID_OUTCOMES,
-    VALID_SOURCES,
-    metadata,
-)
-from .engine import DB_URL_ENV_VAR, get_db_url, get_engine, init_db
+# Re-export sqlalchemy helpers used by tests and consumers via this module
+from sqlalchemy import select, text
+from sqlalchemy.orm import Session
+
 from .base_url import get_or_create_base_url, resolve_base_url_id
+from .engine import DB_URL_ENV_VAR, get_db_url, get_engine, init_db
 from .evaluation_jobs import (
     VALID_EVALUATION_JOB_TRIGGERS,
     claim_next_evaluation_job,
@@ -33,6 +26,17 @@ from .evaluation_jobs import (
     mark_evaluation_job_running,
     mark_evaluation_job_succeeded,
     promote_evaluation_job_to_manual,
+)
+from .models import (
+    VALID_OUTCOMES,
+    VALID_SOURCES,
+    Base,
+    BaseUrl,
+    EvaluationJob,
+    SessionRecord,
+    Usage,
+    UsageDaily,
+    metadata,
 )
 from .sessions import (
     aggregate_model_effectiveness,
@@ -64,10 +68,6 @@ from .usage import (
     summarize_usage_window,
     upsert_daily_aggregate,
 )
-
-# Re-export sqlalchemy helpers used by tests and consumers via this module
-from sqlalchemy import select, text
-from sqlalchemy.orm import Session
 
 
 def record_usage(*args, **kwargs):

@@ -4,12 +4,17 @@ import logging
 import os
 import re
 import time
+from contextlib import asynccontextmanager
+from pathlib import Path
+from typing import Literal
+
+import httpx
 import tomllib
 import yaml
-import httpx
-from pathlib import Path
 from fastapi import FastAPI, HTTPException, Query, Request, Response
 from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel, model_validator
+
 from config.app import (
     CONFIG,
     CONFIG_PATH,
@@ -17,6 +22,7 @@ from config.app import (
     _config_lock,
     refresh_runtime_config,
 )
+
 from .database import (
     VALID_OUTCOMES,
     VALID_SOURCES,
@@ -46,10 +52,6 @@ from .database import (
 )
 from .evaluation import start_session_evaluation_job
 from .evaluation_worker import load_evaluation_worker_config, run_evaluation_worker
-from contextlib import asynccontextmanager
-from pydantic import BaseModel, model_validator
-from typing import Literal
-
 
 logger = logging.getLogger(__name__)
 EVALUATION_WORKER_SHUTDOWN_TIMEOUT_SECONDS = 5
@@ -180,7 +182,7 @@ async def usage_read_cors(request: Request, call_next):
         requested_method = request.headers.get("access-control-request-method", "")
         if requested_method.upper() == "GET":
             response = Response(status_code=204)
-            _add_usage_cors_headers(response, origin)
+            _add_usage_cors_headers(response, origin)  # type: ignore[arg-type]
             response.headers["Access-Control-Allow-Methods"] = "GET"
             response.headers["Access-Control-Allow-Headers"] = request.headers.get(
                 "access-control-request-headers",
@@ -191,7 +193,7 @@ async def usage_read_cors(request: Request, call_next):
 
     response = await call_next(request)
     if request.method == "GET":
-        _add_usage_cors_headers(response, origin)
+        _add_usage_cors_headers(response, origin)  # type: ignore[arg-type]
     return response
 
 
@@ -573,7 +575,7 @@ async def get_config():
     if not os.path.exists(path):
         return {"content": "", "parsed": {}}
     try:
-        with open(path, "r", encoding="utf-8") as f:
+        with open(path, encoding="utf-8") as f:
             content = f.read()
         try:
             parsed = yaml.safe_load(content) or {}
@@ -613,7 +615,7 @@ async def patch_config(update: ConfigPatchUpdate):
 
     try:
         if os.path.exists(path):
-            with open(path, "r", encoding="utf-8") as f:
+            with open(path, encoding="utf-8") as f:
                 config = yaml_parser.load(f) or {}
         else:
             config = {}

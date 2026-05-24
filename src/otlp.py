@@ -3,6 +3,7 @@ import os
 import time
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
+
 from fastapi import FastAPI, Request
 
 from .database import init_db
@@ -21,7 +22,7 @@ CODEX_SERVICE_NAMES = {"codex_cli_rs", "codex_exec"}
 KNOWN_SERVICE_NAMES = {"claude-code", "gemini-cli", "opencode"} | CODEX_SERVICE_NAMES
 
 # State cache for merging Codex events: run/conversation key -> {duration_ms, ttft_ms, timestamp}
-codex_state = {}
+codex_state: dict = {}
 
 
 def _attr(attributes: list, key: str):
@@ -542,8 +543,11 @@ def _parse_log_record(
     event_name = _attr(attrs, "event.name") or ""
 
     if event_name == GEMINI_EVENT:
-        fields = _extract_gemini_fields(record, attrs, usage_session_id or "")
-        record_usage(**fields)
+        fields: dict | None = _extract_gemini_fields(
+            record, attrs, usage_session_id or ""
+        )
+        if fields is not None:
+            record_usage(**fields)
     elif (
         event_name == CLAUDE_EVENT or event_name == "api_request"
     ) and service_name == "claude-code":

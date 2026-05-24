@@ -175,7 +175,7 @@ def claim_next_evaluation_job(
                 .values(status="running", started_at=started_at, error=None)
             )
             session.commit()
-            if result.rowcount != 1:
+            if result.rowcount != 1:  # type: ignore[attr-defined]
                 continue
             job = session.get(EvaluationJob, job_id)
             return _job_to_dict(job) if job else None
@@ -259,7 +259,7 @@ def _fail_stale_evaluation_job(
             finished_at=finished_at,
         )
     )
-    return int(result.rowcount or 0)
+    return int(result.rowcount or 0)  # type: ignore[attr-defined]
 
 
 def list_active_evaluation_jobs(
@@ -425,7 +425,7 @@ def mark_evaluation_job_running(
             .values(status="running", started_at=now, error=None)
         )
         session.commit()
-        return result.rowcount == 1
+        return result.rowcount == 1  # type: ignore[attr-defined]
 
 
 def mark_evaluation_job_succeeded(

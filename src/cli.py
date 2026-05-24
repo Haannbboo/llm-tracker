@@ -16,13 +16,14 @@ from typing import Any
 import httpx
 
 from config.app import CONFIG
+
+from . import evaluation as evaluation_module
 from .database import (
     get_usage_high_watermark_ts,
     init_db,
     merge_usage_database,
     summarize_usage_window,
 )
-from . import evaluation as evaluation_module
 
 evaluation_subprocess = evaluation_module.subprocess
 
@@ -505,7 +506,7 @@ def run_with_isolated_tracking(
         )
         child_code = _normalize_return_code(int(completed.returncode))
 
-        wait_for_usage_flush(run_client, options)
+        wait_for_usage_flush(run_client, options)  # type: ignore[arg-type]
         for service in reversed(services):
             stop_temp_service(service)
         services.clear()

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -35,7 +36,6 @@ from .evaluation import (
     is_local_evaluator_session,
     mark_evaluator_session_no_op,
 )
-
 
 logger = logging.getLogger(__name__)
 
@@ -232,7 +232,7 @@ def classify_local_evaluator_sessions(
 
 def _record_overlaps_evaluation_job(
     record: SessionRecord,
-    jobs: list[EvaluationJob],
+    jobs: Sequence[EvaluationJob],
     *,
     now: datetime,
     grace_seconds: int,
