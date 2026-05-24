@@ -79,7 +79,7 @@ export function SessionsTab({
     if (dateRange !== 'all') {
       const since = dateRange === 'custom' ? customSince : getSinceDate(dateRange)
       if (since) url.searchParams.set('since', since)
-      if (customUntil) url.searchParams.set('until', customUntil)
+      if (dateRange === 'custom' && customUntil) url.searchParams.set('until', customUntil)
     }
     if (hideNoop) url.searchParams.set('hide_noop', 'true')
     fetch(url.toString())

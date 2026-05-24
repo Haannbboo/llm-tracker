@@ -22,16 +22,18 @@ type Props = {
 
 export function LogsPage({ initialSessionFilter }: Props) {
   // Read session filter from sessionStorage (set by Dashboard/Sessions tab navigation)
-  const storedSessionFilter = (() => {
+  const storedSessionFilter = useMemo(() => {
     try {
       const raw = sessionStorage.getItem('llm-tracker-logs-filters')
-      if (raw) {
-        sessionStorage.removeItem('llm-tracker-logs-filters')
-        return JSON.parse(raw).sessionFilter ?? null
-      }
+      if (raw) return JSON.parse(raw).sessionFilter ?? null
     } catch { /* ignore */ }
     return null
-  })()
+  }, [])
+
+  // Clear the one-shot session filter after commit
+  useEffect(() => {
+    sessionStorage.removeItem('llm-tracker-logs-filters')
+  }, [])
 
   const { showToast, configParsed, requestUsageRefresh, activeFilter, setActiveFilter, activeSource, setActiveSource, dateRange, setDateRange, customSince, setCustomSince, customUntil, setCustomUntil } = useApp()
   const {
