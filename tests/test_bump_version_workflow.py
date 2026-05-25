@@ -50,3 +50,22 @@ def test_bump_version_workflow_bumps_pr_branch_from_base_version():
         '|| echo "0.0.0")'
     ) in bump_step["run"]
     assert "BASE_PATCH + 1" in bump_step["run"]
+
+
+def test_bump_version_workflow_appends_version_to_pr_title():
+    workflow = load_workflow()
+
+    assert workflow["permissions"]["pull-requests"] == "write"
+    update_title_step = next(
+        step
+        for step in workflow["jobs"]["bump"]["steps"]
+        if step.get("name") == "Append version to PR title"
+    )
+
+    assert update_title_step["name"] == "Append version to PR title"
+    assert update_title_step["env"]["GH_TOKEN"] == "${{ github.token }}"
+    assert "version ${{ steps.bump.outputs.new_version }}" in update_title_step["run"]
+    assert (
+        'gh pr edit "${{ github.event.pull_request.number }}"'
+        in update_title_step["run"]
+    )
