@@ -81,6 +81,27 @@ def test_configure_kilo_plugin_updates_existing_entry(tmp_path):
     ]
 
 
+def test_configure_kilo_plugin_ignores_non_object_json_config(tmp_path):
+    home = tmp_path / "home"
+    config_path = home / ".config" / "kilo" / "opencode.json"
+    config_path.parent.mkdir(parents=True)
+    config_path.write_text("[]\n", encoding="utf-8")
+    project_root = _make_project_root(tmp_path)
+
+    result = _run_configure(project_root, home, "4102")
+
+    assert result.returncode == 0, result.stderr
+    config = json.loads(config_path.read_text(encoding="utf-8"))
+    assert config == {
+        "plugin": [
+            [
+                str(project_root / "plugins" / "kilo" / "dist" / "index.js"),
+                {"endpoint": "http://localhost:4102/v1/logs"},
+            ]
+        ]
+    }
+
+
 def test_configure_kilo_plugin_skips_without_npm(tmp_path):
     home = tmp_path / "home"
     home.mkdir()

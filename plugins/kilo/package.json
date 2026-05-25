@@ -13,6 +13,7 @@
     "opencode": "^1.0.0"
   },
   "scripts": {
+    "prebuild": "node ../shared/copy-plugin-src.mjs",
     "build": "tsc",
     "dev": "tsc --watch"
   },

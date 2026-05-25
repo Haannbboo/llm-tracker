@@ -9,6 +9,17 @@ function getEndpoint(options?: Record<string, any>): string {
   return DEFAULT_ENDPOINT
 }
 
+function normalizedProvider(value: unknown): string {
+  if (typeof value !== "string") return "unknown"
+  const normalized = value.trim().toLowerCase()
+  return normalized || "unknown"
+}
+
+function nonNegativeNumber(value: unknown): number | null {
+  const parsed = finiteNumber(value)
+  return parsed != null && parsed >= 0 ? parsed : null
+}
+
 function getCompletedInfo(info: any): { completedAt: number | null; statusCode: number | null } {
   const knownStatus = statusCodeFromError(info.error)
   const statusCode = knownStatus ?? (info.error ? 500 : null)
@@ -41,7 +52,7 @@ async function handleMessageUpdated(
   pending.add(info.id)
 
   try {
-    const provider = info.providerID || "unknown"
+    const provider = normalizedProvider(info.providerID)
     const model = info.modelID || "unknown"
     const createdAt: number = finiteNumber(info.time?.created) ?? Date.now()
     const timestampMs = completedAt ?? Date.now()
@@ -50,9 +61,11 @@ async function handleMessageUpdated(
     const ttftMs =
       firstPartStart != null ? Math.max(0, Math.round(firstPartStart - createdAt)) : null
 
-    const inputTokens = finiteNumber(info.tokens?.input)
-    const outputTokens = finiteNumber(info.tokens?.output)
-    const reasoningTokens = finiteNumber(info.tokens?.reasoning)
+    const inputTokens = nonNegativeNumber(info.tokens?.input)
+    const outputTokens = nonNegativeNumber(info.tokens?.output)
+    const reasoningTokens = nonNegativeNumber(info.tokens?.reasoning)
+    const cachedTokens = nonNegativeNumber(info.tokens?.cache?.read)
+    const cacheCreationTokens = nonNegativeNumber(info.tokens?.cache?.write)
     const tokenValues = [inputTokens, outputTokens, reasoningTokens]
     const totalTokens: number | null = tokenValues.some((value) => value != null)
       ? tokenValues.reduce<number>((sum, value) => sum + (value ?? 0), 0)
@@ -71,8 +84,8 @@ async function handleMessageUpdated(
         inputTokens,
         outputTokens,
         reasoningTokens,
-        cachedTokens: finiteNumber(info.tokens?.cache?.read),
-        cacheCreationTokens: finiteNumber(info.tokens?.cache?.write),
+        cachedTokens,
+        cacheCreationTokens,
         totalTokens,
         durationMs,
         ttftMs,

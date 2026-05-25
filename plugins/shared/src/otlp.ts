@@ -24,6 +24,7 @@ export function buildOtlpPayload(
   const eventName = `${serviceName}.message_completed`
   const scopeName = `${serviceName}-llm-tracker`
   const timeUnixNano = String(params.timestampMs * 1_000_000)
+  const severityNumber = params.errorName != null || (params.statusCode != null && params.statusCode >= 400) ? 17 : 9
 
   const attrs: Record<string, any>[] = [
     { key: "event.name", value: { stringValue: eventName } },
@@ -80,7 +81,7 @@ export function buildOtlpPayload(
         scopeLogs: [
           {
             scope: { name: scopeName },
-            logRecords: [{ timeUnixNano, severityNumber: 9, attributes: attrs }],
+            logRecords: [{ timeUnixNano, severityNumber, attributes: attrs }],
           },
         ],
       },
@@ -88,12 +89,19 @@ export function buildOtlpPayload(
   }
 }
 
-export async function emitOtlp(payload: Record<string, any>, endpoint: string): Promise<boolean> {
+export async function emitOtlp(
+  payload: Record<string, any>,
+  endpoint: string,
+  timeoutMs = 10_000,
+): Promise<boolean> {
+  const controller = new AbortController()
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs)
   try {
     const response = await fetch(endpoint, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
+      signal: controller.signal,
     })
     if (!response.ok) {
       console.error(`[llm-tracker] OTLP emission failed: collector returned ${response.status}`)
@@ -101,7 +109,13 @@ export async function emitOtlp(payload: Record<string, any>, endpoint: string): 
     }
     return true
   } catch (err) {
+    if (err instanceof DOMException && err.name === "AbortError") {
+      console.error(`[llm-tracker] OTLP emission timed out after ${timeoutMs}ms`)
+      return false
+    }
     console.error("[llm-tracker] OTLP emission failed:", err)
     return false
+  } finally {
+    clearTimeout(timeoutId)
   }
 }

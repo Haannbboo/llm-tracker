@@ -5,6 +5,7 @@
   "type": "module",
   "main": "dist/index.js",
   "scripts": {
+    "prebuild": "node ../shared/copy-plugin-src.mjs",
     "build": "tsc",
     "dev": "tsc --watch"
   },

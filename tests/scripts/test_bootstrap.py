@@ -258,6 +258,11 @@ def test_bootstrap_reports_local_setup_health_ready_and_skipped_agents(tmp_path)
             expected_endpoint=f"http://localhost:{ports[2]}",
             configured_endpoint=f"http://localhost:{ports[2]}",
         ),
+        kilo=_agent_health(
+            status="ready",
+            expected_endpoint=f"http://localhost:{ports[2]}/v1/logs",
+            configured_endpoint=f"http://localhost:{ports[2]}/v1/logs",
+        ),
     )
     fake_repo = _make_fake_bootstrap_repo(tmp_path, home, ports=ports)
     bin_dir = _make_fake_curl(
@@ -265,6 +270,7 @@ def test_bootstrap_reports_local_setup_health_ready_and_skipped_agents(tmp_path)
     )
 
     _add_fake_agent(bin_dir, "gemini")
+    _add_fake_agent(bin_dir, "kilo")
 
     result = _run_bootstrap(fake_repo, home, bin_dir)
 
@@ -275,7 +281,8 @@ def test_bootstrap_reports_local_setup_health_ready_and_skipped_agents(tmp_path)
     assert "Codex: skipped" in output
     assert "Gemini: ready" in output
     assert "OpenCode: skipped" in output
-    assert "Agents: 1 ready, 3 skipped, 0 failed" in output
+    assert "Kilo: ready" in output
+    assert "Agents: 2 ready, 3 skipped, 0 failed" in output
 
 
 def test_bootstrap_fails_when_detected_agent_setup_health_is_not_ready(tmp_path):
@@ -335,7 +342,8 @@ def test_bootstrap_fails_when_detected_agent_setup_health_is_not_ready(tmp_path)
     assert "Codex: endpoint mismatch" in output
     assert "Gemini: ready" in output
     assert "OpenCode: skipped" in output
-    assert "Agents: 1 ready, 1 skipped, 2 failed" in output
+    assert "Kilo: skipped" in output
+    assert "Agents: 1 ready, 2 skipped, 2 failed" in output
     assert secret_endpoint not in output
 
 
@@ -376,7 +384,8 @@ def test_bootstrap_skips_gemini_when_settings_file_exists_but_cli_is_missing(tmp
     assert "Codex: skipped" in output
     assert "Gemini: skipped" in output
     assert "OpenCode: skipped" in output
-    assert "Agents: 0 ready, 4 skipped, 0 failed" in output
+    assert "Kilo: skipped" in output
+    assert "Agents: 0 ready, 5 skipped, 0 failed" in output
 
 
 def test_bootstrap_exits_nonzero_when_post_start_checks_fail(tmp_path):
@@ -431,4 +440,5 @@ def test_bootstrap_skips_undetected_agent_even_when_setup_health_is_ready(tmp_pa
     assert "Gemini: skipped" in output
     assert "Gemini: ready" not in output
     assert "OpenCode: skipped" in output
-    assert "Agents: 0 ready, 4 skipped, 0 failed" in output
+    assert "Kilo: skipped" in output
+    assert "Agents: 0 ready, 5 skipped, 0 failed" in output

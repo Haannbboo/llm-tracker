@@ -886,10 +886,7 @@ async def get_local_setup_health():
     opencode_plugins = opencode_config.get("plugin", [])
     opencode_endpoint = None
     opencode_plugin_registered = False
-    opencode_plugin_suffixes = (
-        "plugins/opencode/dist/index.js",
-        "plugins/kilo/dist/index.js",
-    )
+    opencode_plugin_suffixes = ("plugins/opencode/dist/index.js",)
     opencode_default_endpoint = "http://localhost:4005/v1/logs"
     if isinstance(opencode_plugins, list):
         for entry in opencode_plugins:
