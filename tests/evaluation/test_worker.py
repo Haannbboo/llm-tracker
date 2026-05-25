@@ -567,3 +567,73 @@ def test_run_evaluation_worker_continues_after_timed_out_tick(
 
     assert len(calls) == 2
     assert "Evaluation worker tick timed out" in caplog.text
+
+
+def test_load_evaluation_worker_config_reads_claude_evaluator(
+    evaluation_worker_module,
+):
+    config = evaluation_worker_module.load_evaluation_worker_config(
+        {"evaluation": {"evaluator": "claude"}}
+    )
+    assert config.evaluator == "claude"
+
+
+def test_run_evaluation_worker_once_passes_evaluator_to_execute(
+    evaluation_worker_module,
+    database_module,
+    isolated_home,
+    monkeypatch,
+):
+    db_path = str(isolated_home / "usage.db")
+    database_module.init_db(db_path)
+    _insert_session_record(database_module, db_path, "s1", client_source="codex")
+    database_module.create_session_evaluation_job(
+        session_id="s1",
+        client_source="codex",
+        trigger="manual",
+        db_path=db_path,
+    )
+
+    captured_kwargs = {}
+
+    def fake_execute(job_id, **kwargs):
+        captured_kwargs.update(kwargs)
+
+    monkeypatch.setattr(
+        evaluation_worker_module,
+        "execute_session_evaluation_job",
+        fake_execute,
+    )
+
+    async def fake_to_thread(fn, *args, **kwargs):
+        if fn.__name__ == "_claim_evaluation_jobs":
+            return fn(*args, **kwargs)
+        if fn is fake_execute:
+            captured_kwargs.update(kwargs)
+            return None
+        raise AssertionError(f"Unexpected to_thread call: {fn.__name__}")
+
+    def fake_create_task(coro):
+        try:
+            coro.send(None)
+        except StopIteration:
+            pass
+        return None
+
+    monkeypatch.setattr(evaluation_worker_module.asyncio, "to_thread", fake_to_thread)
+    monkeypatch.setattr(
+        evaluation_worker_module.asyncio, "create_task", fake_create_task
+    )
+
+    asyncio.run(
+        evaluation_worker_module.run_evaluation_worker_once(
+            config=evaluation_worker_module.EvaluationWorkerConfig(
+                auto_enabled=False,
+                max_concurrent_jobs=1,
+                evaluator="claude",
+            ),
+            db_path=db_path,
+        )
+    )
+
+    assert captured_kwargs.get("evaluator") == "claude"

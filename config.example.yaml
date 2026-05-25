@@ -11,6 +11,9 @@ evaluation:
   queue_buffer_multiplier: 2
   idle_sleep_cap_seconds: 30
   worker_tick_timeout_seconds: 120
+  # Evaluator agent to use for transcript evaluation subprocess.
+  # Supported: "codex" (default), "claude"
+  evaluator: codex
 
 models:
   # Pricing is auto-fetched from LiteLLM. Only add cost blocks here to

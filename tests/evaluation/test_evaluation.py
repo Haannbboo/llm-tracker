@@ -1236,3 +1236,269 @@ def test_run_session_evaluation_job_saves_kilo_evaluation(
     assert polled is not None
     assert polled["status"] == "succeeded"
     assert polled["error"] is None
+
+
+def test_build_evaluator_invocation_uses_claude_command(evaluation_module):
+    invocation = evaluation_module.build_evaluator_invocation(
+        "Transcript text", evaluator="claude"
+    )
+
+    assert invocation.command == [
+        "claude",
+        "--print",
+        "--no-session-persistence",
+    ]
+    assert invocation.stdin is not None
+    assert "Transcript text" in invocation.stdin
+    assert "Return ONLY valid JSON" in invocation.stdin
+    assert invocation.env["OTEL_SDK_DISABLED"] == "true"
+    assert invocation.env["OTEL_LOGS_EXPORTER"] == "none"
+    assert invocation.env["CLAUDE_CODE_NO_AUTO_GIT"] == "1"
+    assert invocation.env["CLAUDE_CODE_NO_BROWSER"] == "1"
+    assert invocation.env["CLAUDE_CODE_HEADLESS"] == "1"
+
+
+def test_build_evaluator_invocation_rejects_invalid_agent(evaluation_module):
+    with pytest.raises(ValueError, match="Unsupported evaluator agent"):
+        evaluation_module.build_evaluator_invocation(
+            "Transcript text", evaluator="invalid"
+        )
+
+
+def test_summarize_session_with_llm_uses_claude_evaluator(
+    evaluation_module,
+    database_module,
+    isolated_home,
+    monkeypatch,
+):
+    db_path = str(isolated_home / "usage.db")
+    database_module.init_db(db_path)
+
+    with database_module.Session(database_module.get_engine(db_path)) as session:
+        session.add(
+            database_module.SessionRecord(
+                session_id="sess-claude-eval",
+                client_source="codex",
+                started=1778493600000000,
+                ended=1778495400000000,
+                updated_at="2026-05-11T10:30:00+00:00",
+            )
+        )
+        session.commit()
+
+    session_dir = isolated_home / ".codex" / "sessions" / "2026" / "05" / "14"
+    session_dir.mkdir(parents=True)
+    (session_dir / "rollout-sess-claude-eval.jsonl").write_text(
+        "\n".join(
+            [
+                json.dumps(
+                    {
+                        "type": "response_item",
+                        "payload": {
+                            "type": "message",
+                            "role": "user",
+                            "content": [
+                                {"type": "input_text", "text": "Fix dashboard"}
+                            ],
+                        },
+                    }
+                ),
+                json.dumps(
+                    {
+                        "type": "response_item",
+                        "payload": {
+                            "type": "message",
+                            "role": "assistant",
+                            "content": [{"type": "output_text", "text": "Done"}],
+                        },
+                    }
+                ),
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    def fake_run(**kwargs):
+        assert kwargs["args"] == ["claude", "--print", "--no-session-persistence"]
+        assert kwargs["input"] is not None
+        assert "Return ONLY valid JSON" in kwargs["input"]
+        assert "USER:\nFix dashboard" in kwargs["input"]
+        assert kwargs["env"]["OTEL_SDK_DISABLED"] == "true"
+        assert kwargs["env"]["CLAUDE_CODE_NO_AUTO_GIT"] == "1"
+        assert kwargs["env"]["CLAUDE_CODE_NO_BROWSER"] == "1"
+        assert kwargs["env"]["CLAUDE_CODE_HEADLESS"] == "1"
+        return subprocess.CompletedProcess(
+            args=kwargs["args"],
+            returncode=0,
+            stdout='{"task_title":"Fix dashboard","task_title_zh":"修复仪表板","summary":"Done","outcome":"solved","confidence":0.9,"evidence":["Done"],"failure_reason":null}',
+            stderr="",
+        )
+
+    monkeypatch.setattr(evaluation_module.subprocess, "run", fake_run)
+
+    result = evaluation_module.summarize_session_with_llm(
+        "sess-claude-eval",
+        db_path=db_path,
+        evaluator="claude",
+    )
+
+    assert result["outcome"] == "solved"
+    assert result["confidence"] == pytest.approx(0.9)
+
+
+def test_execute_session_evaluation_job_passes_claude_evaluator(
+    evaluation_module,
+    database_module,
+    isolated_home,
+    monkeypatch,
+):
+    db_path = str(isolated_home / "usage.db")
+    database_module.init_db(db_path)
+
+    with database_module.Session(database_module.get_engine(db_path)) as session:
+        session.add(
+            database_module.SessionRecord(
+                session_id="sess-exec-claude",
+                client_source="codex",
+                started=1778493600000000,
+                ended=1778495400000000,
+                updated_at="2026-05-11T10:30:00+00:00",
+            )
+        )
+        session.commit()
+
+    session_dir = isolated_home / ".codex" / "sessions" / "2026" / "05" / "14"
+    session_dir.mkdir(parents=True)
+    (session_dir / "rollout-sess-exec-claude.jsonl").write_text(
+        json.dumps(
+            {
+                "type": "response_item",
+                "payload": {
+                    "type": "message",
+                    "role": "user",
+                    "content": [{"type": "input_text", "text": "Fix backend"}],
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    job = database_module.create_session_evaluation_job(
+        session_id="sess-exec-claude",
+        client_source="codex",
+        db_path=db_path,
+    )
+
+    def fake_run(**kwargs):
+        assert kwargs["args"] == ["claude", "--print", "--no-session-persistence"]
+        assert kwargs["input"] is not None
+        return subprocess.CompletedProcess(
+            args=kwargs["args"],
+            returncode=0,
+            stdout='{"task_title":"Fix backend","summary":"Done","outcome":"solved","confidence":0.8,"evidence":["Done"],"failure_reason":null}',
+            stderr="",
+        )
+
+    monkeypatch.setattr(evaluation_module.subprocess, "run", fake_run)
+
+    database_module.mark_evaluation_job_running(job["job_id"], db_path=db_path)
+    evaluation_module.execute_session_evaluation_job(
+        job["job_id"],
+        db_path=db_path,
+        evaluator="claude",
+    )
+
+    saved = database_module.get_session_evaluation("sess-exec-claude", db_path=db_path)
+    polled = database_module.get_evaluation_job(job["job_id"], db_path=db_path)
+    assert saved is not None
+    assert saved["outcome"] == "solved"
+    assert polled is not None
+    assert polled["status"] == "succeeded"
+
+
+def test_run_session_evaluation_job_with_claude_evaluator(
+    evaluation_module,
+    database_module,
+    isolated_home,
+    monkeypatch,
+):
+    db_path = str(isolated_home / "usage.db")
+    database_module.init_db(db_path)
+
+    with database_module.Session(database_module.get_engine(db_path)) as session:
+        session.add(
+            database_module.SessionRecord(
+                session_id="sess-run-claude",
+                client_source="codex",
+                started=1778493600000000,
+                ended=1778495400000000,
+                updated_at="2026-05-11T10:30:00+00:00",
+            )
+        )
+        session.commit()
+
+    session_dir = isolated_home / ".codex" / "sessions" / "2026" / "05" / "14"
+    session_dir.mkdir(parents=True)
+    (session_dir / "rollout-sess-run-claude.jsonl").write_text(
+        "\n".join(
+            [
+                json.dumps(
+                    {
+                        "type": "response_item",
+                        "payload": {
+                            "type": "message",
+                            "role": "user",
+                            "content": [{"type": "input_text", "text": "Fix UI"}],
+                        },
+                    }
+                ),
+                json.dumps(
+                    {
+                        "type": "response_item",
+                        "payload": {
+                            "type": "message",
+                            "role": "assistant",
+                            "content": [{"type": "output_text", "text": "UI fixed"}],
+                        },
+                    }
+                ),
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    job = database_module.create_session_evaluation_job(
+        session_id="sess-run-claude",
+        client_source="codex",
+        db_path=db_path,
+    )
+
+    def fake_run(**kwargs):
+        assert kwargs["args"] == ["claude", "--print", "--no-session-persistence"]
+        assert kwargs["input"] is not None
+        assert "Return ONLY valid JSON" in kwargs["input"]
+        assert kwargs["env"]["CLAUDE_CODE_NO_AUTO_GIT"] == "1"
+        assert kwargs["env"]["CLAUDE_CODE_NO_BROWSER"] == "1"
+        assert kwargs["env"]["CLAUDE_CODE_HEADLESS"] == "1"
+        return subprocess.CompletedProcess(
+            args=kwargs["args"],
+            returncode=0,
+            stdout='{"task_title":"Fix UI","summary":"UI fixed","outcome":"solved","confidence":0.85,"evidence":["Done"],"failure_reason":null}',
+            stderr="",
+        )
+
+    monkeypatch.setattr(evaluation_module.subprocess, "run", fake_run)
+
+    evaluation_module.run_session_evaluation_job(
+        job["job_id"],
+        db_path=db_path,
+        evaluator="claude",
+    )
+
+    saved = database_module.get_session_evaluation("sess-run-claude", db_path=db_path)
+    polled = database_module.get_evaluation_job(job["job_id"], db_path=db_path)
+    assert saved is not None
+    assert saved["outcome"] == "solved"
+    assert saved["confidence"] == pytest.approx(0.85)
+    assert polled is not None
+    assert polled["status"] == "succeeded"
