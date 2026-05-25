@@ -23,6 +23,7 @@ from config.app import (
     refresh_runtime_config,
 )
 
+from ._version import get_version
 from .database import (
     VALID_OUTCOMES,
     VALID_SOURCES,
@@ -940,6 +941,15 @@ async def get_local_setup_health():
             ),
         },
         "agents": agents,
+    }
+
+
+@app.get("/version")
+async def version():
+    """Return API version information."""
+    return {
+        "name": app.title,
+        "version": get_version(),
     }
 
 

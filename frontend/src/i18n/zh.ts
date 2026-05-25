@@ -419,4 +419,7 @@ export const zh: Record<string, string> = {
   'failed requests': '个失败请求',
   'Check logs for details': '查看日志了解详情',
   'System healthy': '系统运行良好',
+
+  'Service Version': '服务版本',
+  'Version': '版本',
 }

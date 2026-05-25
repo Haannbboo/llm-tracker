@@ -14,7 +14,8 @@ export function shouldProxyApiRequest(requestUrl) {
     pathname === '/evaluation-jobs/active' ||
     pathname.startsWith('/poll/') ||
     pathname === '/sessions' ||
-    pathname.startsWith('/sessions/')
+    pathname.startsWith('/sessions/') ||
+    pathname === '/version'
   )
 }
 

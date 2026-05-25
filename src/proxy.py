@@ -381,9 +381,11 @@ async def props():
 @app.get("/version")
 async def version():
     """Return proxy version information."""
+    from ._version import get_version
+
     return {
         "name": app.title,
-        "version": "dev",
+        "version": get_version(),
     }
 
 
