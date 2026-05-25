@@ -88,6 +88,15 @@ class ConfigPatchUpdate(BaseModel):
     patches: list[ConfigPatch]
 
 
+def _runtime_config_payload(parsed_config: dict | None) -> dict:
+    worker_config = load_evaluation_worker_config(parsed_config or {})
+    return {
+        "evaluation": {
+            "evaluator": worker_config.evaluator,
+        },
+    }
+
+
 class ConnectivityTest(BaseModel):
     base_url: str
     api_key: str
@@ -574,7 +583,12 @@ async def active_evaluation_jobs(session_ids: str | None = None):
 async def get_config():
     path = os.path.expanduser(CONFIG_PATH)
     if not os.path.exists(path):
-        return {"content": "", "parsed": {}}
+        parsed: dict = {}
+        return {
+            "content": "",
+            "parsed": parsed,
+            "runtime": _runtime_config_payload(parsed),
+        }
     try:
         with open(path, encoding="utf-8") as f:
             content = f.read()
@@ -582,7 +596,13 @@ async def get_config():
             parsed = yaml.safe_load(content) or {}
         except yaml.YAMLError:
             parsed = {}
-        return {"content": content, "parsed": parsed}
+        if not isinstance(parsed, dict):
+            parsed = {}
+        return {
+            "content": content,
+            "parsed": parsed,
+            "runtime": _runtime_config_payload(parsed),
+        }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

@@ -393,6 +393,7 @@ export const zh: Record<string, string> = {
   'Mark Stuck': '标记卡住',
   'No evaluation yet': '尚未评估',
   'Evaluate with LLM': '用 LLM 评估',
+  'Evaluator': '评估器',
   'Evaluating...': '评估中...',
   'Queued': '排队中',
   'Running': '运行中',
