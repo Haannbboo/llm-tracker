@@ -60,6 +60,18 @@ fix: handle missing cache_read token pricing
 docs: add provider adapter workflow
 ```
 
+## Version management
+
+Version format: `MAJOR.MINOR.PATCH` (e.g. `0.1.180`). Stored in `VERSION` at repo root.
+
+- `MAJOR`: bumped manually for breaking changes — edit first field in `VERSION`.
+- `MINOR`: bumped manually for feature releases — edit second field in `VERSION`.
+- `PATCH`: auto-incremented on PR branches targeting `main` by `.github/workflows/bump-version.yml`; the bump commit becomes part of the PR before squash merge, so `main` gets a single squashed commit.
+
+The version is exposed via `GET /version` (both API and proxy apps) and displayed in Settings → Services in the frontend.
+
+Any new API route consumed by the frontend must be added to `frontend/vite-api-proxy.js` and its proxy route tests.
+
 ## Code style
 
 - Python: use ruff formatting. Pre-commit enforces ruff-format.

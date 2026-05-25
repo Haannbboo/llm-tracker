@@ -6,6 +6,7 @@ import { t } from '../i18n/index.ts'
 import { FIXED_PROVIDER_COLORS, getProviderColor, getModelIcon, getAgentDisplayName } from '../utils'
 import type { PricingEntry } from '../types'
 import { useDashboardAgents } from '../hooks/useDashboardAgents'
+import { useVersion } from '../hooks/useVersion'
 
 type Props = {
   providerColors?: Record<string, string>
@@ -19,6 +20,7 @@ export function SettingsPage({ providerColors }: Props) {
     configStatus, error,
   } = useApp()
   const { localAgents, setupDiagnostics } = useDashboardAgents()
+  const versionData = useVersion()
 
   const {
     selectedPricingProvider, setSelectedPricingProvider,
@@ -105,6 +107,29 @@ export function SettingsPage({ providerColors }: Props) {
 
       {activeSection === 'services' && (
         <>
+          {/* Service Version */}
+          <div className="panel">
+            <div className="panel-tabs">
+              <div className="tab active"><span>🏷️</span> {t('Service Version')}</div>
+            </div>
+            <div className="panel-body" style={{ padding: '16px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                <span style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>{t('Version')}:</span>
+                <span style={{
+                  fontSize: '16px',
+                  fontWeight: 700,
+                  fontFamily: 'var(--font-mono)',
+                  color: 'var(--text-primary)',
+                  padding: '4px 12px',
+                  background: 'var(--tab-toggle-bg)',
+                  borderRadius: '6px',
+                }}>
+                  {versionData?.version ?? '—'}
+                </span>
+              </div>
+            </div>
+          </div>
+
           {/* Detected Agents */}
           <div className="panel">
             <div className="panel-tabs">

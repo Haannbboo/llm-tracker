@@ -1,0 +1,59 @@
+name: bump-version
+
+"on":
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened, ready_for_review]
+
+permissions:
+  contents: write
+
+jobs:
+  bump:
+    name: Bump patch version
+    runs-on: ubuntu-latest
+    if: github.actor != 'github-actions[bot]' && github.event.pull_request.head.repo.full_name == github.repository
+
+    steps:
+      - name: Checkout PR branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref }}
+          fetch-depth: 0
+
+      - name: Bump patch
+        id: bump
+        shell: bash
+        run: |
+          CURRENT_VERSION=$(cat VERSION)
+          git fetch origin "${{ github.base_ref }}" --depth=1
+          BASE_VERSION=$(git show "origin/${{ github.base_ref }}:VERSION" 2>/dev/null || echo "0.0.0")
+
+          if [[ ! "$CURRENT_VERSION" =~ ^([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
+            echo "VERSION must use MAJOR.MINOR.PATCH format, got: $CURRENT_VERSION" >&2
+            exit 1
+          fi
+          CURRENT_MAJOR="${BASH_REMATCH[1]}"
+          CURRENT_MINOR="${BASH_REMATCH[2]}"
+          CURRENT_PATCH="${BASH_REMATCH[3]}"
+
+          if [[ ! "$BASE_VERSION" =~ ^([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
+            echo "Base VERSION must use MAJOR.MINOR.PATCH format, got: $BASE_VERSION" >&2
+            exit 1
+          fi
+          BASE_MAJOR="${BASH_REMATCH[1]}"
+          BASE_MINOR="${BASH_REMATCH[2]}"
+          BASE_PATCH="${BASH_REMATCH[3]}"
+
+          if [[ "$CURRENT_MAJOR.$CURRENT_MINOR" != "$BASE_MAJOR.$BASE_MINOR" ]]; then
+            NEW="$CURRENT_MAJOR.$CURRENT_MINOR.$CURRENT_PATCH"
+          else
+            NEW="$BASE_MAJOR.$BASE_MINOR.$((BASE_PATCH + 1))"
+          fi
+          echo "$NEW" > VERSION
+          echo "new_version=$NEW" >> "$GITHUB_OUTPUT"
+
+      - uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: "chore: bump version to ${{ steps.bump.outputs.new_version }}"
+          file_pattern: VERSION
