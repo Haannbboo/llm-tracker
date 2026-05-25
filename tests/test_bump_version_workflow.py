@@ -45,5 +45,8 @@ def test_bump_version_workflow_bumps_pr_branch_from_base_version():
     assert checkout_step["with"]["ref"] == "${{ github.head_ref }}"
     assert checkout_step["with"]["fetch-depth"] == 0
     assert 'git fetch origin "${{ github.base_ref }}" --depth=1' in bump_step["run"]
-    assert 'git show "origin/${{ github.base_ref }}:VERSION"' in bump_step["run"]
+    assert (
+        'BASE_VERSION=$(git show "origin/${{ github.base_ref }}:VERSION" 2>/dev/null '
+        '|| echo "0.0.0")'
+    ) in bump_step["run"]
     assert "BASE_PATCH + 1" in bump_step["run"]

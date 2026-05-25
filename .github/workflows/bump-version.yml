@@ -27,7 +27,7 @@ jobs:
         run: |
           CURRENT_VERSION=$(cat VERSION)
           git fetch origin "${{ github.base_ref }}" --depth=1
-          BASE_VERSION=$(git show "origin/${{ github.base_ref }}:VERSION")
+          BASE_VERSION=$(git show "origin/${{ github.base_ref }}:VERSION" 2>/dev/null || echo "0.0.0")
 
           if [[ ! "$CURRENT_VERSION" =~ ^([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
             echo "VERSION must use MAJOR.MINOR.PATCH format, got: $CURRENT_VERSION" >&2
