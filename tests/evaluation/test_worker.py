@@ -578,6 +578,21 @@ def test_load_evaluation_worker_config_reads_claude_evaluator(
     assert config.evaluator == "claude"
 
 
+def test_load_evaluation_worker_config_preserves_explicit_empty_config(
+    evaluation_worker_module,
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        evaluation_worker_module,
+        "CONFIG",
+        {"evaluation": {"evaluator": "claude"}},
+    )
+
+    config = evaluation_worker_module.load_evaluation_worker_config({})
+
+    assert config.evaluator == "codex"
+
+
 def test_run_evaluation_worker_once_passes_evaluator_to_execute(
     evaluation_worker_module,
     database_module,

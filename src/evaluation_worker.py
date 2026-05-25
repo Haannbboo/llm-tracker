@@ -55,7 +55,8 @@ class EvaluationWorkerConfig:
 def load_evaluation_worker_config(
     config: dict[str, Any] | None = None,
 ) -> EvaluationWorkerConfig:
-    raw = (config or CONFIG).get("evaluation", {})
+    base_config = CONFIG if config is None else config
+    raw = base_config.get("evaluation", {})
     evaluator = str(raw.get("evaluator", "codex")).lower().strip()
     if evaluator not in VALID_EVALUATOR_AGENTS:
         logger.warning(
