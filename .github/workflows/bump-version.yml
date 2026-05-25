@@ -7,7 +7,6 @@ name: bump-version
 
 permissions:
   contents: write
-  pull-requests: write
 
 jobs:
   bump:
@@ -58,12 +57,3 @@ jobs:
         with:
           commit_message: "chore: bump version to ${{ steps.bump.outputs.new_version }}"
           file_pattern: VERSION
-
-      - name: Append version to PR title
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          TITLE="${{ github.event.pull_request.title }}"
-          TITLE_WITHOUT_VERSION=$(echo "$TITLE" | sed -E 's/[[:space:]]*\\(version [0-9]+\\.[0-9]+\\.[0-9]+\\)$//')
-          gh pr edit "${{ github.event.pull_request.number }}" \
-            --title "$TITLE_WITHOUT_VERSION (version ${{ steps.bump.outputs.new_version }})"
