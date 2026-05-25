@@ -56,7 +56,7 @@ OPENCODE_CONFIG_PATHS = [
 ]
 
 
-def select_config_path() -> Path | None:
+def select_config_path() -> Path:
     """Return the OpenCode config path, creating it if needed."""
     return OPENCODE_CONFIG_PATHS[0]
 

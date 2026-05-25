@@ -8,6 +8,7 @@ import os
 import re
 import sqlite3
 import subprocess
+from collections.abc import Callable
 from contextlib import closing
 from dataclasses import dataclass
 from pathlib import Path
@@ -374,7 +375,7 @@ def _extract_opencode_part_text(value: Any) -> str | None:
 def _load_sqlite_transcript(
     session_id: str,
     client_source: str,
-    connect_db: callable,
+    connect_db: Callable[[], sqlite3.Connection],
     error_label: str,
 ) -> str:
     """Load user/assistant text turns from a SQLite transcript DB (OpenCode/Kilo)."""
@@ -446,7 +447,9 @@ def _load_kilo_transcript(session_id: str, client_source: str) -> str:
     return _load_sqlite_transcript(session_id, client_source, _connect_kilo_db, "Kilo")
 
 
-def _list_sqlite_session_ids_with_text(connect_db: callable) -> frozenset[str]:
+def _list_sqlite_session_ids_with_text(
+    connect_db: Callable[[], sqlite3.Connection],
+) -> frozenset[str]:
     """Return session IDs from a SQLite transcript DB that have at least one text part."""
     try:
         with closing(connect_db()) as connection:
@@ -486,7 +489,9 @@ def _list_opencode_session_ids_with_text() -> frozenset[str]:
     return _list_sqlite_session_ids_with_text(_connect_opencode_db)
 
 
-def _sqlite_session_has_turn_text(session_id: str, connect_db: callable) -> bool:
+def _sqlite_session_has_turn_text(
+    session_id: str, connect_db: Callable[[], sqlite3.Connection]
+) -> bool:
     """Check whether one SQLite transcript session has user/assistant text."""
     try:
         with closing(connect_db()) as connection:
