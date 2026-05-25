@@ -1,16 +1,24 @@
 {
-  "name": "opencode-llm-tracker",
+  "name": "kilo-llm-tracker",
   "version": "0.1.0",
   "private": true,
   "type": "module",
   "main": "dist/index.js",
+  "exports": {
+    "./server": {
+      "import": "./dist/index.js"
+    }
+  },
+  "engines": {
+    "opencode": "^1.0.0"
+  },
   "scripts": {
     "prebuild": "node ../shared/copy-plugin-src.mjs",
     "build": "tsc",
     "dev": "tsc --watch"
   },
   "dependencies": {
-    "@opencode-ai/plugin": "^1.15.10"
+    "@kilocode/plugin": "^7.3.8"
   },
   "devDependencies": {
     "typescript": "^5.5.0"

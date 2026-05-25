@@ -8,6 +8,7 @@ import os
 import re
 import sqlite3
 import subprocess
+from collections.abc import Callable
 from contextlib import closing
 from dataclasses import dataclass
 from pathlib import Path
@@ -81,6 +82,7 @@ class LocalSessionTranscriptIndex:
     claude_session_ids: frozenset[str] = frozenset()
     gemini_session_ids: frozenset[str] = frozenset()
     opencode_session_ids: frozenset[str] = frozenset()
+    kilo_session_ids: frozenset[str] = frozenset()
 
 
 def _normalize_client_source(client_source: str | None) -> str:
@@ -93,6 +95,8 @@ def _normalize_client_source(client_source: str | None) -> str:
         return "gemini"
     if normalized in {"opencode"}:
         return "opencode"
+    if normalized in {"kilo"}:
+        return "kilo"
     raise ValueError(f"Unsupported session source: {client_source or 'unknown'}")
 
 
@@ -341,6 +345,22 @@ def _connect_opencode_db() -> sqlite3.Connection:
     return sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, timeout=1.0)
 
 
+def _kilo_db_path() -> Path:
+    """Return Kilo's local SQLite transcript database path."""
+    data_home = os.environ.get("XDG_DATA_HOME")
+    if data_home:
+        return Path(data_home) / "kilo" / "kilo.db"
+    return Path.home() / ".local" / "share" / "kilo" / "kilo.db"
+
+
+def _connect_kilo_db() -> sqlite3.Connection:
+    """Open Kilo's transcript database read-only for local evaluation."""
+    db_path = _kilo_db_path()
+    if not db_path.exists():
+        raise TranscriptLoadError("Kilo transcript database not found")
+    return sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, timeout=1.0)
+
+
 def _extract_opencode_part_text(value: Any) -> str | None:
     """Extract user-visible text from one OpenCode message part."""
     if not isinstance(value, dict):
@@ -352,10 +372,15 @@ def _extract_opencode_part_text(value: Any) -> str | None:
     return _extract_text(value.get("text"))
 
 
-def _load_opencode_transcript(session_id: str, client_source: str) -> str:
-    """Load user and assistant text turns for an OpenCode session."""
+def _load_sqlite_transcript(
+    session_id: str,
+    client_source: str,
+    connect_db: Callable[[], sqlite3.Connection],
+    error_label: str,
+) -> str:
+    """Load user/assistant text turns from a SQLite transcript DB (OpenCode/Kilo)."""
     try:
-        with closing(_connect_opencode_db()) as connection:
+        with closing(connect_db()) as connection:
             rows = connection.execute(
                 """
                 SELECT m.id, m.data, p.data
@@ -368,7 +393,7 @@ def _load_opencode_transcript(session_id: str, client_source: str) -> str:
             ).fetchall()
     except sqlite3.Error as exc:
         raise TranscriptLoadError(
-            f"OpenCode transcript not found: {session_id}"
+            f"{error_label} transcript not found: {session_id}"
         ) from exc
 
     turns: list[tuple[str, str]] = []
@@ -410,10 +435,24 @@ def _load_opencode_transcript(session_id: str, client_source: str) -> str:
     )
 
 
-def _list_opencode_session_ids_with_text() -> frozenset[str]:
-    """Return OpenCode session IDs that have at least one text transcript part."""
+def _load_opencode_transcript(session_id: str, client_source: str) -> str:
+    """Load user and assistant text turns for an OpenCode session."""
+    return _load_sqlite_transcript(
+        session_id, client_source, _connect_opencode_db, "OpenCode"
+    )
+
+
+def _load_kilo_transcript(session_id: str, client_source: str) -> str:
+    """Load user and assistant text turns for a Kilo session."""
+    return _load_sqlite_transcript(session_id, client_source, _connect_kilo_db, "Kilo")
+
+
+def _list_sqlite_session_ids_with_text(
+    connect_db: Callable[[], sqlite3.Connection],
+) -> frozenset[str]:
+    """Return session IDs from a SQLite transcript DB that have at least one text part."""
     try:
-        with closing(_connect_opencode_db()) as connection:
+        with closing(connect_db()) as connection:
             rows = connection.execute(
                 """
                 SELECT m.session_id, m.data, p.data
@@ -442,10 +481,20 @@ def _list_opencode_session_ids_with_text() -> frozenset[str]:
     return frozenset(session_ids)
 
 
-def _opencode_session_has_turn_text(session_id: str) -> bool:
-    """Check whether one OpenCode session has local user/assistant text."""
+def _list_kilo_session_ids_with_text() -> frozenset[str]:
+    return _list_sqlite_session_ids_with_text(_connect_kilo_db)
+
+
+def _list_opencode_session_ids_with_text() -> frozenset[str]:
+    return _list_sqlite_session_ids_with_text(_connect_opencode_db)
+
+
+def _sqlite_session_has_turn_text(
+    session_id: str, connect_db: Callable[[], sqlite3.Connection]
+) -> bool:
+    """Check whether one SQLite transcript session has user/assistant text."""
     try:
-        with closing(_connect_opencode_db()) as connection:
+        with closing(connect_db()) as connection:
             rows = connection.execute(
                 """
                 SELECT m.data, p.data
@@ -472,6 +521,14 @@ def _opencode_session_has_turn_text(session_id: str) -> bool:
         if _extract_opencode_part_text(part_payload):
             return True
     return False
+
+
+def _opencode_session_has_turn_text(session_id: str) -> bool:
+    return _sqlite_session_has_turn_text(session_id, _connect_opencode_db)
+
+
+def _kilo_session_has_turn_text(session_id: str) -> bool:
+    return _sqlite_session_has_turn_text(session_id, _connect_kilo_db)
 
 
 def build_local_session_transcript_index() -> LocalSessionTranscriptIndex:
@@ -513,6 +570,7 @@ def build_local_session_transcript_index() -> LocalSessionTranscriptIndex:
         claude_session_ids=claude_session_ids,
         gemini_session_ids=frozenset(gemini_session_ids),
         opencode_session_ids=_list_opencode_session_ids_with_text(),
+        kilo_session_ids=_list_kilo_session_ids_with_text(),
     )
 
 
@@ -536,6 +594,8 @@ def has_local_session_transcript(
             return session_id in local_index.claude_session_ids
         if agent == "gemini":
             return session_id in local_index.gemini_session_ids
+        if agent == "kilo":
+            return session_id in local_index.kilo_session_ids
         return session_id in local_index.opencode_session_ids
 
     if agent == "codex":
@@ -545,6 +605,8 @@ def has_local_session_transcript(
     if agent == "gemini":
         path = _find_gemini_session_path(session_id)
         return path is not None and _gemini_session_file_has_turn_text(path)
+    if agent == "kilo":
+        return _kilo_session_has_turn_text(session_id)
     return _opencode_session_has_turn_text(session_id)
 
 
@@ -556,6 +618,8 @@ def load_session_transcript(client_source: str | None, session_id: str) -> str:
         return _load_claude_transcript(session_id, client_source or agent)
     if agent == "gemini":
         return _load_gemini_transcript(session_id, client_source or agent)
+    if agent == "kilo":
+        return _load_kilo_transcript(session_id, client_source or agent)
     return _load_opencode_transcript(session_id, client_source or agent)
 
 

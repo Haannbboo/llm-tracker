@@ -54,7 +54,7 @@ api_key = "super-secret"
     assert data["expected"]["otlp_logs_endpoint"] == "http://localhost:4002/v1/logs"
     assert data["expected"]["otlp_endpoint"] == "http://localhost:4002"
     assert data["summary"] == {
-        "total_agents": 4,
+        "total_agents": 5,
         "configured_agents": 3,
         "matching_agents": 2,
     }
@@ -69,6 +69,10 @@ api_key = "super-secret"
     assert agents["gemini"]["configured"] is True
     assert agents["gemini"]["endpoint_matches"] is True
     assert agents["gemini"]["configured_endpoint"] == "http://localhost:4002"
+    assert agents["kilo"]["status"] == "missing_config"
+    assert agents["kilo"]["configured"] is False
+    assert agents["kilo"]["configured_endpoint"] is None
+    assert agents["kilo"]["endpoint_matches"] is False
 
     assert "super-secret" not in response.text
     assert "api_key" not in response.text.lower()
@@ -209,7 +213,7 @@ def test_local_setup_health_handles_missing_agent_configs(api_module):
     assert response.status_code == 200
     data = response.json()
     assert data["summary"] == {
-        "total_agents": 4,
+        "total_agents": 5,
         "configured_agents": 0,
         "matching_agents": 0,
     }
@@ -218,6 +222,9 @@ def test_local_setup_health_handles_missing_agent_configs(api_module):
         assert agent["endpoint_matches"] is False
         assert agent["configured_endpoint"] is None
         assert agent["status"] == "missing_config"
+    assert (
+        data["agents"]["kilo"]["expected_endpoint"] == "http://localhost:4002/v1/logs"
+    )
 
 
 def test_setup_health_opencode_ready(api_module, isolated_home):
@@ -294,5 +301,86 @@ def test_setup_health_opencode_bare_plugin_uses_plugin_default_endpoint(
     assert agent["status"] == "wrong_endpoint"
     assert agent["configured"] is True
     assert agent["endpoint_matches"] is False
-    assert agent["configured_endpoint"] == "http://localhost:4002/v1/logs"
+    assert agent["configured_endpoint"] == "http://localhost:4005/v1/logs"
     assert agent["expected_endpoint"] == "http://localhost:4102/v1/logs"
+
+
+def test_setup_health_opencode_ignores_kilo_plugin(api_module, isolated_home):
+    config_path = isolated_home / ".config" / "opencode" / "opencode.json"
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    config_path.write_text(
+        json.dumps(
+            {
+                "plugin": [
+                    [
+                        "/some/path/plugins/kilo/dist/index.js",
+                        {"endpoint": "http://localhost:4002/v1/logs"},
+                    ]
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    response = TestClient(api_module.app).get("/local/setup-health")
+
+    assert response.status_code == 200
+    agent = response.json()["agents"]["opencode"]
+    assert agent["status"] == "missing_config"
+    assert agent["configured"] is False
+    assert agent["endpoint_matches"] is False
+    assert agent["configured_endpoint"] is None
+
+
+def test_setup_health_kilo_ready(api_module, isolated_home):
+    config_path = isolated_home / ".config" / "kilo" / "opencode.json"
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    config_path.write_text(
+        json.dumps(
+            {
+                "plugin": [
+                    [
+                        "/some/path/plugins/kilo/dist/index.js",
+                        {"endpoint": "http://localhost:4002/v1/logs"},
+                    ]
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    response = TestClient(api_module.app).get("/local/setup-health")
+
+    assert response.status_code == 200
+    agent = response.json()["agents"]["kilo"]
+    assert agent["status"] == "ready"
+    assert agent["configured"] is True
+    assert agent["endpoint_matches"] is True
+    assert agent["configured_endpoint"] == "http://localhost:4002/v1/logs"
+
+
+def test_setup_health_kilo_wrong_endpoint(api_module, isolated_home):
+    config_path = isolated_home / ".config" / "kilo" / "opencode.json"
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    config_path.write_text(
+        json.dumps(
+            {
+                "plugin": [
+                    [
+                        "/some/path/plugins/kilo/dist/index.js",
+                        {"endpoint": "http://localhost:9999/v1/logs"},
+                    ]
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    response = TestClient(api_module.app).get("/local/setup-health")
+
+    assert response.status_code == 200
+    agent = response.json()["agents"]["kilo"]
+    assert agent["status"] == "wrong_endpoint"
+    assert agent["configured"] is True
+    assert agent["endpoint_matches"] is False
+    assert agent["configured_endpoint"] == "http://localhost:9999/v1/logs"

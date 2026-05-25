@@ -24,4 +24,10 @@ CLAUDE.local.md
 todo.md
 docs/*
 .dev-env.json
-plugins/opencode/dist/
+
+# Plugin build outputs
+plugins/*/dist/
+plugins/*/node_modules/
+plugins/*/src/shared
+plugins/shared/src/*.d.ts
+plugins/shared/src/*.js

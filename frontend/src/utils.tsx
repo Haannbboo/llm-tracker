@@ -265,6 +265,7 @@ export function getSourceBadgeBg(name: string): string {
   if (name === 'gemini-cli') return dark ? '#528af240' : '#528af226'
   if (name === 'proxy') return dark ? '#8b5cf640' : '#8b5cf626'
   if (name === 'opencode') return dark ? '#10b98140' : '#10b98126'
+  if (name === 'kilo') return dark ? '#06b6d440' : '#06b6d426'
   return dark ? '#334155' : '#f1f5f9'
 }
 
@@ -275,6 +276,7 @@ export function getSourceBadgeText(name: string): string {
   if (name === 'gemini-cli') return '#528af2'
   if (name === 'proxy') return '#8b5cf6'
   if (name === 'opencode') return '#10b981'
+  if (name === 'kilo') return '#06b6d4'
   return dark ? '#94a3b8' : '#475569'
 }
 
@@ -404,6 +406,7 @@ export function getAgentDisplayName(name: string) {
   if (normalized.includes('codesonline') || normalized.includes('codex')) return 'Codex'
   if (normalized.includes('gemini')) return 'Gemini CLI'
   if (normalized.includes('opencode')) return 'OpenCode'
+  if (normalized.includes('kilo')) return 'Kilo Code'
   return name
 }
 

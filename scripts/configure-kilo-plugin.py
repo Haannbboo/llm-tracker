@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
-"""Configure the llm-tracker plugin for OpenCode.
+"""Configure the llm-tracker plugin for Kilo Code.
 
-Usage: configure-opencode-plugin.py PROJECT_ROOT [OTLP_PORT]
+Usage: configure-kilo-plugin.py PROJECT_ROOT [OTLP_PORT]
 
-The plugin registers itself in the OpenCode config as a tracked plugin
+The plugin registers itself in the Kilo Code config as a tracked plugin
 so that llm-tracker's health endpoint can detect it.
+
+Kilo Code reads its plugin config from ~/.config/kilo/opencode.json.
 """
 
 from __future__ import annotations
@@ -20,7 +22,8 @@ def load_json(path: Path) -> dict[str, Any]:
     if not path.exists():
         return {}
     try:
-        return json.loads(path.read_text(encoding="utf-8"))
+        data = json.loads(path.read_text(encoding="utf-8"))
+        return data if isinstance(data, dict) else {}
     except Exception:
         return {}
 
@@ -31,9 +34,7 @@ def save_json(path: Path, data: dict[str, Any]) -> None:
 
 
 def warn_skip(message: str) -> int:
-    print(
-        f"WARNING: {message}; skipping OpenCode plugin configuration", file=sys.stderr
-    )
+    print(f"WARNING: {message}; skipping Kilo plugin configuration", file=sys.stderr)
     return 0
 
 
@@ -51,34 +52,32 @@ def run_npm(
         return None
 
 
-OPENCODE_CONFIG_PATHS = [
-    Path.home() / ".config" / "opencode" / "opencode.json",
-]
+KILO_CONFIG_PATH = Path.home() / ".config" / "kilo" / "opencode.json"
 
 
 def select_config_path() -> Path:
-    """Return the OpenCode config path, creating it if needed."""
-    return OPENCODE_CONFIG_PATHS[0]
+    """Return the Kilo Code config path, creating it if needed."""
+    return KILO_CONFIG_PATH
 
 
 def main() -> int:
     if len(sys.argv) < 2:
         print(
-            "usage: configure-opencode-plugin.py PROJECT_ROOT [OTLP_PORT]",
+            "usage: configure-kilo-plugin.py PROJECT_ROOT [OTLP_PORT]",
             file=sys.stderr,
         )
         return 1
 
     project_root = Path(sys.argv[1]).expanduser().resolve()
     otlp_port = sys.argv[2] if len(sys.argv) >= 3 else "4005"
-    plugin_dir = project_root / "plugins" / "opencode"
+    plugin_dir = project_root / "plugins" / "kilo"
     config_path = select_config_path()
     endpoint = f"http://localhost:{otlp_port}/v1/logs"
 
     # Install dependencies
     node_modules = plugin_dir / "node_modules"
     if not node_modules.exists():
-        print(f"==> Installing OpenCode plugin dependencies in {plugin_dir}")
+        print(f"==> Installing Kilo plugin dependencies in {plugin_dir}")
         result = run_npm(["install", "--package-lock=false"], plugin_dir)
         if result is None:
             return warn_skip("npm not found")
@@ -87,7 +86,7 @@ def main() -> int:
 
     # Build
     if not (plugin_dir / "dist" / "index.js").exists():
-        print(f"==> Building OpenCode plugin from {plugin_dir}")
+        print(f"==> Building Kilo plugin from {plugin_dir}")
         result = run_npm(["run", "build"], plugin_dir)
         if result is None:
             return warn_skip("npm not found")
