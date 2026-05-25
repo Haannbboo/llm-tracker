@@ -56,7 +56,7 @@ function getLocalDateKey(date: Date): string {
 export function SessionsTab({
   onNavigateToLogs,
 }: SessionsTabProps) {
-  const { lang, showToast, requestUsageRefresh, refreshTrigger, setError, activeSource, dateRange, customSince, customUntil, setActiveFilter } = useApp()
+  const { lang, showToast, requestUsageRefresh, refreshTrigger, setError, activeSource, dateRange, customSince, customUntil, setActiveFilter, evaluationEvaluator } = useApp()
   const [hideNoop, setHideNoop] = useState(true)
   const {
     sessions,
@@ -282,6 +282,10 @@ export function SessionsTab({
           <div className="widget">
             <div style={{ fontSize: '10px', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.5px', fontWeight: 700 }}>{t('Avg Latency')}</div>
             <div style={{ fontSize: '24px', fontWeight: 800, color: 'var(--text-primary)' }}>{sessionsSummary ? formatLatency(sessionsSummary.avg_latency_ms) : '—'}</div>
+          </div>
+          <div className="widget">
+            <div style={{ fontSize: '10px', color: 'var(--text-muted)', textTransform: 'uppercase', fontWeight: 700 }}>{t('Evaluator')}</div>
+            <div style={{ fontSize: '24px', fontWeight: 800, color: 'var(--text-primary)' }}>{evaluationEvaluator === 'claude' ? t('Claude') : t('Codex')}</div>
           </div>
         </div>
 

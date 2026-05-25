@@ -32,6 +32,8 @@ from .database import (
 EVALUATION_TIMEOUT_SECONDS = 5 * 60
 EVALUATION_LOG_PREVIEW_CHARS = 500
 
+VALID_EVALUATOR_AGENTS = {"codex", "claude"}
+
 logger = logging.getLogger(__name__)
 
 EVALUATION_PROMPT = """You are evaluating a local agent session transcript for task outcome.
@@ -623,10 +625,7 @@ def load_session_transcript(client_source: str | None, session_id: str) -> str:
     return _load_opencode_transcript(session_id, client_source or agent)
 
 
-def build_evaluator_invocation(transcript: str) -> AgentInvocation:
-    prompt = f"{EVALUATION_PROMPT}\n\n<session_transcript>\n{transcript}\n</session_transcript>"
-    # Agent-native resume is intentionally not used here; evaluation reads
-    # stored transcripts and runs through one central ephemeral evaluator.
+def _build_codex_evaluator_invocation(prompt: str) -> AgentInvocation:
     return AgentInvocation(
         command=[
             "codex",
@@ -648,6 +647,40 @@ def build_evaluator_invocation(transcript: str) -> AgentInvocation:
             "OTEL_METRICS_EXPORTER": "none",
         },
     )
+
+
+def _build_claude_evaluator_invocation(prompt: str) -> AgentInvocation:
+    return AgentInvocation(
+        command=[
+            "claude",
+            "--print",
+            "--no-session-persistence",
+        ],
+        stdin=prompt,
+        env={
+            "OTEL_SDK_DISABLED": "true",
+            "OTEL_LOGS_EXPORTER": "none",
+            "OTEL_TRACES_EXPORTER": "none",
+            "OTEL_METRICS_EXPORTER": "none",
+            "CLAUDE_CODE_NO_AUTO_GIT": "1",
+            "CLAUDE_CODE_NO_BROWSER": "1",
+            "CLAUDE_CODE_HEADLESS": "1",
+        },
+    )
+
+
+def build_evaluator_invocation(
+    transcript: str,
+    evaluator: str = "codex",
+) -> AgentInvocation:
+    prompt = f"{EVALUATION_PROMPT}\n\n<session_transcript>\n{transcript}\n</session_transcript>"
+    if evaluator not in VALID_EVALUATOR_AGENTS:
+        raise ValueError(f"Unsupported evaluator agent: {evaluator}")
+    builders = {
+        "codex": _build_codex_evaluator_invocation,
+        "claude": _build_claude_evaluator_invocation,
+    }
+    return builders[evaluator](prompt)
 
 
 def is_claude_mem_observer_session(session_id: str) -> bool:
@@ -891,6 +924,7 @@ def summarize_session_with_llm(
     *,
     db_path: str | None = None,
     update: bool = True,
+    evaluator: str = "codex",
 ) -> dict[str, Any]:
     """Evaluate and summarize a session synchronously using the central evaluator."""
     with Session(get_engine(db_path)) as session:
@@ -950,7 +984,7 @@ def summarize_session_with_llm(
             )
         return evaluation
 
-    invocation = build_evaluator_invocation(transcript)
+    invocation = build_evaluator_invocation(transcript, evaluator=evaluator)
     completed = subprocess.run(
         args=invocation.command,
         input=invocation.stdin,
@@ -983,16 +1017,18 @@ def run_session_evaluation_job(
     job_id: str,
     *,
     db_path: str | None = None,
+    evaluator: str = "codex",
 ) -> None:
     if not mark_evaluation_job_running(job_id, db_path=db_path):
         return
-    execute_session_evaluation_job(job_id, db_path=db_path)
+    execute_session_evaluation_job(job_id, db_path=db_path, evaluator=evaluator)
 
 
 def execute_session_evaluation_job(
     job_id: str,
     *,
     db_path: str | None = None,
+    evaluator: str = "codex",
 ) -> None:
     try:
         job = get_evaluation_job(job_id, db_path=db_path)
@@ -1007,6 +1043,7 @@ def execute_session_evaluation_job(
             job["session_id"],
             db_path=db_path,
             update=True,
+            evaluator=evaluator,
         )
         mark_evaluation_job_succeeded(job_id, db_path=db_path)
     except Exception as exc:

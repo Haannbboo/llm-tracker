@@ -16,6 +16,8 @@ type AppContextType = {
   setConfigContent: (c: string) => void
   configParsed: Record<string, any> | null
   setConfigParsed: (c: Record<string, any> | null) => void
+  evaluationEvaluator: 'codex' | 'claude'
+  setEvaluationEvaluator: (e: 'codex' | 'claude') => void
   configStatus: 'idle' | 'saving' | 'saved' | 'error'
   setConfigStatus: (s: 'idle' | 'saving' | 'saved' | 'error') => void
 
@@ -49,6 +51,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const { lang, setLang } = useLang()
   const [configContent, setConfigContent] = useState('')
   const [configParsed, setConfigParsed] = useState<Record<string, any> | null>(null)
+  const [evaluationEvaluator, setEvaluationEvaluator] = useState<'codex' | 'claude'>('codex')
   const [configStatus, setConfigStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle')
   const [pricingData, setPricingData] = useState<PricingMap | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -85,6 +88,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
           const data = await configResp.json()
           setConfigContent(data.content)
           setConfigParsed(data.parsed)
+          setEvaluationEvaluator(data.runtime?.evaluation?.evaluator === 'claude' ? 'claude' : 'codex')
         }
       } catch (err) {
         console.error('Failed to load initial data:', err)
@@ -99,6 +103,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       theme, setTheme, toggleThemeHandler,
       lang, setLang,
       configContent, setConfigContent, configParsed, setConfigParsed, configStatus, setConfigStatus,
+      evaluationEvaluator, setEvaluationEvaluator,
       pricingData, setPricingData,
       showToast,
       error, setError,

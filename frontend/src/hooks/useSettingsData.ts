@@ -53,7 +53,7 @@ function applyPatchClient(config: unknown, patches: CostPatch[]) {
 }
 
 export function useSettingsData() {
-  const { configContent, setConfigContent, configParsed, setConfigParsed, configStatus: _configStatus, setConfigStatus, setError, pricingData, setPricingData } = useApp()
+  const { configContent, setConfigContent, configParsed, setConfigParsed, setEvaluationEvaluator, configStatus: _configStatus, setConfigStatus, setError, pricingData, setPricingData } = useApp()
 
   const [selectedPricingProvider, setSelectedPricingProvider] = useState('global')
   const [pricingSearch, setPricingSearch] = useState('')
@@ -164,6 +164,7 @@ export function useSettingsData() {
         const freshContent = data.content
         setConfigContent(freshContent)
         setConfigParsed(data.parsed)
+        setEvaluationEvaluator(data.runtime?.evaluation?.evaluator === 'claude' ? 'claude' : 'codex')
         setOriginalConfigContent(freshContent)
         setCostPatches([])
         setConfigStatus('saved')
@@ -183,7 +184,7 @@ export function useSettingsData() {
       setError(t('Connection error while saving config'))
       setConfigStatus('error')
     }
-  }, [configContent, costPatches, originalConfigContent, selectedPricingProvider, setConfigContent, setConfigParsed, setConfigStatus, setError, setPricingData])
+  }, [configContent, costPatches, originalConfigContent, selectedPricingProvider, setConfigContent, setConfigParsed, setConfigStatus, setError, setEvaluationEvaluator, setPricingData])
 
   const handleRunTest = useCallback(async () => {
     setIsTesting(true)

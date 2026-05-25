@@ -6,7 +6,9 @@ import { dirname, join } from 'node:path'
 
 const here = join(dirname(fileURLToPath(import.meta.url)), '..')
 const appSource = readFileSync(join(here, 'src', 'App.tsx'), 'utf-8')
+const appContextSource = readFileSync(join(here, 'src', 'contexts', 'AppContext.tsx'), 'utf-8')
 const dashboardSource = readFileSync(join(here, 'src', 'pages', 'DashboardPage.tsx'), 'utf-8')
+const sessionsTabSource = readFileSync(join(here, 'src', 'pages', 'SessionsTab.tsx'), 'utf-8')
 const detailPanelSource = readFileSync(join(here, 'src', 'components', 'SessionDetailPanel.tsx'), 'utf-8')
 const typesSource = readFileSync(join(here, 'src', 'types.ts'), 'utf-8')
 const utilsSource = readFileSync(join(here, 'src', 'utils.tsx'), 'utf-8')
@@ -29,6 +31,14 @@ test('sessions is NOT a top-level nav tab', () => {
 test('sessions secondary tab button exists in dashboard', () => {
   assert.match(dashboardSource, /dashboardTab === 'sessions' \? 'active' : ''/)
   assert.match(dashboardSource, /onClick=\{.*setDashboardTab\('sessions'\)/)
+})
+
+test('sessions tab shows configured evaluator from runtime config', () => {
+  assert.match(appContextSource, /evaluationEvaluator: 'codex' \| 'claude'/)
+  assert.match(appContextSource, /setEvaluationEvaluator\(data\.runtime\?\.evaluation\?\.evaluator === 'claude' \? 'claude' : 'codex'\)/)
+  assert.match(sessionsTabSource, /evaluationEvaluator/)
+  assert.match(sessionsTabSource, /t\('Evaluator'\)/)
+  assert.match(sessionsTabSource, /evaluationEvaluator === 'claude' \? t\('Claude'\) : t\('Codex'\)/)
 })
 
 test('sessions state variables are declared', () => {

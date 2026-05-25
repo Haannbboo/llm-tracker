@@ -189,6 +189,25 @@ def test_get_config_returns_raw_content_for_malformed_yaml(
 
     assert result["content"] == "providers:\n  broken: [\n"
     assert result["parsed"] == {}
+    assert result["runtime"]["evaluation"]["evaluator"] == "codex"
+
+
+def test_get_config_surfaces_runtime_evaluator(api_module, isolated_home, monkeypatch):
+    config_path = isolated_home / ".llm-tracker" / "config.yaml"
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    config_path.write_text(
+        """
+evaluation:
+  evaluator: claude
+""".lstrip(),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(api_module, "CONFIG_PATH", str(config_path))
+
+    result = asyncio.run(api_module.get_config())
+
+    assert result["parsed"]["evaluation"]["evaluator"] == "claude"
+    assert result["runtime"]["evaluation"]["evaluator"] == "claude"
 
 
 def test_update_config_refreshes_runtime_config(

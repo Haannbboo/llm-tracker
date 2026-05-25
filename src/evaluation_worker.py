@@ -29,6 +29,7 @@ from .database.evaluation_jobs import (
     SESSION_EVALUATION_JOB_KIND,
 )
 from .evaluation import (
+    VALID_EVALUATOR_AGENTS,
     LocalSessionTranscriptIndex,
     build_local_session_transcript_index,
     execute_session_evaluation_job,
@@ -48,12 +49,21 @@ class EvaluationWorkerConfig:
     queue_buffer_multiplier: int = 2
     idle_sleep_cap_seconds: int = 30
     worker_tick_timeout_seconds: int = 120
+    evaluator: str = "codex"
 
 
 def load_evaluation_worker_config(
     config: dict[str, Any] | None = None,
 ) -> EvaluationWorkerConfig:
-    raw = (config or CONFIG).get("evaluation", {})
+    base_config = CONFIG if config is None else config
+    raw = base_config.get("evaluation", {})
+    evaluator = str(raw.get("evaluator", "codex")).lower().strip()
+    if evaluator not in VALID_EVALUATOR_AGENTS:
+        logger.warning(
+            "Unsupported evaluator '%s' in config, falling back to 'codex'",
+            evaluator,
+        )
+        evaluator = "codex"
     return EvaluationWorkerConfig(
         auto_enabled=bool(raw.get("auto_enabled", True)),
         quiet_delay_seconds=max(1, int(raw.get("quiet_delay_seconds", 600))),
@@ -64,6 +74,7 @@ def load_evaluation_worker_config(
             1,
             int(raw.get("worker_tick_timeout_seconds", 120)),
         ),
+        evaluator=evaluator,
     )
 
 
@@ -372,6 +383,7 @@ async def run_evaluation_worker_once(
                 execute_session_evaluation_job,
                 job["job_id"],
                 db_path=db_path,
+                evaluator=config.evaluator,
             )
         )
         if active_tasks is not None:
