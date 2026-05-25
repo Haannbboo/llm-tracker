@@ -9,22 +9,27 @@ def get_api_url():
     config_path = os.path.expanduser(
         os.environ.get("LLM_TRACKER_CONFIG", "~/.llm-tracker/config.yaml")
     )
-    port = 4001
-    host = "127.0.0.1"
-    if os.path.exists(config_path):
-        try:
-            with open(config_path) as f:
-                config = yaml.safe_load(f) or {}
-                server = config.get("server", {})
-                host = server.get("host", "127.0.0.1")
-                port = server.get("api_port", server.get("port", 4000) + 1)
-        except Exception:
-            pass
-    return f"http://{host}:{port}"
+    if not os.path.exists(config_path):
+        return None
+    try:
+        with open(config_path, encoding="utf-8") as f:
+            config = yaml.safe_load(f) or {}
+        server = config.get("server", {})
+        host = server.get("host", "127.0.0.1")
+        api_port = server.get("api_port")
+        if api_port is None and isinstance(server.get("port"), int):
+            api_port = server["port"] + 1
+        if not isinstance(api_port, int):
+            return None
+        return f"http://{host}:{api_port}"
+    except Exception:
+        return None
 
 
 def main():
     base_url = get_api_url()
+    if base_url is None:
+        return 0
     try:
         httpx.get(f"{base_url}/config", timeout=2.0)
     except Exception:
