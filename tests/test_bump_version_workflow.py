@@ -55,7 +55,7 @@ def test_bump_version_workflow_bumps_pr_branch_from_base_version():
 def test_bump_version_workflow_includes_version_in_bump_commit_message():
     workflow = load_workflow()
 
-    assert "pull-requests" not in workflow["permissions"]
+    assert "pull-requests" not in workflow.get("permissions", {})
     auto_commit_step = next(
         step
         for step in workflow["jobs"]["bump"]["steps"]
