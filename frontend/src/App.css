@@ -814,7 +814,7 @@
   border-bottom: 1px solid var(--border-color);
   display: grid;
   gap: 12px;
-  grid-template-columns: 84px minmax(0, 1fr);
+  grid-template-columns: 84px minmax(0, 1fr) auto;
   padding: 10px 16px;
 }
 
@@ -837,6 +837,20 @@
 .evaluation-job-status-running {
   background: var(--badge-success-bg);
   color: var(--badge-success-text);
+}
+
+.evaluation-job-running-pulse {
+  animation: evaluation-job-pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes evaluation-job-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--color-green) 30%, transparent);
+  }
+  50% {
+    box-shadow: 0 0 0 5px color-mix(in srgb, var(--color-green) 0%, transparent);
+  }
 }
 
 .evaluation-job-status-queued {
@@ -873,6 +887,17 @@
   color: var(--text-muted);
   font-size: 11px;
   margin-top: 3px;
+}
+
+.evaluation-warning {
+  background: var(--badge-error-bg);
+  border: 1px solid color-mix(in srgb, var(--color-red) 40%, transparent);
+  border-radius: 6px;
+  color: var(--badge-error-text);
+  font-size: 12px;
+  font-weight: 700;
+  margin: 10px 16px;
+  padding: 8px 10px;
 }
 
 .sessions-empty-state {
@@ -1017,6 +1042,10 @@
   flex-wrap: wrap;
 }
 
+.session-evaluator-picker {
+  margin: 8px 0;
+}
+
 .session-eval-btn {
   padding: 5px 12px;
   border: 1px solid var(--border-color, #dee2e6);
@@ -1049,6 +1078,7 @@
   margin-top: 12px;
   padding-top: 12px;
   border-top: 1px solid var(--border-color, #f0f0f0);
+  min-width: 280px;
 }
 
 .session-eval-label {
@@ -1058,6 +1088,65 @@
   text-transform: uppercase;
   letter-spacing: 0.5px;
   margin-bottom: 8px;
+}
+
+.evaluation-job-history {
+  border-top: 1px solid var(--border-color);
+  margin-top: 12px;
+  padding-top: 10px;
+}
+
+.evaluation-job-history-title {
+  color: var(--text-primary);
+  font-size: 12px;
+  font-weight: 800;
+  margin-bottom: 6px;
+}
+
+.evaluation-job-history-empty {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.evaluation-job-history-item {
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  margin-top: 6px;
+  padding: 6px 8px;
+}
+
+.evaluation-job-history-item summary {
+  align-items: center;
+  cursor: pointer;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  font-size: 12px;
+}
+
+.evaluation-job-error-preview {
+  color: var(--color-red);
+  font-weight: 700;
+}
+
+.evaluation-job-detail {
+  color: var(--text-secondary);
+  display: grid;
+  font-size: 12px;
+  gap: 4px;
+  margin-top: 8px;
+}
+
+.evaluation-job-detail pre {
+  background: var(--surface-hover);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  color: var(--text-primary);
+  margin: 4px 0;
+  max-height: 180px;
+  overflow: auto;
+  padding: 8px;
+  white-space: pre-wrap;
 }
 
 @media (max-width: 1100px) {

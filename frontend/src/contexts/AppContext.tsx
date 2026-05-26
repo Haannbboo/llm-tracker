@@ -2,7 +2,7 @@ import { createContext, useContext, useState, useCallback, useEffect } from 'rea
 import type { ReactNode } from 'react'
 import { toggleTheme, getTheme } from '../theme'
 import { useLang } from '../i18n/index.ts'
-import type { ActiveFilter, DateRangeOption, PricingMap } from '../types.ts'
+import type { ActiveFilter, DateRangeOption, EvaluatorOption, EvaluatorType, PricingMap } from '../types.ts'
 
 type AppContextType = {
   theme: 'light' | 'dark'
@@ -16,8 +16,10 @@ type AppContextType = {
   setConfigContent: (c: string) => void
   configParsed: Record<string, any> | null
   setConfigParsed: (c: Record<string, any> | null) => void
-  evaluationEvaluator: 'codex' | 'claude'
-  setEvaluationEvaluator: (e: 'codex' | 'claude') => void
+  evaluationEvaluator: EvaluatorType
+  setEvaluationEvaluator: (e: EvaluatorType) => void
+  evaluationEvaluators: EvaluatorOption[]
+  setEvaluationEvaluators: (e: EvaluatorOption[]) => void
   configStatus: 'idle' | 'saving' | 'saved' | 'error'
   setConfigStatus: (s: 'idle' | 'saving' | 'saved' | 'error') => void
 
@@ -51,7 +53,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const { lang, setLang } = useLang()
   const [configContent, setConfigContent] = useState('')
   const [configParsed, setConfigParsed] = useState<Record<string, any> | null>(null)
-  const [evaluationEvaluator, setEvaluationEvaluator] = useState<'codex' | 'claude'>('codex')
+  const [evaluationEvaluator, setEvaluationEvaluator] = useState<EvaluatorType>('codex')
+  const [evaluationEvaluators, setEvaluationEvaluators] = useState<EvaluatorOption[]>([])
   const [configStatus, setConfigStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle')
   const [pricingData, setPricingData] = useState<PricingMap | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -89,6 +92,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
           setConfigContent(data.content)
           setConfigParsed(data.parsed)
           setEvaluationEvaluator(data.runtime?.evaluation?.evaluator === 'claude' ? 'claude' : 'codex')
+          if (Array.isArray(data.runtime?.evaluation?.evaluators)) {
+            setEvaluationEvaluators(data.runtime.evaluation.evaluators)
+          }
         }
       } catch (err) {
         console.error('Failed to load initial data:', err)
@@ -103,7 +109,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       theme, setTheme, toggleThemeHandler,
       lang, setLang,
       configContent, setConfigContent, configParsed, setConfigParsed, configStatus, setConfigStatus,
-      evaluationEvaluator, setEvaluationEvaluator,
+      evaluationEvaluator, setEvaluationEvaluator, evaluationEvaluators, setEvaluationEvaluators,
       pricingData, setPricingData,
       showToast,
       error, setError,

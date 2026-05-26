@@ -8,8 +8,11 @@ const __dirname = dirname(fileURLToPath(import.meta.url))
 const root = join(__dirname, '..')
 
 const types = readFileSync(join(root, 'src/types.ts'), 'utf8')
-const dashboard = readFileSync(join(root, 'src/pages/DashboardPage.tsx'), 'utf8')
+const sessionsTab = readFileSync(join(root, 'src/pages/SessionsTab.tsx'), 'utf8')
+const dashboard = `${readFileSync(join(root, 'src/pages/DashboardPage.tsx'), 'utf8')}\n${sessionsTab}`
 const detail = readFileSync(join(root, 'src/components/SessionDetailPanel.tsx'), 'utf8')
+const settings = readFileSync(join(root, 'src/pages/SettingsPage.tsx'), 'utf8')
+const settingsHook = readFileSync(join(root, 'src/hooks/useSettingsData.ts'), 'utf8')
 const css = readFileSync(join(root, 'src/App.css'), 'utf8')
 const zh = readFileSync(join(root, 'src/i18n/zh.ts'), 'utf8')
 
@@ -118,6 +121,7 @@ describe('Session evaluation UI', () => {
 
   test('session detail displays queued and running evaluation progress', () => {
     assert.match(types, /export type EvaluationJobProgress/)
+    assert.match(types, /evaluator_type: EvaluatorType/)
     assert.match(detail, /activeEvaluationJob/)
     assert.match(detail, /Queued/)
     assert.match(detail, /queue_position/)
@@ -129,6 +133,36 @@ describe('Session evaluation UI', () => {
     assert.match(detail, /const sessionTitle = sessionTaskTitle\(displaySession, lang\)/)
     assert.match(detail, /t\('Session Title'\)/)
     assert.doesNotMatch(detail, /hasTaskTitle/)
+  })
+
+  test('session detail loads evaluator job history only when expanded', () => {
+    assert.match(detail, /evaluation-jobs/)
+    assert.match(detail, /evaluationJobHistory/)
+    assert.match(detail, /setEvaluationJobHistory/)
+    assert.match(detail, /details/)
+    assert.match(detail, /Restart/)
+  })
+
+  test('session detail lets users choose evaluator for manual start and restart', () => {
+    assert.match(detail, /selectedEvaluatorType/)
+    assert.match(detail, /evaluator_type: selectedEvaluatorType/)
+    assert.match(detail, /availableEvaluators/)
+    assert.match(detail, /disabled=\{[^}]*!selectedEvaluatorAvailable/)
+  })
+
+  test('global queue displays evaluator type and allows queued evaluator edits', () => {
+    assert.match(sessionsTab, /evaluator_type/)
+    assert.match(sessionsTab, /updateQueuedEvaluationJobEvaluator/)
+    assert.match(sessionsTab, /method: 'PATCH'/)
+    assert.match(sessionsTab, /evaluation-job-running-pulse/)
+    assert.match(sessionsTab, /defaultEvaluatorUnavailable/)
+  })
+
+  test('settings exposes an immediate evaluator default selector', () => {
+    assert.match(settings, /evaluation-default-selector/)
+    assert.match(settingsHook, /handleEvaluationEvaluatorChange/)
+    assert.match(settingsHook, /evaluation\.evaluator/)
+    assert.match(settingsHook, /setEvaluationEvaluator/)
   })
 })
 
@@ -144,6 +178,8 @@ describe('Session evaluation CSS', () => {
     assert.match(css, /\.session-eval-buttons/)
     assert.match(css, /\.session-eval-section/)
     assert.match(css, /\.session-evaluation-job-badge/)
+    assert.match(css, /\.evaluation-job-running-pulse/)
+    assert.match(css, /\.evaluation-job-history/)
   })
 })
 
@@ -156,5 +192,7 @@ describe('Session evaluation i18n', () => {
     assert.match(zh, /'Evaluate with LLM'/)
     assert.match(zh, /'Evaluating\.\.\.'/)
     assert.match(zh, /'Queued'/)
+    assert.match(zh, /'Evaluator unavailable'/)
+    assert.match(zh, /'Restart'/)
   })
 })

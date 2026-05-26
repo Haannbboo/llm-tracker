@@ -298,18 +298,64 @@ def test_enqueue_auto_evaluation_jobs_fills_bounded_buffer(
             {"session_id": "s3", "client_source": "codex", "updated_at": None},
         ],
     )
+    monkeypatch.setattr(
+        evaluation_worker_module,
+        "is_evaluator_type_available",
+        lambda evaluator_type: True,
+    )
 
     jobs = evaluation_worker_module.enqueue_auto_evaluation_jobs(
         config=evaluation_worker_module.EvaluationWorkerConfig(
             auto_enabled=True,
             max_concurrent_jobs=1,
             queue_buffer_multiplier=2,
+            evaluator="claude",
         ),
         db_path=db_path,
     )
 
     assert [job["session_id"] for job in jobs] == ["s1", "s2"]
     assert all(job["trigger"] == "auto" for job in jobs)
+    assert all(job["evaluator_type"] == "claude" for job in jobs)
+
+
+def test_enqueue_auto_evaluation_jobs_skips_unavailable_global_evaluator(
+    evaluation_worker_module,
+    database_module,
+    isolated_home,
+    monkeypatch,
+):
+    db_path = str(isolated_home / "usage.db")
+    database_module.init_db(db_path)
+    _insert_session_record(database_module, db_path, "s1", client_source="codex")
+    called = False
+
+    def fail_if_called(**kwargs):
+        nonlocal called
+        called = True
+        return [{"session_id": "s1", "client_source": "codex", "updated_at": None}]
+
+    monkeypatch.setattr(
+        evaluation_worker_module,
+        "select_auto_evaluation_candidates",
+        fail_if_called,
+    )
+    monkeypatch.setattr(
+        evaluation_worker_module,
+        "is_evaluator_type_available",
+        lambda evaluator_type: False,
+    )
+
+    jobs = evaluation_worker_module.enqueue_auto_evaluation_jobs(
+        config=evaluation_worker_module.EvaluationWorkerConfig(
+            auto_enabled=True,
+            evaluator="claude",
+        ),
+        db_path=db_path,
+    )
+
+    assert jobs == []
+    assert called is False
 
 
 def test_classify_local_evaluator_sessions_marks_no_op_without_job(
@@ -593,7 +639,60 @@ def test_load_evaluation_worker_config_preserves_explicit_empty_config(
     assert config.evaluator == "codex"
 
 
-def test_run_evaluation_worker_once_passes_evaluator_to_execute(
+def test_load_evaluation_worker_config_preserves_invalid_evaluator(
+    evaluation_worker_module,
+):
+    config = evaluation_worker_module.load_evaluation_worker_config(
+        {"evaluation": {"evaluator": "not-real"}}
+    )
+
+    assert config.evaluator == "not-real"
+
+
+@pytest.mark.slow
+def test_run_evaluation_worker_reloads_config_between_ticks(
+    evaluation_worker_module,
+    monkeypatch,
+):
+    stop_event = asyncio.Event()
+    loaded = [
+        evaluation_worker_module.EvaluationWorkerConfig(
+            evaluator="codex",
+            idle_sleep_cap_seconds=1,
+        ),
+        evaluation_worker_module.EvaluationWorkerConfig(
+            evaluator="claude",
+            idle_sleep_cap_seconds=1,
+        ),
+    ]
+    observed_evaluators = []
+
+    def fake_load_config():
+        return loaded[min(len(observed_evaluators), len(loaded) - 1)]
+
+    async def fake_run_once(**kwargs):
+        observed_evaluators.append(kwargs["config"].evaluator)
+        if len(observed_evaluators) == 2:
+            stop_event.set()
+        return 0
+
+    monkeypatch.setattr(
+        evaluation_worker_module,
+        "load_evaluation_worker_config",
+        fake_load_config,
+    )
+    monkeypatch.setattr(
+        evaluation_worker_module,
+        "run_evaluation_worker_once",
+        fake_run_once,
+    )
+
+    asyncio.run(evaluation_worker_module.run_evaluation_worker(stop_event=stop_event))
+
+    assert observed_evaluators == ["codex", "claude"]
+
+
+def test_run_evaluation_worker_once_passes_job_evaluator_to_execute(
     evaluation_worker_module,
     database_module,
     isolated_home,
@@ -606,6 +705,7 @@ def test_run_evaluation_worker_once_passes_evaluator_to_execute(
         session_id="s1",
         client_source="codex",
         trigger="manual",
+        evaluator_type="claude",
         db_path=db_path,
     )
 
@@ -645,7 +745,7 @@ def test_run_evaluation_worker_once_passes_evaluator_to_execute(
             config=evaluation_worker_module.EvaluationWorkerConfig(
                 auto_enabled=False,
                 max_concurrent_jobs=1,
-                evaluator="claude",
+                evaluator="codex",
             ),
             db_path=db_path,
         )

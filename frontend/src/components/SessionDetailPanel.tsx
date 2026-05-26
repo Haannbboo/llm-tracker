@@ -4,7 +4,7 @@ import { t } from '../i18n/index.ts'
 import { useApp } from '../contexts/AppContext'
 import { formatCompact, formatCost, formatDuration, formatLatency, formatNumber, formatTime, value, getModelIcon, sessionTaskTitle } from '../utils'
 import { getModelBadgeBackgroundColor, getModelTextColor } from '../model-badge'
-import type { EvaluationJobProgress, SessionEvaluation, SessionOutcome, SessionSummary } from '../types'
+import type { EvaluatorOption, EvaluatorType, EvaluationJobProgress, SessionEvaluation, SessionOutcome, SessionSummary } from '../types'
 
 // ─── Shared session detail content (used by both inline and panel) ─────────────
 
@@ -30,9 +30,15 @@ export function SessionDetailContent({
   onEvaluationPersisted?: () => void
   activeEvaluationJob?: EvaluationJobProgress | null
 }) {
-  const { lang } = useApp()
+  const { lang, evaluationEvaluator, evaluationEvaluators } = useApp()
   const [localEvaluationOverride, setLocalEvaluationOverride] = useState<{ sessionId: string; evaluation: SessionEvaluation | null } | null>(null)
   const [llmEvaluationStatus, setLlmEvaluationStatus] = useState<'idle' | 'queued' | 'running' | 'succeeded' | 'failed'>('idle')
+  const [evaluationJobHistory, setEvaluationJobHistory] = useState<EvaluationJobProgress[]>([])
+  const [evaluatorCatalog, setEvaluatorCatalog] = useState<EvaluatorOption[]>([])
+  const [globalEvaluatorType, setGlobalEvaluatorType] = useState<EvaluatorType>(evaluationEvaluator)
+  const [globalEvaluatorAvailable, setGlobalEvaluatorAvailable] = useState(true)
+  const [selectedEvaluatorType, setSelectedEvaluatorType] = useState<EvaluatorType>(evaluationEvaluator)
+  const [historyLoading, setHistoryLoading] = useState(false)
   const llmEvaluationPollRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const localEvaluation = localEvaluationOverride?.sessionId === session.session_id ? localEvaluationOverride.evaluation : session.evaluation
   const displaySession = { ...session, evaluation: localEvaluation }
@@ -46,6 +52,52 @@ export function SessionDetailContent({
       if (llmEvaluationPollRef.current) clearTimeout(llmEvaluationPollRef.current)
     }
   }, [])
+
+  const evaluatorOptions = evaluatorCatalog.length > 0 ? evaluatorCatalog : evaluationEvaluators
+  const fallbackEvaluatorOptions: EvaluatorOption[] = evaluatorOptions.length > 0
+    ? evaluatorOptions
+    : [
+        { id: 'codex', label: 'Codex', command: 'codex', available: true },
+        { id: 'claude', label: 'Claude Code', command: 'claude', available: true },
+      ]
+  const availableEvaluators = fallbackEvaluatorOptions
+  const selectedEvaluator = availableEvaluators.find((item) => item.id === selectedEvaluatorType)
+  const selectedEvaluatorAvailable = selectedEvaluator?.available === true
+  const globalEvaluator = availableEvaluators.find((item) => item.id === globalEvaluatorType)
+  const evaluatorLabel = (evaluatorType?: string | null) => {
+    const evaluator = availableEvaluators.find((item) => item.id === evaluatorType)
+    return evaluator?.label || (evaluatorType === 'claude' ? 'Claude Code' : 'Codex')
+  }
+
+  const loadEvaluationJobHistory = async () => {
+    setHistoryLoading(true)
+    try {
+      const response = await fetch(`/sessions/${encodeURIComponent(session.session_id)}/evaluation-jobs`)
+      if (!response.ok) throw new Error('Failed to load evaluation job history')
+      const data: {
+        jobs: EvaluationJobProgress[]
+        evaluators: EvaluatorOption[]
+        global_evaluator_type: EvaluatorType
+        global_evaluator_available: boolean
+      } = await response.json()
+      setEvaluationJobHistory(data.jobs || [])
+      setEvaluatorCatalog(data.evaluators || [])
+      setGlobalEvaluatorType(data.global_evaluator_type || evaluationEvaluator)
+      setGlobalEvaluatorAvailable(data.global_evaluator_available !== false)
+      setSelectedEvaluatorType(data.global_evaluator_type || evaluationEvaluator)
+    } catch {
+      showToast?.('Failed to load evaluation job history')
+    } finally {
+      setHistoryLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    setEvaluationJobHistory([])
+    setEvaluatorCatalog([])
+    setSelectedEvaluatorType(evaluationEvaluator)
+    void loadEvaluationJobHistory()
+  }, [session.session_id, evaluationEvaluator])
 
   const isLlmEvaluationRunning = llmEvaluationStatus === 'queued' || llmEvaluationStatus === 'running'
   const activeJobStatus = activeEvaluationJob?.status
@@ -76,6 +128,7 @@ export function SessionDetailContent({
       if (pollResult.status === 'succeeded') {
         setLlmEvaluationStatus('succeeded')
         await refreshPersistedEvaluation()
+        await loadEvaluationJobHistory()
         onEvaluationPersisted?.()
         showToast?.('Session evaluated with LLM')
         return
@@ -83,6 +136,7 @@ export function SessionDetailContent({
 
       if (pollResult.status === 'failed') {
         setLlmEvaluationStatus('failed')
+        await loadEvaluationJobHistory()
         showToast?.('Failed to evaluate session with LLM')
         return
       }
@@ -97,6 +151,10 @@ export function SessionDetailContent({
 
   const startLlmEvaluation = async () => {
     if (displayEvaluationRunning) return
+    if (!selectedEvaluatorAvailable) {
+      showToast?.('Evaluator unavailable')
+      return
+    }
     if (llmEvaluationPollRef.current) clearTimeout(llmEvaluationPollRef.current)
 
     setLocalEvaluationOverride(null)
@@ -104,11 +162,14 @@ export function SessionDetailContent({
     try {
       const response = await fetch(`/sessions/${encodeURIComponent(session.session_id)}/evaluate-with-llm`, {
         method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ evaluator_type: selectedEvaluatorType }),
       })
       if (!response.ok) throw new Error('Failed to start LLM evaluation')
 
       const job = await response.json()
       setLlmEvaluationStatus(job.status === 'running' ? 'running' : 'queued')
+      await loadEvaluationJobHistory()
       pollLlmEvaluationJob(job)
     } catch {
       setLlmEvaluationStatus('failed')
@@ -369,6 +430,11 @@ export function SessionDetailContent({
 
       <div className="session-eval-section">
         <div className="session-eval-label">{t('Evaluation')}</div>
+        {!globalEvaluatorAvailable && (
+          <div className="evaluation-warning">
+            {t('Evaluator unavailable')}: {globalEvaluator?.label || evaluatorLabel(globalEvaluatorType)}
+          </div>
+        )}
         {localEvaluation && (
           <div style={{ marginBottom: '8px' }}>
             <span className={`session-outcome-badge session-outcome-${localEvaluation.outcome}`}>
@@ -401,13 +467,68 @@ export function SessionDetailContent({
             {t('Reset')}
           </button>
         </div>
+        <div className="session-evaluator-picker">
+          <select
+            className="input-plain"
+            value={selectedEvaluatorType}
+            onChange={(event) => setSelectedEvaluatorType(event.target.value as EvaluatorType)}
+            disabled={displayEvaluationRunning}
+          >
+            {availableEvaluators.map((evaluator) => (
+              <option key={evaluator.id} value={evaluator.id} disabled={!evaluator.available}>
+                {evaluator.label}{evaluator.available ? '' : ` (${t('Not found')})`}
+              </option>
+            ))}
+          </select>
+        </div>
         <button
           className="session-eval-btn"
-          disabled={displayEvaluationRunning}
+          disabled={displayEvaluationRunning || !selectedEvaluatorAvailable}
           onClick={startLlmEvaluation}
         >
           {progressLabel || (isLlmEvaluationRunning ? t('Evaluating...') : t('Evaluate with LLM'))}
         </button>
+        <div className="evaluation-job-history">
+          <div className="evaluation-job-history-title">{t('Evaluator Jobs')}</div>
+          {historyLoading && <div className="evaluation-job-history-empty">{t('Loading...')}</div>}
+          {!historyLoading && evaluationJobHistory.length === 0 && (
+            <div className="evaluation-job-history-empty">{t('No evaluator jobs yet.')}</div>
+          )}
+          {!historyLoading && evaluationJobHistory.map((job) => {
+            const failed = job.status === 'failed'
+            const errorPreview = job.error?.split('\n')[0] || t('No failure reason recorded')
+            return (
+              <details key={job.job_id} className={`evaluation-job-history-item evaluation-job-history-${job.status}`} open={failed}>
+                <summary>
+                  <span className={`evaluation-job-status evaluation-job-status-${job.status}`}>
+                    {job.status === 'running' ? t('Running') : job.status === 'queued' ? t('Queued') : job.status === 'succeeded' ? t('Succeeded') : t('Failed')}
+                  </span>
+                  <span>{evaluatorLabel(job.evaluator_type)}</span>
+                  <span>{job.trigger === 'auto' ? t('Auto') : t('Manual')}</span>
+                  {failed && <span className="evaluation-job-error-preview">{errorPreview}</span>}
+                </summary>
+                <div className="evaluation-job-detail">
+                  <div>{t('Created')}: {job.created_at ? formatTime(job.created_at) : '—'}</div>
+                  <div>{t('Started')}: {job.started_at ? formatTime(job.started_at) : '—'}</div>
+                  <div>{t('Finished')}: {job.finished_at ? formatTime(job.finished_at) : '—'}</div>
+                  <div>{t('Evaluator')}: {evaluatorLabel(job.evaluator_type)}</div>
+                  <div>{t('Trigger')}: {job.trigger === 'auto' ? t('Auto') : t('Manual')}</div>
+                  {job.error && <pre>{job.error}</pre>}
+                  {failed && (
+                    <button
+                      type="button"
+                      className="session-eval-btn"
+                      disabled={displayEvaluationRunning || !selectedEvaluatorAvailable}
+                      onClick={startLlmEvaluation}
+                    >
+                      {t('Restart')}
+                    </button>
+                  )}
+                </div>
+              </details>
+            )
+          })}
+        </div>
       </div>
     </div>
   )

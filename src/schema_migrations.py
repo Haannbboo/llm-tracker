@@ -441,6 +441,7 @@ def migrate_database(db_path: str | None = None) -> list[str]:
                     session_id TEXT NOT NULL,
                     client_source TEXT,
                     trigger TEXT NOT NULL DEFAULT 'manual',
+                    evaluator_type TEXT NOT NULL DEFAULT 'codex',
                     status TEXT NOT NULL,
                     created_at TEXT NOT NULL,
                     started_at TEXT,
@@ -456,6 +457,7 @@ def migrate_database(db_path: str | None = None) -> list[str]:
                     session_id TEXT NOT NULL,
                     client_source TEXT,
                     trigger TEXT NOT NULL DEFAULT 'manual',
+                    evaluator_type TEXT NOT NULL DEFAULT 'codex',
                     status TEXT NOT NULL,
                     created_at TEXT NOT NULL,
                     started_at TEXT,
@@ -480,6 +482,14 @@ def migrate_database(db_path: str | None = None) -> list[str]:
             postgresql_definition="TEXT NOT NULL DEFAULT 'manual'",
         ):
             applied.append("evaluation_jobs.trigger")
+        if _ensure_column(
+            engine,
+            "evaluation_jobs",
+            "evaluator_type",
+            sqlite_definition="TEXT NOT NULL DEFAULT 'codex'",
+            postgresql_definition="TEXT NOT NULL DEFAULT 'codex'",
+        ):
+            applied.append("evaluation_jobs.evaluator_type")
 
     if _table_exists(engine, "usage"):
         if _ensure_column(

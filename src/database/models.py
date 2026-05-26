@@ -211,6 +211,9 @@ class EvaluationJob(Base):
     trigger: Mapped[str] = mapped_column(
         String, nullable=False, server_default=text("'manual'")
     )
+    evaluator_type: Mapped[str] = mapped_column(
+        String, nullable=False, server_default=text("'codex'")
+    )
     status: Mapped[str] = mapped_column(String, nullable=False)
     created_at: Mapped[str] = mapped_column(String, nullable=False)
     started_at: Mapped[str | None] = mapped_column(String, nullable=True)

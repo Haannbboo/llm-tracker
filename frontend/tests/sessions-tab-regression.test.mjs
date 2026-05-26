@@ -34,11 +34,12 @@ test('sessions secondary tab button exists in dashboard', () => {
 })
 
 test('sessions tab shows configured evaluator from runtime config', () => {
-  assert.match(appContextSource, /evaluationEvaluator: 'codex' \| 'claude'/)
+  assert.match(appContextSource, /evaluationEvaluator: EvaluatorType/)
   assert.match(appContextSource, /setEvaluationEvaluator\(data\.runtime\?\.evaluation\?\.evaluator === 'claude' \? 'claude' : 'codex'\)/)
   assert.match(sessionsTabSource, /evaluationEvaluator/)
   assert.match(sessionsTabSource, /t\('Evaluator'\)/)
-  assert.match(sessionsTabSource, /evaluationEvaluator === 'claude' \? t\('Claude'\) : t\('Codex'\)/)
+  assert.match(sessionsTabSource, /evaluatorLabel\(evaluationEvaluator\)/)
+  assert.doesNotMatch(sessionsTabSource, /evaluationEvaluator === 'claude' \? t\('Claude'\) : t\('Codex'\)/)
 })
 
 test('sessions state variables are declared', () => {

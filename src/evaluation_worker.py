@@ -34,6 +34,7 @@ from .evaluation import (
     build_local_session_transcript_index,
     execute_session_evaluation_job,
     has_local_session_transcript,
+    is_evaluator_type_available,
     is_local_evaluator_session,
     mark_evaluator_session_no_op,
 )
@@ -60,10 +61,9 @@ def load_evaluation_worker_config(
     evaluator = str(raw.get("evaluator", "codex")).lower().strip()
     if evaluator not in VALID_EVALUATOR_AGENTS:
         logger.warning(
-            "Unsupported evaluator '%s' in config, falling back to 'codex'",
+            "Unsupported evaluator '%s' in config; evaluation jobs will be blocked until it is corrected",
             evaluator,
         )
-        evaluator = "codex"
     return EvaluationWorkerConfig(
         auto_enabled=bool(raw.get("auto_enabled", True)),
         quiet_delay_seconds=max(1, int(raw.get("quiet_delay_seconds", 600))),
@@ -173,6 +173,12 @@ def enqueue_auto_evaluation_jobs(
 ) -> list[dict[str, Any]]:
     if not config.auto_enabled:
         return []
+    if not is_evaluator_type_available(config.evaluator):
+        logger.warning(
+            "Skipping auto evaluation enqueue because evaluator '%s' is not available",
+            config.evaluator,
+        )
+        return []
 
     active_jobs = list_active_evaluation_jobs(db_path=db_path)
     target_depth = config.max_concurrent_jobs * config.queue_buffer_multiplier
@@ -192,6 +198,7 @@ def enqueue_auto_evaluation_jobs(
                 session_id=str(candidate["session_id"]),
                 client_source=candidate["client_source"],
                 trigger="auto",
+                evaluator_type=config.evaluator,
                 db_path=db_path,
             )
         )
@@ -383,7 +390,7 @@ async def run_evaluation_worker_once(
                 execute_session_evaluation_job,
                 job["job_id"],
                 db_path=db_path,
-                evaluator=config.evaluator,
+                evaluator=job.get("evaluator_type") or config.evaluator,
             )
         )
         if active_tasks is not None:
@@ -398,19 +405,24 @@ async def run_evaluation_worker(
     config: EvaluationWorkerConfig | None = None,
     db_path: str | None = None,
 ) -> None:
-    worker_config = config or load_evaluation_worker_config()
+    explicit_config = config
     active_tasks: set[asyncio.Task] = set()
     tick_task: asyncio.Task[int] | None = None
+    tick_config: EvaluationWorkerConfig | None = None
     while not stop_event.is_set():
         if tick_task is None:
+            tick_config = explicit_config or load_evaluation_worker_config()
             tick_task = asyncio.create_task(
                 run_evaluation_worker_once(
-                    config=worker_config,
+                    config=tick_config,
                     db_path=db_path,
                     active_tasks=active_tasks,
                 )
             )
 
+        worker_config = (
+            tick_config or explicit_config or load_evaluation_worker_config()
+        )
         done, _pending = await asyncio.wait(
             {tick_task},
             timeout=worker_config.worker_tick_timeout_seconds,
@@ -421,6 +433,7 @@ async def run_evaluation_worker(
             except Exception:
                 logger.exception("Evaluation worker tick failed")
             tick_task = None
+            tick_config = None
         else:
             logger.error("Evaluation worker tick timed out")
 

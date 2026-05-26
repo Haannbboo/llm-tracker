@@ -125,6 +125,14 @@ export type DateRangeOption = '24h' | '7d' | '30d' | 'all' | 'custom'
 
 export type SessionOutcome = 'solved' | 'partial' | 'failed' | 'stuck' | 'no_op' | 'unknown'
 export type SessionEvaluationSource = 'manual' | 'heuristic' | 'llm'
+export type EvaluatorType = 'codex' | 'claude'
+
+export type EvaluatorOption = {
+  id: EvaluatorType
+  label: string
+  command: string
+  available: boolean
+}
 
 export type SessionEvaluation = {
   session_id: string
@@ -146,6 +154,7 @@ export type EvaluationJobProgress = {
   client_source?: string | null
   status: 'queued' | 'running' | 'succeeded' | 'failed'
   trigger: 'manual' | 'auto'
+  evaluator_type: EvaluatorType
   created_at?: string | null
   started_at?: string | null
   finished_at?: string | null

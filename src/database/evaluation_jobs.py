@@ -39,6 +39,7 @@ def _job_to_dict(job: EvaluationJob) -> dict[str, Any]:
         "client_source": job.client_source,
         "status": job.status,
         "trigger": job.trigger,
+        "evaluator_type": job.evaluator_type,
         "created_at": job.created_at,
         "started_at": job.started_at,
         "finished_at": job.finished_at,
@@ -51,6 +52,7 @@ def create_session_evaluation_job(
     session_id: str,
     client_source: str | None,
     trigger: str = "manual",
+    evaluator_type: str = "codex",
     created_at: str | None = None,
     db_path: str | None = None,
 ) -> dict[str, Any]:
@@ -63,6 +65,7 @@ def create_session_evaluation_job(
         session_id=session_id,
         client_source=client_source,
         trigger=trigger,
+        evaluator_type=evaluator_type,
         status="queued",
         created_at=created_at or _now_iso(),
     )
@@ -107,8 +110,12 @@ def get_evaluation_job(
 def promote_evaluation_job_to_manual(
     job_id: str,
     *,
+    evaluator_type: str | None = None,
     db_path: str | None = None,
 ) -> dict[str, Any] | None:
+    values: dict[str, Any] = {"trigger": "manual"}
+    if evaluator_type is not None:
+        values["evaluator_type"] = evaluator_type
     with Session(get_engine(db_path)) as session:
         session.execute(
             update(EvaluationJob)
@@ -120,9 +127,34 @@ def promote_evaluation_job_to_manual(
                     EvaluationJob.trigger == "auto",
                 )
             )
-            .values(trigger="manual")
+            .values(**values)
         )
         session.commit()
+        job = session.get(EvaluationJob, job_id)
+        return _job_to_dict(job) if job else None
+
+
+def update_queued_evaluation_job_evaluator(
+    job_id: str,
+    *,
+    evaluator_type: str,
+    db_path: str | None = None,
+) -> dict[str, Any] | None:
+    with Session(get_engine(db_path)) as session:
+        result = session.execute(
+            update(EvaluationJob)
+            .where(
+                and_(
+                    EvaluationJob.job_id == job_id,
+                    EvaluationJob.kind == SESSION_EVALUATION_JOB_KIND,
+                    EvaluationJob.status == "queued",
+                )
+            )
+            .values(evaluator_type=evaluator_type)
+        )
+        session.commit()
+        if result.rowcount != 1:  # type: ignore[attr-defined]
+            return None
         job = session.get(EvaluationJob, job_id)
         return _job_to_dict(job) if job else None
 
@@ -361,6 +393,39 @@ def get_evaluation_job_progress(
         {"ahead_count": 0, "queue_position": None},
     )
     return {**job, **progress}
+
+
+def list_session_evaluation_jobs_with_progress(
+    session_id: str,
+    *,
+    db_path: str | None = None,
+) -> list[dict[str, Any]]:
+    progress = _active_progress_map(db_path=db_path)
+    with Session(get_engine(db_path)) as session:
+        jobs = (
+            session.execute(
+                select(EvaluationJob)
+                .where(
+                    and_(
+                        EvaluationJob.kind == SESSION_EVALUATION_JOB_KIND,
+                        EvaluationJob.session_id == session_id,
+                    )
+                )
+                .order_by(EvaluationJob.created_at.desc())
+            )
+            .scalars()
+            .all()
+        )
+    return [
+        {
+            **_job_to_dict(job),
+            **progress.get(
+                job.job_id,
+                {"ahead_count": 0, "queue_position": None},
+            ),
+        }
+        for job in jobs
+    ]
 
 
 def find_active_session_evaluation_job(

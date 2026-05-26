@@ -28,8 +28,9 @@ export function SettingsPage({ providerColors }: Props) {
     testBaseUrl, setTestBaseUrl, testApiKey, setTestApiKey,
     testFormat, setTestFormat, testModel, setTestModel,
     testMessage, setTestMessage, testResult, isTesting,
-    handleSaveConfig, handleRunTest, handleCostChange,
+    handleSaveConfig, handleRunTest, handleCostChange, handleEvaluationEvaluatorChange,
     manualCurlEquivalent,
+    evaluationEvaluator, evaluationEvaluators,
   } = useSettingsData()
 
   // Setup summary computations (from App.tsx lines 821-838)
@@ -107,6 +108,35 @@ export function SettingsPage({ providerColors }: Props) {
 
       {activeSection === 'services' && (
         <>
+          <div className="panel evaluation-default-selector">
+            <div className="panel-tabs">
+              <div className="tab active">{t('Evaluator')}</div>
+            </div>
+            <div className="panel-body" style={{ padding: '16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '16px', flexWrap: 'wrap' }}>
+              <div>
+                <div style={{ fontSize: '13px', fontWeight: 700, color: 'var(--text-primary)' }}>{t('Global default')}</div>
+                <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '4px' }}>{t('Used for future automatic evaluator jobs.')}</div>
+              </div>
+              <select
+                className="input-plain"
+                value={evaluationEvaluator}
+                onChange={(event) => handleEvaluationEvaluatorChange(event.target.value as any)}
+              >
+                {evaluationEvaluators.map((evaluator) => (
+                  <option key={evaluator.id} value={evaluator.id} disabled={!evaluator.available}>
+                    {evaluator.label}{evaluator.available ? '' : ` (${t('Not found')})`}
+                  </option>
+                ))}
+                {evaluationEvaluators.length === 0 && (
+                  <>
+                    <option value="codex">Codex</option>
+                    <option value="claude">Claude Code</option>
+                  </>
+                )}
+              </select>
+            </div>
+          </div>
+
           {/* Service Version */}
           <div className="panel">
             <div className="panel-tabs">

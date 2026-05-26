@@ -6,6 +6,7 @@ import json
 import logging
 import os
 import re
+import shutil
 import sqlite3
 import subprocess
 from collections.abc import Callable
@@ -27,14 +28,53 @@ from .database import (
     mark_evaluation_job_running,
     mark_evaluation_job_succeeded,
     promote_evaluation_job_to_manual,
+    update_queued_evaluation_job_evaluator,
 )
 
 EVALUATION_TIMEOUT_SECONDS = 5 * 60
 EVALUATION_LOG_PREVIEW_CHARS = 500
 
-VALID_EVALUATOR_AGENTS = {"codex", "claude"}
+EVALUATOR_AGENT_CATALOG = {
+    "codex": {"label": "Codex", "command": "codex"},
+    "claude": {"label": "Claude Code", "command": "claude"},
+}
+VALID_EVALUATOR_AGENTS = set(EVALUATOR_AGENT_CATALOG)
 
 logger = logging.getLogger(__name__)
+
+
+def normalize_evaluator_type(evaluator_type: str) -> str:
+    return str(evaluator_type).lower().strip()
+
+
+def is_evaluator_type_available(evaluator_type: str) -> bool:
+    evaluator_type = normalize_evaluator_type(evaluator_type)
+    metadata = EVALUATOR_AGENT_CATALOG.get(evaluator_type)
+    if metadata is None:
+        return False
+    return shutil.which(metadata["command"]) is not None
+
+
+def list_evaluator_agents() -> list[dict[str, Any]]:
+    return [
+        {
+            "id": evaluator_type,
+            "label": metadata["label"],
+            "command": metadata["command"],
+            "available": shutil.which(metadata["command"]) is not None,
+        }
+        for evaluator_type, metadata in EVALUATOR_AGENT_CATALOG.items()
+    ]
+
+
+def require_available_evaluator_type(evaluator_type: str) -> str:
+    evaluator_type = normalize_evaluator_type(evaluator_type)
+    if evaluator_type not in VALID_EVALUATOR_AGENTS:
+        raise ValueError(f"Unsupported evaluator agent: {evaluator_type}")
+    if not is_evaluator_type_available(evaluator_type):
+        raise ValueError(f"Evaluator not available: {evaluator_type}")
+    return evaluator_type
+
 
 EVALUATION_PROMPT = """You are evaluating a local agent session transcript for task outcome.
 
@@ -1017,7 +1057,7 @@ def run_session_evaluation_job(
     job_id: str,
     *,
     db_path: str | None = None,
-    evaluator: str = "codex",
+    evaluator: str | None = None,
 ) -> None:
     if not mark_evaluation_job_running(job_id, db_path=db_path):
         return
@@ -1028,12 +1068,13 @@ def execute_session_evaluation_job(
     job_id: str,
     *,
     db_path: str | None = None,
-    evaluator: str = "codex",
+    evaluator: str | None = None,
 ) -> None:
     try:
         job = get_evaluation_job(job_id, db_path=db_path)
         if not job:
             raise ValueError(f"Evaluation job not found: {job_id}")
+        evaluator_type = evaluator or job.get("evaluator_type") or "codex"
 
         if _session_has_manual_evaluation(job["session_id"], db_path=db_path):
             mark_evaluation_job_succeeded(job_id, db_path=db_path)
@@ -1043,7 +1084,7 @@ def execute_session_evaluation_job(
             job["session_id"],
             db_path=db_path,
             update=True,
-            evaluator=evaluator,
+            evaluator=evaluator_type,
         )
         mark_evaluation_job_succeeded(job_id, db_path=db_path)
     except Exception as exc:
@@ -1054,8 +1095,13 @@ def start_session_evaluation_job(
     session_id: str,
     *,
     trigger: str = "manual",
+    evaluator_type: str = "codex",
     db_path: str | None = None,
 ) -> dict[str, Any]:
+    evaluator_type = normalize_evaluator_type(evaluator_type)
+    if evaluator_type not in VALID_EVALUATOR_AGENTS:
+        raise ValueError(f"Unsupported evaluator agent: {evaluator_type}")
+
     with Session(get_engine(db_path)) as session:
         record = session.get(SessionRecord, session_id)
         if not record:
@@ -1074,16 +1120,26 @@ def start_session_evaluation_job(
         if trigger == "manual" and active["trigger"] == "auto":
             promoted = promote_evaluation_job_to_manual(
                 active["job_id"],
+                evaluator_type=evaluator_type,
                 db_path=db_path,
             )
             if promoted is not None:
                 return promoted
+        if active["status"] == "queued" and active["trigger"] == trigger:
+            updated = update_queued_evaluation_job_evaluator(
+                active["job_id"],
+                evaluator_type=evaluator_type,
+                db_path=db_path,
+            )
+            if updated is not None:
+                return updated
         return active
 
     job = create_session_evaluation_job(
         session_id=session_id,
         client_source=client_source,
         trigger=trigger,
+        evaluator_type=evaluator_type,
         db_path=db_path,
     )
     return job

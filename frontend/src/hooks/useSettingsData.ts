@@ -2,7 +2,7 @@ import { useState, useCallback, useMemo, useEffect } from 'react'
 import yaml from 'js-yaml'
 import { t } from '../i18n/index.ts'
 import { useApp } from '../contexts/AppContext'
-import type { PricingEntry } from '../types.ts'
+import type { EvaluatorType, PricingEntry } from '../types.ts'
 
 type CostPatchOp = 'set' | 'delete'
 type CostPatch = { path: string[]; op: CostPatchOp; value?: number }
@@ -53,7 +53,22 @@ function applyPatchClient(config: unknown, patches: CostPatch[]) {
 }
 
 export function useSettingsData() {
-  const { configContent, setConfigContent, configParsed, setConfigParsed, setEvaluationEvaluator, configStatus: _configStatus, setConfigStatus, setError, pricingData, setPricingData } = useApp()
+  const {
+    configContent,
+    setConfigContent,
+    configParsed,
+    setConfigParsed,
+    evaluationEvaluator,
+    setEvaluationEvaluator,
+    evaluationEvaluators,
+    setEvaluationEvaluators,
+    showToast,
+    configStatus: _configStatus,
+    setConfigStatus,
+    setError,
+    pricingData,
+    setPricingData,
+  } = useApp()
 
   const [selectedPricingProvider, setSelectedPricingProvider] = useState('global')
   const [pricingSearch, setPricingSearch] = useState('')
@@ -186,6 +201,75 @@ export function useSettingsData() {
     }
   }, [configContent, costPatches, originalConfigContent, selectedPricingProvider, setConfigContent, setConfigParsed, setConfigStatus, setError, setEvaluationEvaluator, setPricingData])
 
+  const handleEvaluationEvaluatorChange = useCallback(async (nextEvaluator: EvaluatorType) => {
+    const option = evaluationEvaluators.find((item) => item.id === nextEvaluator)
+    if (option && !option.available) {
+      setError(t('Evaluator unavailable'))
+      return
+    }
+
+    const previousEvaluator = evaluationEvaluator
+    const previousContent = configContent
+    const previousParsed = configParsed
+    const nextConfig = cloneConfig(configParsed)
+    if (!nextConfig.evaluation) nextConfig.evaluation = {}
+    if (!isPlainMapping(nextConfig.evaluation)) {
+      setError(t('Config root must be a YAML mapping'))
+      return
+    }
+    nextConfig.evaluation.evaluator = nextEvaluator
+    const nextContent = yaml.dump(nextConfig, { indent: 2, noRefs: true })
+
+    setEvaluationEvaluator(nextEvaluator)
+    setConfigParsed(nextConfig)
+    setConfigContent(nextContent)
+    setConfigStatus('saving')
+    try {
+      const response = await fetch('/config', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content: nextContent }),
+      })
+      if (!response.ok) {
+        const error = await response.json()
+        throw new Error(error.detail || t('Failed to save config'))
+      }
+
+      const configResp = await fetch('/config')
+      if (!configResp.ok) throw new Error(t('Failed to refresh config after save'))
+      const data = await configResp.json()
+      setConfigContent(data.content)
+      setConfigParsed(data.parsed)
+      setEvaluationEvaluator(data.runtime?.evaluation?.evaluator === 'claude' ? 'claude' : 'codex')
+      if (Array.isArray(data.runtime?.evaluation?.evaluators)) {
+        setEvaluationEvaluators(data.runtime.evaluation.evaluators)
+      }
+      setOriginalConfigContent(data.content)
+      setCostPatches([])
+      setConfigStatus('saved')
+      showToast(t('Configuration saved successfully'))
+      setTimeout(() => setConfigStatus('idle'), 3000)
+    } catch (err) {
+      setEvaluationEvaluator(previousEvaluator)
+      setConfigContent(previousContent)
+      setConfigParsed(previousParsed)
+      setConfigStatus('error')
+      setError(err instanceof Error ? err.message : t('Failed to save config'))
+    }
+  }, [
+    configContent,
+    configParsed,
+    evaluationEvaluator,
+    evaluationEvaluators,
+    setConfigContent,
+    setConfigParsed,
+    setConfigStatus,
+    setError,
+    setEvaluationEvaluator,
+    setEvaluationEvaluators,
+    showToast,
+  ])
+
   const handleRunTest = useCallback(async () => {
     setIsTesting(true)
     setTestResult(null)
@@ -272,8 +356,9 @@ export function useSettingsData() {
     testBaseUrl, setTestBaseUrl, testApiKey, setTestApiKey,
     testFormat, setTestFormat, testModel, setTestModel,
     testMessage, setTestMessage, testResult, isTesting,
-    handleSaveConfig, handleRunTest, handleCostChange,
+    handleSaveConfig, handleRunTest, handleCostChange, handleEvaluationEvaluatorChange,
     costPatches, originalConfigContent,
+    evaluationEvaluator, evaluationEvaluators,
     manualCurlEquivalent,
   }
 }

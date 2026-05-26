@@ -1171,6 +1171,12 @@ def test_daily_effectiveness_endpoint_rejects_invalid_date(api_module, monkeypat
 def test_evaluate_with_llm_queues_job(api_module, monkeypatch):
     captured = {}
 
+    monkeypatch.setattr(
+        api_module,
+        "require_available_evaluator_type",
+        lambda evaluator_type: evaluator_type,
+    )
+
     def fake_start(session_id, **kwargs):
         captured["session_id"] = session_id
         captured.update(kwargs)
@@ -1198,6 +1204,56 @@ def test_evaluate_with_llm_queues_job(api_module, monkeypatch):
     }
     assert captured["session_id"] == "sess-1"
     assert captured["trigger"] == "manual"
+    assert captured["evaluator_type"] == "codex"
+
+
+def test_evaluate_with_llm_accepts_evaluator_override(api_module, monkeypatch):
+    captured = {}
+
+    monkeypatch.setattr(
+        api_module,
+        "require_available_evaluator_type",
+        lambda evaluator_type: evaluator_type,
+    )
+
+    def fake_start(session_id, **kwargs):
+        captured["session_id"] = session_id
+        captured.update(kwargs)
+        return {
+            "job_id": "job-claude",
+            "kind": "session_evaluation",
+            "session_id": session_id,
+            "status": "queued",
+            "trigger": "manual",
+            "evaluator_type": kwargs["evaluator_type"],
+            "error": None,
+        }
+
+    monkeypatch.setattr(api_module, "start_session_evaluation_job", fake_start)
+
+    response = TestClient(api_module.app).post(
+        "/sessions/sess-1/evaluate-with-llm",
+        json={"evaluator_type": "claude"},
+    )
+
+    assert response.status_code == 202
+    assert response.json()["evaluator_type"] == "claude"
+    assert captured["evaluator_type"] == "claude"
+
+
+def test_evaluate_with_llm_rejects_unavailable_evaluator(api_module, monkeypatch):
+    def reject(evaluator_type):
+        raise ValueError(f"Evaluator not available: {evaluator_type}")
+
+    monkeypatch.setattr(api_module, "require_available_evaluator_type", reject)
+
+    response = TestClient(api_module.app).post(
+        "/sessions/sess-1/evaluate-with-llm",
+        json={"evaluator_type": "claude"},
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "Evaluator not available: claude"
 
 
 def test_evaluate_with_llm_returns_409_for_manual_evaluation(api_module, monkeypatch):
@@ -1266,6 +1322,14 @@ def test_poll_job_returns_404_for_unknown_job(api_module, monkeypatch):
 def test_active_evaluation_jobs_returns_visible_session_jobs(api_module, monkeypatch):
     monkeypatch.setattr(
         api_module,
+        "list_evaluator_agents",
+        lambda: [
+            {"id": "codex", "label": "Codex", "available": True},
+            {"id": "claude", "label": "Claude Code", "available": False},
+        ],
+    )
+    monkeypatch.setattr(
+        api_module,
         "list_active_evaluation_jobs_with_progress",
         lambda session_ids=None: [
             {
@@ -1287,3 +1351,167 @@ def test_active_evaluation_jobs_returns_visible_session_jobs(api_module, monkeyp
 
     assert response.status_code == 200
     assert response.json()["jobs"]["sess-1"]["status"] == "running"
+    assert response.json()["evaluators"][1]["label"] == "Claude Code"
+
+
+def test_session_evaluation_jobs_returns_history_and_evaluator_catalog(
+    api_module, monkeypatch
+):
+    monkeypatch.setattr(
+        api_module,
+        "list_session_evaluation_jobs_with_progress",
+        lambda session_id: [
+            {
+                "job_id": "job-failed",
+                "kind": "session_evaluation",
+                "session_id": session_id,
+                "status": "failed",
+                "trigger": "manual",
+                "evaluator_type": "codex",
+                "ahead_count": 0,
+                "queue_position": None,
+                "error": "Evaluator exited with code 1",
+            }
+        ],
+    )
+    monkeypatch.setattr(
+        api_module,
+        "list_evaluator_agents",
+        lambda: [
+            {"id": "codex", "label": "Codex", "available": True},
+            {"id": "claude", "label": "Claude Code", "available": True},
+        ],
+    )
+
+    response = TestClient(api_module.app).get("/sessions/sess-1/evaluation-jobs")
+
+    assert response.status_code == 200
+    assert response.json()["jobs"][0]["status"] == "failed"
+    assert response.json()["jobs"][0]["evaluator_type"] == "codex"
+    assert response.json()["evaluators"][1]["id"] == "claude"
+    assert response.json()["global_evaluator_type"] == "codex"
+
+
+def test_patch_evaluation_job_updates_queued_evaluator(api_module, monkeypatch):
+    stored = {"evaluator_type": "codex"}
+
+    monkeypatch.setattr(
+        api_module,
+        "require_available_evaluator_type",
+        lambda evaluator_type: evaluator_type,
+    )
+    monkeypatch.setattr(
+        api_module,
+        "get_evaluation_job_progress",
+        lambda job_id: {
+            "job_id": job_id,
+            "session_id": "sess-1",
+            "status": "queued",
+            "evaluator_type": stored["evaluator_type"],
+            "ahead_count": 1,
+            "queue_position": 2,
+            "error": None,
+        },
+    )
+
+    def fake_update(job_id, *, evaluator_type):
+        stored["evaluator_type"] = evaluator_type
+        return {
+            "job_id": job_id,
+            "session_id": "sess-1",
+            "status": "queued",
+            "evaluator_type": evaluator_type,
+            "ahead_count": 1,
+            "queue_position": 2,
+            "error": None,
+        }
+
+    monkeypatch.setattr(
+        api_module,
+        "update_queued_evaluation_job_evaluator",
+        fake_update,
+    )
+
+    response = TestClient(api_module.app).patch(
+        "/evaluation-jobs/job-1",
+        json={"evaluator_type": "claude"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["evaluator_type"] == "claude"
+
+
+def test_patch_evaluation_job_rejects_running_evaluator_change(api_module, monkeypatch):
+    monkeypatch.setattr(
+        api_module,
+        "require_available_evaluator_type",
+        lambda evaluator_type: evaluator_type,
+    )
+    monkeypatch.setattr(
+        api_module,
+        "get_evaluation_job_progress",
+        lambda job_id: {
+            "job_id": job_id,
+            "session_id": "sess-1",
+            "status": "running",
+            "evaluator_type": "codex",
+            "ahead_count": 0,
+            "queue_position": 1,
+            "error": None,
+        },
+    )
+
+    response = TestClient(api_module.app).patch(
+        "/evaluation-jobs/job-1",
+        json={"evaluator_type": "claude"},
+    )
+
+    assert response.status_code == 409
+
+
+def test_patch_evaluation_job_returns_409_for_running_before_evaluator_validation(
+    api_module, monkeypatch
+):
+    monkeypatch.setattr(
+        api_module,
+        "get_evaluation_job_progress",
+        lambda job_id: {
+            "job_id": job_id,
+            "session_id": "sess-1",
+            "status": "running",
+            "evaluator_type": "codex",
+            "ahead_count": 0,
+            "queue_position": 1,
+            "error": None,
+        },
+    )
+
+    def reject(evaluator_type):
+        raise ValueError(f"Evaluator not available: {evaluator_type}")
+
+    monkeypatch.setattr(api_module, "require_available_evaluator_type", reject)
+
+    response = TestClient(api_module.app).patch(
+        "/evaluation-jobs/job-1",
+        json={"evaluator_type": "claude"},
+    )
+
+    assert response.status_code == 409
+
+
+def test_patch_evaluation_job_returns_404_for_missing_before_evaluator_validation(
+    api_module, monkeypatch
+):
+    monkeypatch.setattr(api_module, "get_evaluation_job_progress", lambda job_id: None)
+
+    def reject(evaluator_type):
+        raise ValueError(f"Unsupported evaluator agent: {evaluator_type}")
+
+    monkeypatch.setattr(api_module, "require_available_evaluator_type", reject)
+
+    response = TestClient(api_module.app).patch(
+        "/evaluation-jobs/missing",
+        json={"evaluator_type": "invalid"},
+    )
+
+    assert response.status_code == 404
