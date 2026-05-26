@@ -196,3 +196,19 @@ describe('Session evaluation i18n', () => {
     assert.match(zh, /'Restart'/)
   })
 })
+
+describe('Evaluator label fallback', () => {
+  test('unknown evaluator types display raw string, not hard-coded Codex', () => {
+    assert.doesNotMatch(sessionsTab, /evaluatorType === 'claude' \? 'Claude Code' : 'Codex'/)
+    assert.doesNotMatch(detail, /evaluatorType === 'claude' \? 'Claude Code' : 'Codex'/)
+    assert.match(sessionsTab, /evaluatorType \? evaluatorType : 'Codex'/)
+    assert.match(detail, /evaluatorType \? evaluatorType : 'Codex'/)
+  })
+})
+
+describe('Sessions infinite scroll', () => {
+  test('scroll handler uses ref guard to prevent double page increments', () => {
+    assert.match(sessionsTab, /loadingMoreRef\.current/)
+    assert.match(sessionsTab, /loadingMoreRef = useRef\(false\)/)
+  })
+})

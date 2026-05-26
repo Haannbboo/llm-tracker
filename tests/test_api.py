@@ -1565,3 +1565,39 @@ def test_update_evaluation_config_rejects_invalid_evaluator(api_module, monkeypa
         json={"evaluator": "invalid-evaluator"},
     )
     assert response.status_code == 400
+
+
+# ---------------------------------------------------------------------------
+# SPA catch-all routing
+# ---------------------------------------------------------------------------
+
+
+def test_spa_deep_links_serve_index_html(api_module):
+    """GET /dashboard, /logs, /settings return 200 with HTML, not 404."""
+    from pathlib import Path
+
+    frontend_dist = (
+        Path(api_module.__file__).resolve().parent.parent / "frontend" / "dist"
+    )
+    if not (frontend_dist / "index.html").is_file():
+        import pytest
+
+        pytest.skip("frontend/dist/index.html not built")
+
+    client = TestClient(api_module.app)
+
+    for path in ("/dashboard", "/logs", "/settings"):
+        response = client.get(path)
+        assert response.status_code == 200, f"{path} returned {response.status_code}"
+        assert "text/html" in response.headers.get("content-type", "")
+
+
+def test_spa_deep_links_do_not_hijack_api_routes(api_module, monkeypatch):
+    """SPA middleware must not rewrite API routes to index.html."""
+    monkeypatch.setattr(api_module, "fetch_recent_usage", lambda **kwargs: [])
+
+    client = TestClient(api_module.app)
+    response = client.get("/usage", params={"limit": "0"})
+
+    assert response.status_code == 200
+    assert "application/json" in response.headers.get("content-type", "")
