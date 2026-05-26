@@ -98,8 +98,15 @@ Outcome definitions:
 - partial: meaningful progress but incomplete or uncertain.
 - failed: task attempted but result is wrong or broken.
 - stuck: agent could not make progress or looped.
-- no_op: session did not represent a substantive task.
-- unknown: context is insufficient.
+- no_op: session did not represent a substantive coding or engineering task. This includes:
+  * trivial greetings or small talk ("hello", "hi", "test", "thanks")
+  * sessions with only memory/context blocks and no real user request
+  * sessions that ended immediately after the first message with no agent work
+  * sessions where the user asked a simple question that required no code changes
+  * interrupted sessions with no meaningful work completed
+- unknown: the transcript itself is corrupted, missing, or unreadable — NOT for short or trivial sessions.
+
+When in doubt between "no_op" and a substantive outcome, prefer "no_op" for sessions with fewer than 3 meaningful exchanges.
 
 For substantive LLM-evaluated user tasks, task_title is a concise English title and task_title_zh is a concise Chinese title. Each title must be 2-6 words, preserve the same meaning, and avoid markdown or punctuation. If there is no substantive task, set both titles to null.
 
