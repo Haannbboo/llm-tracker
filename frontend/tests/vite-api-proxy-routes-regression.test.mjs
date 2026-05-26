@@ -12,6 +12,8 @@ const proxiedRoutes = [
   '/model-effectiveness?group_by=model',
   '/poll/job-123',
   '/evaluation-jobs/active',
+  '/evaluation-jobs/job-123',
+  '/sessions/session-123/evaluation-jobs',
 ]
 
 for (const route of proxiedRoutes) {

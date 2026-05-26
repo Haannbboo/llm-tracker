@@ -21,6 +21,7 @@ from config.app import (
     _apply_patch,
     _config_lock,
     refresh_runtime_config,
+    set_evaluation_evaluator,
 )
 
 from ._version import get_version
@@ -44,14 +45,21 @@ from .database import (
     get_usage_high_watermark_ts,
     init_db,
     list_active_evaluation_jobs_with_progress,
+    list_session_evaluation_jobs_with_progress,
     summarize_sessions,
     summarize_usage_by_provider,
     summarize_usage_by_source,
     summarize_usage_daily,
     summarize_usage_window,
+    update_queued_evaluation_job_evaluator,
     upsert_session_evaluation,
 )
-from .evaluation import start_session_evaluation_job
+from .evaluation import (
+    VALID_EVALUATOR_AGENTS,
+    list_evaluator_agents,
+    require_available_evaluator_type,
+    start_session_evaluation_job,
+)
 from .evaluation_worker import load_evaluation_worker_config, run_evaluation_worker
 
 logger = logging.getLogger(__name__)
@@ -93,7 +101,23 @@ def _runtime_config_payload(parsed_config: dict | None) -> dict:
     return {
         "evaluation": {
             "evaluator": worker_config.evaluator,
+            "evaluators": list_evaluator_agents(),
         },
+    }
+
+
+def _evaluation_metadata_payload() -> dict:
+    worker_config = load_evaluation_worker_config()
+    evaluators = list_evaluator_agents()
+    default_evaluator = worker_config.evaluator
+    default_available = any(
+        evaluator["id"] == default_evaluator and evaluator["available"]
+        for evaluator in evaluators
+    )
+    return {
+        "evaluators": evaluators,
+        "global_evaluator_type": default_evaluator,
+        "global_evaluator_available": default_available,
     }
 
 
@@ -114,6 +138,18 @@ class SessionEvaluationUpdate(BaseModel):
     summary: str | None = None
     evidence: list[str] = []
     failure_reason: str | None = None
+
+
+class EvaluateSessionWithLlmRequest(BaseModel):
+    evaluator_type: str | None = None
+
+
+class EvaluationJobUpdate(BaseModel):
+    evaluator_type: str
+
+
+class EvaluationConfigUpdate(BaseModel):
+    evaluator: str
 
 
 async def _stop_evaluation_worker(
@@ -150,10 +186,7 @@ async def _stop_evaluation_worker(
 async def lifespan(app: FastAPI):
     init_db()
     stop_event = asyncio.Event()
-    worker_config = load_evaluation_worker_config()
-    worker_task = asyncio.create_task(
-        run_evaluation_worker(stop_event=stop_event, config=worker_config)
-    )
+    worker_task = asyncio.create_task(run_evaluation_worker(stop_event=stop_event))
     try:
         yield
     finally:
@@ -546,14 +579,29 @@ async def delete_evaluation(session_id: str):
 @app.post("/sessions/{session_id}/evaluate-with-llm", status_code=202)
 async def evaluate_session_with_llm(
     session_id: str,
+    request: EvaluateSessionWithLlmRequest | None = None,
 ):
+    configured_evaluator = load_evaluation_worker_config().evaluator
+    evaluator_type = (
+        request.evaluator_type if request else None
+    ) or configured_evaluator
     try:
-        return start_session_evaluation_job(session_id, trigger="manual")
+        evaluator_type = require_available_evaluator_type(evaluator_type)
+        return start_session_evaluation_job(
+            session_id,
+            trigger="manual",
+            evaluator_type=evaluator_type,
+        )
     except ValueError as e:
         message = str(e)
         if "Session not found" in message:
             raise HTTPException(status_code=404, detail=message)
         if "Unsupported session source" in message:
+            raise HTTPException(status_code=400, detail=message)
+        if (
+            "Unsupported evaluator agent" in message
+            or "Evaluator not available" in message
+        ):
             raise HTTPException(status_code=400, detail=message)
         if "Manual evaluation exists" in message:
             raise HTTPException(status_code=409, detail=message)
@@ -576,7 +624,47 @@ async def active_evaluation_jobs(session_ids: str | None = None):
     jobs = list_active_evaluation_jobs_with_progress(
         session_ids=parsed_session_ids,
     )
-    return {"jobs": {job["session_id"]: job for job in jobs}}
+    return {
+        "jobs": {job["session_id"]: job for job in jobs},
+        **_evaluation_metadata_payload(),
+    }
+
+
+@app.get("/sessions/{session_id}/evaluation-jobs")
+async def session_evaluation_jobs(session_id: str):
+    return {
+        "jobs": list_session_evaluation_jobs_with_progress(session_id),
+        **_evaluation_metadata_payload(),
+    }
+
+
+@app.patch("/evaluation-jobs/{job_id}")
+async def update_evaluation_job(job_id: str, update: EvaluationJobUpdate):
+    current = get_evaluation_job_progress(job_id)
+    if current is None:
+        raise HTTPException(status_code=404, detail="Job not found")
+    if current["status"] != "queued":
+        raise HTTPException(
+            status_code=409,
+            detail="Only queued evaluation jobs can change evaluator",
+        )
+
+    try:
+        evaluator_type = require_available_evaluator_type(update.evaluator_type)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    updated = update_queued_evaluation_job_evaluator(
+        job_id,
+        evaluator_type=evaluator_type,
+    )
+    if updated is None:
+        raise HTTPException(
+            status_code=409,
+            detail="Only queued evaluation jobs can change evaluator",
+        )
+    refreshed = get_evaluation_job_progress(job_id)
+    return refreshed or updated
 
 
 @app.get("/config")
@@ -664,6 +752,20 @@ async def patch_config(update: ConfigPatchUpdate):
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.patch("/config/evaluation")
+async def update_evaluation_config(update: EvaluationConfigUpdate):
+    """Update the global evaluator type in config.yaml."""
+    if update.evaluator not in VALID_EVALUATOR_AGENTS:
+        raise HTTPException(
+            status_code=400, detail=f"Invalid evaluator: {update.evaluator}"
+        )
+    try:
+        set_evaluation_evaluator(update.evaluator)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+    return {"global_evaluator_type": update.evaluator}
 
 
 def _pricing_entry(resolved_cost, scope: str, multiplier: float) -> dict:

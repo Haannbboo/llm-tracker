@@ -12,6 +12,7 @@ export function shouldProxyApiRequest(requestUrl) {
     pathname === '/local/setup-health' ||
     pathname === '/model-effectiveness' ||
     pathname === '/evaluation-jobs/active' ||
+    pathname.startsWith('/evaluation-jobs/') ||
     pathname.startsWith('/poll/') ||
     pathname === '/sessions' ||
     pathname.startsWith('/sessions/') ||

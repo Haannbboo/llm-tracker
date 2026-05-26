@@ -627,6 +627,35 @@ def test_start_session_evaluation_job_queues_without_running(
     assert database_module.count_running_evaluation_jobs(db_path=db_path) == 0
 
 
+def test_start_session_evaluation_job_records_selected_evaluator(
+    evaluation_module,
+    database_module,
+    isolated_home,
+):
+    db_path = str(isolated_home / "usage.db")
+    database_module.init_db(db_path)
+
+    with database_module.Session(database_module.get_engine(db_path)) as session:
+        session.add(
+            database_module.SessionRecord(
+                session_id="sess-selected-evaluator",
+                client_source="codex",
+                started=1778493600000000,
+                ended=1778495400000000,
+                updated_at="2026-05-11T10:30:00+00:00",
+            )
+        )
+        session.commit()
+
+    job = evaluation_module.start_session_evaluation_job(
+        "sess-selected-evaluator",
+        evaluator_type="claude",
+        db_path=db_path,
+    )
+
+    assert job["evaluator_type"] == "claude"
+
+
 def test_start_session_evaluation_job_promotes_queued_auto_job(
     evaluation_module,
     database_module,
@@ -651,23 +680,22 @@ def test_start_session_evaluation_job_promotes_queued_auto_job(
         session_id="sess-promote",
         client_source="codex",
         trigger="auto",
+        evaluator_type="codex",
         db_path=db_path,
     )
 
     manual_job = evaluation_module.start_session_evaluation_job(
         "sess-promote",
+        evaluator_type="claude",
         db_path=db_path,
     )
 
     assert manual_job["job_id"] == auto_job["job_id"]
     assert manual_job["trigger"] == "manual"
-    assert (
-        database_module.get_evaluation_job(
-            auto_job["job_id"],
-            db_path=db_path,
-        )["trigger"]
-        == "manual"
-    )
+    assert manual_job["evaluator_type"] == "claude"
+    stored = database_module.get_evaluation_job(auto_job["job_id"], db_path=db_path)
+    assert stored["trigger"] == "manual"
+    assert stored["evaluator_type"] == "claude"
 
 
 def test_run_session_evaluation_job_saves_llm_evaluation_before_success(
@@ -1265,6 +1293,46 @@ def test_build_evaluator_invocation_rejects_invalid_agent(evaluation_module):
         )
 
 
+def test_list_evaluator_agents_exposes_labels_and_availability(
+    evaluation_module,
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        evaluation_module.shutil,
+        "which",
+        lambda command: f"/usr/bin/{command}" if command == "codex" else None,
+    )
+
+    agents = evaluation_module.list_evaluator_agents()
+
+    assert agents == [
+        {
+            "id": "codex",
+            "label": "Codex",
+            "command": "codex",
+            "available": True,
+        },
+        {
+            "id": "claude",
+            "label": "Claude Code",
+            "command": "claude",
+            "available": False,
+        },
+    ]
+
+
+def test_require_available_evaluator_type_rejects_unknown_and_unavailable(
+    evaluation_module,
+    monkeypatch,
+):
+    monkeypatch.setattr(evaluation_module.shutil, "which", lambda command: None)
+
+    with pytest.raises(ValueError, match="Unsupported evaluator agent"):
+        evaluation_module.require_available_evaluator_type("invalid")
+    with pytest.raises(ValueError, match="Evaluator not available: claude"):
+        evaluation_module.require_available_evaluator_type("claude")
+
+
 def test_summarize_session_with_llm_uses_claude_evaluator(
     evaluation_module,
     database_module,
@@ -1386,6 +1454,7 @@ def test_execute_session_evaluation_job_passes_claude_evaluator(
     job = database_module.create_session_evaluation_job(
         session_id="sess-exec-claude",
         client_source="codex",
+        evaluator_type="claude",
         db_path=db_path,
     )
 
@@ -1405,7 +1474,6 @@ def test_execute_session_evaluation_job_passes_claude_evaluator(
     evaluation_module.execute_session_evaluation_job(
         job["job_id"],
         db_path=db_path,
-        evaluator="claude",
     )
 
     saved = database_module.get_session_evaluation("sess-exec-claude", db_path=db_path)
@@ -1470,6 +1538,7 @@ def test_run_session_evaluation_job_with_claude_evaluator(
     job = database_module.create_session_evaluation_job(
         session_id="sess-run-claude",
         client_source="codex",
+        evaluator_type="claude",
         db_path=db_path,
     )
 
@@ -1492,7 +1561,6 @@ def test_run_session_evaluation_job_with_claude_evaluator(
     evaluation_module.run_session_evaluation_job(
         job["job_id"],
         db_path=db_path,
-        evaluator="claude",
     )
 
     saved = database_module.get_session_evaluation("sess-run-claude", db_path=db_path)

@@ -3681,6 +3681,139 @@ def test_create_session_evaluation_job_reuses_active_job_after_unique_conflict(
     assert second["job_id"] == first["job_id"]
 
 
+def test_create_session_evaluation_job_persists_evaluator_type(
+    database_module, isolated_home
+):
+    db_path = str(isolated_home / "usage.db")
+    database_module.init_db(db_path)
+    _insert_session_record(
+        database_module, db_path, "sess-claude", client_source="codex"
+    )
+
+    job = database_module.create_session_evaluation_job(
+        session_id="sess-claude",
+        client_source="codex",
+        evaluator_type="claude",
+        db_path=db_path,
+    )
+
+    assert job["evaluator_type"] == "claude"
+    assert (
+        database_module.get_evaluation_job(job["job_id"], db_path=db_path)[
+            "evaluator_type"
+        ]
+        == "claude"
+    )
+
+
+def test_update_queued_evaluation_job_evaluator_preserves_queue_position(
+    database_module, isolated_home
+):
+    db_path = str(isolated_home / "usage.db")
+    database_module.init_db(db_path)
+    _insert_session_record(database_module, db_path, "first", client_source="codex")
+    _insert_session_record(database_module, db_path, "second", client_source="codex")
+    database_module.create_session_evaluation_job(
+        session_id="first",
+        client_source="codex",
+        evaluator_type="codex",
+        db_path=db_path,
+    )
+    job = database_module.create_session_evaluation_job(
+        session_id="second",
+        client_source="codex",
+        evaluator_type="codex",
+        db_path=db_path,
+    )
+    before = database_module.get_evaluation_job_progress(job["job_id"], db_path=db_path)
+
+    updated = database_module.update_queued_evaluation_job_evaluator(
+        job["job_id"],
+        evaluator_type="claude",
+        db_path=db_path,
+    )
+    after = database_module.get_evaluation_job_progress(job["job_id"], db_path=db_path)
+
+    assert updated is not None
+    assert updated["job_id"] == job["job_id"]
+    assert updated["evaluator_type"] == "claude"
+    assert after["queue_position"] == before["queue_position"]
+
+
+def test_update_queued_evaluation_job_evaluator_rejects_running_job(
+    database_module, isolated_home
+):
+    db_path = str(isolated_home / "usage.db")
+    database_module.init_db(db_path)
+    _insert_session_record(database_module, db_path, "running", client_source="codex")
+    job = database_module.create_session_evaluation_job(
+        session_id="running",
+        client_source="codex",
+        evaluator_type="codex",
+        db_path=db_path,
+    )
+    database_module.claim_next_evaluation_job(db_path=db_path)
+
+    updated = database_module.update_queued_evaluation_job_evaluator(
+        job["job_id"],
+        evaluator_type="claude",
+        db_path=db_path,
+    )
+
+    assert updated is None
+    assert (
+        database_module.get_evaluation_job(job["job_id"], db_path=db_path)[
+            "evaluator_type"
+        ]
+        == "codex"
+    )
+
+
+def test_list_session_evaluation_jobs_with_progress_includes_history(
+    database_module, isolated_home
+):
+    db_path = str(isolated_home / "usage.db")
+    database_module.init_db(db_path)
+    _insert_session_record(
+        database_module, db_path, "sess-history", client_source="codex"
+    )
+
+    failed = database_module.create_session_evaluation_job(
+        session_id="sess-history",
+        client_source="codex",
+        evaluator_type="codex",
+        created_at="2026-05-14T09:00:00+00:00",
+        db_path=db_path,
+    )
+    database_module.claim_next_evaluation_job(
+        now="2026-05-14T09:01:00+00:00",
+        db_path=db_path,
+    )
+    database_module.mark_evaluation_job_failed(
+        failed["job_id"],
+        "Evaluator exited with code 1\nfull stderr details",
+        db_path=db_path,
+    )
+    queued = database_module.create_session_evaluation_job(
+        session_id="sess-history",
+        client_source="codex",
+        evaluator_type="claude",
+        created_at="2026-05-14T09:02:00+00:00",
+        db_path=db_path,
+    )
+
+    jobs = database_module.list_session_evaluation_jobs_with_progress(
+        "sess-history",
+        db_path=db_path,
+    )
+
+    assert [job["job_id"] for job in jobs] == [queued["job_id"], failed["job_id"]]
+    assert jobs[0]["evaluator_type"] == "claude"
+    assert jobs[0]["queue_position"] == 1
+    assert jobs[1]["status"] == "failed"
+    assert jobs[1]["error"] == "Evaluator exited with code 1\nfull stderr details"
+
+
 def test_stale_session_evaluation_job_is_failed_before_new_job(
     database_module, isolated_home
 ):
@@ -4153,6 +4286,7 @@ def test_migrate_database_creates_evaluation_jobs_table(
         "kind",
         "session_id",
         "client_source",
+        "evaluator_type",
         "status",
         "created_at",
         "started_at",
@@ -4226,6 +4360,38 @@ def test_migrate_database_adds_evaluation_job_trigger(
     assert "trigger" in schema_migrations_module._table_column_names(
         engine, "evaluation_jobs"
     )
+
+
+def test_migrate_database_adds_evaluation_job_evaluator_type(
+    schema_migrations_module, database_module, isolated_home
+):
+    db_path = str(isolated_home / "usage.db")
+    database_module.init_db(db_path)
+    engine = database_module.get_engine(db_path)
+
+    with engine.begin() as connection:
+        connection.execute(
+            database_module.text(
+                "INSERT INTO evaluation_jobs (job_id, kind, session_id, client_source, trigger, status, created_at) "
+                "VALUES ('legacy-job', 'session_evaluation', 'legacy-session', 'codex', 'manual', 'failed', '2026-05-14T09:00:00+00:00')"
+            )
+        )
+        connection.execute(
+            database_module.text(
+                "ALTER TABLE evaluation_jobs DROP COLUMN evaluator_type"
+            )
+        )
+
+    applied = schema_migrations_module.migrate_database(db_path)
+
+    assert "evaluation_jobs.evaluator_type" in applied
+    with engine.connect() as connection:
+        row = connection.execute(
+            database_module.text(
+                "SELECT evaluator_type FROM evaluation_jobs WHERE job_id = 'legacy-job'"
+            )
+        ).fetchone()
+    assert row[0] == "codex"
 
 
 def test_upsert_daily_aggregate_with_epoch_ts(database_module, isolated_home):
