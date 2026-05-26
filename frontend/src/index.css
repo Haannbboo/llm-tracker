@@ -77,6 +77,9 @@
   --text-primary: #f1f5f9;
   --text-secondary: #94a3b8;
   --text-muted: #64748b;
+  --text-color: #e2e8f0;
+  --hover-bg: #334155;
+  --primary-color: #3b82f6;
 
   --tab-active-bg: #172554;
   --tab-toggle-bg: #334155;
