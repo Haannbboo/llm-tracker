@@ -1153,6 +1153,30 @@
   color: var(--muted-text, #6c757d);
 }
 
+.session-eval-btn-set-default {
+  margin-top: 12px;
+  padding: 5px 12px;
+  border: 1px solid var(--border-color, #dee2e6);
+  border-radius: 6px;
+  background: var(--card-bg, #fff);
+  color: var(--text-color, #333);
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.session-eval-btn-set-default:hover:not(:disabled) {
+  background: var(--icon-indigo-bg, #eef2ff);
+  border-color: var(--color-indigo);
+  color: var(--color-indigo);
+}
+
+.session-eval-btn-set-default:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 .session-eval-btn-primary {
   margin-top: 12px;
   padding: 8px 20px;
