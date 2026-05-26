@@ -454,7 +454,7 @@ export function SessionDetailContent({
           {(['solved', 'partial', 'failed', 'stuck', 'no_op'] as const).map((o) => (
             <button
               key={o}
-              className={`session-eval-btn${localEvaluation?.outcome === o ? ' active' : ''}`}
+              className={`session-eval-btn${localEvaluation?.outcome === o ? ` session-eval-btn-active-${o}` : ''}`}
               onClick={() => updateEvaluation(o)}
             >
               {outcomeLabels[o]}
@@ -466,23 +466,23 @@ export function SessionDetailContent({
           >
             {t('Reset')}
           </button>
-        </div>
-        <div className="session-evaluator-picker">
-          <select
-            className="input-plain"
-            value={selectedEvaluatorType}
-            onChange={(event) => setSelectedEvaluatorType(event.target.value as EvaluatorType)}
-            disabled={displayEvaluationRunning}
-          >
-            {availableEvaluators.map((evaluator) => (
-              <option key={evaluator.id} value={evaluator.id} disabled={!evaluator.available}>
-                {evaluator.label}{evaluator.available ? '' : ` (${t('Not found')})`}
-              </option>
-            ))}
-          </select>
+          <div className="session-evaluator-picker">
+            <select
+              className="input-plain"
+              value={selectedEvaluatorType}
+              onChange={(event) => setSelectedEvaluatorType(event.target.value as EvaluatorType)}
+              disabled={displayEvaluationRunning}
+            >
+              {availableEvaluators.map((evaluator) => (
+                <option key={evaluator.id} value={evaluator.id} disabled={!evaluator.available}>
+                  {evaluator.label}{evaluator.available ? '' : ` (${t('Not found')})`}
+                </option>
+              ))}
+            </select>
+          </div>
         </div>
         <button
-          className="session-eval-btn"
+          className={`session-eval-btn-primary${isLlmEvaluationRunning ? ' running' : ''}`}
           disabled={displayEvaluationRunning || !selectedEvaluatorAvailable}
           onClick={startLlmEvaluation}
         >
@@ -497,12 +497,18 @@ export function SessionDetailContent({
           {!historyLoading && evaluationJobHistory.map((job) => {
             const failed = job.status === 'failed'
             const errorPreview = job.error?.split('\n')[0] || t('No failure reason recorded')
+            const outcomeLabels: Record<string, string> = { solved: 'Solved', partial: 'Partial', failed: 'Failed', stuck: 'Stuck', no_op: 'No-op', unknown: 'Unknown' }
             return (
               <details key={job.job_id} className={`evaluation-job-history-item evaluation-job-history-${job.status}`} open={failed}>
                 <summary>
                   <span className={`evaluation-job-status evaluation-job-status-${job.status}`}>
                     {job.status === 'running' ? t('Running') : job.status === 'queued' ? t('Queued') : job.status === 'succeeded' ? t('Succeeded') : t('Failed')}
                   </span>
+                  {job.outcome && (
+                    <span className={`evaluation-job-outcome evaluation-job-outcome-${job.outcome}`}>
+                      {t(outcomeLabels[job.outcome] ?? job.outcome)}
+                    </span>
+                  )}
                   <span>{evaluatorLabel(job.evaluator_type)}</span>
                   <span>{job.trigger === 'auto' ? t('Auto') : t('Manual')}</span>
                   {failed && <span className="evaluation-job-error-preview">{errorPreview}</span>}
@@ -513,6 +519,9 @@ export function SessionDetailContent({
                   <div>{t('Finished')}: {job.finished_at ? formatTime(job.finished_at) : '—'}</div>
                   <div>{t('Evaluator')}: {evaluatorLabel(job.evaluator_type)}</div>
                   <div>{t('Trigger')}: {job.trigger === 'auto' ? t('Auto') : t('Manual')}</div>
+                  {job.outcome && (
+                    <div>{t('Outcome')}: <span className={`evaluation-job-outcome evaluation-job-outcome-${job.outcome}`}>{t(outcomeLabels[job.outcome] ?? job.outcome)}</span></div>
+                  )}
                   {job.error && <pre>{job.error}</pre>}
                   {failed && (
                     <button

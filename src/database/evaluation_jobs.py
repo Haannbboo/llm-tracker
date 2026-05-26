@@ -401,7 +401,10 @@ def list_session_evaluation_jobs_with_progress(
     db_path: str | None = None,
 ) -> list[dict[str, Any]]:
     progress = _active_progress_map(db_path=db_path)
-    with Session(get_engine(db_path)) as session:
+    engine = get_engine(db_path)
+    with Session(engine) as session:
+        rec = session.get(SessionRecord, session_id)
+        outcome = rec.outcome if rec else None
         jobs = (
             session.execute(
                 select(EvaluationJob)
@@ -423,6 +426,7 @@ def list_session_evaluation_jobs_with_progress(
                 job.job_id,
                 {"ahead_count": 0, "queue_position": None},
             ),
+            **({"outcome": outcome} if job.status == "succeeded" and outcome else {}),
         }
         for job in jobs
     ]

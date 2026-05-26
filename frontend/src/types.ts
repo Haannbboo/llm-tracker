@@ -161,6 +161,7 @@ export type EvaluationJobProgress = {
   ahead_count: number
   queue_position: number | null
   error: string | null
+  outcome?: string | null
 }
 
 export type SessionSummary = {
