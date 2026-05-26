@@ -21,6 +21,7 @@ from config.app import (
     _apply_patch,
     _config_lock,
     refresh_runtime_config,
+    set_evaluation_evaluator,
 )
 
 from ._version import get_version
@@ -54,6 +55,7 @@ from .database import (
     upsert_session_evaluation,
 )
 from .evaluation import (
+    VALID_EVALUATOR_AGENTS,
     list_evaluator_agents,
     require_available_evaluator_type,
     start_session_evaluation_job,
@@ -144,6 +146,10 @@ class EvaluateSessionWithLlmRequest(BaseModel):
 
 class EvaluationJobUpdate(BaseModel):
     evaluator_type: str
+
+
+class EvaluationConfigUpdate(BaseModel):
+    evaluator: str
 
 
 async def _stop_evaluation_worker(
@@ -746,6 +752,20 @@ async def patch_config(update: ConfigPatchUpdate):
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.patch("/config/evaluation")
+async def update_evaluation_config(update: EvaluationConfigUpdate):
+    """Update the global evaluator type in config.yaml."""
+    if update.evaluator not in VALID_EVALUATOR_AGENTS:
+        raise HTTPException(
+            status_code=400, detail=f"Invalid evaluator: {update.evaluator}"
+        )
+    try:
+        set_evaluation_evaluator(update.evaluator)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+    return {"global_evaluator_type": update.evaluator}
 
 
 def _pricing_entry(resolved_cost, scope: str, multiplier: float) -> dict:

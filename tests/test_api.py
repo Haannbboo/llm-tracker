@@ -1515,3 +1515,51 @@ def test_patch_evaluation_job_returns_404_for_missing_before_evaluator_validatio
     )
 
     assert response.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# Slice 9: PATCH /config/evaluation endpoint
+# ---------------------------------------------------------------------------
+
+
+def test_update_evaluation_config(api_module, monkeypatch):
+    from unittest.mock import MagicMock
+
+    mock_set = MagicMock()
+    monkeypatch.setattr("src.api.set_evaluation_evaluator", mock_set)
+
+    response = TestClient(api_module.app).patch(
+        "/config/evaluation",
+        json={"evaluator": "claude"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["global_evaluator_type"] == "claude"
+    mock_set.assert_called_once_with("claude")
+
+
+def test_update_evaluation_config_returns_500_on_set_evaluator_error(
+    api_module, monkeypatch
+):
+    def raise_error(evaluator):
+        raise RuntimeError("Failed to persist evaluator config")
+
+    monkeypatch.setattr("src.api.set_evaluation_evaluator", raise_error)
+
+    response = TestClient(api_module.app).patch(
+        "/config/evaluation",
+        json={"evaluator": "claude"},
+    )
+
+    assert response.status_code == 500
+    assert "Failed to persist evaluator config" in response.json()["detail"]
+
+
+def test_update_evaluation_config_rejects_invalid_evaluator(api_module, monkeypatch):
+    monkeypatch.setattr(api_module, "set_evaluation_evaluator", lambda **kw: None)
+
+    response = TestClient(api_module.app).patch(
+        "/config/evaluation",
+        json={"evaluator": "invalid-evaluator"},
+    )
+    assert response.status_code == 400
