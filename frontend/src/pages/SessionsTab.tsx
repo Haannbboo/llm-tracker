@@ -531,6 +531,34 @@ export function SessionsTab({
                   {formatNumber(runningEvaluationJobs.length)} {t('running')} · {formatNumber(queuedEvaluationJobs.length)} {t('queued')}
                 </div>
               </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>{t('Default')}:</span>
+                <select
+                  className="input-plain"
+                  value={evaluationEvaluator}
+                  onChange={async (event) => {
+                    const newEvaluator = event.target.value as EvaluatorType
+                    try {
+                      const response = await fetch("/config/evaluation", {
+                        method: "PATCH",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ evaluator: newEvaluator }),
+                      })
+                      if (!response.ok) throw new Error("Failed")
+                      setEvaluationEvaluator(newEvaluator)
+                      showToast?.("Default evaluator updated")
+                    } catch {
+                      showToast?.("Failed to update default evaluator")
+                    }
+                  }}
+                >
+                  {evaluatorOptions.map((evaluator) => (
+                    <option key={evaluator.id} value={evaluator.id} disabled={!evaluator.available}>
+                      {evaluator.label}{evaluator.available ? '' : ` (${t('Not found')})`}
+                    </option>
+                  ))}
+                </select>
+              </div>
             </div>
             {defaultEvaluatorUnavailable && (
               <div className="evaluation-warning">

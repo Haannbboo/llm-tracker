@@ -227,22 +227,6 @@ export function SessionDetailContent({
 
   const outcomeLabels: Record<string, string> = { solved: 'Solved', partial: 'Partial', failed: 'Failed', stuck: 'Stuck', no_op: 'No-op' }
 
-  const setDefaultEvaluator = async () => {
-    try {
-      const response = await fetch("/config/evaluation", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ evaluator: selectedEvaluatorType }),
-      })
-      if (!response.ok) throw new Error("Failed")
-      const data = await response.json()
-      setGlobalEvaluatorType(data.global_evaluator_type)
-      showToast?.("Default evaluator updated")
-    } catch {
-      showToast?.("Failed to update default evaluator")
-    }
-  }
-
   return (
     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '20px', width: '100%' }}>
       <div style={{ display: 'flex', gap: '32px', flexWrap: 'wrap', alignItems: 'flex-start' }}>
@@ -495,14 +479,6 @@ export function SessionDetailContent({
                 </option>
               ))}
             </select>
-            <button
-              type="button"
-              className="session-eval-btn-set-default"
-              onClick={setDefaultEvaluator}
-              disabled={selectedEvaluatorType === globalEvaluatorType || displayEvaluationRunning}
-            >
-              {t('Set as default')}
-            </button>
           </div>
         </div>
         <button
