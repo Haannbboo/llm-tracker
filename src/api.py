@@ -799,10 +799,20 @@ async def test_connectivity(test: ConnectivityTest):
 async def detect_local_agents():
     """Detect locally installed CLI agents. Only works when API has host access."""
     import shutil
+    from pathlib import Path
+
+    # Kilo's install script adds ~/.kilo/bin to PATH via ~/.zshrc, but
+    # the supervisor service runs without sourcing .zshrc so it lacks this
+    # directory. Other agents (claude, codex, gemini, opencode) are found via
+    # ~/superset/bin which IS on the supervisor PATH, so only Kilo needs
+    # a fallback path check.
+    kilo_fallback = str(Path.home() / ".kilo" / "bin" / "kilo")
 
     agents = {}
     for name in ("claude", "codex", "gemini", "opencode", "kilo"):
         path = shutil.which(name)
+        if path is None and name == "kilo":
+            path = kilo_fallback if Path(kilo_fallback).exists() else None
         agents[name] = {"found": path is not None, "path": path}
     return agents
 
