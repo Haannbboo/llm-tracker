@@ -111,14 +111,14 @@ Use targeted tests during iteration, but before commit/PR run the relevant full 
 
 ## Bootstrap architecture
 
-Three-script chain, all internal except `bootstrap.sh`:
+Two-script chain:
 
 ```txt
-bootstrap.sh → install.sh → start.sh → post-checks
+install.sh → bootstrap.sh → start.sh → post-checks
 ```
 
-- `bootstrap.sh` — public entrypoint. One command for full setup.
-- `install.sh` — Python venv, deps, CLI symlink, frontend build with Node.js detection.
+- `install.sh` — curl-pipe-bash entrypoint. Clones repo, runs bootstrap.
+- `bootstrap.sh` — install deps, start services, verify. Internal entrypoint.
 - `start.sh` — supervisord, port checks, API restart, serves `frontend/dist`.
 
 Quick backend iteration:
