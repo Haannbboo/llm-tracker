@@ -1082,16 +1082,16 @@ def test_llm_tracker_script_supports_bootstrap_subcommand():
     assert 'exec bash "${SCRIPTS_DIR}/bootstrap.sh" "$@"' in content
 
 
-def test_install_symlinks_llm_tracker_cli_into_user_local_bin():
+def test_bootstrap_embeds_cli_symlink_setup():
     from pathlib import Path
 
-    install_script = Path(__file__).resolve().parents[1] / "scripts" / "install.sh"
-    content = install_script.read_text(encoding="utf-8")
+    bootstrap_script = Path(__file__).resolve().parents[1] / "scripts" / "bootstrap.sh"
+    content = bootstrap_script.read_text(encoding="utf-8")
 
-    assert 'BIN_DIR="${HOME}/.local/bin"' in content
-    assert 'CLI_LINK="${BIN_DIR}/llm-tracker"' in content
-    assert 'CLI_SOURCE="${ROOT_DIR}/scripts/llm-tracker"' in content
-    assert 'ln -sf "${CLI_SOURCE}" "${CLI_LINK}"' in content
+    assert 'local bin_dir="${HOME}/.local/bin"' in content
+    assert 'local cli_link="${bin_dir}/llm-tracker"' in content
+    assert 'local cli_source="${SCRIPTS_DIR}/llm-tracker"' in content
+    assert 'ln -sf "${cli_source}" "${cli_link}"' in content
 
 
 @pytest.mark.slow

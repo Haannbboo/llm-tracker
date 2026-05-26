@@ -73,6 +73,99 @@ except Exception:
 ' "${url}"
 }
 
+_install_deps() {
+  if [[ "${LLM_TRACKER_SKIP_INSTALL:-0}" == "1" ]]; then
+    mkdir -p "${HOME}/.local/bin" "${HOME}/.llm-tracker"
+    ln -sf "${SCRIPTS_DIR}/llm-tracker" "${HOME}/.local/bin/llm-tracker"
+    chmod +x "${SCRIPTS_DIR}/llm-tracker"
+    echo "==> Installation skipped (LLM_TRACKER_SKIP_INSTALL=1)"
+    return 0
+  fi
+
+  local python_version="${LLM_TRACKER_PYTHON_VERSION:-3.13}"
+  local venv_dir="${ROOT_DIR}/.venv"
+  local bin_dir="${HOME}/.local/bin"
+  local cli_link="${bin_dir}/llm-tracker"
+  local cli_source="${SCRIPTS_DIR}/llm-tracker"
+  local frontend_dir="${ROOT_DIR}/frontend"
+
+  echo "==> Setting up llm-tracker environment..."
+
+  # 1. Bootstrap uv
+  if ! command -v uv >/dev/null 2>&1; then
+    echo "==> Installing uv..."
+    curl -LsSf https://astral.sh/uv/install.sh | sh
+    export PATH="${HOME}/.local/bin:${PATH}"
+  fi
+
+  # 2. Create venv
+  if [[ ! -x "${venv_dir}/bin/python" ]]; then
+    echo "==> Creating venv..."
+    uv venv --python "${python_version}" "${venv_dir}"
+  fi
+
+  # 3. Install initial dependencies
+  echo "==> Installing dependencies..."
+  uv pip install --python "${venv_dir}/bin/python" -r "${ROOT_DIR}/requirements.txt"
+
+  # 4. Build frontend
+  if command -v node >/dev/null 2>&1 && command -v npm >/dev/null 2>&1; then
+    local node_version node_major
+    node_version=$(node -v | cut -d'v' -f2)
+    node_major=$(echo "$node_version" | cut -d'.' -f1)
+
+    if [[ "$node_major" -lt 18 ]]; then
+      echo ""
+      echo "⚠️  Node.js version $node_version is too old (minimum v18 required)."
+      echo "   Skipping frontend build. Dashboard will not be available."
+      echo ""
+    elif [[ -d "${frontend_dir}" ]]; then
+      echo "==> Building frontend (Node $node_version)..."
+      if ! (cd "${frontend_dir}" && npm install --ignore-scripts && npm run build); then
+        echo ""
+        echo "❌ Frontend build failed."
+        echo "   If you see 'Cannot find native binding', try cleaning the frontend directory and retrying:"
+        echo "     rm -rf frontend/node_modules frontend/package-lock.json && bash scripts/bootstrap.sh"
+        echo ""
+        exit 1
+      fi
+      echo "==> Frontend built: ${frontend_dir}/dist"
+    fi
+  else
+    echo ""
+    echo "⚠️  Node.js not found — skipping frontend build."
+    echo "   The dashboard will not be available until you install Node.js and run:"
+    echo "     cd frontend && npm install && npm run build"
+    echo ""
+  fi
+
+  # 5. CLI Setup
+  echo "==> Setting up CLI symlink..."
+  mkdir -p "${bin_dir}"
+  ln -sf "${cli_source}" "${cli_link}"
+  chmod +x "${cli_source}"
+
+  # 6. PATH Check & Notification
+  if [[ ":$PATH:" != *":${bin_dir}:"* ]]; then
+    echo ""
+    echo "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
+    echo "WARNING: ${bin_dir} is not in your PATH."
+    echo "To use 'llm-tracker' from anywhere, add this to your shell profile:"
+    echo ""
+    if [[ "${SHELL}" == *"/zsh" ]]; then
+      echo "  echo 'export PATH=\"\$HOME/.local/bin:\$PATH\"' >> ~/.zshrc"
+      echo "  source ~/.zshrc"
+    else
+      echo "  echo 'export PATH=\"\$HOME/.local/bin:\$PATH\"' >> ~/.bashrc"
+      echo "  source ~/.bashrc"
+    fi
+    echo "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
+    echo ""
+  fi
+
+  echo "==> Installation complete! You can now use 'llm-tracker' (if in PATH) or 'scripts/start.sh'."
+}
+
 _verify_agent_setup_health() {
   local url="http://${HOST}:${API_PORT}/local/setup-health"
   local health_json
@@ -178,7 +271,7 @@ banner
 
 # ── Step 1: Install ─────────────────────────────────────────────────
 step_header "Installing dependencies & CLI"
-bash "${SCRIPTS_DIR}/install.sh"
+_install_deps
 
 # ── Step 2: Start services ──────────────────────────────────────────
 step_header "Starting services"

@@ -24,24 +24,12 @@ def _make_fake_bootstrap_repo(
     lib_dir.mkdir(parents=True)
     shutil.copy2(repo_root / "scripts" / "lib" / "terminal.sh", lib_dir / "terminal.sh")
 
-    (scripts_dir / "install.sh").write_text(
-        textwrap.dedent(
-            f"""
-            #!/usr/bin/env bash
-            set -euo pipefail
-            mkdir -p "{home}/.local/bin" "{home}/.llm-tracker"
-            cat > "{scripts_dir}/llm-tracker" <<'EOF'
-            #!/usr/bin/env bash
-            echo llm-tracker fake cli
-            EOF
-            chmod +x "{scripts_dir}/llm-tracker"
-            ln -sf "{scripts_dir}/llm-tracker" "{home}/.local/bin/llm-tracker"
-            """
-        ).strip()
-        + "\n",
+    # Create CLI wrapper directly (install logic is now inline in bootstrap.sh)
+    (scripts_dir / "llm-tracker").write_text(
+        "#!/usr/bin/env bash\necho llm-tracker fake cli\n",
         encoding="utf-8",
     )
-    (scripts_dir / "install.sh").chmod(0o755)
+    (scripts_dir / "llm-tracker").chmod(0o755)
 
     proxy_port, api_port, otlp_port = ports
     (scripts_dir / "start.sh").write_text(
@@ -129,6 +117,7 @@ def _run_bootstrap(
         **os.environ,
         "HOME": str(home),
         "PATH": f"{bin_dir}{os.pathsep}/bin{os.pathsep}/usr/bin",
+        "LLM_TRACKER_SKIP_INSTALL": "1",
     }
     if extra_env:
         env.update(extra_env)
