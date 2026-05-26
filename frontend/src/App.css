@@ -487,6 +487,19 @@
   border: 1px dashed var(--border-color, #dee2e6);
 }
 
+.session-status-circle {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  vertical-align: middle;
+}
+
+.session-status-circle-empty {
+  background: transparent;
+  border: 1.5px dashed var(--muted-text, #6c757d);
+}
+
 .session-fade-out {
   opacity: 0 !important;
   transition: opacity 0.5s ease-out;

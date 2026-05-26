@@ -11,7 +11,7 @@ import {
   shortSessionId, sessionAgentName, sessionDisplayName, sessionTaskTitle, getSinceDate,
 } from '../utils'
 import { getModelBadgeBackgroundColor, getModelTextColor } from '../model-badge'
-import type { DailyEffectivenessReport, EvaluatorOption, EvaluatorType, EvaluationJobProgress, ModelEffectivenessGroup, SessionSummary, SessionsSummary } from '../types'
+import type { DailyEffectivenessReport, EvaluatorOption, EvaluatorType, EvaluationJobProgress, ModelEffectivenessGroup, SessionOutcome, SessionSummary, SessionsSummary } from '../types'
 
 type SessionsTabProps = {
   onNavigateToLogs: (filters?: { sessionFilter?: string }) => void
@@ -25,6 +25,20 @@ function getOutcomeBadge(outcome: string | null | undefined): { label: string; c
     case 'stuck': return { label: 'Stuck', className: 'session-outcome-stuck' }
     case 'no_op': return { label: 'No-op', className: 'session-outcome-no_op' }
     default: return { label: 'Unknown', className: 'session-outcome-unknown' }
+  }
+}
+
+function getSessionOutcomeColor(outcome: SessionOutcome | null | undefined): string {
+  switch (outcome) {
+    case 'solved': return '#81c784'
+    case 'partial': return '#ffd54f'
+    case 'stuck': return '#ffd54f'
+    case 'failed': return '#e57373'
+    case 'no_op': return '#9e9e9e'
+    case 'unknown': return '#9e9e9e'
+    case null:
+    case undefined:
+    default: return 'transparent'
   }
 }
 
@@ -646,6 +660,7 @@ export function SessionsTab({
             <table className="table sessions-table">
               <thead>
                 <tr>
+                  <th style={{ width: '40px' }}></th>
                   <th className="sessions-col-session" style={{ width: sessionColWidth, position: 'relative' }}>
                     {t('Session')}
                     <div
@@ -704,6 +719,16 @@ export function SessionsTab({
                     style={{ cursor: 'pointer', background: selectedSession?.session_id === session.session_id ? 'var(--surface-hover)' : undefined }}
                     onClick={() => setSelectedSession(selectedSession?.session_id === session.session_id ? null : session)}
                   >
+                    <td style={{ textAlign: 'center' }}>
+                      {session.evaluation?.outcome ? (
+                        <span
+                          className="session-status-circle"
+                          style={{ backgroundColor: getSessionOutcomeColor(session.evaluation?.outcome) }}
+                        />
+                      ) : (
+                        <span className="session-status-circle session-status-circle-empty" />
+                      )}
+                    </td>
                     <td className="sessions-session-cell" title={displayTitle}>
                       <div className="session-primary" title={displayTitle} style={{ maxWidth: sessionColWidth - 24 }}>{displayTitle}</div>
                       <div className="session-secondary">
