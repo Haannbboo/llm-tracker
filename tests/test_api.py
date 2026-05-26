@@ -1261,6 +1261,7 @@ def test_evaluate_with_llm_returns_409_for_manual_evaluation(api_module, monkeyp
         raise ValueError("Manual evaluation exists for session: sess-1")
 
     monkeypatch.setattr(api_module, "start_session_evaluation_job", raise_manual)
+    monkeypatch.setattr(api_module, "require_available_evaluator_type", lambda t: t)
 
     response = TestClient(api_module.app).post("/sessions/sess-1/evaluate-with-llm")
 
@@ -1272,6 +1273,7 @@ def test_evaluate_with_llm_rejects_unsupported_source(api_module, monkeypatch):
         raise ValueError("Unsupported session source: unknown")
 
     monkeypatch.setattr(api_module, "start_session_evaluation_job", raise_unsupported)
+    monkeypatch.setattr(api_module, "require_available_evaluator_type", lambda t: t)
 
     response = TestClient(api_module.app).post(
         "/sessions/sess-unsupported/evaluate-with-llm"
