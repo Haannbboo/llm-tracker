@@ -14,7 +14,7 @@ BRANCH="${LLM_TRACKER_BRANCH:-main}"
 INSTALL_DIR="${HOME}/.llm-tracker/src"
 
 # ── Prerequisites ──────────────────────────────────────────────────
-for cmd in git bash; do
+for cmd in git bash curl; do
   if ! command -v "$cmd" >/dev/null 2>&1; then
     echo "Error: $cmd is required but not found." >&2
     exit 1
