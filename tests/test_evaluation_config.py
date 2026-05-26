@@ -1,7 +1,12 @@
 import os
 import tempfile
 
-from config.app import CONFIG, set_evaluation_evaluator
+from config.app import (
+    CONFIG,
+    CONFIG_PATH,
+    refresh_runtime_config,
+    set_evaluation_evaluator,
+)
 
 
 def test_set_evaluation_evaluator():
@@ -17,4 +22,5 @@ def test_set_evaluation_evaluator():
         assert "evaluator: claude" in content
         assert CONFIG["evaluation"]["evaluator"] == "claude"
     finally:
+        refresh_runtime_config(CONFIG_PATH)
         os.unlink(path)

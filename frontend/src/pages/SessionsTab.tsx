@@ -794,7 +794,7 @@ export function SessionsTab({
                   </tr>
                   {selectedSession?.session_id === session.session_id && (
                     <tr key={session.session_id + '-detail'} className={fadingOutSessions.has(session.session_id) ? 'session-fade-out' : undefined}>
-                      <td colSpan={8} className="session-detail-cell">
+                      <td colSpan={9} className="session-detail-cell">
                         <SessionDetailInline
                           session={session}
                           onNavigateToLogs={handleViewInLogs}

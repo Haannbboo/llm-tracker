@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import { ClickToCopy } from './CopyButton'
 import { t } from '../i18n/index.ts'
 import { useApp } from '../contexts/AppContext'
@@ -62,6 +62,7 @@ export function SessionDetailContent({
       ]
   const availableEvaluators = fallbackEvaluatorOptions
   const selectedEvaluator = availableEvaluators.find((item) => item.id === selectedEvaluatorType)
+  const historyRequestRef = useRef(0)
   const selectedEvaluatorAvailable = selectedEvaluator?.available === true
   const globalEvaluator = availableEvaluators.find((item) => item.id === globalEvaluatorType)
   const evaluatorLabel = (evaluatorType?: string | null) => {
@@ -69,7 +70,8 @@ export function SessionDetailContent({
     return evaluator?.label || (evaluatorType === 'claude' ? 'Claude Code' : 'Codex')
   }
 
-  const loadEvaluationJobHistory = async () => {
+  const loadEvaluationJobHistory = useCallback(async () => {
+    const requestId = ++historyRequestRef.current
     setHistoryLoading(true)
     try {
       const response = await fetch(`/sessions/${encodeURIComponent(session.session_id)}/evaluation-jobs`)
@@ -80,24 +82,26 @@ export function SessionDetailContent({
         global_evaluator_type: EvaluatorType
         global_evaluator_available: boolean
       } = await response.json()
+      if (requestId !== historyRequestRef.current) return
       setEvaluationJobHistory(data.jobs || [])
       setEvaluatorCatalog(data.evaluators || [])
       setGlobalEvaluatorType(data.global_evaluator_type || evaluationEvaluator)
       setGlobalEvaluatorAvailable(data.global_evaluator_available !== false)
       setSelectedEvaluatorType(data.global_evaluator_type || evaluationEvaluator)
     } catch {
+      if (requestId !== historyRequestRef.current) return
       showToast?.('Failed to load evaluation job history')
     } finally {
-      setHistoryLoading(false)
+      if (requestId === historyRequestRef.current) setHistoryLoading(false)
     }
-  }
+  }, [session.session_id, evaluationEvaluator, showToast])
 
   useEffect(() => {
     setEvaluationJobHistory([])
     setEvaluatorCatalog([])
     setSelectedEvaluatorType(evaluationEvaluator)
     void loadEvaluationJobHistory()
-  }, [session.session_id, evaluationEvaluator])
+  }, [session.session_id, evaluationEvaluator, loadEvaluationJobHistory])
 
   const isLlmEvaluationRunning = llmEvaluationStatus === 'queued' || llmEvaluationStatus === 'running'
   const activeJobStatus = activeEvaluationJob?.status

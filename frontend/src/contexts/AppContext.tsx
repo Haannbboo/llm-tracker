@@ -91,7 +91,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
           const data = await configResp.json()
           setConfigContent(data.content)
           setConfigParsed(data.parsed)
-          setEvaluationEvaluator(data.runtime?.evaluation?.evaluator === 'claude' ? 'claude' : 'codex')
+          const runtimeEvaluator = data.runtime?.evaluation?.evaluator
+          setEvaluationEvaluator(typeof runtimeEvaluator === 'string' ? runtimeEvaluator as EvaluatorType : 'codex')
           if (Array.isArray(data.runtime?.evaluation?.evaluators)) {
             setEvaluationEvaluators(data.runtime.evaluation.evaluators)
           }

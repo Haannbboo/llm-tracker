@@ -265,8 +265,11 @@ def _reload_config(path: str | None = None) -> None:
 def set_evaluation_evaluator(evaluator: str, path: str | None = None) -> None:
     """Set the evaluator type in config.yaml and reload config."""
     config_path = get_config_path(path)
-    with open(config_path, encoding="utf-8") as f:
-        config = yaml.safe_load(f) or {}
+    try:
+        with open(config_path, encoding="utf-8") as f:
+            config = yaml.safe_load(f) or {}
+    except FileNotFoundError:
+        config = {}
     evaluation = config.setdefault("evaluation", {})
     evaluation["evaluator"] = evaluator
     with open(config_path, "w", encoding="utf-8") as f:

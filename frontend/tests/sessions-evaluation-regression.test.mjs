@@ -9,7 +9,7 @@ const root = join(__dirname, '..')
 
 const types = readFileSync(join(root, 'src/types.ts'), 'utf8')
 const sessionsTab = readFileSync(join(root, 'src/pages/SessionsTab.tsx'), 'utf8')
-const dashboard = `${readFileSync(join(root, 'src/pages/DashboardPage.tsx'), 'utf8')}\n${sessionsTab}`
+const dashboard = readFileSync(join(root, 'src/pages/DashboardPage.tsx'), 'utf8')
 const detail = readFileSync(join(root, 'src/components/SessionDetailPanel.tsx'), 'utf8')
 const settings = readFileSync(join(root, 'src/pages/SettingsPage.tsx'), 'utf8')
 const settingsHook = readFileSync(join(root, 'src/hooks/useSettingsData.ts'), 'utf8')
@@ -42,15 +42,15 @@ describe('Session evaluation types', () => {
 
 describe('Session evaluation UI', () => {
   test('sessions table has outcome column header', () => {
-    assert.match(dashboard, /Outcome/)
+    assert.match(sessionsTab, /Outcome/)
   })
 
   test('sessions table renders outcome badge', () => {
-    assert.match(dashboard, /session-outcome-badge/)
+    assert.match(sessionsTab, /session-outcome-badge/)
   })
 
   test('getOutcomeBadge helper exists', () => {
-    assert.match(dashboard, /getOutcomeBadge/)
+    assert.match(sessionsTab, /getOutcomeBadge/)
   })
 
   test('session detail has evaluation section', () => {
@@ -78,8 +78,8 @@ describe('Session evaluation UI', () => {
   test('session detail notifies parent on evaluation update', () => {
     assert.match(detail, /onEvaluationUpdate/)
     assert.match(detail, /onEvaluationUpdate\(newEval\)/)
-    assert.match(dashboard, /handleEvaluationUpdate/)
-    assert.match(dashboard, /setSessions/)
+    assert.match(sessionsTab, /handleEvaluationUpdate/)
+    assert.match(sessionsTab, /setSessions/)
   })
 
   test('session detail notifies parent after evaluation persistence succeeds', () => {
@@ -89,7 +89,7 @@ describe('Session evaluation UI', () => {
     assert.match(detail, /refreshPersistedEvaluation/)
     assert.match(detail, /\/sessions\/\$\{encodeURIComponent\(session\.session_id\)\}\/evaluation/)
     assert.match(detail, /onEvaluationUpdate\?\.\(data\.evaluation\)/)
-    assert.match(dashboard, /onEvaluationPersisted=\{refreshModelEffectiveness\}/)
+    assert.match(sessionsTab, /onEvaluationPersisted=\{refreshModelEffectiveness\}/)
   })
 
   test('session detail can launch and poll LLM evaluation jobs', () => {
@@ -106,17 +106,17 @@ describe('Session evaluation UI', () => {
   })
 
   test('dashboard polls active evaluation jobs while sessions tab is open', () => {
-    assert.match(dashboard, /evaluation-jobs\/active/)
-    assert.match(dashboard, /setActiveEvaluationJobs/)
-    assert.match(dashboard, /setTimeout\(pollActiveEvaluationJobs, 2000\)/)
+    assert.match(sessionsTab, /evaluation-jobs\/active/)
+    assert.match(sessionsTab, /setActiveEvaluationJobs/)
+    assert.match(sessionsTab, /setTimeout\(pollActiveEvaluationJobs, 2000\)/)
   })
 
   test('dashboard displays a global evaluator queue monitor', () => {
-    assert.match(dashboard, /activeEvaluationJobList/)
-    assert.match(dashboard, /Evaluator Queue/)
-    assert.match(dashboard, /evaluator-queue-panel/)
-    assert.match(dashboard, /evaluation-job-row/)
-    assert.doesNotMatch(dashboard, /url\.searchParams\.set\('session_ids'/)
+    assert.match(sessionsTab, /activeEvaluationJobList/)
+    assert.match(sessionsTab, /Evaluator Queue/)
+    assert.match(sessionsTab, /evaluator-queue-panel/)
+    assert.match(sessionsTab, /evaluation-job-row/)
+    assert.doesNotMatch(sessionsTab, /url\.searchParams\.set\('session_ids'/)
   })
 
   test('session detail displays queued and running evaluation progress', () => {
@@ -126,7 +126,7 @@ describe('Session evaluation UI', () => {
     assert.match(detail, /Queued/)
     assert.match(detail, /queue_position/)
     assert.match(detail, /llmEvaluationStatus === 'queued' \|\| llmEvaluationStatus === 'running'/)
-    assert.match(dashboard, /session-evaluation-job-badge/)
+    assert.match(sessionsTab, /session-evaluation-job-badge/)
   })
 
   test('session detail displays session title in expanded row', () => {

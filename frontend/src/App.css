@@ -1670,6 +1670,11 @@
     opacity: 0.25;
     transform: none;
   }
+
+  .evaluation-job-running-pulse,
+  .session-eval-btn-primary.running {
+    animation: none;
+  }
 }
 
 .btn-primary {
