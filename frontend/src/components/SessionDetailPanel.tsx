@@ -67,7 +67,7 @@ export function SessionDetailContent({
   const globalEvaluator = availableEvaluators.find((item) => item.id === globalEvaluatorType)
   const evaluatorLabel = (evaluatorType?: string | null) => {
     const evaluator = availableEvaluators.find((item) => item.id === evaluatorType)
-    return evaluator?.label || (evaluatorType === 'claude' ? 'Claude Code' : 'Codex')
+    return evaluator?.label || (evaluatorType ? evaluatorType : 'Codex')
   }
 
   const loadEvaluationJobHistory = useCallback(async () => {
