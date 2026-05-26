@@ -1157,11 +1157,13 @@ if _frontend_dist.is_dir():
 
         async def dispatch(self, request: Request, call_next):
             path = request.url.path
+            requested = path.lstrip("/")
             if (
                 request.method in ("GET", "HEAD")
                 and _index_html.is_file()
                 and not any(path.startswith(p) for p in _SPA_API_PREFIXES)
-                and not (_frontend_dist / path.lstrip("/")).is_file()
+                and not Path(requested).suffix
+                and not (_frontend_dist / requested).is_file()
             ):
                 request.scope["path"] = "/index.html"
             return await call_next(request)

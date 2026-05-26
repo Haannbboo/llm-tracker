@@ -1601,3 +1601,22 @@ def test_spa_deep_links_do_not_hijack_api_routes(api_module, monkeypatch):
 
     assert response.status_code == 200
     assert "application/json" in response.headers.get("content-type", "")
+
+
+def test_spa_missing_asset_does_not_return_html(api_module):
+    """Missing asset-like paths (with extensions) must not be rewritten to index.html."""
+    from pathlib import Path
+
+    frontend_dist = (
+        Path(api_module.__file__).resolve().parent.parent / "frontend" / "dist"
+    )
+    if not (frontend_dist / "index.html").is_file():
+        import pytest
+
+        pytest.skip("frontend/dist/index.html not built")
+
+    client = TestClient(api_module.app)
+    response = client.get("/assets/missing.js")
+
+    assert response.status_code == 404
+    assert "text/html" not in response.headers.get("content-type", "")
