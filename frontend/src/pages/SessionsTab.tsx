@@ -133,7 +133,7 @@ export function SessionsTab({
   const evaluatorOptions = queueEvaluators.length > 0 ? queueEvaluators : evaluationEvaluators
   const evaluatorLabel = (evaluatorType?: string | null) => {
     const evaluator = evaluatorOptions.find((item) => item.id === evaluatorType)
-    return evaluator?.label || (evaluatorType === 'claude' ? 'Claude Code' : 'Codex')
+    return evaluator?.label || (evaluatorType ? evaluatorType : 'Codex')
   }
   const defaultEvaluatorUnavailable = !globalEvaluatorAvailable
 
@@ -260,14 +260,16 @@ export function SessionsTab({
   const [sessionSearch, setSessionSearch] = useState('')
   const [sessionColWidth, setSessionColWidth] = useState(250)
   const [loadingMore, setLoadingMore] = useState(false)
+  const loadingMoreRef = useRef(false)
   const sessionsTableRef = useRef<HTMLDivElement>(null)
   const sessionColumnResizeRef = useRef<{ startX: number; startWidth: number } | null>(null)
 
   useEffect(() => {
     const handleScroll = () => {
-      if (!sessionsTableRef.current || sessionsLoading || loadingMore || !hasMoreSessions) return
+      if (!sessionsTableRef.current || sessionsLoading || loadingMoreRef.current || !hasMoreSessions) return
       const { scrollTop, scrollHeight, clientHeight } = sessionsTableRef.current
       if (scrollTop + clientHeight >= scrollHeight - 100) {
+        loadingMoreRef.current = true
         setLoadingMore(true)
         setSessionPage(p => p + 1)
       }
@@ -276,10 +278,13 @@ export function SessionsTab({
     const el = sessionsTableRef.current
     el?.addEventListener('scroll', handleScroll)
     return () => el?.removeEventListener('scroll', handleScroll)
-  }, [sessionsLoading, loadingMore, hasMoreSessions, setSessionPage])
+  }, [sessionsLoading, hasMoreSessions, setSessionPage])
 
   useEffect(() => {
-    if (!sessionsLoading) setLoadingMore(false)
+    if (!sessionsLoading) {
+      loadingMoreRef.current = false
+      setLoadingMore(false)
+    }
   }, [sessionsLoading])
 
   const handleSessionColumnResizeStart = (event: React.MouseEvent) => {
