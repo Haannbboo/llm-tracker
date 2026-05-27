@@ -23,6 +23,10 @@ from .models import (
     Usage,
 )
 
+# Sources that emit one usage row per assistant completion, so
+# single-request sessions can still be real user-visible sessions.
+_SINGLE_REQUEST_SOURCES = frozenset({"opencode", "kilo"})
+
 
 def _successful_usage_count(usages: list[Usage]) -> int:
     return sum(1 for usage in usages if usage.status is None or usage.status < 400)
@@ -332,6 +336,11 @@ def _compute_duration_s(started: int | str | None, ended: int | str | None) -> i
         return 0
 
 
+def _duration_s_expr() -> Any:
+    """SQL expression for session duration in seconds from epoch microseconds."""
+    return (SessionRecord.ended - SessionRecord.started) / 1_000_000
+
+
 def _normalize_timestamp_filter(value: str) -> int:
     """Convert an ISO timestamp string to epoch microseconds for column comparison."""
     try:
@@ -362,8 +371,6 @@ def _session_filters(
     if until:
         filters.append(SessionRecord.ended <= _normalize_timestamp_filter(until))
     if hide_noop:
-        # OpenCode emits one usage row per assistant completion, so one-request
-        # OpenCode sessions can still be real user-visible sessions.
         filters.append(
             or_(
                 SessionRecord.outcome != "no_op",
@@ -373,7 +380,7 @@ def _session_filters(
         filters.append(
             or_(
                 SessionRecord.request_count > 1,
-                SessionRecord.client_source == "opencode",
+                SessionRecord.client_source.in_(_SINGLE_REQUEST_SOURCES),
             )
         )
     return filters
@@ -451,90 +458,95 @@ def aggregate_model_effectiveness(
         hide_noop=hide_noop,
     )
 
-    query = select(SessionRecord)
+    if group_by == "provider":
+        group_key = func.coalesce(SessionRecord.primary_provider, "unknown").label(
+            "key"
+        )
+    elif group_by == "source":
+        group_key = func.coalesce(SessionRecord.client_source, "unknown").label("key")
+    else:
+        group_key = func.coalesce(SessionRecord.primary_model, "unknown").label("key")
+
+    session_count = func.count(SessionRecord.session_id)
+    evaluated_count = _count_when(SessionRecord.outcome.in_(_EVALUATED_OUTCOMES))
+    solved_count = _count_when(SessionRecord.outcome == "solved")
+    partial_count = _count_when(SessionRecord.outcome == "partial")
+    failed_count = _count_when(SessionRecord.outcome == "failed")
+    stuck_count = _count_when(SessionRecord.outcome == "stuck")
+    no_op_count = _count_when(SessionRecord.outcome == "no_op")
+    unknown_count = _count_when(
+        (SessionRecord.outcome.is_(None)) | (SessionRecord.outcome == "unknown")
+    )
+    total_cost = func.coalesce(func.sum(SessionRecord.total_cost_usd), 0)
+    evaluated_cost = func.coalesce(
+        func.sum(
+            case(
+                (
+                    SessionRecord.outcome.in_(_EVALUATED_OUTCOMES),
+                    SessionRecord.total_cost_usd,
+                ),
+                else_=0,
+            )
+        ),
+        0,
+    )
+    total_duration = func.coalesce(func.sum(_duration_s_expr()), 0)
+
+    query = (
+        select(
+            group_key,
+            session_count.label("session_count"),
+            evaluated_count.label("evaluated_count"),
+            solved_count.label("solved_count"),
+            partial_count.label("partial_count"),
+            failed_count.label("failed_count"),
+            stuck_count.label("stuck_count"),
+            no_op_count.label("no_op_count"),
+            unknown_count.label("unknown_count"),
+            total_cost.label("total_cost_usd"),
+            evaluated_cost.label("_evaluated_cost_usd"),
+            case(
+                (session_count > 0, total_duration / session_count),
+                else_=0,
+            ).label("avg_duration_s"),
+            case(
+                (evaluated_count > 0, (solved_count * 1.0) / evaluated_count),
+                else_=None,
+            ).label("solve_rate"),
+            case(
+                (solved_count > 0, evaluated_cost / solved_count),
+                else_=None,
+            ).label("cost_per_solved"),
+        )
+        .group_by(group_key)
+        .order_by(session_count.desc(), group_key.asc())
+    )
+
     if filters:
         query = query.where(and_(*filters))
 
     with Session(get_engine(db_path)) as session:
-        records = session.execute(query).scalars().all()
+        rows = session.execute(query).all()
 
-    grouped: dict[str, dict[str, Any]] = {}
-    for rec in records:
-        if group_by == "provider":
-            raw_key = rec.primary_provider
-        elif group_by == "source":
-            raw_key = rec.client_source
-        else:
-            raw_key = rec.primary_model
-        key = raw_key or "unknown"
+    groups = [
+        {
+            "key": row.key,
+            "session_count": _as_int(row.session_count),
+            "evaluated_count": _as_int(row.evaluated_count),
+            "solved_count": _as_int(row.solved_count),
+            "partial_count": _as_int(row.partial_count),
+            "failed_count": _as_int(row.failed_count),
+            "stuck_count": _as_int(row.stuck_count),
+            "no_op_count": _as_int(row.no_op_count),
+            "unknown_count": _as_int(row.unknown_count),
+            "solve_rate": _as_float(row.solve_rate),
+            "total_cost_usd": float(row.total_cost_usd or 0),
+            "cost_per_solved": _as_float(row.cost_per_solved),
+            "avg_duration_s": round(float(row.avg_duration_s or 0), 1),
+        }
+        for row in rows
+    ]
 
-        group = grouped.setdefault(
-            key,
-            {
-                "key": key,
-                "session_count": 0,
-                "evaluated_count": 0,
-                "solved_count": 0,
-                "partial_count": 0,
-                "failed_count": 0,
-                "stuck_count": 0,
-                "unknown_count": 0,
-                "no_op_count": 0,
-                "solve_rate": None,
-                "total_cost_usd": 0.0,
-                "cost_per_solved": None,
-                "avg_duration_s": 0.0,
-                "_evaluated_cost_usd": 0.0,
-                "_total_duration_s": 0,
-            },
-        )
-
-        cost = float(rec.total_cost_usd or 0)
-        group["session_count"] += 1
-        group["total_cost_usd"] += cost
-        group["_total_duration_s"] += _compute_duration_s(rec.started, rec.ended)
-
-        if rec.outcome == "solved":
-            group["solved_count"] += 1
-            group["evaluated_count"] += 1
-            group["_evaluated_cost_usd"] += cost
-        elif rec.outcome == "partial":
-            group["partial_count"] += 1
-            group["evaluated_count"] += 1
-            group["_evaluated_cost_usd"] += cost
-        elif rec.outcome == "failed":
-            group["failed_count"] += 1
-            group["evaluated_count"] += 1
-            group["_evaluated_cost_usd"] += cost
-        elif rec.outcome == "stuck":
-            group["stuck_count"] += 1
-            group["evaluated_count"] += 1
-            group["_evaluated_cost_usd"] += cost
-        elif rec.outcome == "no_op":
-            group["no_op_count"] += 1
-        else:
-            group["unknown_count"] += 1
-
-    groups: list[dict[str, Any]] = []
-    for group in grouped.values():
-        evaluated_count = group["evaluated_count"]
-        solved_count = group["solved_count"]
-        session_count = group["session_count"]
-        if evaluated_count:
-            group["solve_rate"] = round(solved_count / evaluated_count, 4)
-        if solved_count:
-            group["cost_per_solved"] = group["_evaluated_cost_usd"] / solved_count
-        group["avg_duration_s"] = (
-            round(group["_total_duration_s"] / session_count, 1)
-            if session_count
-            else 0.0
-        )
-        group["total_cost_usd"] = float(group["total_cost_usd"])
-        group.pop("_evaluated_cost_usd")
-        group.pop("_total_duration_s")
-        groups.append(group)
-
-    groups.sort(key=lambda group: (-group["session_count"], group["key"]))
     return {"groups": groups}
 
 
@@ -772,22 +784,13 @@ def fetch_sessions(
     )
 
     sort_col = _SESSION_SORT_COLUMNS.get(sort_by)
-    python_sort = sort_by == "duration_s"
 
     engine = get_engine(db_path)
 
-    if python_sort:
-        # Fetch all, sort+paginate in Python
-        query = select(SessionRecord)
-        if filters:
-            query = query.where(and_(*filters))
-        with Session(engine) as session:
-            records = session.execute(query).scalars().all()
-        result = [_session_record_to_dict(r) for r in records]
-        result.sort(key=lambda r: r["duration_s"], reverse=(sort_order == "desc"))
-        return result[offset : offset + limit]
-
-    if sort_col is not None:
+    if sort_by == "duration_s":
+        duration_expr = _duration_s_expr()
+        order = duration_expr.desc() if sort_order == "desc" else duration_expr.asc()
+    elif sort_col is not None:
         order = sort_col.asc() if sort_order == "asc" else sort_col.desc()
     else:
         order = SessionRecord.ended.desc()  # type: ignore[assignment]
@@ -886,6 +889,7 @@ def summarize_sessions(
         func.sum(SessionRecord.total_cost_usd).label("total_cost_usd"),
         func.avg(SessionRecord.avg_latency_ms).label("avg_latency_ms"),
         func.sum(SessionRecord.latency_sum_ms).label("latency_sum_ms"),
+        func.avg(_duration_s_expr()).label("avg_duration_s"),
     )
     if filters:
         query = query.where(and_(*filters))
@@ -902,20 +906,9 @@ def summarize_sessions(
             "avg_latency_ms": 0,
         }
 
-    # Compute avg_duration_s from persisted started/ended in Python
-    duration_query = select(SessionRecord.started, SessionRecord.ended)
-    if filters:
-        duration_query = duration_query.where(and_(*filters))
-
-    with get_engine(db_path).connect() as connection:
-        duration_rows = connection.execute(duration_query).fetchall()
-
-    durations = [_compute_duration_s(r.started, r.ended) for r in duration_rows]
-    avg_duration = sum(durations) / len(durations) if durations else 0
-
     return {
         "session_count": int(row.session_count),
-        "avg_duration_s": round(avg_duration, 1),
+        "avg_duration_s": round(float(row.avg_duration_s or 0), 1),
         "total_tokens": int(row.total_tokens or 0),
         "total_cost_usd": float(row.total_cost_usd or 0),
         "avg_latency_ms": round(float(row.avg_latency_ms or 0), 1),

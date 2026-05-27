@@ -53,6 +53,9 @@ export function DashboardPage({ onNavigateToLogs }: Props) {
       {totalTrackedEvents !== 0 && (
       <div className="dashboard-filter-row" style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: '8px', marginBottom: '16px' }}>
           <select
+            id="dashboard-date-range"
+            name="dateRange"
+            aria-label={t('Date Range')}
             className="input-plain"
             value={dateRange}
             onChange={(e) => { setDateRange(e.target.value as any); resetPage(); }}
@@ -70,6 +73,9 @@ export function DashboardPage({ onNavigateToLogs }: Props) {
             onChange={(f) => { setActiveFilter(f); resetPage(); }}
           />
           <select
+            id="dashboard-source-filter"
+            name="sourceFilter"
+            aria-label={t('Source Filter')}
             className="input-plain"
             value={activeSource || ''}
             onChange={(e) => { setActiveSource(e.target.value || null); resetPage(); }}

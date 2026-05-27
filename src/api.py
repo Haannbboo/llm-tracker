@@ -14,6 +14,7 @@ import yaml
 from fastapi import FastAPI, HTTPException, Query, Request, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, model_validator
+from starlette.middleware.base import BaseHTTPMiddleware
 
 from config.app import (
     CONFIG,
@@ -1136,6 +1137,38 @@ async def version():
 # Serve built frontend if available (must come after all API routes)
 _frontend_dist = Path(__file__).resolve().parent.parent / "frontend" / "dist"
 if _frontend_dist.is_dir():
+    _index_html = _frontend_dist / "index.html"
+
+    _SPA_API_PREFIXES = (
+        "/usage",
+        "/sessions",
+        "/model-effectiveness",
+        "/poll/",
+        "/evaluation-jobs",
+        "/config",
+        "/pricing",
+        "/local/",
+        "/test-connectivity",
+        "/version",
+    )
+
+    class SPACatchAllMiddleware(BaseHTTPMiddleware):
+        """Rewrite non-API, non-file requests to /index.html for SPA routing."""
+
+        async def dispatch(self, request: Request, call_next):
+            path = request.url.path
+            requested = path.lstrip("/")
+            if (
+                request.method in ("GET", "HEAD")
+                and _index_html.is_file()
+                and not any(path.startswith(p) for p in _SPA_API_PREFIXES)
+                and not Path(requested).suffix
+                and not (_frontend_dist / requested).is_file()
+            ):
+                request.scope["path"] = "/index.html"
+            return await call_next(request)
+
+    app.add_middleware(SPACatchAllMiddleware)
     app.mount(
         "/", StaticFiles(directory=str(_frontend_dist), html=True), name="frontend"
     )
