@@ -6,6 +6,14 @@ import sys
 from pathlib import Path
 from typing import Any
 
+_GRAY = "\033[38;2;102;102;102m" if sys.stdout.isatty() else ""
+_RESET = "\033[0m" if sys.stdout.isatty() else ""
+
+
+def _info(msg: str) -> None:
+    print(f"  {_GRAY}{msg}{_RESET}")
+
+
 DESIRED_TELEMETRY = {
     "enabled": True,
     "target": "local",
@@ -185,14 +193,14 @@ def main() -> int:
     user_settings = load_settings(user_settings_path)
     upsert_hooks(user_settings, hook_path)
     save_settings(user_settings_path, user_settings)
-    print(f"==> Gemini user telemetry and hooks configured in {user_settings_path}")
+    _info(f"Gemini user telemetry and hooks configured in {user_settings_path}")
 
     # Strip any llm-tracker hooks/telemetry from project settings (avoid double-firing)
     project_settings = load_settings(project_settings_path)
     if strip_all_llm_tracker_hooks(project_settings):
         save_settings(project_settings_path, project_settings)
-        print(
-            f"==> Removed llm-tracker hooks/telemetry from project {project_settings_path}"
+        _info(
+            f"Removed llm-tracker hooks/telemetry from project {project_settings_path}"
         )
 
     return 0

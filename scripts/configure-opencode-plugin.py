@@ -85,7 +85,7 @@ def main() -> int:
     # Install dependencies
     node_modules = plugin_dir / "node_modules"
     if not node_modules.exists():
-        print(f"==> Installing OpenCode plugin dependencies in {plugin_dir}")
+        _info(f"Installing OpenCode plugin dependencies in {plugin_dir}")
         result = run_npm(["install", "--package-lock=false"], plugin_dir)
         if result is None:
             return warn_skip("npm not found")
@@ -94,7 +94,7 @@ def main() -> int:
 
     # Build
     if not (plugin_dir / "dist" / "index.js").exists():
-        print(f"==> Building OpenCode plugin from {plugin_dir}")
+        _info(f"Building OpenCode plugin from {plugin_dir}")
         result = run_npm(["run", "build"], plugin_dir)
         if result is None:
             return warn_skip("npm not found")
@@ -134,7 +134,7 @@ def main() -> int:
 
     config["plugin"] = plugins
     save_json(config_path, config)
-    print(f"==> llm-tracker plugin registered in {config_path} (endpoint: {endpoint})")
+    _info(f"llm-tracker plugin registered in {config_path} (endpoint: {endpoint})")
 
     return 0
 

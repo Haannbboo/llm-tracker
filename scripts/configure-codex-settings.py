@@ -4,6 +4,13 @@ import re
 import sys
 from pathlib import Path
 
+_GRAY = "\033[38;2;102;102;102m" if sys.stdout.isatty() else ""
+_RESET = "\033[0m" if sys.stdout.isatty() else ""
+
+
+def _info(msg: str) -> None:
+    print(f"  {_GRAY}{msg}{_RESET}")
+
 
 def resolve_otlp_logs_endpoint(otlp_port: str) -> str:
     """Return explicit OTLP logs endpoint override or localhost port default."""
@@ -103,9 +110,9 @@ def main():
     new_content = update_existing_otel_config(content, endpoint)
     if new_content != content:
         config_path.write_text(new_content, encoding="utf-8")
-        print(f"==> Codex OTLP telemetry updated to {endpoint} in {config_path}")
+        _info(f"Codex OTLP telemetry updated to {endpoint} in {config_path}")
     else:
-        print(f"==> Codex OTLP telemetry already up-to-date in {config_path}")
+        _info(f"Codex OTLP telemetry already up-to-date in {config_path}")
 
     return 0
 

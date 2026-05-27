@@ -162,7 +162,7 @@ def main(argv: list[str] | None = None) -> int:
     _info("Default service ports are busy; moved llm-tracker to free ports")
     for line in _service_port_summary(config):
         print(line)
-    print(f"==> Updated config at {config_path}")
+    _info(f"Updated config at {config_path}")
     return 0
 
 
