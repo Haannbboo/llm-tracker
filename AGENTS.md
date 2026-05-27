@@ -135,6 +135,33 @@ cd frontend && npm run dev
 
 Vite dev uses port `5173`. Bootstrap serves built frontend through FastAPI.
 
+## Worktree dev environment
+
+`scripts/dev/dev-start.sh` launches an isolated dev environment for worktree work. It is fully independent from the main production server:
+
+| | Main API server | Dev API server |
+|---|---|---|
+| **Manager** | supervisord (`~/.llm-tracker/supervisord.conf`) | standalone uvicorn |
+| **Working dir** | `~/Documents/llm-tracker/` | worktree dir |
+| **Port** | from `~/.llm-tracker/config.yaml` | random free port |
+| **DB** | `~/.llm-tracker/usage.db` | ephemeral copy in `/tmp/` |
+| **Auto-reload** | no | yes (`--reload`) |
+
+Key behaviors:
+
+- **Ephemeral DB**: copies `~/.llm-tracker/usage.db` into a temp dir; the main DB is never modified. Temp dir is deleted on stop.
+- **Free ports**: API and Vite ports are allocated dynamically; no conflicts with main server.
+- **Auto-reload**: the dev uvicorn server runs with `--reload`, so Python file changes restart it automatically.
+- **Safe restart**: `scripts/dev/dev-stop.sh` + `scripts/dev/dev-start.sh` restarts only the dev server. The main supervisord-managed server is unaffected.
+
+```bash
+# Start isolated dev environment
+./scripts/dev/dev-start.sh
+
+# Stop it
+./scripts/dev/dev-stop.sh
+```
+
 ## Durable repo notes
 
 - Runtime API port is config-driven. Do not assume `4001`; read `~/.llm-tracker/config.yaml`. This repo has recently run the API on `4004`.
