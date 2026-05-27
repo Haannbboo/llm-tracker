@@ -23,6 +23,10 @@ from .models import (
     Usage,
 )
 
+# Sources that emit one usage row per assistant completion, so
+# single-request sessions can still be real user-visible sessions.
+_SINGLE_REQUEST_SOURCES = frozenset({"opencode", "kilo"})
+
 
 def _successful_usage_count(usages: list[Usage]) -> int:
     return sum(1 for usage in usages if usage.status is None or usage.status < 400)
@@ -367,8 +371,6 @@ def _session_filters(
     if until:
         filters.append(SessionRecord.ended <= _normalize_timestamp_filter(until))
     if hide_noop:
-        # OpenCode emits one usage row per assistant completion, so one-request
-        # OpenCode sessions can still be real user-visible sessions.
         filters.append(
             or_(
                 SessionRecord.outcome != "no_op",
@@ -378,7 +380,7 @@ def _session_filters(
         filters.append(
             or_(
                 SessionRecord.request_count > 1,
-                SessionRecord.client_source == "opencode",
+                SessionRecord.client_source.in_(_SINGLE_REQUEST_SOURCES),
             )
         )
     return filters
