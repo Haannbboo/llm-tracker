@@ -276,7 +276,9 @@ sys.exit(1 if failed else 0)
 }
 
 # ── Banner ──────────────────────────────────────────────────────────
-banner
+if [[ -z "${LLM_TRACKER_SKIP_BANNER:-}" ]]; then
+  banner
+fi
 
 # ── Step 1: Install ─────────────────────────────────────────────────
 step_header "Installing dependencies & CLI"
