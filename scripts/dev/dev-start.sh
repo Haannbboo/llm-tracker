@@ -92,7 +92,7 @@ trap cleanup EXIT INT TERM
 
 # --- Start API server ---
 LLM_TRACKER_DB_URL="${DB_URL}" "${PYTHON}" -m uvicorn src.api:app \
-  --host 127.0.0.1 --port "${API_PORT}" --log-level warning &
+  --host 127.0.0.1 --port "${API_PORT}" --log-level warning --reload &
 API_PID=$!
 
 # Wait for API readiness
