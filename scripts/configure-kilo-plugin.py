@@ -17,6 +17,13 @@ import sys
 from pathlib import Path
 from typing import Any
 
+_GRAY = "\033[38;2;102;102;102m" if sys.stdout.isatty() else ""
+_RESET = "\033[0m" if sys.stdout.isatty() else ""
+
+
+def _info(msg: str) -> None:
+    print(f"  {_GRAY}{msg}{_RESET}")
+
 
 def load_json(path: Path) -> dict[str, Any]:
     if not path.exists():
@@ -92,9 +99,9 @@ def main() -> int:
             return warn_skip("npm not found")
         if result.returncode != 0:
             return warn_skip(f"plugin build failed:\n{result.stderr}")
-        print("==> Plugin built successfully")
+        _info("Plugin built successfully")
     else:
-        print("==> Plugin already built")
+        _info("Plugin already built")
 
     # Register in config
     config = load_json(config_path)

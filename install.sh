@@ -9,6 +9,23 @@
 #   LLM_TRACKER_BRANCH  — branch to install (default: main)
 set -euo pipefail
 
+# ── Color helpers ─────────────────────────────────────────────────
+if [[ -t 1 ]] && [[ -z "${NO_COLOR:-}" ]]; then
+  _C_GRAY='\033[38;2;102;102;102m'
+  _C_RESET='\033[0m'
+else
+  _C_GRAY=''
+  _C_RESET=''
+fi
+
+_info() {
+  if [[ -n "${_C_GRAY}" ]]; then
+    printf "  ${_C_GRAY}%s${_C_RESET}\n" "$1"
+  else
+    printf "  %s\n" "$1"
+  fi
+}
+
 REPO="Haannbboo/llm-tracker"
 BRANCH="${LLM_TRACKER_BRANCH:-main}"
 INSTALL_DIR="${HOME}/.llm-tracker/src"
@@ -37,12 +54,12 @@ if [[ -d "${INSTALL_DIR}/.git" ]]; then
     echo "Expected ${EXPECTED_HTTPS_REMOTE} (or SSH equivalent)." >&2
     exit 1
   fi
-  echo "==> Updating llm-tracker in ${INSTALL_DIR}..."
+  _info "Updating llm-tracker in ${INSTALL_DIR}..."
   git -C "${INSTALL_DIR}" fetch origin "${BRANCH}"
   git -C "${INSTALL_DIR}" checkout "${BRANCH}"
   git -C "${INSTALL_DIR}" pull origin "${BRANCH}"
 else
-  echo "==> Cloning llm-tracker to ${INSTALL_DIR}..."
+  _info "Cloning llm-tracker to ${INSTALL_DIR}..."
   mkdir -p "$(dirname "${INSTALL_DIR}")"
   git clone --branch "${BRANCH}" "https://github.com/${REPO}.git" "${INSTALL_DIR}"
 fi

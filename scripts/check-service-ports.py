@@ -12,6 +12,15 @@ from pathlib import Path
 import yaml
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+
+_GRAY = "\033[38;2;102;102;102m" if sys.stdout.isatty() else ""
+_RESET = "\033[0m" if sys.stdout.isatty() else ""
+
+
+def _info(msg: str) -> None:
+    print(f"  {_GRAY}{msg}{_RESET}")
+
+
 # Standalone script entrypoint: ensure project imports work without PYTHONPATH=.
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
@@ -112,7 +121,7 @@ def main() -> int:
         return 0
 
     # Keep the warning format concise so shell wrappers can surface it directly.
-    print("==> Port Issues")
+    _info("Port Issues")
     for issue in output_issues:
         print(format_port_issue(issue))
 

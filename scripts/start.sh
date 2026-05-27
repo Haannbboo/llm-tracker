@@ -22,7 +22,7 @@ AUTO_PORT_ASSIGNER="${ROOT_DIR}/scripts/auto-assign-ports.py"
 source "${ROOT_DIR}/scripts/lib/terminal.sh"
 
 # Show banner only when run standalone (not from bootstrap.sh)
-if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+if [[ -z "${LLM_TRACKER_SKIP_BANNER:-}" ]]; then
   banner
   step_header "Starting services"
 fi

@@ -14,6 +14,15 @@ from typing import Any
 import yaml
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+
+_GRAY = "\033[38;2;102;102;102m" if sys.stdout.isatty() else ""
+_RESET = "\033[0m" if sys.stdout.isatty() else ""
+
+
+def _info(msg: str) -> None:
+    print(f"  {_GRAY}{msg}{_RESET}")
+
+
 # Standalone script entrypoint: ensure project imports work without PYTHONPATH=.
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
@@ -150,7 +159,7 @@ def main(argv: list[str] | None = None) -> int:
 
     _write_config(config_path, config)
 
-    print("==> Default service ports are busy; moved llm-tracker to free ports")
+    _info("Default service ports are busy; moved llm-tracker to free ports")
     for line in _service_port_summary(config):
         print(line)
     print(f"==> Updated config at {config_path}")
