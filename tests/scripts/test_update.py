@@ -9,6 +9,10 @@ _CLEAN_GIT_ENV = {
     **os.environ,
     "GIT_CONFIG_GLOBAL": "/dev/null",
     "GIT_CONFIG_SYSTEM": "/dev/null",
+    "GIT_AUTHOR_NAME": "test",
+    "GIT_AUTHOR_EMAIL": "test@test.com",
+    "GIT_COMMITTER_NAME": "test",
+    "GIT_COMMITTER_EMAIL": "test@test.com",
     "PRE_COMMIT_ALLOW_NO_CONFIG": "1",
 }
 
