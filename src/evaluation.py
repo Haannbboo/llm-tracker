@@ -161,7 +161,7 @@ def _iter_jsonl(path: Path):
                 continue
 
 
-def _extract_text(value: Any) -> str | None:
+def _extract_content(value: Any) -> str | None:
     if isinstance(value, str):
         text = value.strip()
         return text or None
@@ -172,10 +172,29 @@ def _extract_text(value: Any) -> str | None:
     for item in value:
         if not isinstance(item, dict):
             continue
-        if item.get("type") in {"text", "input_text", "output_text"}:
+        item_type = item.get("type")
+        if item_type in {"text", "input_text", "output_text"}:
             text = item.get("text")  # type: ignore[assignment]
             if isinstance(text, str) and text.strip():
                 parts.append(text.strip())
+        elif item_type == "tool_use":
+            name = item.get("name", "?")
+            inp = item.get("input", {})
+            if not isinstance(inp, dict):
+                parts.append(f"[tool:{name}]")
+            elif name == "Read":
+                parts.append(f"[tool:Read] {inp.get('file_path', '?')}")
+            elif name == "Write":
+                parts.append(f"[tool:Write] {inp.get('file_path', '?')}")
+            elif name == "Edit":
+                parts.append(f"[tool:Edit] {inp.get('file_path', '?')}")
+            elif name == "Bash":
+                cmd = inp.get("command", "?")
+                parts.append(f"[tool:Bash] {str(cmd)[:150]}")
+            elif name == "WebSearch":
+                parts.append(f"[tool:WebSearch] {inp.get('query', '?')}")
+            else:
+                parts.append(f"[tool:{name}] {str(inp)[:100]}")
     if not parts:
         return None
     return "\n".join(parts)
@@ -195,7 +214,7 @@ def _format_transcript_turns(
     lines = [
         f"Session source: {client_source}",
         f"Session id: {session_id}",
-        "Transcript: user/assistant text only; tool calls and tool outputs omitted.",
+        "Transcript: user/assistant text with tool call summaries (name + target). Tool outputs omitted.",
         "",
     ]
     for role, text in turns:
@@ -247,7 +266,7 @@ def _load_codex_transcript(session_id: str, client_source: str) -> str:
         role = payload.get("role")
         if role not in {"user", "assistant"}:
             continue
-        text = _extract_text(payload.get("content"))
+        text = _extract_content(payload.get("content"))
         if text:
             turns.append((role, text))
     return _format_transcript_turns(
@@ -288,7 +307,7 @@ def _load_claude_transcript(session_id: str, client_source: str) -> str:
             if message_id in seen_message_ids:
                 continue
             seen_message_ids.add(message_id)
-        text = _extract_text(message.get("content"))
+        text = _extract_content(message.get("content"))
         if text:
             turns.append((role, text))
     return _format_transcript_turns(
@@ -319,7 +338,7 @@ def _extract_gemini_turn(record: dict[str, Any]) -> tuple[str, str] | None:
     role = record.get("type") or record.get("role")
     if role not in {"user", "assistant"}:
         return None
-    text = _extract_text(
+    text = _extract_content(
         record.get("message")
         or record.get("content")
         or record.get("text")
@@ -369,7 +388,7 @@ def _load_gemini_transcript(session_id: str, client_source: str) -> str:
             role = item.get("type")
             if role not in {"user", "assistant"}:
                 continue
-            text = _extract_text(item.get("message"))
+            text = _extract_content(item.get("message"))
             if text:
                 turns.append((role, text))
 
@@ -418,7 +437,7 @@ def _extract_opencode_part_text(value: Any) -> str | None:
         return None
     if value.get("synthetic") or value.get("ignored"):
         return None
-    return _extract_text(value.get("text"))
+    return _extract_content(value.get("text"))
 
 
 def _load_sqlite_transcript(

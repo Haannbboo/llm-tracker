@@ -1570,3 +1570,61 @@ def test_run_session_evaluation_job_with_claude_evaluator(
     assert saved["confidence"] == pytest.approx(0.85)
     assert polled is not None
     assert polled["status"] == "succeeded"
+
+
+def test_extract_content_includes_tool_use_summaries(evaluation_module):
+    content = [
+        {"type": "text", "text": "Let me read that file."},
+        {
+            "type": "tool_use",
+            "name": "Read",
+            "input": {"file_path": "/Users/me/project/api.py"},
+        },
+        {
+            "type": "tool_use",
+            "name": "Bash",
+            "input": {"command": "uv sync", "description": "Install deps"},
+        },
+        {
+            "type": "tool_use",
+            "name": "Write",
+            "input": {
+                "file_path": "/Users/me/project/main.py",
+                "content": "print('hi')",
+            },
+        },
+        {
+            "type": "tool_use",
+            "name": "Edit",
+            "input": {"file_path": "/Users/me/project/README.md"},
+        },
+    ]
+    result = evaluation_module._extract_content(content)
+    assert "Let me read that file." in result
+    assert "[tool:Read] /Users/me/project/api.py" in result
+    assert "[tool:Bash] uv sync" in result
+    assert "[tool:Write] /Users/me/project/main.py" in result
+    assert "[tool:Edit] /Users/me/project/README.md" in result
+
+
+def test_extract_content_skips_thinking_blocks(evaluation_module):
+    content = [
+        {"type": "thinking", "text": "internal reasoning"},
+        {"type": "text", "text": "Here's my answer."},
+    ]
+    result = evaluation_module._extract_content(content)
+    assert result == "Here's my answer."
+
+
+def test_extract_content_handles_string_content(evaluation_module):
+    result = evaluation_module._extract_content("hello world")
+    assert result == "hello world"
+
+
+def test_extract_content_returns_none_for_empty(evaluation_module):
+    assert evaluation_module._extract_content([]) is None
+    assert (
+        evaluation_module._extract_content([{"type": "thinking", "text": "meh"}])
+        is None
+    )
+    assert evaluation_module._extract_content(None) is None
