@@ -1607,6 +1607,22 @@ def test_extract_content_includes_tool_use_summaries(evaluation_module):
     assert "[tool:Edit] /Users/me/project/README.md" in result
 
 
+def test_extract_content_redacts_secrets_in_bash_commands(evaluation_module):
+    content = [
+        {
+            "type": "tool_use",
+            "name": "Bash",
+            "input": {
+                "command": "export API_KEY=sk-abc123secret && curl -H 'Authorization: Bearer tok_xyz' https://example.com"
+            },
+        },
+    ]
+    result = evaluation_module._extract_content(content)
+    assert "sk-abc123secret" not in result
+    assert "tok_xyz" not in result
+    assert "[tool:Bash]" in result
+
+
 def test_extract_content_skips_thinking_blocks(evaluation_module):
     content = [
         {"type": "thinking", "text": "internal reasoning"},

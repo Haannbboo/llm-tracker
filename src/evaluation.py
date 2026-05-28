@@ -192,12 +192,14 @@ def _extract_content(value: Any) -> str | None:
             elif name == "Edit":
                 parts.append(f"[tool:Edit] {inp.get('file_path', '?')}")
             elif name == "Bash":
-                cmd = inp.get("command", "?")
-                parts.append(f"[tool:Bash] {str(cmd)[:150]}")
+                cmd = _sanitize_evaluator_log_text(str(inp.get("command", "?")))
+                parts.append(f"[tool:Bash] {cmd[:150]}")
             elif name == "WebSearch":
-                parts.append(f"[tool:WebSearch] {inp.get('query', '?')}")
+                query = _sanitize_evaluator_log_text(str(inp.get("query", "?")))
+                parts.append(f"[tool:WebSearch] {query[:150]}")
             else:
-                parts.append(f"[tool:{name}] {str(inp)[:100]}")
+                safe = _sanitize_evaluator_log_text(str(inp))
+                parts.append(f"[tool:{name}] {safe[:100]}")
     if not parts:
         return None
     return "\n".join(parts)
