@@ -188,17 +188,17 @@ def test_update_refuses_missing_upstream(tmp_path):
     assert "refused: branch 'no-upstream' has no upstream" in output
 
 
-def test_update_refuses_missing_origin(tmp_path):
+def test_update_refuses_missing_upstream_remote(tmp_path):
     local, bare = _make_update_repo(tmp_path)
 
-    # Remove origin remote
+    # Remove the upstream remote (origin in this case)
     _git(local, "remote", "remove", "origin", check=False)
 
     result = _run_update(local)
 
     output = result.stdout + result.stderr
     assert result.returncode != 0, output
-    assert "refused: 'origin' remote not found" in output
+    assert "has no upstream" in output or "remote" in output
 
 
 def test_update_refuses_non_fast_forward(tmp_path):
@@ -287,6 +287,73 @@ def test_update_dry_run_mode(tmp_path):
     # Should not have pulled or bootstrapped
     assert "Pulling" not in output
     assert "Bootstrap" not in output
+
+
+def test_update_fetches_from_correct_remote(tmp_path):
+    """Regression: update should fetch the actual upstream remote, not hardcoded origin."""
+    bare = tmp_path / "upstream.git"
+    local = tmp_path / "local"
+
+    subprocess.run(
+        ["git", "init", "--bare", str(bare)],
+        check=True,
+        capture_output=True,
+        text=True,
+        env=_CLEAN_GIT_ENV,
+    )
+
+    # Clone with custom remote name "upstream" instead of "origin"
+    subprocess.run(
+        ["git", "clone", "--origin", "upstream", str(bare), str(local)],
+        check=True,
+        capture_output=True,
+        text=True,
+        env=_CLEAN_GIT_ENV,
+    )
+
+    # Copy scripts
+    repo_root = Path(__file__).resolve().parents[2]
+    scripts_dir = local / "scripts"
+    scripts_dir.mkdir(exist_ok=True)
+    lib_dir = scripts_dir / "lib"
+    lib_dir.mkdir(exist_ok=True)
+    shutil.copy2(repo_root / "scripts" / "update.sh", scripts_dir / "update.sh")
+    (scripts_dir / "update.sh").chmod(0o755)
+    shutil.copy2(repo_root / "scripts" / "lib" / "terminal.sh", lib_dir / "terminal.sh")
+    for name, body in [("bootstrap.sh", "exit 0"), ("restart.sh", "exit 0")]:
+        (scripts_dir / name).write_text(
+            f"#!/usr/bin/env bash\n{body}\n", encoding="utf-8"
+        )
+        (scripts_dir / name).chmod(0o755)
+
+    # Initial commit and push
+    (local / "README.md").write_text("init\n", encoding="utf-8")
+    _git(local, "add", ".")
+    _git(local, "commit", "-m", "init")
+    _git(local, "push", "upstream", "main")
+
+    # Add upstream commit via helper clone
+    helper = tmp_path / "helper"
+    subprocess.run(
+        ["git", "clone", "--origin", "upstream", str(bare), str(helper)],
+        check=True,
+        capture_output=True,
+        text=True,
+        env=_CLEAN_GIT_ENV,
+    )
+    (helper / "new.txt").write_text("upstream change\n", encoding="utf-8")
+    _git(helper, "add", ".")
+    _git(helper, "commit", "-m", "add new.txt")
+    _git(helper, "push", "upstream", "main")
+    shutil.rmtree(helper)
+
+    result = _run_update(local)
+
+    output = result.stdout + result.stderr
+    assert result.returncode == 0, output
+    assert "Fetched from upstream" in output
+    assert "Pulling updates" in output
+    assert "Update complete" in output
 
 
 def test_update_works_from_any_cwd(tmp_path):

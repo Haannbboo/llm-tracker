@@ -64,14 +64,6 @@ if ! git -C "${ROOT_DIR}" symbolic-ref -q HEAD >/dev/null 2>&1; then
 fi
 pass "HEAD attached"
 
-# origin remote must exist
-if ! git -C "${ROOT_DIR}" remote get-url origin >/dev/null 2>&1; then
-  fail "llm-tracker update refused: 'origin' remote not found."
-  exit 1
-fi
-ORIGIN_URL="$(git -C "${ROOT_DIR}" remote get-url origin 2>/dev/null)"
-pass "Origin: ${ORIGIN_URL}"
-
 # Current branch must have an upstream
 BRANCH="$(git -C "${ROOT_DIR}" symbolic-ref --short HEAD 2>/dev/null)"
 if ! git -C "${ROOT_DIR}" rev-parse --abbrev-ref "@{upstream}" >/dev/null 2>&1; then
@@ -80,12 +72,21 @@ if ! git -C "${ROOT_DIR}" rev-parse --abbrev-ref "@{upstream}" >/dev/null 2>&1; 
   exit 1
 fi
 UPSTREAM="$(git -C "${ROOT_DIR}" rev-parse --abbrev-ref "@{upstream}" 2>/dev/null)"
+UPSTREAM_REMOTE="${UPSTREAM%%/*}"
+
+# Upstream remote must exist
+if ! git -C "${ROOT_DIR}" remote get-url "${UPSTREAM_REMOTE}" >/dev/null 2>&1; then
+  fail "llm-tracker update refused: remote '${UPSTREAM_REMOTE}' not found."
+  exit 1
+fi
+REMOTE_URL="$(git -C "${ROOT_DIR}" remote get-url "${UPSTREAM_REMOTE}" 2>/dev/null)"
 pass "Branch: ${BRANCH} → ${UPSTREAM}"
+pass "Remote: ${REMOTE_URL}"
 
 # ── Fetch ───────────────────────────────────────────────────────────
 step_header "Fetching updates"
-git -C "${ROOT_DIR}" fetch origin
-pass "Fetched from origin"
+git -C "${ROOT_DIR}" fetch "${UPSTREAM_REMOTE}"
+pass "Fetched from ${UPSTREAM_REMOTE}"
 
 # ── Check status ────────────────────────────────────────────────────
 LOCAL="$(git -C "${ROOT_DIR}" rev-parse HEAD)"
@@ -109,6 +110,7 @@ if [[ "${MODE}" == "check" || "${MODE}" == "dry-run" ]]; then
   echo ""
   if [[ "${MODE}" == "dry-run" ]]; then
     info "Planned commands:"
+    info "  git -C ${ROOT_DIR} fetch ${UPSTREAM_REMOTE}"
     info "  git -C ${ROOT_DIR} pull --ff-only"
     info "  bash ${SCRIPTS_DIR}/bootstrap.sh"
     info "  bash ${SCRIPTS_DIR}/restart.sh"
