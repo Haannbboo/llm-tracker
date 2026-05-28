@@ -294,7 +294,11 @@ def _load_claude_transcript(session_id: str, client_source: str) -> str:
         raise TranscriptLoadError(f"Claude transcript not found: {session_id}")
 
     turns: list[tuple[str, str]] = []
-    seen_message_ids: set[str] = set()
+    # Claude Code emits the same message ID as multiple JSONL records
+    # (thinking, tool_use, text). Accumulate content blocks per message ID.
+    pending_id: str | None = None
+    pending_role: str = ""
+    pending_content: list[Any] = []
     for record in _iter_jsonl(path):
         if not isinstance(record, dict) or record.get("type") not in {
             "user",
@@ -308,13 +312,24 @@ def _load_claude_transcript(session_id: str, client_source: str) -> str:
         if role not in {"user", "assistant"}:
             continue
         message_id = message.get("id") or record.get("uuid")
-        if isinstance(message_id, str):
-            if message_id in seen_message_ids:
-                continue
-            seen_message_ids.add(message_id)
-        text = _extract_content(message.get("content"))
+        # Flush when message ID changes
+        if message_id != pending_id and pending_id is not None:
+            text = _extract_content(pending_content)
+            if text:
+                turns.append((pending_role, text))
+            pending_content = []
+        pending_id = message_id
+        pending_role = role
+        content = message.get("content")
+        if isinstance(content, list):
+            pending_content.extend(content)
+        elif isinstance(content, str) and content.strip():
+            pending_content.append({"type": "text", "text": content})
+    # Flush last message
+    if pending_id is not None:
+        text = _extract_content(pending_content)
         if text:
-            turns.append((role, text))
+            turns.append((pending_role, text))
     return _format_transcript_turns(
         client_source=client_source, session_id=session_id, turns=turns
     )
