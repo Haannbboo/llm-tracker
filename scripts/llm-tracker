@@ -15,6 +15,7 @@ case "${1:-}" in
   stop)    shift; exec bash "${SCRIPTS_DIR}/stop.sh" "$@" ;;
   restart) shift; exec bash "${SCRIPTS_DIR}/restart.sh" "$@" ;;
   status)  shift; exec bash "${SCRIPTS_DIR}/status.sh" "$@" ;;
+  update)  shift; exec bash "${SCRIPTS_DIR}/update.sh" "$@" ;;
 esac
 
 PYTHON="${ROOT_DIR}/.venv/bin/python"
