@@ -962,6 +962,7 @@ def _upsert_llm_evaluation(
         summary=evaluation.get("summary"),
         evidence=evaluation.get("evidence"),
         failure_reason=evaluation.get("failure_reason"),
+        project=evaluation.get("project"),
         skip_if_manual=skip_if_manual,
         db_path=db_path,
     )

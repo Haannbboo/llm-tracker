@@ -1700,3 +1700,98 @@ def test_parse_evaluation_output_clears_project_for_no_op(evaluation_module):
         )
     )
     assert parsed["project"] is None
+
+
+def test_upsert_session_evaluation_stores_project(
+    evaluation_module, database_module, isolated_home
+):
+    db_path = str(isolated_home / "usage.db")
+    database_module.init_db(db_path)
+
+    with database_module.Session(database_module.get_engine(db_path)) as session:
+        session.add(
+            database_module.SessionRecord(
+                session_id="sess-proj",
+                client_source="claude-code",
+                started=1778493600000000,
+                ended=1778495400000000,
+                updated_at="2026-05-27T10:00:00+00:00",
+            )
+        )
+        session.commit()
+
+    database_module.upsert_session_evaluation(
+        session_id="sess-proj",
+        outcome="solved",
+        source="llm",
+        confidence=0.9,
+        task_title="Fix auth",
+        task_title_zh="修复认证",
+        summary="Fixed.",
+        evidence=["done"],
+        failure_reason=None,
+        project="my-cool-project",
+        db_path=db_path,
+    )
+
+    result = database_module.get_session_evaluation("sess-proj", db_path=db_path)
+    assert result is not None
+    assert result["project"] == "my-cool-project"
+
+
+def test_get_session_evaluation_includes_project(
+    evaluation_module, database_module, isolated_home
+):
+    db_path = str(isolated_home / "usage.db")
+    database_module.init_db(db_path)
+
+    with database_module.Session(database_module.get_engine(db_path)) as session:
+        session.add(
+            database_module.SessionRecord(
+                session_id="sess-proj2",
+                client_source="claude-code",
+                started=1778493600000000,
+                ended=1778495400000000,
+                updated_at="2026-05-27T10:00:00+00:00",
+            )
+        )
+        session.commit()
+
+    database_module.upsert_session_evaluation(
+        session_id="sess-proj2",
+        outcome="solved",
+        source="manual",
+        project="hub-router",
+        db_path=db_path,
+    )
+
+    result = database_module.get_session_evaluation("sess-proj2", db_path=db_path)
+    assert result["project"] == "hub-router"
+
+
+def test_delete_session_evaluation_clears_project(
+    evaluation_module, database_module, isolated_home
+):
+    db_path = str(isolated_home / "usage.db")
+    database_module.init_db(db_path)
+
+    with database_module.Session(database_module.get_engine(db_path)) as session:
+        session.add(
+            database_module.SessionRecord(
+                session_id="sess-proj3",
+                client_source="claude-code",
+                started=1778493600000000,
+                ended=1778495400000000,
+                updated_at="2026-05-27T10:00:00+00:00",
+                outcome="solved",
+                source="llm",
+                project="to-be-deleted",
+            )
+        )
+        session.commit()
+
+    database_module.delete_session_evaluation("sess-proj3", db_path=db_path)
+
+    with database_module.Session(database_module.get_engine(db_path)) as session:
+        rec = session.get(database_module.SessionRecord, "sess-proj3")
+        assert rec.project is None

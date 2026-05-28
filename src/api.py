@@ -139,6 +139,7 @@ class SessionEvaluationUpdate(BaseModel):
     summary: str | None = None
     evidence: list[str] = []
     failure_reason: str | None = None
+    project: str | None = None
 
 
 class EvaluateSessionWithLlmRequest(BaseModel):
@@ -555,6 +556,7 @@ async def put_session_evaluation(session_id: str, update: SessionEvaluationUpdat
             summary=update.summary,
             evidence=update.evidence,
             failure_reason=update.failure_reason,
+            project=update.project,
         )
     except ValueError as e:
         if "Session not found" in str(e):

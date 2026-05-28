@@ -195,6 +195,7 @@ class SessionRecord(Base):
     evidence_json: Mapped[str | None] = mapped_column(String, nullable=True)
     failure_reason: Mapped[str | None] = mapped_column(String, nullable=True)
     evaluated_at: Mapped[str | None] = mapped_column(String, nullable=True)
+    project: Mapped[str | None] = mapped_column(String, nullable=True)
 
 
 VALID_OUTCOMES = {"solved", "partial", "failed", "stuck", "no_op", "unknown"}
