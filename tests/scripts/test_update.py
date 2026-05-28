@@ -38,9 +38,9 @@ def _make_update_repo(
     bare = tmp_path / "remote.git"
     local = tmp_path / "local"
 
-    # Create bare remote
+    # Create bare remote with explicit default branch
     subprocess.run(
-        ["git", "init", "--bare", str(bare)],
+        ["git", "init", "--bare", "--initial-branch=main", str(bare)],
         check=True,
         capture_output=True,
         text=True,
@@ -299,7 +299,7 @@ def test_update_fetches_from_correct_remote(tmp_path):
     local = tmp_path / "local"
 
     subprocess.run(
-        ["git", "init", "--bare", str(bare)],
+        ["git", "init", "--bare", "--initial-branch=main", str(bare)],
         check=True,
         capture_output=True,
         text=True,
