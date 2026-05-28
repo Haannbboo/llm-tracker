@@ -780,6 +780,7 @@ def migrate_database(db_path: str | None = None) -> list[str]:
             ("evidence_json", "TEXT"),
             ("failure_reason", "TEXT"),
             ("evaluated_at", "TEXT"),
+            ("project", "TEXT"),
         ]:
             if _ensure_column(
                 engine,

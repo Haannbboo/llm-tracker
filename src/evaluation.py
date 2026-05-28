@@ -90,7 +90,8 @@ Return ONLY valid JSON matching:
   "outcome": "solved" | "partial" | "failed" | "stuck" | "no_op" | "unknown",
   "confidence": number | null,
   "evidence": string[],
-  "failure_reason": string | null
+  "failure_reason": string | null,
+  "project": string | null
 }
 
 Outcome definitions:
@@ -111,6 +112,8 @@ When in doubt between "no_op" and a substantive outcome, prefer "no_op" for sess
 For substantive LLM-evaluated user tasks, task_title is a concise English title and task_title_zh is a concise Chinese title. Each title must be 2-6 words, preserve the same meaning, and avoid markdown or punctuation. If there is no substantive task, set both titles to null.
 
 Keep evidence short. Do not include markdown.
+
+For "project": infer the project or repository name from file paths, repo names, directory names, or project-specific terms in the conversation. Return the short name (e.g., "llm-tracker", "cw-tracker"), not a full path. If you cannot determine the project, return null.
 """
 
 
@@ -161,7 +164,7 @@ def _iter_jsonl(path: Path):
                 continue
 
 
-def _extract_text(value: Any) -> str | None:
+def _extract_content(value: Any) -> str | None:
     if isinstance(value, str):
         text = value.strip()
         return text or None
@@ -172,10 +175,31 @@ def _extract_text(value: Any) -> str | None:
     for item in value:
         if not isinstance(item, dict):
             continue
-        if item.get("type") in {"text", "input_text", "output_text"}:
+        item_type = item.get("type")
+        if item_type in {"text", "input_text", "output_text"}:
             text = item.get("text")  # type: ignore[assignment]
             if isinstance(text, str) and text.strip():
                 parts.append(text.strip())
+        elif item_type == "tool_use":
+            name = item.get("name", "?")
+            inp = item.get("input", {})
+            if not isinstance(inp, dict):
+                parts.append(f"[tool:{name}]")
+            elif name == "Read":
+                parts.append(f"[tool:Read] {inp.get('file_path', '?')}")
+            elif name == "Write":
+                parts.append(f"[tool:Write] {inp.get('file_path', '?')}")
+            elif name == "Edit":
+                parts.append(f"[tool:Edit] {inp.get('file_path', '?')}")
+            elif name == "Bash":
+                cmd = _sanitize_evaluator_log_text(str(inp.get("command", "?")))
+                parts.append(f"[tool:Bash] {cmd[:150]}")
+            elif name == "WebSearch":
+                query = _sanitize_evaluator_log_text(str(inp.get("query", "?")))
+                parts.append(f"[tool:WebSearch] {query[:150]}")
+            else:
+                safe = _sanitize_evaluator_log_text(str(inp))
+                parts.append(f"[tool:{name}] {safe[:100]}")
     if not parts:
         return None
     return "\n".join(parts)
@@ -195,7 +219,7 @@ def _format_transcript_turns(
     lines = [
         f"Session source: {client_source}",
         f"Session id: {session_id}",
-        "Transcript: user/assistant text only; tool calls and tool outputs omitted.",
+        "Transcript: user/assistant text with tool call summaries (name + target). Tool outputs omitted.",
         "",
     ]
     for role, text in turns:
@@ -247,7 +271,7 @@ def _load_codex_transcript(session_id: str, client_source: str) -> str:
         role = payload.get("role")
         if role not in {"user", "assistant"}:
             continue
-        text = _extract_text(payload.get("content"))
+        text = _extract_content(payload.get("content"))
         if text:
             turns.append((role, text))
     return _format_transcript_turns(
@@ -270,7 +294,11 @@ def _load_claude_transcript(session_id: str, client_source: str) -> str:
         raise TranscriptLoadError(f"Claude transcript not found: {session_id}")
 
     turns: list[tuple[str, str]] = []
-    seen_message_ids: set[str] = set()
+    # Claude Code emits the same message ID as multiple JSONL records
+    # (thinking, tool_use, text). Accumulate content blocks per message ID.
+    pending_id: str | None = None
+    pending_role: str = ""
+    pending_content: list[Any] = []
     for record in _iter_jsonl(path):
         if not isinstance(record, dict) or record.get("type") not in {
             "user",
@@ -284,13 +312,24 @@ def _load_claude_transcript(session_id: str, client_source: str) -> str:
         if role not in {"user", "assistant"}:
             continue
         message_id = message.get("id") or record.get("uuid")
-        if isinstance(message_id, str):
-            if message_id in seen_message_ids:
-                continue
-            seen_message_ids.add(message_id)
-        text = _extract_text(message.get("content"))
+        # Flush when message ID changes
+        if message_id != pending_id and pending_id is not None:
+            text = _extract_content(pending_content)
+            if text:
+                turns.append((pending_role, text))
+            pending_content = []
+        pending_id = message_id
+        pending_role = role
+        content = message.get("content")
+        if isinstance(content, list):
+            pending_content.extend(content)
+        elif isinstance(content, str) and content.strip():
+            pending_content.append({"type": "text", "text": content})
+    # Flush last message
+    if pending_id is not None:
+        text = _extract_content(pending_content)
         if text:
-            turns.append((role, text))
+            turns.append((pending_role, text))
     return _format_transcript_turns(
         client_source=client_source, session_id=session_id, turns=turns
     )
@@ -319,7 +358,7 @@ def _extract_gemini_turn(record: dict[str, Any]) -> tuple[str, str] | None:
     role = record.get("type") or record.get("role")
     if role not in {"user", "assistant"}:
         return None
-    text = _extract_text(
+    text = _extract_content(
         record.get("message")
         or record.get("content")
         or record.get("text")
@@ -369,7 +408,7 @@ def _load_gemini_transcript(session_id: str, client_source: str) -> str:
             role = item.get("type")
             if role not in {"user", "assistant"}:
                 continue
-            text = _extract_text(item.get("message"))
+            text = _extract_content(item.get("message"))
             if text:
                 turns.append((role, text))
 
@@ -418,7 +457,7 @@ def _extract_opencode_part_text(value: Any) -> str | None:
         return None
     if value.get("synthetic") or value.get("ignored"):
         return None
-    return _extract_text(value.get("text"))
+    return _extract_content(value.get("text"))
 
 
 def _load_sqlite_transcript(
@@ -751,6 +790,7 @@ def _no_op_claude_mem_evaluation() -> dict[str, Any]:
         "summary": "Session was generated by Claude-Mem observer, not a user task.",
         "evidence": ["Claude session file is under the Claude-Mem observer project"],
         "failure_reason": None,
+        "project": None,
     }
 
 
@@ -763,6 +803,7 @@ def _no_op_evaluator_session_evaluation() -> dict[str, Any]:
         "summary": "Session was generated by llm-tracker's evaluator, not a user task.",
         "evidence": ["Session matched llm-tracker evaluator telemetry"],
         "failure_reason": None,
+        "project": None,
     }
 
 
@@ -775,6 +816,7 @@ def _unknown_transcript_unavailable_evaluation(error: Exception) -> dict[str, An
         "summary": "Session transcript could not be loaded from local agent storage.",
         "evidence": [str(error)],
         "failure_reason": None,
+        "project": None,
     }
 
 
@@ -914,6 +956,7 @@ def parse_evaluation_output(output: str) -> dict[str, Any]:
         "summary": payload.get("summary"),
         "evidence": evidence,
         "failure_reason": payload.get("failure_reason"),
+        "project": payload.get("project") if has_substantive_task else None,
     }
 
 
@@ -936,6 +979,7 @@ def _upsert_llm_evaluation(
         summary=evaluation.get("summary"),
         evidence=evaluation.get("evidence"),
         failure_reason=evaluation.get("failure_reason"),
+        project=evaluation.get("project"),
         skip_if_manual=skip_if_manual,
         db_path=db_path,
     )

@@ -232,6 +232,7 @@ def upsert_session_evaluation(
     summary: str | None = None,
     evidence: list[str] | None = None,
     failure_reason: str | None = None,
+    project: str | None = None,
     skip_if_manual: bool = False,
     db_path: str | None = None,
 ) -> None:
@@ -257,6 +258,7 @@ def upsert_session_evaluation(
         record.summary = summary
         record.evidence_json = json.dumps(evidence) if evidence else None
         record.failure_reason = failure_reason
+        record.project = project if source == "llm" else (project or record.project)
         record.evaluated_at = now
         session.commit()
 
@@ -281,6 +283,7 @@ def get_session_evaluation(
             "evidence": json.loads(rec.evidence_json) if rec.evidence_json else [],
             "failure_reason": rec.failure_reason,
             "evaluated_at": rec.evaluated_at,
+            "project": rec.project,
         }
 
 
@@ -300,6 +303,7 @@ def delete_session_evaluation(session_id: str, db_path: str | None = None) -> bo
         rec.evidence_json = None
         rec.failure_reason = None
         rec.evaluated_at = None
+        rec.project = None
         session.commit()
         return True
 
@@ -421,6 +425,7 @@ def _session_record_to_dict(rec: SessionRecord) -> dict[str, Any]:
             "evidence": json.loads(rec.evidence_json) if rec.evidence_json else [],
             "failure_reason": rec.failure_reason,
             "evaluated_at": rec.evaluated_at,
+            "project": rec.project,
         }
     else:
         result["evaluation"] = None

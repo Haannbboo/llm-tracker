@@ -1570,3 +1570,306 @@ def test_run_session_evaluation_job_with_claude_evaluator(
     assert saved["confidence"] == pytest.approx(0.85)
     assert polled is not None
     assert polled["status"] == "succeeded"
+
+
+def test_extract_content_includes_tool_use_summaries(evaluation_module):
+    content = [
+        {"type": "text", "text": "Let me read that file."},
+        {
+            "type": "tool_use",
+            "name": "Read",
+            "input": {"file_path": "/Users/me/project/api.py"},
+        },
+        {
+            "type": "tool_use",
+            "name": "Bash",
+            "input": {"command": "uv sync", "description": "Install deps"},
+        },
+        {
+            "type": "tool_use",
+            "name": "Write",
+            "input": {
+                "file_path": "/Users/me/project/main.py",
+                "content": "print('hi')",
+            },
+        },
+        {
+            "type": "tool_use",
+            "name": "Edit",
+            "input": {"file_path": "/Users/me/project/README.md"},
+        },
+    ]
+    result = evaluation_module._extract_content(content)
+    assert "Let me read that file." in result
+    assert "[tool:Read] /Users/me/project/api.py" in result
+    assert "[tool:Bash] uv sync" in result
+    assert "[tool:Write] /Users/me/project/main.py" in result
+    assert "[tool:Edit] /Users/me/project/README.md" in result
+
+
+def test_extract_content_redacts_secrets_in_bash_commands(evaluation_module):
+    content = [
+        {
+            "type": "tool_use",
+            "name": "Bash",
+            "input": {
+                "command": "export API_KEY=sk-abc123secret && curl -H 'Authorization: Bearer tok_xyz' https://example.com"
+            },
+        },
+    ]
+    result = evaluation_module._extract_content(content)
+    assert "sk-abc123secret" not in result
+    assert "tok_xyz" not in result
+    assert "[tool:Bash]" in result
+
+
+def test_extract_content_skips_thinking_blocks(evaluation_module):
+    content = [
+        {"type": "thinking", "text": "internal reasoning"},
+        {"type": "text", "text": "Here's my answer."},
+    ]
+    result = evaluation_module._extract_content(content)
+    assert result == "Here's my answer."
+
+
+def test_extract_content_handles_string_content(evaluation_module):
+    result = evaluation_module._extract_content("hello world")
+    assert result == "hello world"
+
+
+def test_extract_content_returns_none_for_empty(evaluation_module):
+    assert evaluation_module._extract_content([]) is None
+    assert (
+        evaluation_module._extract_content([{"type": "thinking", "text": "meh"}])
+        is None
+    )
+    assert evaluation_module._extract_content(None) is None
+
+
+def test_parse_evaluation_output_extracts_project(evaluation_module):
+    parsed = evaluation_module.parse_evaluation_output(
+        json.dumps(
+            {
+                "task_title": "Fix auth",
+                "task_title_zh": "修复认证",
+                "summary": "Fixed auth bug.",
+                "outcome": "solved",
+                "confidence": 0.9,
+                "evidence": ["auth fixed"],
+                "failure_reason": None,
+                "project": "llm-tracker",
+            }
+        )
+    )
+    assert parsed["project"] == "llm-tracker"
+
+
+def test_parse_evaluation_output_allows_null_project(evaluation_module):
+    parsed = evaluation_module.parse_evaluation_output(
+        json.dumps(
+            {
+                "task_title": "Fix auth",
+                "task_title_zh": "修复认证",
+                "summary": "Fixed auth bug.",
+                "outcome": "solved",
+                "confidence": 0.9,
+                "evidence": ["auth fixed"],
+                "failure_reason": None,
+                "project": None,
+            }
+        )
+    )
+    assert parsed["project"] is None
+
+
+def test_parse_evaluation_output_defaults_project_to_none(evaluation_module):
+    """Backwards compat: if LLM omits project field, default to None."""
+    parsed = evaluation_module.parse_evaluation_output(
+        json.dumps(
+            {
+                "task_title": "Fix auth",
+                "task_title_zh": "修复认证",
+                "summary": "Fixed auth bug.",
+                "outcome": "solved",
+                "confidence": 0.9,
+                "evidence": ["auth fixed"],
+                "failure_reason": None,
+            }
+        )
+    )
+    assert parsed["project"] is None
+
+
+def test_parse_evaluation_output_clears_project_for_no_op(evaluation_module):
+    parsed = evaluation_module.parse_evaluation_output(
+        json.dumps(
+            {
+                "task_title": "Greeting",
+                "task_title_zh": "问候",
+                "summary": "Just a hello.",
+                "outcome": "no_op",
+                "confidence": 1.0,
+                "evidence": [],
+                "failure_reason": None,
+                "project": "some-project",
+            }
+        )
+    )
+    assert parsed["project"] is None
+
+
+def test_upsert_session_evaluation_stores_project(
+    evaluation_module, database_module, isolated_home
+):
+    db_path = str(isolated_home / "usage.db")
+    database_module.init_db(db_path)
+
+    with database_module.Session(database_module.get_engine(db_path)) as session:
+        session.add(
+            database_module.SessionRecord(
+                session_id="sess-proj",
+                client_source="claude-code",
+                started=1778493600000000,
+                ended=1778495400000000,
+                updated_at="2026-05-27T10:00:00+00:00",
+            )
+        )
+        session.commit()
+
+    database_module.upsert_session_evaluation(
+        session_id="sess-proj",
+        outcome="solved",
+        source="llm",
+        confidence=0.9,
+        task_title="Fix auth",
+        task_title_zh="修复认证",
+        summary="Fixed.",
+        evidence=["done"],
+        failure_reason=None,
+        project="my-cool-project",
+        db_path=db_path,
+    )
+
+    result = database_module.get_session_evaluation("sess-proj", db_path=db_path)
+    assert result is not None
+    assert result["project"] == "my-cool-project"
+
+
+def test_get_session_evaluation_includes_project(
+    evaluation_module, database_module, isolated_home
+):
+    db_path = str(isolated_home / "usage.db")
+    database_module.init_db(db_path)
+
+    with database_module.Session(database_module.get_engine(db_path)) as session:
+        session.add(
+            database_module.SessionRecord(
+                session_id="sess-proj2",
+                client_source="claude-code",
+                started=1778493600000000,
+                ended=1778495400000000,
+                updated_at="2026-05-27T10:00:00+00:00",
+            )
+        )
+        session.commit()
+
+    database_module.upsert_session_evaluation(
+        session_id="sess-proj2",
+        outcome="solved",
+        source="manual",
+        project="hub-router",
+        db_path=db_path,
+    )
+
+    result = database_module.get_session_evaluation("sess-proj2", db_path=db_path)
+    assert result["project"] == "hub-router"
+
+
+def test_delete_session_evaluation_clears_project(
+    evaluation_module, database_module, isolated_home
+):
+    db_path = str(isolated_home / "usage.db")
+    database_module.init_db(db_path)
+
+    with database_module.Session(database_module.get_engine(db_path)) as session:
+        session.add(
+            database_module.SessionRecord(
+                session_id="sess-proj3",
+                client_source="claude-code",
+                started=1778493600000000,
+                ended=1778495400000000,
+                updated_at="2026-05-27T10:00:00+00:00",
+                outcome="solved",
+                source="llm",
+                project="to-be-deleted",
+            )
+        )
+        session.commit()
+
+    database_module.delete_session_evaluation("sess-proj3", db_path=db_path)
+
+    with database_module.Session(database_module.get_engine(db_path)) as session:
+        rec = session.get(database_module.SessionRecord, "sess-proj3")
+        assert rec.project is None
+
+
+def test_upsert_project_source_overwrite_behavior(database_module, isolated_home):
+    db_path = str(isolated_home / "usage.db")
+    database_module.init_db(db_path)
+
+    with database_module.Session(database_module.get_engine(db_path)) as session:
+        session.add(
+            database_module.SessionRecord(
+                session_id="sess-overwrite",
+                client_source="claude-code",
+                started=1778493600000000,
+                ended=1778495400000000,
+                updated_at="2026-05-27T10:00:00+00:00",
+            )
+        )
+        session.commit()
+
+    # 1) LLM sets project
+    database_module.upsert_session_evaluation(
+        session_id="sess-overwrite",
+        outcome="solved",
+        source="llm",
+        project="alpha",
+        db_path=db_path,
+    )
+    assert (
+        database_module.get_session_evaluation("sess-overwrite", db_path=db_path)[
+            "project"
+        ]
+        == "alpha"
+    )
+
+    # 2) Manual eval with project=None preserves existing LLM-set project
+    database_module.upsert_session_evaluation(
+        session_id="sess-overwrite",
+        outcome="partial",
+        source="manual",
+        project=None,
+        db_path=db_path,
+    )
+    assert (
+        database_module.get_session_evaluation("sess-overwrite", db_path=db_path)[
+            "project"
+        ]
+        == "alpha"
+    )
+
+    # 3) LLM eval with project=None clears it
+    database_module.upsert_session_evaluation(
+        session_id="sess-overwrite",
+        outcome="failed",
+        source="llm",
+        project=None,
+        db_path=db_path,
+    )
+    assert (
+        database_module.get_session_evaluation("sess-overwrite", db_path=db_path)[
+            "project"
+        ]
+        is None
+    )
