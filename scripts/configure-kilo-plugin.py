@@ -17,6 +17,13 @@ import sys
 from pathlib import Path
 from typing import Any
 
+_GRAY = "\033[38;2;102;102;102m" if sys.stdout.isatty() else ""
+_RESET = "\033[0m" if sys.stdout.isatty() else ""
+
+
+def _info(msg: str) -> None:
+    print(f"  {_GRAY}{msg}{_RESET}")
+
 
 def load_json(path: Path) -> dict[str, Any]:
     if not path.exists():
@@ -77,7 +84,7 @@ def main() -> int:
     # Install dependencies
     node_modules = plugin_dir / "node_modules"
     if not node_modules.exists():
-        print(f"==> Installing Kilo plugin dependencies in {plugin_dir}")
+        _info(f"Installing Kilo plugin dependencies in {plugin_dir}")
         result = run_npm(["install", "--package-lock=false"], plugin_dir)
         if result is None:
             return warn_skip("npm not found")
@@ -86,15 +93,15 @@ def main() -> int:
 
     # Build
     if not (plugin_dir / "dist" / "index.js").exists():
-        print(f"==> Building Kilo plugin from {plugin_dir}")
+        _info(f"Building Kilo plugin from {plugin_dir}")
         result = run_npm(["run", "build"], plugin_dir)
         if result is None:
             return warn_skip("npm not found")
         if result.returncode != 0:
             return warn_skip(f"plugin build failed:\n{result.stderr}")
-        print("==> Plugin built successfully")
+        _info("Plugin built successfully")
     else:
-        print("==> Plugin already built")
+        _info("Plugin already built")
 
     # Register in config
     config = load_json(config_path)
@@ -126,7 +133,7 @@ def main() -> int:
 
     config["plugin"] = plugins
     save_json(config_path, config)
-    print(f"==> llm-tracker plugin registered in {config_path} (endpoint: {endpoint})")
+    _info(f"llm-tracker plugin registered in {config_path} (endpoint: {endpoint})")
 
     return 0
 

@@ -7,6 +7,15 @@ import sys
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+
+_GRAY = "\033[38;2;102;102;102m" if sys.stdout.isatty() else ""
+_RESET = "\033[0m" if sys.stdout.isatty() else ""
+
+
+def _info(msg: str) -> None:
+    print(f"  {_GRAY}{msg}{_RESET}")
+
+
 # Standalone script entrypoint: ensure project imports work without PYTHONPATH=.
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
@@ -25,9 +34,9 @@ def main() -> int:
     config_path, default_config_path = sys.argv[1:3]
     changed = sync_config_file_with_defaults(config_path, default_config_path)
     if changed:
-        print(f"==> Updated config with missing defaults at {config_path}")
+        _info(f"Updated config with missing defaults at {config_path}")
     else:
-        print(f"==> Config already includes current defaults at {config_path}")
+        _info(f"Config already includes current defaults at {config_path}")
     return 0
 
 

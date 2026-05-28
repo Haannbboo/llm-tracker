@@ -21,13 +21,13 @@ banner
 step_header "Pre-flight checks"
 
 if [[ ! -x "${PYTHON}" ]]; then
-  fail "Virtual environment not found — run scripts/install.sh first"
+  fail "Virtual environment not found — run scripts/bootstrap.sh first"
   exit 1
 fi
 pass "Python: ${PYTHON}"
 
 if [[ ! -L "${HOME}/.local/bin/llm-tracker" ]]; then
-  info "NOTE: CLI symlink missing — run scripts/install.sh to set it up"
+  info "NOTE: CLI symlink missing — run scripts/bootstrap.sh to set it up"
 fi
 
 if [[ ! -f "${SUPERVISORD_CONF}" ]]; then

@@ -22,19 +22,19 @@ AUTO_PORT_ASSIGNER="${ROOT_DIR}/scripts/auto-assign-ports.py"
 source "${ROOT_DIR}/scripts/lib/terminal.sh"
 
 # Show banner only when run standalone (not from bootstrap.sh)
-if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+if [[ -z "${LLM_TRACKER_SKIP_BANNER:-}" ]]; then
   banner
   step_header "Starting services"
 fi
 
 # ── Verification ────────────────────────────────────────────────────
 if [[ ! -x "${PYTHON}" ]]; then
-  fail "Virtual environment not found — run scripts/install.sh first"
+  fail "Virtual environment not found — run scripts/bootstrap.sh first"
   exit 1
 fi
 
 if [[ ! -L "${HOME}/.local/bin/llm-tracker" ]]; then
-  info "NOTE: CLI symlink missing — run scripts/install.sh to set it up"
+  info "NOTE: CLI symlink missing — run scripts/bootstrap.sh to set it up"
 fi
 
 # ── Install deps when requirements.txt changes ─────────────────────

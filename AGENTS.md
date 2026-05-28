@@ -111,15 +111,15 @@ Use targeted tests during iteration, but before commit/PR run the relevant full 
 
 ## Bootstrap architecture
 
-Three-script chain, all internal except `bootstrap.sh`:
+Three-script chain:
 
 ```txt
-bootstrap.sh → install.sh → start.sh → post-checks
+install.sh (root) → bootstrap.sh → start.sh
 ```
 
-- `bootstrap.sh` — public entrypoint. One command for full setup.
-- `install.sh` — Python venv, deps, CLI symlink, frontend build with Node.js detection.
-- `start.sh` — supervisord, port checks, API restart, serves `frontend/dist`.
+- `install.sh` — curl-pipe-bash entrypoint at repo root. Checks prerequisites (git, bash, curl), clones/updates repo to `~/.llm-tracker/src`, delegates to `scripts/bootstrap.sh`.
+- `bootstrap.sh` — installs deps (via embedded `_install_deps()`), starts services via `start.sh`, runs post-start verification.
+- `start.sh` — supervisord, port checks, agent config, schema migrations, serves `frontend/dist`.
 
 Quick backend iteration:
 

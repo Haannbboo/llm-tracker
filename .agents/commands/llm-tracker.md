@@ -131,7 +131,7 @@ Do not casually rewrite bootstrap scripts. They are the user-facing install path
 Architecture:
 
 ```txt
-bootstrap.sh → install.sh → start.sh → post-checks
+install.sh (root) → bootstrap.sh → start.sh
 ```
 
 Quick backend restart:

@@ -7,6 +7,13 @@ import sys
 from pathlib import Path
 from typing import Any
 
+_GRAY = "\033[38;2;102;102;102m" if sys.stdout.isatty() else ""
+_RESET = "\033[0m" if sys.stdout.isatty() else ""
+
+
+def _info(msg: str) -> None:
+    print(f"  {_GRAY}{msg}{_RESET}")
+
 
 def load_settings(path: Path) -> dict[str, Any]:
     if not path.exists():
@@ -58,9 +65,9 @@ def main() -> int:
 
     if changed:
         save_settings(settings_path, settings)
-        print(f"==> Claude Code telemetry configured in {settings_path}")
+        _info(f"Claude Code telemetry configured in {settings_path}")
     else:
-        print(f"==> Claude Code telemetry already up-to-date in {settings_path}")
+        _info(f"Claude Code telemetry already up-to-date in {settings_path}")
 
     return 0
 

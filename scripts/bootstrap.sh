@@ -73,6 +73,99 @@ except Exception:
 ' "${url}"
 }
 
+_install_deps() {
+  if [[ "${LLM_TRACKER_SKIP_INSTALL:-0}" == "1" ]]; then
+    mkdir -p "${HOME}/.local/bin" "${HOME}/.llm-tracker"
+    ln -sf "${SCRIPTS_DIR}/llm-tracker" "${HOME}/.local/bin/llm-tracker"
+    chmod +x "${SCRIPTS_DIR}/llm-tracker"
+    info "Installation skipped (LLM_TRACKER_SKIP_INSTALL=1)"
+    return 0
+  fi
+
+  local python_version="${LLM_TRACKER_PYTHON_VERSION:-3.13}"
+  local venv_dir="${ROOT_DIR}/.venv"
+  local bin_dir="${HOME}/.local/bin"
+  local cli_link="${bin_dir}/llm-tracker"
+  local cli_source="${SCRIPTS_DIR}/llm-tracker"
+  local frontend_dir="${ROOT_DIR}/frontend"
+
+  info "Setting up llm-tracker environment..."
+
+  # 1. Bootstrap uv
+  if ! command -v uv >/dev/null 2>&1; then
+    info "Installing uv..."
+    curl -LsSf https://astral.sh/uv/install.sh | sh
+    export PATH="${HOME}/.local/bin:${PATH}"
+  fi
+
+  # 2. Create venv
+  if [[ ! -x "${venv_dir}/bin/python" ]]; then
+    info "Creating venv..."
+    uv venv --python "${python_version}" "${venv_dir}"
+  fi
+
+  # 3. Install initial dependencies
+  info "Installing dependencies..."
+  uv pip install --python "${venv_dir}/bin/python" -r "${ROOT_DIR}/requirements.txt"
+
+  # 4. Build frontend
+  if command -v node >/dev/null 2>&1 && command -v npm >/dev/null 2>&1; then
+    local node_version node_major
+    node_version=$(node -v | cut -d'v' -f2)
+    node_major=$(echo "$node_version" | cut -d'.' -f1)
+
+    if [[ "$node_major" -lt 18 ]]; then
+      echo ""
+      echo "⚠️  Node.js version $node_version is too old (minimum v18 required)."
+      echo "   Skipping frontend build. Dashboard will not be available."
+      echo ""
+    elif [[ -d "${frontend_dir}" ]]; then
+      info "Building frontend (Node $node_version)..."
+      if ! (cd "${frontend_dir}" && npm install --ignore-scripts && npm run build); then
+        echo ""
+        echo "❌ Frontend build failed."
+        echo "   If you see 'Cannot find native binding', try cleaning the frontend directory and retrying:"
+        echo "     rm -rf frontend/node_modules frontend/package-lock.json && bash scripts/bootstrap.sh"
+        echo ""
+        exit 1
+      fi
+      info "Frontend built: ${frontend_dir}/dist"
+    fi
+  else
+    echo ""
+    echo "⚠️  Node.js not found — skipping frontend build."
+    echo "   The dashboard will not be available until you install Node.js and run:"
+    echo "     cd frontend && npm install && npm run build"
+    echo ""
+  fi
+
+  # 5. CLI Setup
+  info "Setting up CLI symlink..."
+  mkdir -p "${bin_dir}"
+  ln -sf "${cli_source}" "${cli_link}"
+  chmod +x "${cli_source}"
+
+  # 6. PATH Check & Notification
+  if [[ ":$PATH:" != *":${bin_dir}:"* ]]; then
+    echo ""
+    echo "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
+    echo "WARNING: ${bin_dir} is not in your PATH."
+    echo "To use 'llm-tracker' from anywhere, add this to your shell profile:"
+    echo ""
+    if [[ "${SHELL}" == *"/zsh" ]]; then
+      echo "  echo 'export PATH=\"\$HOME/.local/bin:\$PATH\"' >> ~/.zshrc"
+      echo "  source ~/.zshrc"
+    else
+      echo "  echo 'export PATH=\"\$HOME/.local/bin:\$PATH\"' >> ~/.bashrc"
+      echo "  source ~/.bashrc"
+    fi
+    echo "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
+    echo ""
+  fi
+
+  info "Installation complete! You can now use 'llm-tracker' (if in PATH) or 'scripts/start.sh'."
+}
+
 _verify_agent_setup_health() {
   local url="http://${HOST}:${API_PORT}/local/setup-health"
   local health_json
@@ -109,20 +202,27 @@ _verify_agent_setup_health() {
         LLM_TRACKER_GEMINI_DETECTED="${gemini_detected}" \
         LLM_TRACKER_OPENCODE_DETECTED="${opencode_detected}" \
         LLM_TRACKER_KILO_DETECTED="${kilo_detected}" \
+        LLM_TRACKER_GREEN="${_T_GREEN}" \
+        LLM_TRACKER_RED="${_T_RED}" \
+        LLM_TRACKER_RESET="${_T_RESET}" \
         "${python}" -c '
 import json
 import os
 import sys
 
+GREEN = os.environ.get("LLM_TRACKER_GREEN", "")
+RED = os.environ.get("LLM_TRACKER_RED", "")
+RESET = os.environ.get("LLM_TRACKER_RESET", "")
+
 try:
     data = json.loads(sys.stdin.read())
 except Exception:
-    print("  ✗ Agent tracking: invalid setup-health response")
+    print(f"  {RED}✗{RESET} Agent tracking: invalid setup-health response")
     sys.exit(1)
 
 agents = data.get("agents")
 if not isinstance(agents, dict):
-    print("  ✗ Agent tracking: setup-health response is missing agents")
+    print(f"  {RED}✗{RESET} Agent tracking: setup-health response is missing agents")
     sys.exit(1)
 
 ready = 0
@@ -138,7 +238,7 @@ for key, label in (
     agent = agents.get(key)
     if not isinstance(agent, dict):
         failed += 1
-        print(f"  ✗ {label}: setup health unavailable")
+        print(f"  {RED}✗{RESET} {label}: setup health unavailable")
         continue
 
     status = agent.get("status")
@@ -148,22 +248,24 @@ for key, label in (
 
     if not detected:
         skipped += 1
-        print(f"  ✓ {label}: skipped")
+        print(f"  {GREEN}✓{RESET} {label}: skipped")
     elif status == "ready" and endpoint_matches:
         ready += 1
-        print(f"  ✓ {label}: ready")
+        print(f"  {GREEN}✓{RESET} {label}: ready")
     elif status == "wrong_endpoint" or (configured and not endpoint_matches):
         failed += 1
-        print(f"  ✗ {label}: endpoint mismatch")
+        print(f"  {RED}✗{RESET} {label}: endpoint mismatch")
     elif status == "missing_config":
         failed += 1
-        print(f"  ✗ {label}: OTLP not configured")
+        print(f"  {RED}✗{RESET} {label}: OTLP not configured")
     else:
         failed += 1
-        print(f"  ✗ {label}: setup health unavailable")
+        print(f"  {RED}✗{RESET} {label}: setup health unavailable")
 
-icon = "✓" if failed == 0 else "✗"
-print(f"  {icon} Agents: {ready} ready, {skipped} skipped, {failed} failed")
+if failed == 0:
+    print(f"  {GREEN}✓{RESET} Agents: {ready} ready, {skipped} skipped, {failed} failed")
+else:
+    print(f"  {RED}✗{RESET} Agents: {ready} ready, {skipped} skipped, {failed} failed")
 sys.exit(1 if failed else 0)
 '
   then
@@ -174,15 +276,17 @@ sys.exit(1 if failed else 0)
 }
 
 # ── Banner ──────────────────────────────────────────────────────────
-banner
+if [[ -z "${LLM_TRACKER_SKIP_BANNER:-}" ]]; then
+  banner
+fi
 
 # ── Step 1: Install ─────────────────────────────────────────────────
 step_header "Installing dependencies & CLI"
-bash "${SCRIPTS_DIR}/install.sh"
+_install_deps
 
 # ── Step 2: Start services ──────────────────────────────────────────
 step_header "Starting services"
-bash "${SCRIPTS_DIR}/start.sh"
+LLM_TRACKER_SKIP_BANNER=1 bash "${SCRIPTS_DIR}/start.sh"
 
 # ── Step 3: Post-start checks ──────────────────────────────────────
 step_header "Running post-start checks"
