@@ -1628,3 +1628,75 @@ def test_extract_content_returns_none_for_empty(evaluation_module):
         is None
     )
     assert evaluation_module._extract_content(None) is None
+
+
+def test_parse_evaluation_output_extracts_project(evaluation_module):
+    parsed = evaluation_module.parse_evaluation_output(
+        json.dumps(
+            {
+                "task_title": "Fix auth",
+                "task_title_zh": "修复认证",
+                "summary": "Fixed auth bug.",
+                "outcome": "solved",
+                "confidence": 0.9,
+                "evidence": ["auth fixed"],
+                "failure_reason": None,
+                "project": "llm-tracker",
+            }
+        )
+    )
+    assert parsed["project"] == "llm-tracker"
+
+
+def test_parse_evaluation_output_allows_null_project(evaluation_module):
+    parsed = evaluation_module.parse_evaluation_output(
+        json.dumps(
+            {
+                "task_title": "Fix auth",
+                "task_title_zh": "修复认证",
+                "summary": "Fixed auth bug.",
+                "outcome": "solved",
+                "confidence": 0.9,
+                "evidence": ["auth fixed"],
+                "failure_reason": None,
+                "project": None,
+            }
+        )
+    )
+    assert parsed["project"] is None
+
+
+def test_parse_evaluation_output_defaults_project_to_none(evaluation_module):
+    """Backwards compat: if LLM omits project field, default to None."""
+    parsed = evaluation_module.parse_evaluation_output(
+        json.dumps(
+            {
+                "task_title": "Fix auth",
+                "task_title_zh": "修复认证",
+                "summary": "Fixed auth bug.",
+                "outcome": "solved",
+                "confidence": 0.9,
+                "evidence": ["auth fixed"],
+                "failure_reason": None,
+            }
+        )
+    )
+    assert parsed["project"] is None
+
+
+def test_parse_evaluation_output_clears_project_for_no_op(evaluation_module):
+    parsed = evaluation_module.parse_evaluation_output(
+        json.dumps(
+            {
+                "task_title": "Greeting",
+                "task_title_zh": "问候",
+                "summary": "Just a hello.",
+                "outcome": "no_op",
+                "confidence": 1.0,
+                "evidence": [],
+                "failure_reason": None,
+                "project": "some-project",
+            }
+        )
+    )
+    assert parsed["project"] is None
