@@ -1795,3 +1795,65 @@ def test_delete_session_evaluation_clears_project(
     with database_module.Session(database_module.get_engine(db_path)) as session:
         rec = session.get(database_module.SessionRecord, "sess-proj3")
         assert rec.project is None
+
+
+def test_upsert_project_source_overwrite_behavior(database_module, isolated_home):
+    db_path = str(isolated_home / "usage.db")
+    database_module.init_db(db_path)
+
+    with database_module.Session(database_module.get_engine(db_path)) as session:
+        session.add(
+            database_module.SessionRecord(
+                session_id="sess-overwrite",
+                client_source="claude-code",
+                started=1778493600000000,
+                ended=1778495400000000,
+                updated_at="2026-05-27T10:00:00+00:00",
+            )
+        )
+        session.commit()
+
+    # 1) LLM sets project
+    database_module.upsert_session_evaluation(
+        session_id="sess-overwrite",
+        outcome="solved",
+        source="llm",
+        project="alpha",
+        db_path=db_path,
+    )
+    assert (
+        database_module.get_session_evaluation("sess-overwrite", db_path=db_path)[
+            "project"
+        ]
+        == "alpha"
+    )
+
+    # 2) Manual eval with project=None preserves existing LLM-set project
+    database_module.upsert_session_evaluation(
+        session_id="sess-overwrite",
+        outcome="partial",
+        source="manual",
+        project=None,
+        db_path=db_path,
+    )
+    assert (
+        database_module.get_session_evaluation("sess-overwrite", db_path=db_path)[
+            "project"
+        ]
+        == "alpha"
+    )
+
+    # 3) LLM eval with project=None clears it
+    database_module.upsert_session_evaluation(
+        session_id="sess-overwrite",
+        outcome="failed",
+        source="llm",
+        project=None,
+        db_path=db_path,
+    )
+    assert (
+        database_module.get_session_evaluation("sess-overwrite", db_path=db_path)[
+            "project"
+        ]
+        is None
+    )
