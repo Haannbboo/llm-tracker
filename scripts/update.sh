@@ -79,9 +79,8 @@ if ! git -C "${ROOT_DIR}" remote get-url "${UPSTREAM_REMOTE}" >/dev/null 2>&1; t
   fail "llm-tracker update refused: remote '${UPSTREAM_REMOTE}' not found."
   exit 1
 fi
-REMOTE_URL="$(git -C "${ROOT_DIR}" remote get-url "${UPSTREAM_REMOTE}" 2>/dev/null)"
 pass "Branch: ${BRANCH} → ${UPSTREAM}"
-pass "Remote: ${REMOTE_URL}"
+pass "Remote: ${UPSTREAM_REMOTE}"
 
 # ── Fetch ───────────────────────────────────────────────────────────
 step_header "Fetching updates"
