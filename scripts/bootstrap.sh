@@ -315,6 +315,19 @@ HOST="127.0.0.1"
 CHECKS_PASS=0
 CHECKS_FAIL=0
 
+# Wait for a port to become reachable (gunicorn may still be starting)
+_wait_for_port() {
+  local host="$1" port="$2" label="$3"
+  local retries=10
+  for ((i = 1; i <= retries; i++)); do
+    if _port_listening "${host}" "${port}"; then
+      return 0
+    fi
+    sleep 1
+  done
+  return 1
+}
+
 # Config file
 if [[ -f "${CONFIG_PATH}" ]]; then
   pass "Config: ${CONFIG_PATH}"
@@ -342,8 +355,8 @@ else
   CHECKS_FAIL=$((CHECKS_FAIL + 1))
 fi
 
-# API reachable
-if _port_listening "${HOST}" "${API_PORT}"; then
+# API reachable (wait for gunicorn to finish starting)
+if _wait_for_port "${HOST}" "${API_PORT}" "API"; then
   pass "API running: http://${HOST}:${API_PORT}"
   CHECKS_PASS=$((CHECKS_PASS + 1))
 else
@@ -352,7 +365,7 @@ else
 fi
 
 # Proxy listening
-if _port_listening "${HOST}" "${PROXY_PORT}"; then
+if _wait_for_port "${HOST}" "${PROXY_PORT}" "Proxy"; then
   pass "Proxy listening: http://${HOST}:${PROXY_PORT}"
   CHECKS_PASS=$((CHECKS_PASS + 1))
 else
@@ -361,7 +374,7 @@ else
 fi
 
 # OTLP listening
-if _port_listening "${HOST}" "${OTLP_PORT}"; then
+if _wait_for_port "${HOST}" "${OTLP_PORT}" "OTLP"; then
   pass "OTLP listening: http://${HOST}:${OTLP_PORT}"
   CHECKS_PASS=$((CHECKS_PASS + 1))
 else

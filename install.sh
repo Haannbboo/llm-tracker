@@ -49,12 +49,33 @@ EXPECTED_HTTPS_REMOTE="https://github.com/${REPO}.git"
 EXPECTED_SSH_REMOTE="git@github.com:${REPO}.git"
 
 # ── Prerequisites ──────────────────────────────────────────────────
-for cmd in git bash curl; do
+for cmd in bash curl; do
   if ! command -v "$cmd" >/dev/null 2>&1; then
     echo "Error: $cmd is required but not found." >&2
     exit 1
   fi
 done
+
+# Auto-install git if missing (common on bare VMs)
+if ! command -v git >/dev/null 2>&1; then
+  _info "git not found — attempting to install..."
+  installed=0
+  if command -v apt-get >/dev/null 2>&1; then
+    sudo apt-get update -qq && sudo apt-get install -y -qq git && installed=1
+  elif command -v dnf >/dev/null 2>&1; then
+    sudo dnf install -y -q git && installed=1
+  elif command -v yum >/dev/null 2>&1; then
+    sudo yum install -y -q git && installed=1
+  elif command -v apk >/dev/null 2>&1; then
+    sudo apk add -q git && installed=1
+  fi
+  if [[ "${installed}" -ne 1 ]]; then
+    echo "Error: git is required but could not be installed automatically." >&2
+    echo "Please install git manually and re-run this installer." >&2
+    exit 1
+  fi
+  _info "git installed successfully."
+fi
 
 # ── Clone or update ───────────────────────────────────────────────
 if [[ -d "${INSTALL_DIR}" && ! -d "${INSTALL_DIR}/.git" ]]; then
