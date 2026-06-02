@@ -127,7 +127,7 @@ def _run_bootstrap(
         env=env,
         text=True,
         capture_output=True,
-        timeout=20,
+        timeout=45,
     )
 
 
