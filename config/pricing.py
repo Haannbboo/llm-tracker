@@ -45,6 +45,7 @@ _PROVIDER_PREFIX_RE = re.compile(
     r"|voyage/"  # voyage/voyage-3
     r"|databricks/"  # databricks/databricks-meta-...
     r"|xai/"  # xai/grok-3
+    r"|stepfun/"  # stepfun/step-2-16k
     r")",
     re.IGNORECASE,
 )
