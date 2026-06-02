@@ -20,6 +20,7 @@ PROVIDER_RULES: list[tuple[str, str]] = [
     ("openrouter.ai", "OpenRouter"),
     ("api.openai", "OpenAI"),
     ("api.github", "GitHub"),
+    ("stepfun", "StepFun"),
     ("azure", "Azure"),
     ("google", "Google"),
     ("amazon", "AWS"),
