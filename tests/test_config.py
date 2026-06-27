@@ -184,6 +184,22 @@ def test_build_maps_allows_provider_without_models(config_module):
     assert model_map == {}
 
 
+def test_build_maps_normalizes_empty_api_key_to_none(config_module):
+    provider_map, _ = config_module.build_maps(
+        {
+            "models": {},
+            "providers": {
+                "empty-key": {
+                    "base_url": "https://empty.example/v1",
+                    "api_key": "",
+                },
+            },
+        }
+    )
+
+    assert provider_map["empty-key"].api_key is None
+
+
 def test_build_cost_maps_parses_global_and_provider_model_costs(config_module):
     model_costs, provider_model_costs = config_module.build_cost_maps(
         {
