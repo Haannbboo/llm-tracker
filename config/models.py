@@ -22,6 +22,7 @@ class ProviderConfig:
     name: str
     base_url: str
     price_multiplier: float = 1.0
+    api_key: str | None = None
 
 
 @dataclass(frozen=True)

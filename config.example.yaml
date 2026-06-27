@@ -207,12 +207,14 @@ models:
 providers:
   my-provider:
     base_url: https://api.example.com/v1
+    # api_key: sk-...          # optional; if set, proxy injects Authorization header
     models:
       gemini-3.1-pro-preview: {}
       claude-sonnet-4-6: {}
       gpt-5.4: {}
   openrouter:
     base_url: https://openrouter.ai/api/v1
+    # api_key: sk-or-...       # optional; overrides any client-supplied Authorization
     models:
       claude-sonnet-4-6: {}
       claude-haiku-4-5: {}

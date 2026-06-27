@@ -117,13 +117,18 @@ def build_upstream_url(base_url: str, path: str) -> str:
     return urljoin(base_url.rstrip("/") + "/", stripped_path)
 
 
-def build_forward_headers(request: Request) -> dict[str, str]:
+def build_forward_headers(
+    request: Request, provider: ProviderConfig | None = None
+) -> dict[str, str]:
     """Filter and prepare headers for forwarding to upstream provider."""
-    return {
+    headers = {
         k: v
         for k, v in request.headers.items()
-        if k.lower() not in {"host", "content-length"}
+        if k.lower() not in {"host", "content-length", "authorization"}
     }
+    if provider and provider.api_key:
+        headers["authorization"] = f"Bearer {provider.api_key}"
+    return headers
 
 
 def parse_json_body(body: bytes) -> dict[str, Any]:
@@ -239,7 +244,7 @@ async def forward(request: Request, path: str):
         body = json.dumps(body_json).encode()
 
     url = build_upstream_url(provider.base_url, path)
-    headers = build_forward_headers(request)
+    headers = build_forward_headers(request, provider)
     started_at = time.monotonic()
 
     if body_json.get("stream", False):

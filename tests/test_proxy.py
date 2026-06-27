@@ -90,11 +90,54 @@ def test_build_forward_headers_filters_hop_by_hop_fields(proxy_module):
 
     headers = proxy_module.build_forward_headers(request)
 
-    assert headers["authorization"] == "Bearer caller-token"
     assert headers["x-request-id"] == "abc123"
     assert headers["accept"] == "application/json"
     assert "host" not in headers
     assert "content-length" not in headers
+    assert "authorization" not in headers
+
+
+def test_build_forward_headers_injects_provider_api_key(proxy_module):
+    request = proxy_module.Request(
+        {
+            "type": "http",
+            "method": "POST",
+            "path": "/v1/chat/completions",
+            "headers": [
+                (b"host", b"localhost:4000"),
+                (b"authorization", b"Bearer caller-token"),
+                (b"x-request-id", b"abc123"),
+            ],
+        }
+    )
+    provider = proxy_module.ProviderConfig(
+        name="test", base_url="https://api.test/v1", api_key="sk-test-key"
+    )
+
+    headers = proxy_module.build_forward_headers(request, provider)
+
+    assert headers["authorization"] == "Bearer sk-test-key"
+    assert headers["x-request-id"] == "abc123"
+
+
+def test_build_forward_headers_passes_through_without_provider_key(proxy_module):
+    request = proxy_module.Request(
+        {
+            "type": "http",
+            "method": "POST",
+            "path": "/v1/chat/completions",
+            "headers": [
+                (b"authorization", b"Bearer caller-token"),
+                (b"x-request-id", b"abc123"),
+            ],
+        }
+    )
+    provider = proxy_module.ProviderConfig(name="test", base_url="https://api.test/v1")
+
+    headers = proxy_module.build_forward_headers(request, provider)
+
+    assert "authorization" not in headers
+    assert headers["x-request-id"] == "abc123"
 
 
 def test_parse_json_body_returns_empty_dict_for_empty_body(proxy_module):
