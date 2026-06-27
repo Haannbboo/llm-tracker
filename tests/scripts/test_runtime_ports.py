@@ -335,6 +335,10 @@ def test_start_configures_only_installed_agent_clis_under_isolated_home(tmp_path
               */auto-assign-ports.py)
                 exit 0
                 ;;
+              */read-otlp-config.py)
+                printf '4002 localhost\\n'
+                exit 0
+                ;;
               -c)
                 printf '4002\\n'
                 exit 0

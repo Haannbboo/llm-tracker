@@ -173,9 +173,9 @@ def strip_all_llm_tracker_hooks(settings: dict[str, Any]) -> bool:
 
 
 def main() -> int:
-    if len(sys.argv) not in (4, 5):
+    if len(sys.argv) not in (4, 5, 6):
         print(
-            "usage: configure-gemini-settings.py USER_SETTINGS PROJECT_SETTINGS HOOK_PATH [OTLP_PORT]",
+            "usage: configure-gemini-settings.py USER_SETTINGS PROJECT_SETTINGS HOOK_PATH [OTLP_PORT] [HOST]",
             file=sys.stderr,
         )
         return 1
@@ -183,11 +183,12 @@ def main() -> int:
     user_settings_path = Path(sys.argv[1]).expanduser()
     project_settings_path = Path(sys.argv[2]).expanduser()
     hook_path = str(Path(sys.argv[3]).resolve())
-    otlp_port = sys.argv[4] if len(sys.argv) == 5 else "4002"
+    otlp_port = sys.argv[4] if len(sys.argv) >= 5 else "4002"
+    host = sys.argv[5] if len(sys.argv) >= 6 else "localhost"
 
     global DESIRED_TELEMETRY
     DESIRED_TELEMETRY = DESIRED_TELEMETRY.copy()
-    DESIRED_TELEMETRY["otlpEndpoint"] = f"http://localhost:{otlp_port}"
+    DESIRED_TELEMETRY["otlpEndpoint"] = f"http://{host}:{otlp_port}"
 
     # Install telemetry + hooks into user settings (global, applies to all Gemini CLI usage)
     user_settings = load_settings(user_settings_path)

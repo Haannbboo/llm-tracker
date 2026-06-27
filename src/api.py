@@ -923,10 +923,10 @@ async def detect_local_agents():
 
 
 def _local_setup_expected_endpoints() -> dict[str, str]:
-    otlp_port = CONFIG["server"].get(
-        "otlp_port", CONFIG["server"].get("port", 4000) + 2
-    )
-    base = f"http://localhost:{otlp_port}"
+    from config.server_config import resolve_server_urls
+
+    urls = resolve_server_urls(CONFIG)
+    base = urls["otlp_url"]
     return {"otlp_endpoint": base, "otlp_logs_endpoint": f"{base}/v1/logs"}
 
 
@@ -1023,7 +1023,16 @@ async def get_local_setup_health():
     opencode_endpoint = None
     opencode_plugin_registered = False
     opencode_plugin_suffixes = ("plugins/opencode/dist/index.js",)
-    opencode_default_endpoint = "http://localhost:4005/v1/logs"
+    _otlp_host = (
+        CONFIG["server"]
+        .get("base_url", "")
+        .rstrip("/")
+        .replace("http://", "")
+        .replace("https://", "")
+        if CONFIG["server"].get("base_url")
+        else "localhost"
+    )
+    opencode_default_endpoint = f"http://{_otlp_host}:4005/v1/logs"
     if isinstance(opencode_plugins, list):
         for entry in opencode_plugins:
             entry_path = (
@@ -1060,7 +1069,7 @@ async def get_local_setup_health():
     kilo_endpoint = None
     kilo_plugin_registered = False
     kilo_plugin_suffix = "plugins/kilo/dist/index.js"
-    kilo_default_endpoint = "http://localhost:4005/v1/logs"
+    kilo_default_endpoint = f"http://{_otlp_host}:4005/v1/logs"
     if isinstance(kilo_plugins, list):
         for entry in kilo_plugins:
             entry_path = (

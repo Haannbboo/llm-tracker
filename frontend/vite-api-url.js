@@ -8,9 +8,12 @@ const DEFAULT_API_URL = 'http://localhost:4001'
 
 function buildApiUrlFromConfig(config) {
   const server = config?.server ?? {}
-  const host = server.host || 'localhost'
   const port = server.port ?? 4000
   const apiPort = server.api_port ?? port + 1
+  if (server.base_url) {
+    return `${server.base_url.replace(/\/+$/, '')}:${apiPort}`
+  }
+  const host = server.host || 'localhost'
   return `http://${host}:${apiPort}`
 }
 

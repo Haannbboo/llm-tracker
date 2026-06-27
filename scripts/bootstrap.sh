@@ -312,6 +312,23 @@ if [[ -f "${CONFIG_PATH}" ]]; then
 fi
 
 HOST="127.0.0.1"
+
+# Read base_url for display URLs (external address)
+BASE_URL=""
+if [[ -f "${CONFIG_PATH}" ]]; then
+  BASE_URL="$(grep -E "^\s+base_url:" "${CONFIG_PATH}" 2>/dev/null | head -1 | sed 's/.*base_url:\s*//' | tr -d '"' || true)"
+fi
+# Derive display host from base_url, fall back to 127.0.0.1
+if [[ -n "${BASE_URL}" ]]; then
+  DISPLAY_HOST="${BASE_URL#http://}"
+  DISPLAY_HOST="${DISPLAY_HOST#https://}"
+  DISPLAY_HOST="${DISPLAY_HOST%%:*}"  # strip port if any
+  DISPLAY_SCHEME="${BASE_URL%%://*}"
+else
+  DISPLAY_HOST="127.0.0.1"
+  DISPLAY_SCHEME="http"
+fi
+
 CHECKS_PASS=0
 CHECKS_FAIL=0
 
@@ -357,28 +374,28 @@ fi
 
 # API reachable (wait for gunicorn to finish starting)
 if _wait_for_port "${HOST}" "${API_PORT}" "API"; then
-  pass "API running: http://${HOST}:${API_PORT}"
+  pass "API running: ${DISPLAY_SCHEME}://${DISPLAY_HOST}:${API_PORT}"
   CHECKS_PASS=$((CHECKS_PASS + 1))
 else
-  fail "API reachable: http://${HOST}:${API_PORT} (not responding)"
+  fail "API reachable: ${DISPLAY_SCHEME}://${DISPLAY_HOST}:${API_PORT} (not responding)"
   CHECKS_FAIL=$((CHECKS_FAIL + 1))
 fi
 
 # Proxy listening
 if _wait_for_port "${HOST}" "${PROXY_PORT}" "Proxy"; then
-  pass "Proxy listening: http://${HOST}:${PROXY_PORT}"
+  pass "Proxy listening: ${DISPLAY_SCHEME}://${DISPLAY_HOST}:${PROXY_PORT}"
   CHECKS_PASS=$((CHECKS_PASS + 1))
 else
-  fail "Proxy listening: http://${HOST}:${PROXY_PORT} (not responding)"
+  fail "Proxy listening: ${DISPLAY_SCHEME}://${DISPLAY_HOST}:${PROXY_PORT} (not responding)"
   CHECKS_FAIL=$((CHECKS_FAIL + 1))
 fi
 
 # OTLP listening
 if _wait_for_port "${HOST}" "${OTLP_PORT}" "OTLP"; then
-  pass "OTLP listening: http://${HOST}:${OTLP_PORT}"
+  pass "OTLP listening: ${DISPLAY_SCHEME}://${DISPLAY_HOST}:${OTLP_PORT}"
   CHECKS_PASS=$((CHECKS_PASS + 1))
 else
-  fail "OTLP listening: http://${HOST}:${OTLP_PORT} (not responding)"
+  fail "OTLP listening: ${DISPLAY_SCHEME}://${DISPLAY_HOST}:${OTLP_PORT} (not responding)"
   CHECKS_FAIL=$((CHECKS_FAIL + 1))
 fi
 
@@ -386,14 +403,14 @@ fi
 if command -v curl >/dev/null 2>&1; then
   _dash_ct="$(curl --connect-timeout 3 -s -o /dev/null -w '%{content_type}' "http://${HOST}:${API_PORT}/" 2>/dev/null || true)"
   if [[ "${_dash_ct}" == text/html* ]]; then
-    pass "Dashboard: http://${HOST}:${API_PORT}"
+    pass "Dashboard: ${DISPLAY_SCHEME}://${DISPLAY_HOST}:${API_PORT}"
     CHECKS_PASS=$((CHECKS_PASS + 1))
   else
-    fail "Dashboard: http://${HOST}:${API_PORT} (frontend not served)"
+    fail "Dashboard: ${DISPLAY_SCHEME}://${DISPLAY_HOST}:${API_PORT} (frontend not served)"
     CHECKS_FAIL=$((CHECKS_FAIL + 1))
   fi
 else
-  pass "Dashboard: http://${HOST}:${API_PORT} (curl not available, skipped)"
+  pass "Dashboard: ${DISPLAY_SCHEME}://${DISPLAY_HOST}:${API_PORT} (curl not available, skipped)"
   CHECKS_PASS=$((CHECKS_PASS + 1))
 fi
 

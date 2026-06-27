@@ -1,0 +1,11 @@
+services:
+  llm-tracker:
+    build: .
+    container_name: llm-tracker
+    restart: unless-stopped
+    ports:
+      - "4000:4000"   # proxy
+      - "4001:4001"   # api + frontend
+      - "4002:4002"   # otlp
+    volumes:
+      - ./config.yaml:/root/.llm-tracker/config.yaml

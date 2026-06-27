@@ -222,7 +222,12 @@ providers:
       gemini-2.5-flash: {}
 
 server:
-  host: 127.0.0.1
+  # Base URL for agent OTLP/proxy endpoint configuration.
+  # When set, overrides 'host' for URL generation (e.g. http://my-nas).
+  # Ports still come from port/api_port/otlp_port below.
+  # Leave commented for local-only usage (defaults to http://localhost).
+  # base_url: http://my-nas
+  host: 127.0.0.1       # bind address: 127.0.0.1 = local only, 0.0.0.0 = all interfaces
   port: 4000
   api_port: 4001
 

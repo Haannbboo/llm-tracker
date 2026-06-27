@@ -98,33 +98,40 @@ else
   pass "Port check passed"
 fi
 
-OTLP_PORT=$("${PYTHON}" -c "import yaml; from pathlib import Path; p = Path('${CONFIG_PATH}'); c = yaml.safe_load(p.read_text()) or {}; print(c.get('server', {}).get('otlp_port', 4002))" 2>/dev/null || echo "4002")
+# Read OTLP port and host from config
+OTLP_PORT="4002"
+OTLP_HOST="localhost"
+if [[ -f "${CONFIG_PATH}" ]]; then
+  _otlp_line=$("${PYTHON}" "${ROOT_DIR}/scripts/read-otlp-config.py" "${CONFIG_PATH}" 2>/dev/null || echo "4002 localhost")
+  OTLP_PORT="${_otlp_line%% *}"
+  OTLP_HOST="${_otlp_line#* }"
+fi
 
 # ── Configure agent OTLP telemetry ──────────────────────────────────
 if command -v codex >/dev/null 2>&1; then
   CODEX_CONFIG="${HOME}/.codex/config.toml"
-  "${PYTHON}" "${ROOT_DIR}/scripts/configure-codex-settings.py" "${CODEX_CONFIG}" "${OTLP_PORT}"
+  "${PYTHON}" "${ROOT_DIR}/scripts/configure-codex-settings.py" "${CODEX_CONFIG}" "${OTLP_PORT}" "${OTLP_HOST}"
   pass "Codex configured"
 fi
 
 if command -v gemini >/dev/null 2>&1; then
-  bash "${ROOT_DIR}/scripts/setup-gemini.sh" "${OTLP_PORT}"
+  bash "${ROOT_DIR}/scripts/setup-gemini.sh" "${OTLP_PORT}" "${OTLP_HOST}"
   pass "Gemini configured"
 fi
 
 if command -v claude >/dev/null 2>&1; then
   CLAUDE_SETTINGS="${HOME}/.claude/settings.json"
-  "${PYTHON}" "${ROOT_DIR}/scripts/configure-claude-settings.py" "${CLAUDE_SETTINGS}" "${OTLP_PORT}"
+  "${PYTHON}" "${ROOT_DIR}/scripts/configure-claude-settings.py" "${CLAUDE_SETTINGS}" "${OTLP_PORT}" "${OTLP_HOST}"
   pass "Claude configured"
 fi
 
 if command -v opencode >/dev/null 2>&1; then
-  "${PYTHON}" "${ROOT_DIR}/scripts/configure-opencode-plugin.py" "${ROOT_DIR}" "${OTLP_PORT}"
+  "${PYTHON}" "${ROOT_DIR}/scripts/configure-opencode-plugin.py" "${ROOT_DIR}" "${OTLP_PORT}" "${OTLP_HOST}"
   pass "OpenCode configured"
 fi
 
 if command -v kilo >/dev/null 2>&1; then
-  "${PYTHON}" "${ROOT_DIR}/scripts/configure-kilo-plugin.py" "${ROOT_DIR}" "${OTLP_PORT}"
+  "${PYTHON}" "${ROOT_DIR}/scripts/configure-kilo-plugin.py" "${ROOT_DIR}" "${OTLP_PORT}" "${OTLP_HOST}"
   pass "Kilo Code configured"
 fi
 

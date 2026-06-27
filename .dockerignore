@@ -1,0 +1,34 @@
+# Git
+.git/
+.gitignore
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+*.egg-info/
+.ruff_cache/
+.mypy_cache/
+
+# Node
+frontend/node_modules/
+
+# IDE
+.vscode/
+.idea/
+
+# Docker (don't send docker files to build context)
+docker-compose*.yml
+Dockerfile
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Test / CI
+.pytest_cache/
+htmlcov/
+coverage.xml
+.claude/
+.agents/

@@ -132,21 +132,16 @@ class DatabaseUsageClient:
 
 
 def build_api_base_url() -> str:
-    server = CONFIG["server"]
-    host = server.get("host", "127.0.0.1")
-    if host == "0.0.0.0":
-        host = "127.0.0.1"
-    port = int(server.get("api_port", int(server.get("port", 4000)) + 1))
-    return f"http://{host}:{port}"
+    from config.server_config import resolve_server_urls
+
+    return resolve_server_urls(CONFIG)["api_url"]
 
 
 def build_proxy_base_urls() -> tuple[str, str]:
-    server = CONFIG["server"]
-    host = server.get("host", "127.0.0.1")
-    if host == "0.0.0.0":
-        host = "127.0.0.1"
-    port = int(server.get("port", 4000))
-    return f"http://{host}:{port}/v1", f"http://{host}:{port}"
+    from config.server_config import resolve_server_urls
+
+    proxy_url = resolve_server_urls(CONFIG)["proxy_url"]
+    return f"{proxy_url}/v1", proxy_url
 
 
 class CliHelpFormatter(argparse.RawDescriptionHelpFormatter):

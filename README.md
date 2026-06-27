@@ -112,6 +112,10 @@ llm-tracker gemini -p "hello"
 
 The empty dashboard automatically checks for your first event. No fake demo data, no manual seeding.
 
+## Docker deployment
+
+Run all three servers in a single container for NAS or remote server deployment. See [docker/README.md](docker/README.md).
+
 ## CLI examples
 
 The wrapper runs a child command, captures usage while it runs, then prints a summary.

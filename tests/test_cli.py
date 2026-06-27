@@ -695,7 +695,7 @@ def test_proxy_env_sets_base_urls_without_overwriting(cli_module, monkeypatch):
     env = cli_module.build_child_env(cli_module.RunOptions(proxy_env=True))
 
     assert env["OPENAI_BASE_URL"] == "https://existing.example/v1"
-    assert env["ANTHROPIC_BASE_URL"] == "http://127.0.0.1:4999"
+    assert env["ANTHROPIC_BASE_URL"] == "http://localhost:4999"
     assert "OTEL_RESOURCE_ATTRIBUTES" not in env
 
 

@@ -10,13 +10,11 @@ cp "${ROOT_DIR}/scripts/gemini-hook.sh" "${GEMINI_HOOK_DEST}"
 chmod +x "${GEMINI_HOOK_DEST}"
 
 OTLP_PORT="${1:-}"
+OTLP_HOST="${2:-}"
 
 if [[ -z "${OTLP_PORT}" ]]; then
   CONFIG_PATH="${HOME}/.llm-tracker/config.yaml"
   if [[ -f "${CONFIG_PATH}" ]]; then
-    # Try to extract otlp_port from config.yaml using a simple grep/sed to avoid dependency on a specific python/yaml in this script
-    # but since we have the venv, maybe we should use it?
-    # Actually, let's just use a simple python command if available or default.
     PYTHON_CMD="python3"
     if [[ -x "${ROOT_DIR}/.venv/bin/python" ]]; then
       PYTHON_CMD="${ROOT_DIR}/.venv/bin/python"
@@ -25,8 +23,31 @@ if [[ -z "${OTLP_PORT}" ]]; then
   fi
 fi
 
+if [[ -z "${OTLP_HOST}" ]]; then
+  CONFIG_PATH="${HOME}/.llm-tracker/config.yaml"
+  if [[ -f "${CONFIG_PATH}" ]]; then
+    PYTHON_CMD="python3"
+    if [[ -x "${ROOT_DIR}/.venv/bin/python" ]]; then
+      PYTHON_CMD="${ROOT_DIR}/.venv/bin/python"
+    fi
+    OTLP_HOST=$("${PYTHON_CMD}" -c "
+import yaml
+from pathlib import Path
+from urllib.parse import urlparse
+c = yaml.safe_load(Path('${CONFIG_PATH}').read_text()) or {}
+base = c.get('server', {}).get('base_url')
+if base:
+    parsed = urlparse(base)
+    print(parsed.hostname or 'localhost')
+else:
+    print('localhost')
+" 2>/dev/null || echo "localhost")
+  fi
+fi
+
 python3 "${ROOT_DIR}/scripts/configure-gemini-settings.py" \
   "${HOME}/.gemini/settings.json" \
   "${ROOT_DIR}/.gemini/settings.json" \
   "${GEMINI_HOOK_DEST}" \
-  ${OTLP_PORT:+"${OTLP_PORT}"}
+  ${OTLP_PORT:+"${OTLP_PORT}"} \
+  ${OTLP_HOST:+"${OTLP_HOST}"}

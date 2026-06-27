@@ -12,12 +12,12 @@ def _info(msg: str) -> None:
     print(f"  {_GRAY}{msg}{_RESET}")
 
 
-def resolve_otlp_logs_endpoint(otlp_port: str) -> str:
+def resolve_otlp_logs_endpoint(otlp_port: str, host: str = "localhost") -> str:
     """Return explicit OTLP logs endpoint override or localhost port default."""
     env_endpoint = os.environ.get("OTEL_EXPORTER_OTLP_LOGS_ENDPOINT")
     if env_endpoint:
         return env_endpoint
-    return f"http://localhost:{otlp_port}/v1/logs"
+    return f"http://{host}:{otlp_port}/v1/logs"
 
 
 def update_existing_otel_config(content: str, endpoint: str) -> str:
@@ -88,15 +88,16 @@ def update_existing_otel_config(content: str, endpoint: str) -> str:
 
 
 def main():
-    if len(sys.argv) not in (2, 3):
+    if len(sys.argv) not in (2, 3, 4):
         print(
-            "usage: configure-codex-settings.py CONFIG_PATH [OTLP_PORT]",
+            "usage: configure-codex-settings.py CONFIG_PATH [OTLP_PORT] [HOST]",
             file=sys.stderr,
         )
         return 1
 
     config_path = Path(sys.argv[1]).expanduser()
-    otlp_port = sys.argv[2] if len(sys.argv) == 3 else "4002"
+    otlp_port = sys.argv[2] if len(sys.argv) >= 3 else "4002"
+    host = sys.argv[3] if len(sys.argv) >= 4 else "localhost"
 
     if not config_path.parent.exists():
         return 0
@@ -105,7 +106,7 @@ def main():
     if config_path.exists():
         content = config_path.read_text(encoding="utf-8")
 
-    endpoint = resolve_otlp_logs_endpoint(otlp_port)
+    endpoint = resolve_otlp_logs_endpoint(otlp_port, host)
 
     new_content = update_existing_otel_config(content, endpoint)
     if new_content != content:
