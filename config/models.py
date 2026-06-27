@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 DEFAULT_TRACKER_HOME = "~/.llm-tracker"
 TRACKER_HOME_ENV_VAR = "LLM_TRACKER_HOME"
@@ -22,6 +22,7 @@ class ProviderConfig:
     name: str
     base_url: str
     price_multiplier: float = 1.0
+    api_key: str | None = field(default=None, repr=False)
 
 
 @dataclass(frozen=True)

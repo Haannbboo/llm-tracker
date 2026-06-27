@@ -106,6 +106,7 @@ def test_build_maps_returns_provider_configs(config_module):
     assert model_map["alpha-1"] == config_module.ProviderConfig(
         name="alpha",
         base_url="https://alpha.example/v1",
+        api_key="alpha-key",
     )
     assert model_map["beta-1"].name == "beta"
     assert provider_map["alpha"].name == "alpha"
@@ -178,8 +179,25 @@ def test_build_maps_allows_provider_without_models(config_module):
     assert provider_map["empty"] == config_module.ProviderConfig(
         name="empty",
         base_url="https://empty.example/v1",
+        api_key="empty-key",
     )
     assert model_map == {}
+
+
+def test_build_maps_normalizes_empty_api_key_to_none(config_module):
+    provider_map, _ = config_module.build_maps(
+        {
+            "models": {},
+            "providers": {
+                "empty-key": {
+                    "base_url": "https://empty.example/v1",
+                    "api_key": "",
+                },
+            },
+        }
+    )
+
+    assert provider_map["empty-key"].api_key is None
 
 
 def test_build_cost_maps_parses_global_and_provider_model_costs(config_module):
