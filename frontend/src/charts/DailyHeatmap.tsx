@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { DailyUsage } from '../types'
-import { formatCost, formatNumber, value } from '../utils'
+import { formatCost, formatNumber, value, resolveTimezone } from '../utils'
+import { useApp } from '../contexts/AppContext'
 import { t } from '../i18n/index.ts'
 
 export function DailyHeatmap({
@@ -10,6 +11,8 @@ export function DailyHeatmap({
   mode: 'activity' | 'success-rate'
   data: DailyUsage[]
 }) {
+  const { timezone } = useApp()
+  const tz = resolveTimezone(timezone)
   const [hoveredCell, setHoveredCell] = useState<{ date: string; data: DailyUsage | null; x: number; y: number } | null>(null)
   const [containerWidth, setContainerWidth] = useState(0)
   const containerRef = useRef<HTMLDivElement>(null)
@@ -76,16 +79,20 @@ export function DailyHeatmap({
 
   const monthLabels = useMemo(() => {
     const labels: { label: string; col: number }[] = []
-    let lastMonth = -1
+    let lastMonthKey = ''
     for (let wi = 0; wi < visibleWeeks.length; wi++) {
       const firstDay = visibleWeeks[wi][0]
-      if (firstDay && firstDay.metric >= 0 && firstDay.date.getMonth() !== lastMonth) {
-        labels.push({ label: firstDay.date.toLocaleString(undefined, { month: 'short' }), col: wi })
-        lastMonth = firstDay.date.getMonth()
+      if (firstDay && firstDay.metric >= 0) {
+        // Derive month key from tz-aware formatting to match the label
+        const monthKey = new Intl.DateTimeFormat('en-US', { timeZone: tz, year: 'numeric', month: 'numeric' }).format(firstDay.date)
+        if (monthKey !== lastMonthKey) {
+          labels.push({ label: firstDay.date.toLocaleString(undefined, { month: 'short', timeZone: tz }), col: wi })
+          lastMonthKey = monthKey
+        }
       }
     }
     return labels
-  }, [visibleWeeks])
+  }, [visibleWeeks, tz])
 
   function getColor(metric: number): string {
     if (metric < 0) return 'transparent'
@@ -177,8 +184,10 @@ export function DailyHeatmap({
       </div>
       {hoveredCell && (() => {
         const d = hoveredCell.data
-        const dateObj = new Date(hoveredCell.date + 'T12:00:00')
-        const dateLabel = dateObj.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })
+        // Parse YYYY-MM-DD directly to avoid browser timezone shifting
+        const [yr, mo, dy] = hoveredCell.date.split('-').map(Number)
+        const dateObj = new Date(Date.UTC(yr, mo - 1, dy, 12, 0, 0))
+        const dateLabel = dateObj.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric', timeZone: tz })
 
         let content: React.ReactNode
         if (mode === 'activity') {

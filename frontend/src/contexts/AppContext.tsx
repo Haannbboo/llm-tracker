@@ -2,6 +2,7 @@ import { createContext, useContext, useState, useCallback, useEffect } from 'rea
 import type { ReactNode } from 'react'
 import { toggleTheme, getTheme } from '../theme'
 import { useLang } from '../i18n/index.ts'
+import { getSavedTimezone, saveTimezone } from '../utils'
 import type { ActiveFilter, DateRangeOption, EvaluatorOption, EvaluatorType, PricingMap } from '../types.ts'
 
 type AppContextType = {
@@ -44,6 +45,9 @@ type AppContextType = {
   setCustomSince: (s: string) => void
   customUntil: string
   setCustomUntil: (s: string) => void
+
+  timezone: string
+  setTimezone: (tz: string) => void
 }
 
 const AppContext = createContext<AppContextType | null>(null)
@@ -65,6 +69,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [dateRange, setDateRange] = useState<DateRangeOption>('24h')
   const [customSince, setCustomSince] = useState('')
   const [customUntil, setCustomUntil] = useState('')
+  const [timezone, setTimezoneState] = useState<string>(getSavedTimezone)
+  const setTimezone = useCallback((tz: string) => { setTimezoneState(tz); saveTimezone(tz) }, [])
 
   const [toast, setToast] = useState<{ message: string; visible: boolean }>({ message: '', visible: false })
   const showToast = useCallback((message: string) => {
@@ -117,6 +123,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       refreshTrigger, requestUsageRefresh,
       activeFilter, setActiveFilter, activeSource, setActiveSource,
       dateRange, setDateRange, customSince, setCustomSince, customUntil, setCustomUntil,
+      timezone, setTimezone,
     }}>
       {children}
       <div className={`toast-container ${toast.visible ? 'visible' : ''}`}>

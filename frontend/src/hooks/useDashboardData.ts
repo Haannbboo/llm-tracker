@@ -1,11 +1,12 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import type { DailyUsage, UsageSummary } from '../types'
-import { getSinceDate, getTimezoneOffset, FIXED_PROVIDER_COLORS, PALETTE } from '../utils'
+import { getSinceDate, getTimezoneOffset, resolveTimezone, FIXED_PROVIDER_COLORS, PALETTE } from '../utils'
 import { t } from '../i18n/index.ts'
 import { useApp } from '../contexts/AppContext'
 
 export function useDashboardData() {
-  const { refreshTrigger, setError, activeFilter, activeSource, dateRange, customSince, customUntil } = useApp()
+  const { refreshTrigger, setError, activeFilter, activeSource, dateRange, customSince, customUntil, timezone } = useApp()
+  const tz = resolveTimezone(timezone)
 
   const [summary, setSummary] = useState<UsageSummary[]>([])
   const [dailyUsage, setDailyUsage] = useState<DailyUsage[]>([])
@@ -86,14 +87,14 @@ export function useDashboardData() {
       try {
         const summaryUrl = applyFilterParams(new URL('/usage/summary', window.location.origin))
         const dailyUrl = applyFilterParams(new URL('/usage/daily', window.location.origin))
-        dailyUrl.searchParams.set('tz_offset', getTimezoneOffset())
+        dailyUrl.searchParams.set('tz_offset', getTimezoneOffset(tz))
         if (dateRange === '24h') dailyUrl.searchParams.set('granularity', 'hour')
 
         const heatmapUrl = new URL('/usage/daily', window.location.origin)
         heatmapUrl.searchParams.set('since', new Date(Date.now() - 730 * 24 * 60 * 60 * 1000).toISOString())
         heatmapUrl.searchParams.set('until', new Date().toISOString())
         heatmapUrl.searchParams.set('granularity', 'day')
-        heatmapUrl.searchParams.set('tz_offset', getTimezoneOffset())
+        heatmapUrl.searchParams.set('tz_offset', getTimezoneOffset(tz))
         if (activeFilter) {
           if (activeFilter.provider) heatmapUrl.searchParams.set('provider', activeFilter.provider)
           if (activeFilter.model) heatmapUrl.searchParams.set('model', activeFilter.model)
@@ -137,7 +138,7 @@ export function useDashboardData() {
 
     void fetchDashboard()
     return () => controller.abort()
-  }, [activeFilter, activeSource, dateRange, customSince, customUntil, refreshTrigger, applyFilterParams, setError])
+  }, [activeFilter, activeSource, dateRange, customSince, customUntil, refreshTrigger, applyFilterParams, setError, tz])
 
   // Sources fetch
   useEffect(() => {
