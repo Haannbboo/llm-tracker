@@ -146,6 +146,7 @@ async def _forward_stream_or_error(
     provider: ProviderConfig,
     model: str,
     client_source: str | None,
+    client_ip: str | None,
     path: str,
     started_at: float,
 ) -> StreamingResponse | JSONResponse:
@@ -221,6 +222,7 @@ async def _forward_stream_or_error(
                 latency_ms=latency_ms,
                 ttft_ms=ttft_ms,
                 status=upstream.status_code,
+                client_ip=client_ip,
                 base_url=provider.base_url,
                 base_url_provider=provider.name,
                 base_url_source="proxy_config",
@@ -235,6 +237,7 @@ async def forward(request: Request, path: str):
     body_json = parse_json_body(body)
     user_agent = request.headers.get("user-agent", "")
     client_source = parse_client_source(user_agent)
+    client_ip = request.client.host if request.client else None
     record_proxy_user_agent(path, user_agent)
     model = body_json.get("model", "")
     provider, upstream_model = resolve_provider(model)
@@ -260,6 +263,7 @@ async def forward(request: Request, path: str):
             provider=provider,
             model=model,
             client_source=client_source,
+            client_ip=client_ip,
             path=path,
             started_at=started_at,
         )
@@ -285,6 +289,7 @@ async def forward(request: Request, path: str):
         latency_ms=latency_ms,
         ttft_ms=None,
         status=response.status_code,
+        client_ip=client_ip,
         base_url=provider.base_url,
         base_url_provider=provider.name,
         base_url_source="proxy_config",

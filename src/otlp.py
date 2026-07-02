@@ -224,6 +224,7 @@ def _extract_gemini_fields(
     record: dict,
     attrs: list,
     session_id: str,
+    client_ip: str | None = None,
 ) -> dict:
     """Extract normalized usage fields from a Gemini OTLP record."""
     time_ns = record.get("timeUnixNano", "0")
@@ -272,20 +273,22 @@ def _extract_gemini_fields(
         "ttft_ms": ttft_ms,
         "cache_creation_tokens": None,
         "status": status,
+        "client_ip": client_ip,
         "base_url": metadata.base_url,
         "base_url_provider": metadata.provider,
         "base_url_source": metadata.source,
     }
 
 
-def _parse_gemini_record(record: dict, attrs: list, session_id: str) -> None:
-    record_usage(**_extract_gemini_fields(record, attrs, session_id))
+def _parse_gemini_record(record: dict, attrs: list, session_id: str, client_ip: str | None = None) -> None:
+    record_usage(**_extract_gemini_fields(record, attrs, session_id, client_ip))
 
 
 def _extract_claude_fields(
     record: dict,
     attrs: list,
     session_id: str,
+    client_ip: str | None = None,
 ) -> dict:
     """Extract normalized usage fields from a Claude OTLP record."""
     time_ns = record.get("timeUnixNano", "0")
@@ -328,14 +331,15 @@ def _extract_claude_fields(
         "latency_ms": _attr(attrs, "duration_ms"),
         "ttft_ms": None,
         "status": status,
+        "client_ip": client_ip,
         "base_url": metadata.base_url,
         "base_url_provider": metadata.provider,
         "base_url_source": metadata.source,
     }
 
 
-def _parse_claude_record(record: dict, attrs: list, session_id: str) -> None:
-    record_usage(**_extract_claude_fields(record, attrs, session_id))
+def _parse_claude_record(record: dict, attrs: list, session_id: str, client_ip: str | None = None) -> None:
+    record_usage(**_extract_claude_fields(record, attrs, session_id, client_ip))
 
 
 def _extract_opencode_fields(
@@ -343,6 +347,7 @@ def _extract_opencode_fields(
     attrs: list,
     session_id: str,
     client_source: str = "opencode",
+    client_ip: str | None = None,
 ) -> dict:
     """Extract normalized usage fields from an OpenCode or Kilo OTLP record."""
     time_ns = record.get("timeUnixNano", "0")
@@ -402,6 +407,7 @@ def _extract_opencode_fields(
         "latency_ms": int(duration_ms) if duration_ms is not None else None,
         "ttft_ms": int(ttft_ms) if ttft_ms is not None else None,
         "status": int(status) if status is not None else None,
+        "client_ip": client_ip,
         "base_url": metadata.base_url,
         "base_url_provider": metadata.provider,
         "base_url_source": metadata.source,
@@ -409,11 +415,11 @@ def _extract_opencode_fields(
 
 
 def _parse_opencode_record(
-    record: dict, attrs: list, session_id: str, client_source: str = "opencode"
+    record: dict, attrs: list, session_id: str, client_source: str = "opencode", client_ip: str | None = None
 ) -> None:
     record_usage(
         **_extract_opencode_fields(
-            record, attrs, session_id, client_source=client_source
+            record, attrs, session_id, client_source=client_source, client_ip=client_ip
         )
     )
 
@@ -456,6 +462,7 @@ def _extract_codex_fields(
     record: dict,
     attrs: list,
     service_name: str,
+    client_ip: str | None = None,
 ) -> dict | None:
     """Extract normalized usage fields from a Codex OTLP response.completed record."""
     event_kind = _attr(attrs, "event.kind")
@@ -523,16 +530,17 @@ def _extract_codex_fields(
         "ttft_ms": int(ttft_ms) if ttft_ms is not None else None,
         "cache_creation_tokens": None,
         "status": status,
+        "client_ip": client_ip,
         "base_url": metadata.base_url,
         "base_url_provider": metadata.provider,
         "base_url_source": metadata.source,
     }
 
 
-def _parse_codex_record(record: dict, attrs: list, service_name: str) -> None:
+def _parse_codex_record(record: dict, attrs: list, service_name: str, client_ip: str | None = None) -> None:
     if _handle_codex_state_event(attrs):
         return
-    fields = _extract_codex_fields(record, attrs, service_name)
+    fields = _extract_codex_fields(record, attrs, service_name, client_ip)
     if fields is not None:
         record_usage(**fields)
 
@@ -541,6 +549,7 @@ def _parse_log_record(
     record: dict,
     service_name: str,
     resource_session_id: str,
+    client_ip: str | None = None,
 ) -> None:
     attrs = record.get("attributes", [])
     usage_session_id = _usage_session_id(
@@ -557,28 +566,28 @@ def _parse_log_record(
 
     if event_name == GEMINI_EVENT:
         fields: dict | None = _extract_gemini_fields(
-            record, attrs, usage_session_id or ""
+            record, attrs, usage_session_id or "", client_ip
         )
         if fields is not None:
             record_usage(**fields)
     elif (
         event_name == CLAUDE_EVENT or event_name == "api_request"
     ) and service_name == "claude-code":
-        fields = _extract_claude_fields(record, attrs, usage_session_id or "")
+        fields = _extract_claude_fields(record, attrs, usage_session_id or "", client_ip)
         record_usage(**fields)
     elif event_name == CODEX_EVENT and service_name in CODEX_SERVICE_NAMES:
         if _handle_codex_state_event(attrs):
             return
-        fields = _extract_codex_fields(record, attrs, service_name)
+        fields = _extract_codex_fields(record, attrs, service_name, client_ip)
         if fields is not None:
             record_usage(**fields)
     elif event_name == CODEX_API_REQUEST_EVENT and service_name in CODEX_SERVICE_NAMES:
         _handle_codex_state_event(attrs)
     elif event_name == OPENCODE_EVENT and service_name == "opencode":
-        _parse_opencode_record(record, attrs, usage_session_id or "")
+        _parse_opencode_record(record, attrs, usage_session_id or "", client_ip=client_ip)
     elif event_name == KILO_EVENT and service_name in KILO_SERVICE_NAMES:
         _parse_opencode_record(
-            record, attrs, usage_session_id or "", client_source="kilo"
+            record, attrs, usage_session_id or "", client_source="kilo", client_ip=client_ip
         )
     elif (
         service_name not in KNOWN_SERVICE_NAMES
@@ -620,6 +629,8 @@ async def receive_logs(request: Request):
         del codex_state[k]
     PROMPT_LENGTH_TRACKER.evict_stale()
 
+    client_ip = request.client.host if request.client else None
+
     body = await request.json()
     for resource_log in body.get("resourceLogs", []):
         resource = resource_log.get("resource", {})
@@ -635,7 +646,7 @@ async def receive_logs(request: Request):
                 )
         for scope_log in resource_log.get("scopeLogs", []):
             for record in scope_log.get("logRecords", []):
-                _parse_log_record(record, service_name, session_id)
+                _parse_log_record(record, service_name, session_id, client_ip)
     return {}
 
 

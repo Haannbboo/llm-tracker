@@ -99,6 +99,7 @@ def test_init_db_log_usage_and_fetch_rows(database_module, isolated_home):
         "output_cost_usd": 3e-05,
         "total_cost_usd": 5e-05,
         "status": 200,
+        "client_ip": None,
         "base_url_id": base_url_id,
         "base_url": "https://api.example.com/v1",
     }
@@ -159,6 +160,7 @@ def test_fetch_recent_usage_returns_expected_row_shape(database_module, isolated
         "output_cost_usd",
         "total_cost_usd",
         "status",
+        "client_ip",
         "base_url_id",
         "base_url",
     }
