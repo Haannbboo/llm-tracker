@@ -179,9 +179,7 @@ function tzDateParts(date: Date, tz?: string): { year: number; month: number; da
 }
 
 export function fillGaps(data: DailyUsage[], granularity: 'hour' | 'day', periodCount: number, tz?: string): DailyUsage[] {
-  // Daily granularity uses pre-aggregated UTC dates from the backend,
-  // so timezone only applies to hourly granularity.
-  const effectiveTz = granularity === 'hour' ? tz : undefined
+  const effectiveTz = tz
   const zeroRow = (period: string): DailyUsage => ({
     period, requests: 0, prompt_tokens: 0, completion_tokens: 0,
     cached_tokens: 0, total_tokens: 0, input_cost_usd: 0,
