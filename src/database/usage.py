@@ -205,6 +205,7 @@ USAGE_COPY_FIELDS = (
     "output_cost_usd",
     "total_cost_usd",
     "status",
+    "client_ip",
 )
 
 

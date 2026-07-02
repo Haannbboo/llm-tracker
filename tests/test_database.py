@@ -519,6 +519,7 @@ def test_migrate_database_adds_usage_columns(
     assert "total_cost_usd" in column_names
     assert "client_source" in column_names
     assert "session_id" in column_names
+    assert "client_ip" in column_names
     assert "usage.prompt_length" in changes
     assert "usage.base_url_id" in changes
     assert "usage.input_cost_usd" in changes
@@ -526,6 +527,7 @@ def test_migrate_database_adds_usage_columns(
     assert "usage.total_cost_usd" in changes
     assert "usage.client_source" in changes
     assert "usage.session_id" in changes
+    assert "usage.client_ip" in changes
 
     import sqlite3
 
