@@ -5,9 +5,7 @@ import shutil
 import subprocess
 from pathlib import Path
 
-_CLEAN_GIT_ENV = {
-    k: v for k, v in os.environ.items() if not k.startswith("GIT_")
-}
+_CLEAN_GIT_ENV = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
 _CLEAN_GIT_ENV.update(
     {
         "GIT_CONFIG_GLOBAL": "/dev/null",
