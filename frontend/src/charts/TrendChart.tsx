@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react'
 import type { DailyUsage } from '../types'
-import { fillGaps, formatCost, formatNumber, formatThroughput, value } from '../utils'
+import { fillGaps, formatCost, formatNumber, formatThroughput, value, resolveTimezone } from '../utils'
+import { useApp } from '../contexts/AppContext'
 import { ChartTooltip, TooltipRow, TooltipDivider } from './ChartTooltip'
 import { t } from '../i18n/index.ts'
 
@@ -17,9 +18,11 @@ export function TrendChart({
   periodCount: number,
   showDots?: boolean,
 }) {
+  const { timezone } = useApp()
+  const tz = resolveTimezone(timezone)
   const [metric, setMetric] = useState<'tokens' | 'cost' | 'throughput'>('tokens');
   const [hoveredIdx, setHoveredIdx] = useState<number | null>(null);
-  const filled = useMemo(() => fillGaps(data, granularity, periodCount), [data, granularity, periodCount]);
+  const filled = useMemo(() => fillGaps(data, granularity, periodCount, tz), [data, granularity, periodCount, tz]);
   const maxTokens = Math.max(...filled.map(x => value(x.total_tokens)), 1);
   const maxCost = Math.max(...filled.map(x => value(x.total_cost_usd)), 0.001);
   const maxThroughput = Math.max(...filled.map(x => value(x.avg_throughput)), 1);

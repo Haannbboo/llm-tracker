@@ -8,7 +8,7 @@ import { t } from '../i18n/index.ts'
 import {
   formatCompact, formatCost, formatDuration, formatLatency, formatNumber,
   formatTime, getModelIcon, getSourceBadgeBg, getSourceBadgeText,
-  shortSessionId, sessionAgentName, sessionDisplayName, sessionTaskTitle, getSinceDate,
+  shortSessionId, sessionAgentName, sessionDisplayName, sessionTaskTitle, getSinceDate, resolveTimezone,
 } from '../utils'
 import { getModelBadgeBackgroundColor, getModelTextColor } from '../model-badge'
 import type { DailyEffectivenessReport, EvaluatorOption, EvaluatorType, EvaluationJobProgress, ModelEffectivenessGroup, SessionOutcome, SessionSummary, SessionsSummary } from '../types'
@@ -60,17 +60,25 @@ function formatEvaluationJobBadge(job?: EvaluationJobProgress | null): string | 
   return null
 }
 
-function getLocalDateKey(date: Date): string {
-  const year = date.getFullYear()
-  const month = String(date.getMonth() + 1).padStart(2, '0')
-  const day = String(date.getDate()).padStart(2, '0')
-  return `${year}-${month}-${day}`
+function getLocalDateKey(date: Date, tz?: string): string {
+  if (!tz) {
+    const year = date.getFullYear()
+    const month = String(date.getMonth() + 1).padStart(2, '0')
+    const day = String(date.getDate()).padStart(2, '0')
+    return `${year}-${month}-${day}`
+  }
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: tz, year: 'numeric', month: 'numeric', day: 'numeric',
+  }).formatToParts(date)
+  const get = (type: string) => parseInt(parts.find(p => p.type === type)?.value || '0', 10)
+  return `${get('year')}-${String(get('month')).padStart(2, '0')}-${String(get('day')).padStart(2, '0')}`
 }
 
 export function SessionsTab({
   onNavigateToLogs,
 }: SessionsTabProps) {
-  const { lang, showToast, requestUsageRefresh, refreshTrigger, setError, activeSource, dateRange, customSince, customUntil, setActiveFilter, evaluationEvaluator, setEvaluationEvaluator, evaluationEvaluators, setEvaluationEvaluators } = useApp()
+  const { lang, showToast, requestUsageRefresh, refreshTrigger, setError, activeSource, dateRange, customSince, customUntil, setActiveFilter, evaluationEvaluator, setEvaluationEvaluator, evaluationEvaluators, setEvaluationEvaluators, timezone } = useApp()
+  const tz = resolveTimezone(timezone)
   const [hideNoop, setHideNoop] = useState(true)
   const {
     sessions,
@@ -220,7 +228,7 @@ export function SessionsTab({
     )
   }, [modelEffectiveness.groups])
 
-  const todayDateKey = getLocalDateKey(new Date())
+  const todayDateKey = getLocalDateKey(new Date(), tz)
   const [dailyEffectivenessReport, setDailyEffectivenessReport] = useState<DailyEffectivenessReport | null>(null)
 
   const fetchDailyEffectivenessReport = useCallback(async () => {
@@ -607,7 +615,7 @@ export function SessionsTab({
                       {' · '}
                       {t('Evaluator')}: {evaluatorLabel(job.evaluator_type)}
                       {' · '}
-                      {job.started_at ? `${t('Started')} ${formatTime(job.started_at)}` : `${t('Created')} ${job.created_at ? formatTime(job.created_at) : '—'}`}
+                      {job.started_at ? `${t('Started')} ${formatTime(job.started_at, tz)}` : `${t('Created')} ${job.created_at ? formatTime(job.created_at, tz) : '—'}`}
                     </div>
                   </div>
                   {job.status === 'queued' && evaluatorOptions.length > 0 && (
@@ -779,7 +787,7 @@ export function SessionsTab({
                         )}
                       </div>
                     </td>
-                    <td style={{ fontSize: '12px' }}>{formatTime(session.started)}</td>
+                    <td style={{ fontSize: '12px' }}>{formatTime(session.started, tz)}</td>
                     <td className="sessions-number-cell" style={{ fontSize: '12px' }}>{formatDuration(session.duration_s)}</td>
                     <td className="sessions-number-cell" style={{ fontSize: '12px' }}>{formatNumber(session.request_count)}</td>
                     <td className="sessions-number-cell" style={{ fontSize: '12px' }}>{formatCompact(session.total_tokens)}</td>

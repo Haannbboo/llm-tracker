@@ -30,7 +30,6 @@ from .database import (
     VALID_OUTCOMES,
     VALID_SOURCES,
     aggregate_daily_by_dimension,
-    aggregate_daily_by_period,
     aggregate_model_effectiveness,
     aggregate_usage_by_period,
     count_sessions,
@@ -393,22 +392,14 @@ async def usage_daily(
     granularity: str = "day",
     tz_offset: str = "+00:00",
 ):
-    if granularity == "hour":
-        return aggregate_usage_by_period(
-            since=since,
-            until=until,
-            provider=provider,
-            model=model,
-            client_source=client_source,
-            granularity=granularity,
-            tz_offset=tz_offset,
-        )
-    return aggregate_daily_by_period(
+    return aggregate_usage_by_period(
         since=since,
         until=until,
         provider=provider,
         model=model,
         client_source=client_source,
+        granularity=granularity,
+        tz_offset=tz_offset,
     )
 
 

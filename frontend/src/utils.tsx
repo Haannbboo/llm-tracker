@@ -2,6 +2,60 @@ import type { DateRangeOption, DailyUsage } from './types'
 import type { Lang } from './i18n/index.ts'
 import { getTheme, type Theme } from './theme'
 
+const TIMEZONE_KEY = 'llm-tracker-timezone'
+
+export const TIMEZONES: Record<string, string[]> = {
+  'Americas': [
+    'America/New_York', 'America/Chicago', 'America/Denver', 'America/Los_Angeles',
+    'America/Sao_Paulo', 'America/Argentina/Buenos_Aires', 'America/Toronto', 'America/Vancouver',
+  ],
+  'Europe': [
+    'Europe/London', 'Europe/Paris', 'Europe/Berlin', 'Europe/Moscow',
+    'Europe/Amsterdam', 'Europe/Stockholm', 'Europe/Istanbul', 'Europe/Madrid',
+  ],
+  'Asia': [
+    'Asia/Shanghai', 'Asia/Tokyo', 'Asia/Seoul', 'Asia/Singapore',
+    'Asia/Hong_Kong', 'Asia/Taipei', 'Asia/Kolkata', 'Asia/Bangkok', 'Asia/Dubai',
+  ],
+  'Pacific': [
+    'Australia/Sydney', 'Australia/Melbourne', 'Pacific/Auckland', 'Pacific/Honolulu',
+  ],
+  'Other': [
+    'UTC',
+  ],
+}
+
+export function getLocalTimezone(): string {
+  return Intl.DateTimeFormat().resolvedOptions().timeZone
+}
+
+export function getTimezone(): string {
+  const saved = localStorage.getItem(TIMEZONE_KEY) || 'auto'
+  if (saved === 'auto') return getLocalTimezone()
+  return validateTimezone(saved)
+}
+
+export function resolveTimezone(tz: string): string {
+  return tz === 'auto' ? getLocalTimezone() : validateTimezone(tz)
+}
+
+function validateTimezone(tz: string): string {
+  try {
+    new Intl.DateTimeFormat(undefined, { timeZone: tz })
+    return tz
+  } catch {
+    return getLocalTimezone()
+  }
+}
+
+export function getSavedTimezone(): string {
+  return localStorage.getItem(TIMEZONE_KEY) || 'auto'
+}
+
+export function saveTimezone(tz: string): void {
+  localStorage.setItem(TIMEZONE_KEY, tz)
+}
+
 export const numberFormatter = new Intl.NumberFormat()
 export const compactFormatter = new Intl.NumberFormat(undefined, {
   maximumFractionDigits: 1,
@@ -89,16 +143,18 @@ export function formatThroughput(val: number | null | undefined): string {
   return `${val.toFixed(1)} t/s`
 }
 
-export function formatTime(input: string | number) {
+export function formatTime(input: string | number, tz?: string) {
   const date = typeof input === 'number' ? new Date(input / 1000) : new Date(input)
   if (Number.isNaN(date.valueOf())) return String(input)
-  return new Intl.DateTimeFormat(undefined, {
+  const options: Intl.DateTimeFormatOptions = {
     month: 'short',
     day: 'numeric',
     hour: '2-digit',
     minute: '2-digit',
     hour12: false
-  }).format(date)
+  }
+  if (tz) options.timeZone = tz
+  return new Intl.DateTimeFormat(undefined, options).format(date)
 }
 
 export function getSinceDate(option: DateRangeOption): string | null {
@@ -110,7 +166,20 @@ export function getSinceDate(option: DateRangeOption): string | null {
   return now.toISOString()
 }
 
-export function fillGaps(data: DailyUsage[], granularity: 'hour' | 'day', periodCount: number): DailyUsage[] {
+function tzDateParts(date: Date, tz?: string): { year: number; month: number; day: number; hour: number } {
+  if (!tz) {
+    return { year: date.getFullYear(), month: date.getMonth() + 1, day: date.getDate(), hour: date.getHours() }
+  }
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: tz, year: 'numeric', month: 'numeric', day: 'numeric', hour: 'numeric', hour12: false,
+  }).formatToParts(date)
+  const get = (type: string) => parseInt(parts.find(p => p.type === type)?.value || '0', 10)
+  const hour = get('hour') % 24
+  return { year: get('year'), month: get('month'), day: get('day'), hour }
+}
+
+export function fillGaps(data: DailyUsage[], granularity: 'hour' | 'day', periodCount: number, tz?: string): DailyUsage[] {
+  const effectiveTz = tz
   const zeroRow = (period: string): DailyUsage => ({
     period, requests: 0, prompt_tokens: 0, completion_tokens: 0,
     cached_tokens: 0, total_tokens: 0, input_cost_usd: 0,
@@ -126,23 +195,21 @@ export function fillGaps(data: DailyUsage[], granularity: 'hour' | 'day', period
   const now = new Date()
 
   if (granularity === 'hour') {
-    const start = new Date(now)
-    start.setMinutes(0, 0, 0)
-    start.setHours(start.getHours() - (periodCount - 1))
+    // Step back from the current UTC instant by (periodCount-1) hours
+    const startMs = now.getTime() - (periodCount - 1) * 3600_000
     for (let i = 0; i < periodCount; i++) {
-      const d = new Date(start)
-      d.setHours(d.getHours() + i)
-      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')} ${String(d.getHours()).padStart(2, '0')}:00`
+      const d = new Date(startMs + i * 3600_000)
+      const p = tzDateParts(d, effectiveTz)
+      const key = `${p.year}-${String(p.month).padStart(2, '0')}-${String(p.day).padStart(2, '0')} ${String(p.hour).padStart(2, '0')}:00`
       result.push(map.get(key) ?? zeroRow(key))
     }
   } else {
-    const start = new Date(now)
-    start.setHours(0, 0, 0, 0)
-    start.setDate(start.getDate() - (periodCount - 1))
+    // Step back from the current UTC instant by (periodCount-1) days
+    const startMs = now.getTime() - (periodCount - 1) * 86400_000
     for (let i = 0; i < periodCount; i++) {
-      const d = new Date(start)
-      d.setDate(d.getDate() + i)
-      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+      const d = new Date(startMs + i * 86400_000)
+      const p = tzDateParts(d, effectiveTz)
+      const key = `${p.year}-${String(p.month).padStart(2, '0')}-${String(p.day).padStart(2, '0')}`
       result.push(map.get(key) ?? zeroRow(key))
     }
   }
@@ -150,13 +217,31 @@ export function fillGaps(data: DailyUsage[], granularity: 'hour' | 'day', period
   return result
 }
 
-export function getTimezoneOffset(): string {
-  const offset = -new Date().getTimezoneOffset();
-  const absOffset = Math.abs(offset);
-  const hours = Math.floor(absOffset / 60);
-  const mins = absOffset % 60;
-  const sign = offset >= 0 ? '+' : '-';
-  return `${sign}${String(hours).padStart(2, '0')}:${String(mins).padStart(2, '0')}`;
+export function getTimezoneOffset(tz?: string): string {
+  if (!tz) {
+    const offset = -new Date().getTimezoneOffset();
+    const absOffset = Math.abs(offset);
+    const hours = Math.floor(absOffset / 60);
+    const mins = absOffset % 60;
+    const sign = offset >= 0 ? '+' : '-';
+    return `${sign}${String(hours).padStart(2, '0')}:${String(mins).padStart(2, '0')}`;
+  }
+  const ref = new Date(Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth(), new Date().getUTCDate(), 12, 0, 0))
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: tz, year: 'numeric', month: 'numeric', day: 'numeric',
+    hour: 'numeric', minute: 'numeric', second: 'numeric', hour12: false,
+  }).formatToParts(ref)
+  const get = (type: string) => parseInt(parts.find(p => p.type === type)?.value || '0', 10)
+  // Build a UTC timestamp from the timezone-local parts.
+  // Note: the local date may differ from ref's UTC date (e.g. UTC+7 at 2am UTC = 9pm previous day).
+  // Normalize the difference to [-720, +720] minutes to handle day-boundary crossings.
+  const localAsUtc = Date.UTC(get('year'), get('month') - 1, get('day'), get('hour') % 24, get('minute'), get('second'))
+  let diffMin = Math.round((localAsUtc - ref.getTime()) / 60_000)
+  if (diffMin > 720) diffMin -= 1440
+  if (diffMin < -720) diffMin += 1440
+  const sign = diffMin >= 0 ? '+' : '-'
+  const absMin = Math.abs(diffMin)
+  return `${sign}${String(Math.floor(absMin / 60)).padStart(2, '0')}:${String(absMin % 60).padStart(2, '0')}`
 }
 
 export const PALETTE = [

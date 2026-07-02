@@ -11,7 +11,7 @@ import { ClickToCopy } from '../components/CopyButton'
 import { t } from '../i18n/index.ts'
 import {
   formatCost, formatLatency, formatNumber, formatRate, formatTime,
-  value, getProviderColor, getModelIcon, shortSessionId,
+  value, getProviderColor, getModelIcon, shortSessionId, resolveTimezone,
 } from '../utils'
 import { getModelBadgeBackgroundColor, getModelTextColor } from '../model-badge'
 import type { DateRangeOption } from '../types'
@@ -35,7 +35,8 @@ export function LogsPage({ initialSessionFilter }: Props) {
     sessionStorage.removeItem('llm-tracker-logs-filters')
   }, [])
 
-  const { showToast, configParsed, requestUsageRefresh, activeFilter, setActiveFilter, activeSource, setActiveSource, dateRange, setDateRange, customSince, setCustomSince, customUntil, setCustomUntil } = useApp()
+  const { showToast, configParsed, requestUsageRefresh, activeFilter, setActiveFilter, activeSource, setActiveSource, dateRange, setDateRange, customSince, setCustomSince, customUntil, setCustomUntil, timezone } = useApp()
+  const tz = resolveTimezone(timezone)
   const {
     columns,
     visibleColumns,
@@ -191,7 +192,7 @@ export function LogsPage({ initialSessionFilter }: Props) {
   const renderRequestCell = (row: (typeof usageRows)[number], columnId: RequestLogColumnId) => {
     switch (columnId) {
       case 'time':
-        return <td style={{ color: 'var(--text-secondary)' }}>{formatTime(row.ts)}</td>
+        return <td style={{ color: 'var(--text-secondary)' }}>{formatTime(row.ts, tz)}</td>
       case 'model':
         return (
           <td style={{ padding: '8px' }}>
@@ -676,7 +677,7 @@ export function LogsPage({ initialSessionFilter }: Props) {
                           </div>
                           <div className="detail-group">
                             <span className="detail-label">{t('Full Timestamp')}</span>
-                            <span className="detail-value">{formatTime(row.ts)}</span>
+                            <span className="detail-value">{formatTime(row.ts, tz)}</span>
                           </div>
                           <div className="detail-group">
                             <span className="detail-label">{t('Endpoint')}</span>

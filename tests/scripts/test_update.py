@@ -5,16 +5,18 @@ import shutil
 import subprocess
 from pathlib import Path
 
-_CLEAN_GIT_ENV = {
-    **os.environ,
-    "GIT_CONFIG_GLOBAL": "/dev/null",
-    "GIT_CONFIG_SYSTEM": "/dev/null",
-    "GIT_AUTHOR_NAME": "test",
-    "GIT_AUTHOR_EMAIL": "test@test.com",
-    "GIT_COMMITTER_NAME": "test",
-    "GIT_COMMITTER_EMAIL": "test@test.com",
-    "PRE_COMMIT_ALLOW_NO_CONFIG": "1",
-}
+_CLEAN_GIT_ENV = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+_CLEAN_GIT_ENV.update(
+    {
+        "GIT_CONFIG_GLOBAL": "/dev/null",
+        "GIT_CONFIG_SYSTEM": "/dev/null",
+        "GIT_AUTHOR_NAME": "test",
+        "GIT_AUTHOR_EMAIL": "test@test.com",
+        "GIT_COMMITTER_NAME": "test",
+        "GIT_COMMITTER_EMAIL": "test@test.com",
+        "PRE_COMMIT_ALLOW_NO_CONFIG": "1",
+    }
+)
 
 
 def _git(repo: Path, *args: str, check: bool = True) -> subprocess.CompletedProcess:

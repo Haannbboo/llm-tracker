@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import { ClickToCopy } from './CopyButton'
 import { t } from '../i18n/index.ts'
 import { useApp } from '../contexts/AppContext'
-import { formatCompact, formatCost, formatDuration, formatLatency, formatNumber, formatTime, value, getModelIcon, sessionTaskTitle } from '../utils'
+import { formatCompact, formatCost, formatDuration, formatLatency, formatNumber, formatTime, value, getModelIcon, sessionTaskTitle, resolveTimezone } from '../utils'
 import { getModelBadgeBackgroundColor, getModelTextColor } from '../model-badge'
 import type { EvaluatorOption, EvaluatorType, EvaluationJobProgress, SessionEvaluation, SessionOutcome, SessionSummary } from '../types'
 
@@ -30,7 +30,8 @@ export function SessionDetailContent({
   onEvaluationPersisted?: () => void
   activeEvaluationJob?: EvaluationJobProgress | null
 }) {
-  const { lang, evaluationEvaluator, evaluationEvaluators } = useApp()
+  const { lang, evaluationEvaluator, evaluationEvaluators, timezone } = useApp()
+  const tz = resolveTimezone(timezone)
   const [localEvaluationOverride, setLocalEvaluationOverride] = useState<{ sessionId: string; evaluation: SessionEvaluation | null } | null>(null)
   const [llmEvaluationStatus, setLlmEvaluationStatus] = useState<'idle' | 'queued' | 'running' | 'succeeded' | 'failed'>('idle')
   const [evaluationJobHistory, setEvaluationJobHistory] = useState<EvaluationJobProgress[]>([])
@@ -257,7 +258,7 @@ export function SessionDetailContent({
         <div>
           <div style={{ fontSize: '10px', color: 'var(--text-muted)', marginBottom: '4px', textTransform: 'uppercase', letterSpacing: '0.5px', fontWeight: 700 }}>{t('Timeline')}</div>
           <div style={{ fontSize: '12px', color: 'var(--text-primary)' }}>
-            <div style={{ fontWeight: 600 }}>{formatTime(session.started)}</div>
+            <div style={{ fontWeight: 600 }}>{formatTime(session.started, tz)}</div>
             <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '2px' }}>{formatDuration(session.duration_s)} {t('duration')}</div>
           </div>
         </div>
@@ -518,9 +519,9 @@ export function SessionDetailContent({
                   {failed && <span className="evaluation-job-error-preview">{errorPreview}</span>}
                 </summary>
                 <div className="evaluation-job-detail">
-                  <div>{t('Created')}: {job.created_at ? formatTime(job.created_at) : '—'}</div>
-                  <div>{t('Started')}: {job.started_at ? formatTime(job.started_at) : '—'}</div>
-                  <div>{t('Finished')}: {job.finished_at ? formatTime(job.finished_at) : '—'}</div>
+                  <div>{t('Created')}: {job.created_at ? formatTime(job.created_at, tz) : '—'}</div>
+                  <div>{t('Started')}: {job.started_at ? formatTime(job.started_at, tz) : '—'}</div>
+                  <div>{t('Finished')}: {job.finished_at ? formatTime(job.finished_at, tz) : '—'}</div>
                   <div>{t('Evaluator')}: {evaluatorLabel(job.evaluator_type)}</div>
                   <div>{t('Trigger')}: {job.trigger === 'auto' ? t('Auto') : t('Manual')}</div>
                   {job.outcome && (

@@ -4,6 +4,7 @@ import { useSettingsData } from '../hooks/useSettingsData'
 import { CopyButton } from '../components/CopyButton'
 import { t } from '../i18n/index.ts'
 import { FIXED_PROVIDER_COLORS, getProviderColor, getModelIcon, getAgentDisplayName } from '../utils'
+import { TimezoneSelector } from '../components/TimezoneSelector'
 import type { PricingEntry } from '../types'
 import { useDashboardAgents } from '../hooks/useDashboardAgents'
 import { useVersion } from '../hooks/useVersion'
@@ -136,6 +137,8 @@ export function SettingsPage({ providerColors }: Props) {
               </select>
             </div>
           </div>
+
+          <TimezoneSelector />
 
           {/* Service Version */}
           <div className="panel">

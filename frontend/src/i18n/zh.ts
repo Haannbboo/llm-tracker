@@ -437,4 +437,16 @@ export const zh: Record<string, string> = {
 
   'Service Version': '服务版本',
   'Version': '版本',
+
+  // Timezone
+  'Timezone': '时区',
+  'Display timezone': '显示时区',
+  'Auto (Browser)': '自动（浏览器）',
+  'Auto-detected:': '自动检测：',
+  'Browser:': '浏览器：',
+  'Americas': '美洲',
+  'Europe': '欧洲',
+  'Asia': '亚洲',
+  'Pacific': '太平洋',
+  'Other': '其他',
 }

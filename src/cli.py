@@ -160,6 +160,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
             "  stop [program...]        stop all services or named services: llm-tracker-proxy, llm-tracker-api, llm-tracker-otlp\n"
             "  restart [program...]     restart all services or named services: llm-tracker-proxy, llm-tracker-api, llm-tracker-otlp\n"
             "  status                   show service status\n"
+            "  update [--check|--dry-run]  fetch, pull, bootstrap, and restart\n"
             "  summary <session_id>     show the saved LLM summary for a tracked session\n"
             "  codex ...                run Codex with tracking\n"
             "  claude ...               run Claude Code with tracking\n"
@@ -216,6 +217,42 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     if args.command and args.command[0] == "--":
         args.command = args.command[1:]
     return args
+
+
+def parse_update_args(command: list[str]) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        prog="llm-tracker update",
+        description="Fetch, pull (fast-forward), bootstrap, and restart.",
+    )
+    parser.add_argument(
+        "--check",
+        action="store_true",
+        help="show status without pulling or bootstrapping",
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="show planned commands without executing them",
+    )
+    return parser.parse_args(command[1:])
+
+
+def run_update_command(command: list[str]) -> int:
+    """Delegate to scripts/update.sh for the actual update logic."""
+    update_args = parse_update_args(command)
+    scripts_dir = project_root() / "scripts"
+    update_script = scripts_dir / "update.sh"
+    if not update_script.exists():
+        print(f"Update script not found: {update_script}", file=sys.stderr)
+        return 1
+
+    cmd: list[str] = ["bash", str(update_script)]
+    if update_args.check:
+        cmd.append("--check")
+    elif update_args.dry_run:
+        cmd.append("--dry-run")
+
+    return subprocess.run(cmd).returncode
 
 
 def parse_session_summary_args(command: list[str]) -> argparse.Namespace:
@@ -728,6 +765,8 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     if args.command[0] == "summary":
         return run_session_summary_command(args.command, json_output=args.json)
+    if args.command[0] == "update":
+        return run_update_command(args.command)
 
     options = options_from_args(args)
     if options.summary_dest == "file" and not options.summary_file:
