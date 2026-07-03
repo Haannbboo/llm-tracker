@@ -280,7 +280,9 @@ def _extract_gemini_fields(
     }
 
 
-def _parse_gemini_record(record: dict, attrs: list, session_id: str, client_ip: str | None = None) -> None:
+def _parse_gemini_record(
+    record: dict, attrs: list, session_id: str, client_ip: str | None = None
+) -> None:
     record_usage(**_extract_gemini_fields(record, attrs, session_id, client_ip))
 
 
@@ -338,7 +340,9 @@ def _extract_claude_fields(
     }
 
 
-def _parse_claude_record(record: dict, attrs: list, session_id: str, client_ip: str | None = None) -> None:
+def _parse_claude_record(
+    record: dict, attrs: list, session_id: str, client_ip: str | None = None
+) -> None:
     record_usage(**_extract_claude_fields(record, attrs, session_id, client_ip))
 
 
@@ -415,7 +419,11 @@ def _extract_opencode_fields(
 
 
 def _parse_opencode_record(
-    record: dict, attrs: list, session_id: str, client_source: str = "opencode", client_ip: str | None = None
+    record: dict,
+    attrs: list,
+    session_id: str,
+    client_source: str = "opencode",
+    client_ip: str | None = None,
 ) -> None:
     record_usage(
         **_extract_opencode_fields(
@@ -537,7 +545,9 @@ def _extract_codex_fields(
     }
 
 
-def _parse_codex_record(record: dict, attrs: list, service_name: str, client_ip: str | None = None) -> None:
+def _parse_codex_record(
+    record: dict, attrs: list, service_name: str, client_ip: str | None = None
+) -> None:
     if _handle_codex_state_event(attrs):
         return
     fields = _extract_codex_fields(record, attrs, service_name, client_ip)
@@ -573,7 +583,9 @@ def _parse_log_record(
     elif (
         event_name == CLAUDE_EVENT or event_name == "api_request"
     ) and service_name == "claude-code":
-        fields = _extract_claude_fields(record, attrs, usage_session_id or "", client_ip)
+        fields = _extract_claude_fields(
+            record, attrs, usage_session_id or "", client_ip
+        )
         record_usage(**fields)
     elif event_name == CODEX_EVENT and service_name in CODEX_SERVICE_NAMES:
         if _handle_codex_state_event(attrs):
@@ -584,10 +596,16 @@ def _parse_log_record(
     elif event_name == CODEX_API_REQUEST_EVENT and service_name in CODEX_SERVICE_NAMES:
         _handle_codex_state_event(attrs)
     elif event_name == OPENCODE_EVENT and service_name == "opencode":
-        _parse_opencode_record(record, attrs, usage_session_id or "", client_ip=client_ip)
+        _parse_opencode_record(
+            record, attrs, usage_session_id or "", client_ip=client_ip
+        )
     elif event_name == KILO_EVENT and service_name in KILO_SERVICE_NAMES:
         _parse_opencode_record(
-            record, attrs, usage_session_id or "", client_source="kilo", client_ip=client_ip
+            record,
+            attrs,
+            usage_session_id or "",
+            client_source="kilo",
+            client_ip=client_ip,
         )
     elif (
         service_name not in KNOWN_SERVICE_NAMES
