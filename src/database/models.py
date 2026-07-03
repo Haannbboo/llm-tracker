@@ -68,6 +68,7 @@ class Usage(Base):
         Numeric(18, 8), nullable=False, default=0, server_default=text("0")
     )
     status: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    client_ip: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
     base_url_id: Mapped[int | None] = mapped_column(
         Integer, ForeignKey("base_urls.id"), nullable=True
     )

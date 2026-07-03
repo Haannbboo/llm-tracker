@@ -205,6 +205,7 @@ USAGE_COPY_FIELDS = (
     "output_cost_usd",
     "total_cost_usd",
     "status",
+    "client_ip",
 )
 
 
@@ -530,6 +531,7 @@ def fetch_recent_usage(
             Usage.output_cost_usd,
             Usage.total_cost_usd,
             Usage.status,
+            Usage.client_ip,
             Usage.base_url_id,
             BaseUrl.base_url.label("base_url"),
         )
@@ -669,6 +671,7 @@ def summarize_usage_window(
             Usage.output_cost_usd,
             Usage.total_cost_usd,
             Usage.status,
+            Usage.client_ip,
         )
         .where(and_(*filters))
         .order_by(Usage.ts.asc())

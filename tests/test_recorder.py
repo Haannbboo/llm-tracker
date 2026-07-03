@@ -93,3 +93,46 @@ def test_record_usage_computes_costs(test_db):
         costs_module.PROVIDER_MODEL_COSTS.update(original_provider_costs)
         costs_module.PROVIDER_MAP.clear()
         costs_module.PROVIDER_MAP.update(original_provider_map)
+
+
+def test_record_usage_persists_client_ip(test_db):
+    from src.recorder import record_usage
+
+    record_usage(
+        ts=1779148800000000,
+        provider="openai",
+        model="gpt-4",
+        client_source="test",
+        session_id="sess-ip",
+        endpoint="/v1/chat/completions",
+        prompt_tokens=100,
+        completion_tokens=50,
+        total_tokens=150,
+        status=200,
+        client_ip="100.88.94.9",
+        db_path=test_db,
+    )
+
+    rows = fetch_recent_usage(limit=10, db_path=test_db)
+    assert len(rows) == 1
+    assert rows[0]["client_ip"] == "100.88.94.9"
+
+
+def test_record_usage_client_ip_defaults_to_none(test_db):
+    from src.recorder import record_usage
+
+    record_usage(
+        ts=1779148800000000,
+        provider="openai",
+        model="gpt-4",
+        endpoint="/v1/chat/completions",
+        prompt_tokens=100,
+        completion_tokens=50,
+        total_tokens=150,
+        status=200,
+        db_path=test_db,
+    )
+
+    rows = fetch_recent_usage(limit=10, db_path=test_db)
+    assert len(rows) == 1
+    assert rows[0]["client_ip"] is None

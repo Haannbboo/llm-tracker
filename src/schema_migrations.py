@@ -548,6 +548,21 @@ def migrate_database(db_path: str | None = None) -> list[str]:
             postgresql_definition="TEXT",
         ):
             applied.append("usage.session_id")
+        if _ensure_column(
+            engine,
+            "usage",
+            "client_ip",
+            sqlite_definition="TEXT",
+            postgresql_definition="TEXT",
+        ):
+            applied.append("usage.client_ip")
+        if _ensure_index(
+            engine,
+            "usage",
+            "ix_usage_client_ip",
+            "CREATE INDEX IF NOT EXISTS ix_usage_client_ip ON usage (client_ip)",
+        ):
+            applied.append("usage.ix_client_ip")
 
     if _table_exists(engine, "base_urls"):
         if _drop_column(engine, "base_urls", "validation_status"):

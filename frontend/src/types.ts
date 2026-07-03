@@ -90,6 +90,7 @@ export type UsageRow = {
   output_cost_usd: number | null
   total_cost_usd: number | null
   status: number | null
+  client_ip: string | null
 }
 
 export type DailyUsage = {

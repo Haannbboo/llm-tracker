@@ -683,6 +683,12 @@ export function LogsPage({ initialSessionFilter }: Props) {
                             <span className="detail-label">{t('Endpoint')}</span>
                             <span className="detail-value">{row.endpoint}</span>
                           </div>
+                          {row.client_ip && (
+                            <div className="detail-group">
+                              <span className="detail-label">{t('Client IP')}</span>
+                              <span className="detail-value">{row.client_ip}</span>
+                            </div>
+                          )}
                           <div className="detail-group">
                             <span className="detail-label">{t('Total Tokens')}</span>
                             <span className="detail-value">{formatNumber(row.total_tokens ?? (value(row.prompt_tokens) + value(row.completion_tokens)))}</span>
