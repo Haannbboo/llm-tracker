@@ -6,6 +6,7 @@ Supports both /v1/chat/completions and /v1/responses endpoints.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import time
@@ -17,7 +18,13 @@ import httpx
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 
-from config.app import CONFIG, MODEL_MAP, PROVIDER_MAP, ProviderConfig
+from config.app import (
+    CONFIG,
+    MODEL_MAP,
+    PROVIDER_MAP,
+    ProviderConfig,
+    refresh_runtime_config,
+)
 
 from .database import init_db
 from .recorder import record_usage
@@ -361,6 +368,13 @@ async def list_models():
             for model, provider in MODEL_MAP.items()
         ],
     }
+
+
+@app.post("/config/refresh")
+async def refresh_config():
+    """Reload config from disk so the proxy picks up provider/model changes."""
+    await asyncio.to_thread(refresh_runtime_config)
+    return {"status": "success"}
 
 
 @app.get("/models/{model_id:path}")
