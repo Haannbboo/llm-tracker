@@ -717,7 +717,7 @@ async def update_config(update: ConfigUpdate):
         with open(path, "w", encoding="utf-8") as f:
             f.write(update.content)
         refresh_runtime_config(path)
-        await _notify_proxy_refresh()
+        asyncio.create_task(_notify_proxy_refresh())
         return {"status": "success"}
     except yaml.YAMLError as e:
         raise HTTPException(status_code=400, detail=f"Invalid YAML: {str(e)}")
@@ -755,7 +755,7 @@ async def patch_config(update: ConfigPatchUpdate):
             yaml_parser.dump(config, f)
 
         refresh_runtime_config(path)
-        await _notify_proxy_refresh()
+        asyncio.create_task(_notify_proxy_refresh())
         return {"status": "success"}
     except RuamelYAMLError as e:
         raise HTTPException(status_code=400, detail=f"Invalid YAML: {str(e)}")
