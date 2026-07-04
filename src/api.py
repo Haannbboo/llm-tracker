@@ -24,6 +24,7 @@ from config.app import (
     refresh_runtime_config,
     set_evaluation_evaluator,
 )
+from config.server_config import load_server_config
 
 from ._version import get_version
 from .database import (
@@ -689,6 +690,22 @@ async def get_config():
         raise HTTPException(status_code=500, detail=str(e))
 
 
+async def _notify_proxy_refresh() -> None:
+    """Ask the proxy process to reload its runtime config.
+
+    Fire-and-forget: failures are logged but never surfaced to the caller.
+    """
+    try:
+        server = load_server_config()
+        proxy_url = f"http://{server.host}:{server.port}/config/refresh"
+        async with httpx.AsyncClient(timeout=5) as client:
+            await client.post(proxy_url)
+    except Exception:
+        logging.getLogger(__name__).warning(
+            "Failed to notify proxy to refresh config", exc_info=True
+        )
+
+
 @app.put("/config")
 async def update_config(update: ConfigUpdate):
     path = os.path.expanduser(CONFIG_PATH)
@@ -700,6 +717,7 @@ async def update_config(update: ConfigUpdate):
         with open(path, "w", encoding="utf-8") as f:
             f.write(update.content)
         refresh_runtime_config(path)
+        await _notify_proxy_refresh()
         return {"status": "success"}
     except yaml.YAMLError as e:
         raise HTTPException(status_code=400, detail=f"Invalid YAML: {str(e)}")
@@ -737,6 +755,7 @@ async def patch_config(update: ConfigPatchUpdate):
             yaml_parser.dump(config, f)
 
         refresh_runtime_config(path)
+        await _notify_proxy_refresh()
         return {"status": "success"}
     except RuamelYAMLError as e:
         raise HTTPException(status_code=400, detail=f"Invalid YAML: {str(e)}")
