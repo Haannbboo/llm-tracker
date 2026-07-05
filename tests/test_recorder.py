@@ -136,3 +136,94 @@ def test_record_usage_client_ip_defaults_to_none(test_db):
     rows = fetch_recent_usage(limit=10, db_path=test_db)
     assert len(rows) == 1
     assert rows[0]["client_ip"] is None
+
+
+def test_record_usage_skips_zero_tokens_on_success(test_db):
+    """Status 200 with all token fields zero/None should not be recorded."""
+    from src.recorder import record_usage
+
+    record_usage(
+        provider="openrouter",
+        model="test-model",
+        endpoint="/v1/chat/completions",
+        prompt_tokens=0,
+        completion_tokens=0,
+        status=200,
+        db_path=test_db,
+    )
+
+    rows = fetch_recent_usage(limit=10, db_path=test_db)
+    assert len(rows) == 0
+
+
+def test_record_usage_skips_none_tokens_on_success(test_db):
+    """Status 200 with all token fields None should not be recorded."""
+    from src.recorder import record_usage
+
+    record_usage(
+        provider="openrouter",
+        model="test-model",
+        endpoint="/v1/chat/completions",
+        status=200,
+        db_path=test_db,
+    )
+
+    rows = fetch_recent_usage(limit=10, db_path=test_db)
+    assert len(rows) == 0
+
+
+def test_record_usage_records_prompt_only_tokens(test_db):
+    """Status 200 with prompt_tokens only should be recorded."""
+    from src.recorder import record_usage
+
+    record_usage(
+        provider="openai",
+        model="gpt-4",
+        endpoint="/v1/chat/completions",
+        prompt_tokens=100,
+        completion_tokens=0,
+        status=200,
+        db_path=test_db,
+    )
+
+    rows = fetch_recent_usage(limit=10, db_path=test_db)
+    assert len(rows) == 1
+    assert rows[0]["prompt_tokens"] == 100
+
+
+def test_record_usage_records_zero_tokens_on_error(test_db):
+    """Error status with zero tokens should still be recorded."""
+    from src.recorder import record_usage
+
+    record_usage(
+        provider="openai",
+        model="gpt-4",
+        endpoint="/v1/chat/completions",
+        prompt_tokens=0,
+        completion_tokens=0,
+        status=400,
+        db_path=test_db,
+    )
+
+    rows = fetch_recent_usage(limit=10, db_path=test_db)
+    assert len(rows) == 1
+    assert rows[0]["status"] == 400
+
+
+def test_record_usage_records_zero_tokens_on_unknown_status(test_db):
+    """None status with zero tokens should still be recorded."""
+    from src.recorder import record_usage
+
+    record_usage(
+        provider="openai",
+        model="gpt-4",
+        endpoint="/v1/chat/completions",
+        prompt_tokens=0,
+        completion_tokens=0,
+        status=None,
+        db_path=test_db,
+    )
+
+    rows = fetch_recent_usage(limit=10, db_path=test_db)
+    assert len(rows) == 1
+    assert rows[0]["status"] is None
