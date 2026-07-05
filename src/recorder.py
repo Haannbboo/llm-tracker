@@ -40,6 +40,12 @@ def record_usage(
     db_path: str | None = None,
 ) -> None:
     """Record a single LLM usage event."""
+    # Skip if successful and no token counts are available (None or zero).
+    if status == 200 and not (
+        prompt_tokens or completion_tokens or cached_tokens or total_tokens
+    ):
+        return
+
     usage_ts = ts if ts is not None else time.time_ns() // 1000
     costs = calculate_costs(
         prompt_tokens=prompt_tokens,
