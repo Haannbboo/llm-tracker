@@ -11,7 +11,7 @@ import { ClickToCopy } from '../components/CopyButton'
 import { t } from '../i18n/index.ts'
 import {
   formatCost, formatLatency, formatNumber, formatRate, formatSpeed, formatTime,
-  value, getProviderColor, getModelIcon, shortSessionId, resolveTimezone,
+  value, getProviderIcon, getProviderBadgeBg, getProviderBadgeText, getModelIcon, shortSessionId, resolveTimezone,
 } from '../utils'
 import { getModelBadgeBackgroundColor, getModelTextColor } from '../model-badge'
 import type { DateRangeOption } from '../types'
@@ -196,16 +196,18 @@ export function LogsPage({ initialSessionFilter }: Props) {
         return (
           <td style={{ padding: '8px' }}>
             <div style={{
-              padding: '2px 8px',
-              borderRadius: '4px',
+              padding: '4px 6px',
+              borderRadius: '6px',
               display: 'inline-flex',
-              fontSize: '10px',
-              backgroundColor: getProviderColor(row.provider, providerColors) + '22',
-              color: getProviderColor(row.provider, providerColors),
+              alignItems: 'center',
+              gap: '4px',
+              fontSize: '11px',
+              backgroundColor: getProviderBadgeBg(row.provider),
+              color: getProviderBadgeText(row.provider),
               width: 'fit-content',
-              border: `1px solid ${getProviderColor(row.provider, providerColors)}44`,
               fontWeight: 600
             }}>
+              {getProviderIcon(row.provider)}
               {row.provider}
             </div>
           </td>
