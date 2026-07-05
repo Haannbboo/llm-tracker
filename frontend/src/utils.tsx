@@ -118,6 +118,14 @@ export function formatLatency(input: number | null | undefined) {
   return latency >= 1000 ? `${(latency / 1000).toFixed(2)}s` : `${Math.round(latency)}ms`
 }
 
+export function formatSpeed(tokens: number | null | undefined, latencyMs: number | null | undefined): string {
+  const t = value(tokens)
+  const ms = value(latencyMs)
+  if (t <= 0 || ms <= 0) return ''
+  const tps = t / (ms / 1000)
+  return tps >= 100 ? `${Math.round(tps)} tok/s` : `${tps.toFixed(1)} tok/s`
+}
+
 type DurationFormatOptions = {
   secondsFractionDigits?: number
 }

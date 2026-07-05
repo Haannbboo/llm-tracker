@@ -10,7 +10,7 @@ import { SessionSelector } from '../components/SessionSelector'
 import { ClickToCopy } from '../components/CopyButton'
 import { t } from '../i18n/index.ts'
 import {
-  formatCost, formatLatency, formatNumber, formatRate, formatTime,
+  formatCost, formatLatency, formatNumber, formatRate, formatSpeed, formatTime,
   value, getProviderColor, getModelIcon, shortSessionId, resolveTimezone,
 } from '../utils'
 import { getModelBadgeBackgroundColor, getModelTextColor } from '../model-badge'
@@ -91,12 +91,12 @@ export function LogsPage({ initialSessionFilter }: Props) {
       input: 220,
       output: 130,
       cost: 110,
-      latency: 130,
+      speed: 110,
       status: 80,
     }
 
     const hidePriority: RequestLogColumnId[] = [
-      'latency', 'session', 'source', 'cost', 'status',
+      'speed', 'session', 'source', 'cost', 'status',
       'provider', 'output', 'time', 'input', 'model',
     ]
 
@@ -135,31 +135,13 @@ export function LogsPage({ initialSessionFilter }: Props) {
         return { minWidth: '120px' }
       case 'cost':
         return { minWidth: '100px' }
-      case 'latency':
+      case 'speed':
         return { padding: '12px 8px' }
       case 'status':
         return { width: '80px' }
       default:
         return {}
     }
-  }
-
-  const renderHeaderContent = (columnId: RequestLogColumnId, label: string) => {
-    if (columnId === 'latency') {
-      return (
-        <div className="has-tooltip">
-          {t(label)}
-          <div className="tooltip-text">
-            {t('Claude Code: No TTFT')}<br/>
-            {t('Gemini CLI: Time to first chunk')}<br/>
-            {t('Codex: Actual TTFT')}<br/>
-            {t('Proxy: Time to first chunk')}
-          </div>
-        </div>
-      )
-    }
-
-    return t(label)
   }
 
   const renderLoadingCell = (columnId: RequestLogColumnId) => {
@@ -180,8 +162,8 @@ export function LogsPage({ initialSessionFilter }: Props) {
         return <td><div className="skeleton" style={{ width: 60, height: 14 }} /></td>
       case 'cost':
         return <td><div className="skeleton" style={{ width: 50, height: 14 }} /></td>
-      case 'latency':
-        return <td><div className="skeleton" style={{ width: 100, height: 20, borderRadius: 999 }} /></td>
+      case 'speed':
+        return <td><div className="skeleton" style={{ width: 80, height: 14 }} /></td>
       case 'status':
         return <td><div className="skeleton" style={{ width: 40, height: 20, borderRadius: 6 }} /></td>
       default:
@@ -380,7 +362,7 @@ export function LogsPage({ initialSessionFilter }: Props) {
         )
       case 'cost':
         return (
-          <td style={{ verticalAlign: 'top' }}>
+          <td style={{ padding: '8px' }}>
             {(() => {
               const total = value(row.total_cost_usd);
               if (total === 0) return <div style={{ color: 'var(--color-green)', fontWeight: 500 }}>$0.00</div>;
@@ -446,33 +428,18 @@ export function LogsPage({ initialSessionFilter }: Props) {
             })()}
           </td>
         )
-      case 'latency':
+      case 'speed':
         return (
-          <td style={{ padding: '8px' }}>
-            <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
-              {value(row.ttft_ms) > 0 && (
-                <div style={{
-                  backgroundColor: 'var(--badge-success-bg)',
-                  color: 'var(--badge-success-text)',
-                  padding: '2px 12px',
-                  borderRadius: '999px',
-                  fontSize: '12px',
-                  whiteSpace: 'nowrap'
-                }} title={t('Time To First Token')}>
-                  {formatLatency(row.ttft_ms)}
-                </div>
-              )}
-              <div style={{
-                backgroundColor: 'var(--badge-error-bg)',
-                color: 'var(--badge-error-text)',
-                padding: '2px 12px',
-                borderRadius: '999px',
-                fontSize: '12px',
-                whiteSpace: 'nowrap'
-              }} title={t('Total Latency')}>
-                {formatLatency(row.latency_ms)}
-              </div>
-            </div>
+          <td style={{ padding: '8px', fontWeight: 600 }}>
+            {(() => {
+              const speed = formatSpeed(row.completion_tokens ?? row.total_tokens, row.latency_ms)
+              return speed ? (
+                <span title={`${formatNumber(row.completion_tokens ?? row.total_tokens)} tokens / ${formatLatency(row.latency_ms)}`}>
+                  <span>{speed.split(' ')[0]}</span>
+                  <span style={{ fontSize: '11px', color: 'var(--text-muted)', fontWeight: 400, marginLeft: '3px' }}>{speed.split(' ')[1]}</span>
+                </span>
+              ) : <span style={{ color: 'var(--text-muted)', fontSize: '12px', fontWeight: 400 }}>—</span>
+            })()}
           </td>
         )
       case 'status':
@@ -616,7 +583,7 @@ export function LogsPage({ initialSessionFilter }: Props) {
               <tr>
                 {effectiveVisibleColumns.map((column) => (
                   <th key={column.id} style={getHeaderStyle(column.id)}>
-                    {renderHeaderContent(column.id, column.label)}
+                    {t(column.label)}
                     {column.id === 'model' && (
                       <div
                         onMouseDown={handleResizeStart}
@@ -705,6 +672,16 @@ export function LogsPage({ initialSessionFilter }: Props) {
                               <span className="detail-value">{formatNumber(row.prompt_length)} {t('chars')}</span>
                             </div>
                           )}
+                          {value(row.ttft_ms) > 0 && (
+                            <div className="detail-group">
+                              <span className="detail-label">TTFT</span>
+                              <span className="detail-value">{formatLatency(row.ttft_ms)}</span>
+                            </div>
+                          )}
+                          <div className="detail-group">
+                            <span className="detail-label">{t('Latency')}</span>
+                            <span className="detail-value">{formatLatency(row.latency_ms)}</span>
+                          </div>
                         </div>
                       </td>
                     </tr>
