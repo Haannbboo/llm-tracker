@@ -58,7 +58,7 @@ export function LogsPage({ initialSessionFilter }: Props) {
     usageRows, totalLogs, totalPages,
     limit, setLimit, page, setPage, jumpPage, setJumpPage, resetPage,
     logsLoading, expandedRow, setExpandedRow,
-    modelColWidth, handleResizeStart,
+    colWidths, resizedColumns, handleResizeStart,
   } = useLogsData({ activeFilter, activeSource, sessionFilter, dateRange, customSince, customUntil })
 
   // Sessions data for the session filter dropdown
@@ -82,19 +82,6 @@ export function LogsPage({ initialSessionFilter }: Props) {
   const effectiveVisibleColumns = useMemo(() => {
     if (tableWidth === 0) return visibleColumns
 
-    const colWidths: Record<RequestLogColumnId, number> = {
-      time: 120,
-      model: modelColWidth,
-      provider: 120,
-      source: 110,
-      session: 120,
-      input: 220,
-      output: 130,
-      cost: 110,
-      speed: 110,
-      status: 80,
-    }
-
     const hidePriority: RequestLogColumnId[] = [
       'speed', 'session', 'source', 'cost', 'status',
       'provider', 'output', 'time', 'input', 'model',
@@ -115,32 +102,35 @@ export function LogsPage({ initialSessionFilter }: Props) {
     }
 
     return visibleColumns.filter(c => !toRemove.has(c.id))
-  }, [visibleColumns, modelColWidth, tableWidth])
+  }, [visibleColumns, colWidths, tableWidth])
 
   const getHeaderStyle = (columnId: RequestLogColumnId): CSSProperties => {
+    if (resizedColumns.has(columnId)) {
+      return { width: colWidths[columnId], position: 'relative' }
+    }
     switch (columnId) {
       case 'time':
-        return { width: '120px' }
+        return { width: colWidths.time, position: 'relative' }
       case 'model':
-        return { width: modelColWidth, padding: '12px 8px', position: 'relative' }
+        return { width: colWidths.model, position: 'relative' }
       case 'provider':
-        return { width: '120px', padding: '12px 8px' }
+        return { width: colWidths.provider, position: 'relative' }
       case 'source':
-        return { width: '110px', padding: '12px 8px' }
+        return { width: colWidths.source, position: 'relative' }
       case 'session':
-        return { width: '120px', padding: '12px 8px' }
+        return { width: colWidths.session, position: 'relative' }
       case 'input':
-        return { minWidth: '220px' }
+        return { minWidth: colWidths.input, position: 'relative' }
       case 'output':
-        return { minWidth: '120px' }
+        return { minWidth: colWidths.output, position: 'relative' }
       case 'cost':
-        return { minWidth: '100px' }
+        return { minWidth: colWidths.cost, position: 'relative' }
       case 'speed':
-        return { padding: '12px 8px' }
+        return { position: 'relative' }
       case 'status':
-        return { width: '80px' }
+        return { width: colWidths.status, position: 'relative' }
       default:
-        return {}
+        return { position: 'relative' }
     }
   }
 
@@ -187,7 +177,7 @@ export function LogsPage({ initialSessionFilter }: Props) {
               fontSize: '11px',
               backgroundColor: getModelBadgeBackgroundColor(row.model),
               color: getModelTextColor(row.model),
-              maxWidth: modelColWidth - 10,
+              maxWidth: colWidths.model - 10,
               fontWeight: 600,
               cursor: 'pointer'
             }} title={row.model}>
@@ -584,23 +574,10 @@ export function LogsPage({ initialSessionFilter }: Props) {
                 {effectiveVisibleColumns.map((column) => (
                   <th key={column.id} style={getHeaderStyle(column.id)}>
                     {t(column.label)}
-                    {column.id === 'model' && (
-                      <div
-                        onMouseDown={handleResizeStart}
-                        style={{
-                          position: 'absolute',
-                          right: 0,
-                          top: 0,
-                          bottom: 0,
-                          width: '3px',
-                          cursor: 'col-resize',
-                          userSelect: 'none',
-                          backgroundColor: 'rgba(128,128,128,0.2)',
-                        }}
-                        onMouseEnter={(e) => e.currentTarget.style.backgroundColor = 'rgba(128,128,128,0.5)'}
-                        onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'rgba(128,128,128,0.2)'}
-                      />
-                    )}
+                    <div
+                      className="col-resize-handle"
+                      onMouseDown={(e) => handleResizeStart(column.id, e)}
+                    />
                   </th>
                 ))}
               </tr>
