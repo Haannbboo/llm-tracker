@@ -607,6 +607,14 @@ export function LogsPage({ initialSessionFilter }: Props) {
                     <tr className="expanded-row">
                       <td colSpan={effectiveVisibleColumns.length}>
                         <div className="expanded-detail">
+                          <div className="detail-group">
+                            <span className="detail-label">{t('Request ID')}</span>
+                            <span className="detail-value">
+                              <ClickToCopy text={row.id} onCopy={showToast}>
+                                {row.id}
+                              </ClickToCopy>
+                            </span>
+                          </div>
                           {row.session_id && (
                             <div className="detail-group">
                               <span className="detail-label">{t('Session ID')}</span>
@@ -618,23 +626,13 @@ export function LogsPage({ initialSessionFilter }: Props) {
                             </div>
                           )}
                           <div className="detail-group">
-                            <span className="detail-label">{t('Request ID')}</span>
-                            <span className="detail-value">{row.id}</span>
-                          </div>
-                          <div className="detail-group">
-                            <span className="detail-label">{t('Full Timestamp')}</span>
-                            <span className="detail-value">{formatTime(row.ts, tz)}</span>
+                            <span className="detail-label">{t('Latency')}</span>
+                            <span className="detail-value">{formatLatency(row.latency_ms)}</span>
                           </div>
                           <div className="detail-group">
                             <span className="detail-label">{t('Endpoint')}</span>
                             <span className="detail-value">{row.endpoint}</span>
                           </div>
-                          {row.client_ip && (
-                            <div className="detail-group">
-                              <span className="detail-label">{t('Client IP')}</span>
-                              <span className="detail-value">{row.client_ip}</span>
-                            </div>
-                          )}
                           <div className="detail-group">
                             <span className="detail-label">{t('Total Tokens')}</span>
                             <span className="detail-value">{formatNumber(row.total_tokens ?? (value(row.prompt_tokens) + value(row.completion_tokens)))}</span>
@@ -657,10 +655,12 @@ export function LogsPage({ initialSessionFilter }: Props) {
                               <span className="detail-value">{formatLatency(row.ttft_ms)}</span>
                             </div>
                           )}
-                          <div className="detail-group">
-                            <span className="detail-label">{t('Latency')}</span>
-                            <span className="detail-value">{formatLatency(row.latency_ms)}</span>
-                          </div>
+                          {row.client_ip && (
+                            <div className="detail-group">
+                              <span className="detail-label">{t('Client IP')}</span>
+                              <span className="detail-value">{row.client_ip}</span>
+                            </div>
+                          )}
                         </div>
                       </td>
                     </tr>
