@@ -118,6 +118,14 @@ export function formatLatency(input: number | null | undefined) {
   return latency >= 1000 ? `${(latency / 1000).toFixed(2)}s` : `${Math.round(latency)}ms`
 }
 
+export function formatSpeed(tokens: number | null | undefined, latencyMs: number | null | undefined): string {
+  const t = value(tokens)
+  const ms = value(latencyMs)
+  if (t <= 0 || ms <= 0) return ''
+  const tps = t / (ms / 1000)
+  return tps >= 100 ? `${Math.round(tps)} tok/s` : `${tps.toFixed(1)} tok/s`
+}
+
 type DurationFormatOptions = {
   secondsFractionDigits?: number
 }
@@ -269,105 +277,103 @@ export function getProviderColor(provider: string, providerColors: Record<string
   return providerColors[provider] || '#94a3b8';
 }
 
+const ICON_STYLE = { width: 14, height: 14, display: 'block', objectFit: 'contain' as const }
+
 export function getModelIcon(model: string, theme: Theme = getTheme()) {
   const m = model.toLowerCase()
-  const style = { width: 14, height: 14, display: 'block', objectFit: 'contain' as const }
+  const style = ICON_STYLE
   const dark = theme === 'dark'
   if (m.startsWith('tencent/') || m.startsWith('hy3')) return <img src="/models/hunyuan-color.svg" alt="" style={style} />
-  if (m.includes('gpt') || m.includes('codex')) return <img src={dark ? '/models/chatgpt-dark.png' : '/models/chatgpt.svg'} alt="" style={style} />
+  if (m.includes('gpt') || m.includes('codex')) return <img src={dark ? '/models/openai-light.svg' : '/models/openai.svg'} alt="" style={style} />
   if (m.includes('claude')) return <img src="/models/claude-ai-icon.svg" alt="" style={style} />
-  if (m.includes('gemini')) return <img src="/models/google-gemini-icon.svg" alt="" style={style} />
+  if (m.includes('gemini') || m.includes('google') || m.includes('gemma')) return <img src="/models/google-gemini-icon.svg" alt="" style={style} />
   if (m.includes('minimax') || m.includes('mimimax')) return <img src="/models/minimax-color.svg" alt="" style={style} />
   if (m.includes('mimo') || m.includes('xiaomi')) return <img src="/models/xiaomi.svg" alt="" style={style} />
   if (m.includes('inclusionai')) return <img src="/models/inclusionai.png" alt="" style={style} />
-  if (m.includes('poolside')) return <img src="/models/poolside.png" alt="" style={style} />
-  if (m.includes('deepseek')) return <img src="/models/deepseek.png" alt="" style={style} />
+  if (m.includes('poolside')) return <img src="/models/poolside.svg" alt="" style={style} />
+  if (m.includes('deepseek')) return <img src="/models/deepseek.svg" alt="" style={style} />
   if (m.includes('openrouter')) return <img src={dark ? '/models/openrouter-dark.svg' : '/models/openrouter.svg'} alt="" style={style} />
   if (m.startsWith('z-ai/') || m.includes('glm')) return <img src="/models/z-ai.svg" alt="" style={style} />
   if (m.includes('stepfun') || m.includes('step-')) return <img src="/models/stepfun-color.svg" alt="" style={style} />
+  if (m.startsWith('nvidia/') || m.includes('nemotron')) return <img src="/models/nvidia.svg" alt="" style={style} />
+  if (m.startsWith('cohere/')) return <img src="/models/cohere.svg" alt="" style={style} />
+  return null
+}
+
+type BadgeTheme = { light: string; dark: string }
+
+const PROVIDER_BADGES: Record<string, { color: string; bg: BadgeTheme; text: BadgeTheme }> = {
+  'tencent/': { color: '#0052D9', bg: { light: '#0052D926', dark: '#0052D980' }, text: { light: '#003a8c', dark: '#d0dff5' } },
+  anthropic: { color: '#cc7c5e', bg: { light: '#cc7c5e26', dark: '#cc7c5e40' }, text: { light: '#cc7c5e', dark: '#cc7c5e' } },
+  google: { color: '#528af2', bg: { light: '#528af226', dark: '#528af240' }, text: { light: '#528af2', dark: '#528af2' } },
+  openai: { color: '#dcdcdc', bg: { light: '#dcdcdc80', dark: '#dcdcdc90' }, text: { light: '#475569', dark: '#94a3b8' } },
+  minimax: { color: '#ec6b53', bg: { light: '#ec6b5326', dark: '#ec6b5340' }, text: { light: '#ec6b53', dark: '#ec6b53' } },
+  xiaomi: { color: '#dcc496', bg: { light: '#dcc49680', dark: '#dcc49690' }, text: { light: '#6b4f2a', dark: '#dcc496' } },
+  openrouter: { color: '#6366f1', bg: { light: '#6366f126', dark: '#6366f140' }, text: { light: '#6366f1', dark: '#a5b4fc' } },
+  poolside: { color: '#f97316', bg: { light: '#f9731626', dark: '#f9731640' }, text: { light: '#c2410c', dark: '#fdba74' } },
+  deepseek: { color: '#4d7cff', bg: { light: '#4d7cff26', dark: '#4d7cff40' }, text: { light: '#1d4ed8', dark: '#93b4ff' } },
+  'z-ai': { color: '#1F63EC', bg: { light: '#1F63EC26', dark: '#1F63EC40' }, text: { light: '#1F63EC', dark: '#7daaf5' } },
+  stepfun: { color: '#01A9FF', bg: { light: '#01A9FF26', dark: '#01A9FF40' }, text: { light: '#006f9f', dark: '#7dd5fc' } },
+}
+
+function findProviderBadge(provider: string) {
+  const p = provider.toLowerCase()
+  for (const [key, val] of Object.entries(PROVIDER_BADGES)) {
+    if (key.endsWith('/') ? p.startsWith(key) : p.includes(key)) return val
+  }
   return null
 }
 
 export function getProviderBadgeColor(provider: string): string {
-  const p = provider.toLowerCase()
-  if (p.startsWith('tencent/')) return '#0052D9'
-  if (p.includes('anthropic')) return '#cc7c5e'
-  if (p.includes('google')) return '#528af2'
-  if (p.includes('openai')) return '#dcdcdc'
-  if (p.includes('minimax')) return '#ec6b53'
-  if (p.includes('xiaomi')) return '#dcc496'
-  if (p.includes('openrouter')) return '#6366f1'
-  if (p.includes('poolside')) return '#f97316'
-  if (p.includes('deepseek')) return '#4d7cff'
-  if (p.includes('z-ai')) return '#1F63EC'
-  if (p.includes('stepfun')) return '#01A9FF'
-  return '#f1f5f9'
+  return findProviderBadge(provider)?.color ?? '#f1f5f9'
 }
 
 export function getProviderBadgeBg(provider: string, theme: Theme = getTheme()): string {
-  const base = getProviderBadgeColor(provider)
-  const dark = theme === 'dark'
-  const p = provider.toLowerCase()
-  if (p.startsWith('tencent/')) return dark ? '#0052D980' : '#0052D926'
-  if (p.includes('openai') || p.includes('xiaomi')) return dark ? `${base}90` : `${base}80`
-  if (p.includes('anthropic') || p.includes('google') || p.includes('minimax') || p.includes('openrouter') || p.includes('poolside') || p.includes('deepseek') || p.includes('z-ai') || p.includes('stepfun')) return dark ? `${base}40` : `${base}26`
-  return dark ? '#334155' : '#f1f5f9'
+  return findProviderBadge(provider)?.bg[theme] ?? (theme === 'dark' ? '#334155' : '#f1f5f9')
 }
 
 export function getProviderBadgeText(provider: string, theme: Theme = getTheme()): string {
-  const dark = theme === 'dark'
-  const p = provider.toLowerCase()
-  if (p.startsWith('tencent/')) return dark ? '#d0dff5' : '#003a8c'
-  if (p.includes('openai')) return dark ? '#94a3b8' : '#475569'
-  if (p.includes('xiaomi')) return dark ? '#dcc496' : '#6b4f2a'
-  if (p.includes('openrouter')) return dark ? '#a5b4fc' : '#6366f1'
-  if (p.includes('poolside')) return dark ? '#fdba74' : '#c2410c'
-  if (p.includes('deepseek')) return dark ? '#93b4ff' : '#1d4ed8'
-  if (p.includes('z-ai')) return dark ? '#7daaf5' : '#1F63EC'
-  if (p.includes('stepfun')) return dark ? '#7dd5fc' : '#006f9f'
-  if (p.includes('anthropic') || p.includes('google') || p.includes('minimax')) return getProviderBadgeColor(provider)
-  return dark ? '#94a3b8' : '#475569'
+  return findProviderBadge(provider)?.text[theme] ?? (theme === 'dark' ? '#94a3b8' : '#475569')
 }
 
 export function getProviderIcon(provider: string, theme: Theme = getTheme()) {
   const p = provider.toLowerCase()
-  const style = { width: 14, height: 14, display: 'block', objectFit: 'contain' as const }
+  const style = ICON_STYLE
   const dark = theme === 'dark'
   if (p.startsWith('tencent/')) return <img src="/models/hunyuan-color.svg" alt="" style={style} />
   if (p.includes('anthropic')) return <img src="/models/claude-ai-icon.svg" alt="" style={style} />
-  if (p.includes('openai')) return <img src={dark ? '/models/chatgpt-dark.png' : '/models/chatgpt.svg'} alt="" style={style} />
+  if (p.includes('openai')) return <img src={dark ? '/models/openai-light.svg' : '/models/openai.svg'} alt="" style={style} />
   if (p.includes('google')) return <img src="/models/google-gemini-icon.svg" alt="" style={style} />
   if (p.includes('minimax')) return <img src="/models/minimax-color.svg" alt="" style={style} />
   if (p.includes('xiaomi')) return <img src="/models/xiaomi.svg" alt="" style={style} />
   if (p.includes('openrouter')) return <img src={dark ? '/models/openrouter-dark.svg' : '/models/openrouter.svg'} alt="" style={style} />
   if (p.includes('inclusionai')) return <img src="/models/inclusionai.png" alt="" style={style} />
-  if (p.includes('poolside')) return <img src="/models/poolside.png" alt="" style={style} />
-  if (p.includes('deepseek')) return <img src="/models/deepseek.png" alt="" style={style} />
+  if (p.includes('poolside')) return <img src="/models/poolside.svg" alt="" style={style} />
+  if (p.includes('deepseek')) return <img src="/models/deepseek.svg" alt="" style={style} />
   if (p.includes('z-ai')) return <img src="/models/z-ai.svg" alt="" style={style} />
   if (p.includes('stepfun')) return <img src="/models/stepfun-color.svg" alt="" style={style} />
+  if (p.includes('nvidia')) return <img src="/models/nvidia.svg" alt="" style={style} />
+  if (p.includes('cohere')) return <img src="/models/cohere.svg" alt="" style={style} />
   return null
 }
 
+const SOURCE_BADGES: Record<string, { bg: BadgeTheme; text: BadgeTheme }> = {
+  'codex': { bg: { light: '#dcdcdc80', dark: '#dcdcdc90' }, text: { light: '#475569', dark: '#0f172a' } },
+  'claude-code': { bg: { light: '#cc7c5e26', dark: '#cc7c5e40' }, text: { light: '#cc7c5e', dark: '#cc7c5e' } },
+  'gemini-cli': { bg: { light: '#528af226', dark: '#528af240' }, text: { light: '#528af2', dark: '#528af2' } },
+  'proxy': { bg: { light: '#8b5cf626', dark: '#8b5cf640' }, text: { light: '#8b5cf6', dark: '#8b5cf6' } },
+  'opencode': { bg: { light: '#10b98126', dark: '#10b98140' }, text: { light: '#10b981', dark: '#10b981' } },
+  'kilo': { bg: { light: '#06b6d426', dark: '#06b6d440' }, text: { light: '#06b6d4', dark: '#06b6d4' } },
+}
+
 export function getSourceBadgeBg(name: string): string {
-  const dark = getTheme() === 'dark'
-  if (name === 'codex') return dark ? '#dcdcdc90' : '#dcdcdc80'
-  if (name === 'claude-code') return dark ? '#cc7c5e40' : '#cc7c5e26'
-  if (name === 'gemini-cli') return dark ? '#528af240' : '#528af226'
-  if (name === 'proxy') return dark ? '#8b5cf640' : '#8b5cf626'
-  if (name === 'opencode') return dark ? '#10b98140' : '#10b98126'
-  if (name === 'kilo') return dark ? '#06b6d440' : '#06b6d426'
-  return dark ? '#334155' : '#f1f5f9'
+  const theme = getTheme()
+  return SOURCE_BADGES[name]?.bg[theme] ?? (theme === 'dark' ? '#334155' : '#f1f5f9')
 }
 
 export function getSourceBadgeText(name: string): string {
-  const dark = getTheme() === 'dark'
-  if (name === 'codex') return dark ? '#0f172a' : '#475569'
-  if (name === 'claude-code') return '#cc7c5e'
-  if (name === 'gemini-cli') return '#528af2'
-  if (name === 'proxy') return '#8b5cf6'
-  if (name === 'opencode') return '#10b981'
-  if (name === 'kilo') return '#06b6d4'
-  return dark ? '#94a3b8' : '#475569'
+  const theme = getTheme()
+  return SOURCE_BADGES[name]?.text[theme] ?? (theme === 'dark' ? '#94a3b8' : '#475569')
 }
 
 export function shortSessionId(id: string) {

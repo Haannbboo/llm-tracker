@@ -1,8 +1,22 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import type { UsageRow, DateRangeOption, ActiveFilter } from '../types'
+import type { RequestLogColumnId } from './useRequestLogColumns'
 import { getSinceDate } from '../utils'
 import { t } from '../i18n/index.ts'
 import { useApp } from '../contexts/AppContext'
+
+const DEFAULT_COL_WIDTHS: Record<RequestLogColumnId, number> = {
+  time: 120,
+  model: 135,
+  provider: 120,
+  source: 110,
+  session: 120,
+  input: 220,
+  output: 130,
+  cost: 110,
+  speed: 110,
+  status: 80,
+}
 
 export function useLogsData(opts: {
   activeFilter: ActiveFilter
@@ -21,21 +35,25 @@ export function useLogsData(opts: {
   const [jumpPage, setJumpPage] = useState('')
   const [logsLoading, setLogsLoading] = useState(true)
   const [expandedRow, setExpandedRow] = useState<string | null>(null)
-  const [modelColWidth, setModelColWidth] = useState(135)
-  const resizeRef = useRef<{ startX: number; startWidth: number } | null>(null)
+  const [colWidths, setColWidths] = useState<Record<RequestLogColumnId, number>>(DEFAULT_COL_WIDTHS)
+  const [resizedColumns, setResizedColumns] = useState<Set<RequestLogColumnId>>(new Set())
+  const resizeRef = useRef<{ columnId: RequestLogColumnId; startX: number; startWidth: number } | null>(null)
 
   const resetPage = useCallback(() => setPage(1), [])
 
-  const handleResizeStart = (e: React.MouseEvent) => {
+  const handleResizeStart = (columnId: RequestLogColumnId, e: React.MouseEvent) => {
     e.preventDefault()
-    resizeRef.current = { startX: e.clientX, startWidth: modelColWidth }
+    const startX = e.clientX
+    const thEl = (e.currentTarget as HTMLElement).closest('th')
+    const startWidth = thEl?.offsetWidth ?? colWidths[columnId]
+    resizeRef.current = { columnId, startX, startWidth }
     document.body.style.userSelect = 'none'
     document.body.style.cursor = 'col-resize'
     const handleMouseMove = (e: MouseEvent) => {
-      if (!resizeRef.current) return
-      const delta = e.clientX - resizeRef.current.startX
-      const newWidth = Math.max(100, resizeRef.current.startWidth + delta)
-      setModelColWidth(newWidth)
+      const delta = e.clientX - startX
+      const newWidth = Math.max(80, startWidth + delta)
+      setColWidths(prev => ({ ...prev, [columnId]: newWidth }))
+      setResizedColumns(prev => prev.has(columnId) ? prev : new Set(prev).add(columnId))
     }
     const handleMouseUp = () => {
       resizeRef.current = null
@@ -119,6 +137,6 @@ export function useLogsData(opts: {
     usageRows, totalLogs, totalPages,
     limit, setLimit, page, setPage, jumpPage, setJumpPage, resetPage,
     logsLoading, expandedRow, setExpandedRow,
-    modelColWidth, handleResizeStart,
+    colWidths, resizedColumns, handleResizeStart,
   }
 }

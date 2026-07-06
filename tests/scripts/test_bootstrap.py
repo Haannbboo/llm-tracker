@@ -8,6 +8,8 @@ import sys
 import textwrap
 from pathlib import Path
 
+import pytest
+
 
 def _make_fake_bootstrap_repo(
     tmp_path: Path, home: Path, ports: tuple[int, int, int]
@@ -377,6 +379,7 @@ def test_bootstrap_skips_gemini_when_settings_file_exists_but_cli_is_missing(tmp
     assert "Agents: 0 ready, 5 skipped, 0 failed" in output
 
 
+@pytest.mark.slow
 def test_bootstrap_exits_nonzero_when_post_start_checks_fail(tmp_path):
     home = tmp_path / "home"
     home.mkdir()

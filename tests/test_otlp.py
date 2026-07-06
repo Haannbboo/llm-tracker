@@ -144,7 +144,7 @@ def test_extract_gemini_fields_basic(otlp_module):
     assert fields["latency_ms"] == 500
     assert fields["status"] == 200
     assert fields["client_source"] == "gemini-cli"
-    assert fields["endpoint"] == "generate-otlp"
+    assert fields["endpoint"] == "otlp"
 
 
 def test_extract_claude_fields_basic(otlp_module):
@@ -242,7 +242,7 @@ def test_extract_opencode_fields_basic(otlp_module):
     assert fields["ttft_ms"] == 345
     assert fields["client_source"] == "opencode"
     assert fields["session_id"] == "oc-sess-1"
-    assert fields["endpoint"] == "generate-otlp"
+    assert fields["endpoint"] == "otlp"
     assert fields["tool_tokens"] is None
     assert fields["prompt_length"] == 4321
 

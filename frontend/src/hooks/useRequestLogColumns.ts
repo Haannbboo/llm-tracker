@@ -11,7 +11,7 @@ export type RequestLogColumnId =
   | 'input'
   | 'output'
   | 'cost'
-  | 'latency'
+  | 'speed'
   | 'status'
 
 type RequestLogColumn = {
@@ -28,7 +28,7 @@ export const REQUEST_LOG_COLUMNS: RequestLogColumn[] = [
   { id: 'input', label: 'Input (Prompt)' },
   { id: 'output', label: 'Output' },
   { id: 'cost', label: 'Cost' },
-  { id: 'latency', label: 'TTFT / Latency' },
+  { id: 'speed', label: 'Speed' },
   { id: 'status', label: 'Status' },
 ]
 

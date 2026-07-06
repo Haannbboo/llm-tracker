@@ -242,7 +242,41 @@
   font-size: 12px;
   font-weight: 600;
   text-transform: uppercase;
+  background: var(--surface-bg);
   border-bottom: 1px solid var(--border-color);
+  transition: background-color 0.15s ease;
+  user-select: none;
+}
+
+.table th:hover {
+  background: var(--surface-hover);
+}
+
+.col-resize-handle {
+  position: absolute;
+  right: 0;
+  top: 4px;
+  bottom: 4px;
+  width: 5px;
+  cursor: col-resize;
+  border-radius: 2px;
+  opacity: 0;
+  transition: opacity 0.15s ease, background-color 0.15s ease;
+}
+
+.col-resize-handle:hover {
+  opacity: 1;
+  background-color: var(--color-blue);
+}
+
+.table th:hover > .col-resize-handle {
+  opacity: 0.4;
+  background-color: var(--text-muted);
+}
+
+.table th:hover > .col-resize-handle:hover {
+  opacity: 1;
+  background-color: var(--color-blue);
 }
 
 .table td {
