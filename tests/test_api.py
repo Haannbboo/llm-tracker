@@ -162,7 +162,7 @@ def test_usage_ingest_route_is_not_available(api_module):
             "model": "gpt-5.5",
             "client_source": "codex",
             "session_id": "codex-session-1",
-            "endpoint": "generate-otlp",
+            "endpoint": "otlp",
             "prompt_tokens": 21742,
             "completion_tokens": 6,
             "cached_tokens": 6528,
