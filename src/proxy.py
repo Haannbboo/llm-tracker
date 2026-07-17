@@ -145,6 +145,41 @@ def parse_json_body(body: bytes) -> dict[str, Any]:
     return json.loads(body)
 
 
+def _content_text_length(content: Any) -> int:
+    """Return character count of a message content value."""
+    if isinstance(content, str):
+        return len(content)
+    if isinstance(content, list):
+        total = 0
+        for part in content:
+            if isinstance(part, dict) and isinstance(part.get("text"), str):
+                total += len(part["text"])
+        return total
+    return 0
+
+
+def compute_prompt_length(body_json: dict[str, Any]) -> int:
+    """Compute new user prompt character count from a request body.
+
+    Only counts ``role=user`` messages that appear *after* the last
+    ``role=assistant`` message, so that tool-call continuation turns
+    (which replay the full history but add no new human input) report 0.
+    Supports chat/completions (``messages``) and responses (``input``) formats.
+    """
+    items = body_json.get("messages", []) or body_json.get("input", []) or []
+    # Find index of last assistant message; only count user messages after it.
+    last_assistant = -1
+    for i, item in enumerate(items):
+        if isinstance(item, dict) and item.get("role") == "assistant":
+            last_assistant = i
+
+    total = 0
+    for item in items[last_assistant + 1 :]:
+        if isinstance(item, dict) and item.get("role") == "user":
+            total += _content_text_length(item.get("content"))
+    return total
+
+
 async def _forward_stream_or_error(
     *,
     url: str,
@@ -156,6 +191,7 @@ async def _forward_stream_or_error(
     client_ip: str | None,
     path: str,
     started_at: float,
+    prompt_length: int = 0,
 ) -> StreamingResponse | JSONResponse:
     """Open an upstream streaming connection, check status, and relay or error."""
     client = httpx.AsyncClient(timeout=REQUEST_TIMEOUT_SECONDS)
@@ -222,6 +258,7 @@ async def _forward_stream_or_error(
                 session_id=None,
                 endpoint=path,
                 prompt_tokens=usage_fields.get("prompt_tokens"),
+                prompt_length=prompt_length,
                 completion_tokens=usage_fields.get("completion_tokens"),
                 cached_tokens=usage_fields.get("cached_tokens"),
                 reasoning_tokens=usage_fields.get("reasoning_tokens"),
@@ -248,6 +285,7 @@ async def forward(request: Request, path: str):
     record_proxy_user_agent(path, user_agent)
     model = body_json.get("model", "")
     provider, upstream_model = resolve_provider(model)
+    prompt_length = compute_prompt_length(body_json)
 
     if upstream_model != model:
         body_json["model"] = upstream_model
@@ -273,6 +311,7 @@ async def forward(request: Request, path: str):
             client_ip=client_ip,
             path=path,
             started_at=started_at,
+            prompt_length=prompt_length,
         )
 
     async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT_SECONDS) as client:
@@ -289,6 +328,7 @@ async def forward(request: Request, path: str):
         session_id=None,
         endpoint=path,
         prompt_tokens=usage_fields.get("prompt_tokens"),
+        prompt_length=prompt_length,
         completion_tokens=usage_fields.get("completion_tokens"),
         cached_tokens=usage_fields.get("cached_tokens"),
         reasoning_tokens=usage_fields.get("reasoning_tokens"),
