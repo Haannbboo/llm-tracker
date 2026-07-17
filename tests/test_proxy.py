@@ -1,3 +1,5 @@
+import json
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -149,6 +151,96 @@ def test_parse_json_body_decodes_json_body(proxy_module):
         "model": "test-model",
         "stream": True,
     }
+
+
+class TestComputePromptLength:
+    def test_empty_body(self, proxy_module):
+        assert proxy_module.compute_prompt_length({}) == 0
+
+    def test_empty_messages(self, proxy_module):
+        assert proxy_module.compute_prompt_length({"messages": []}) == 0
+
+    def test_single_user_message(self, proxy_module):
+        body = {"messages": [{"role": "user", "content": "Hello world"}]}
+        assert proxy_module.compute_prompt_length(body) == 11
+
+    def test_only_counts_user_after_last_assistant(self, proxy_module):
+        body = {
+            "messages": [
+                {"role": "system", "content": "You are helpful."},
+                {"role": "user", "content": "Hi"},
+                {"role": "assistant", "content": "Hello! How can I help?"},
+                {"role": "user", "content": "Bye"},
+            ]
+        }
+        # "Hi" is before the last assistant, only "Bye" counts
+        assert proxy_module.compute_prompt_length(body) == 3
+
+    def test_tool_call_continuation_returns_zero(self, proxy_module):
+        """Tool-call turns replay history with no new user input."""
+        body = {
+            "messages": [
+                {"role": "system", "content": "You are helpful."},
+                {"role": "user", "content": "What is the weather?"},
+                {"role": "assistant", "content": None, "tool_calls": [{"id": "tc_1"}]},
+                {"role": "tool", "content": '{"temp":72}'},
+            ]
+        }
+        assert proxy_module.compute_prompt_length(body) == 0
+
+    def test_multiple_tool_rounds(self, proxy_module):
+        """Each tool-call continuation reports 0; new user turn reports its length."""
+        body = {
+            "messages": [
+                {"role": "user", "content": "Book a flight"},
+                {"role": "assistant", "content": None, "tool_calls": [{"id": "tc_1"}]},
+                {"role": "tool", "content": '{"found":true}'},
+                {"role": "assistant", "content": None, "tool_calls": [{"id": "tc_2"}]},
+                {"role": "tool", "content": '{"booked":true}'},
+                {"role": "assistant", "content": "Done!"},
+                {"role": "user", "content": "Thanks!"},
+            ]
+        }
+        # Only "Thanks!" after last assistant
+        assert proxy_module.compute_prompt_length(body) == 7
+
+    def test_multimodal_content(self, proxy_module):
+        body = {
+            "messages": [
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": "Describe this"},
+                        {"type": "image_url", "image_url": {"url": "data:..."}},
+                    ],
+                }
+            ]
+        }
+        assert proxy_module.compute_prompt_length(body) == len("Describe this")
+
+    def test_none_content(self, proxy_module):
+        body = {"messages": [{"role": "user", "content": None}]}
+        assert proxy_module.compute_prompt_length(body) == 0
+
+    def test_no_user_messages(self, proxy_module):
+        body = {
+            "messages": [
+                {"role": "system", "content": "You are helpful."},
+                {"role": "assistant", "content": "Hello!"},
+            ]
+        }
+        assert proxy_module.compute_prompt_length(body) == 0
+
+    def test_responses_api_input(self, proxy_module):
+        body = {"input": [{"role": "user", "content": "test prompt"}]}
+        assert proxy_module.compute_prompt_length(body) == len("test prompt")
+
+    def test_messages_takes_precedence_over_input(self, proxy_module):
+        body = {
+            "messages": [{"role": "user", "content": "msg"}],
+            "input": [{"role": "user", "content": "input"}],
+        }
+        assert proxy_module.compute_prompt_length(body) == 3
 
 
 @pytest.mark.parametrize(
@@ -417,6 +509,67 @@ async def test_forward_logs_base_url_id_from_provider_config(proxy_module, monke
 
 
 @pytest.mark.anyio
+async def test_forward_computes_prompt_length_non_streaming(proxy_module, monkeypatch):
+    captured = {}
+
+    class FakeResponse:
+        status_code = 200
+
+        def json(self):
+            return {"usage": {"prompt_tokens": 10, "completion_tokens": 5}}
+
+    class FakeAsyncClient:
+        def __init__(self, timeout):
+            self.timeout = timeout
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        async def post(self, url, headers, content):
+            return FakeResponse()
+
+    body = json.dumps(
+        {
+            "model": "test-model",
+            "stream": False,
+            "messages": [
+                {"role": "system", "content": "You are helpful."},
+                {"role": "user", "content": "Hello world"},
+                {"role": "assistant", "content": "Hi there!"},
+                {"role": "user", "content": "Bye"},
+            ],
+        }
+    ).encode()
+
+    async def receive():
+        return {"type": "http.request", "body": body, "more_body": False}
+
+    monkeypatch.setattr(proxy_module.httpx, "AsyncClient", FakeAsyncClient)
+    monkeypatch.setattr(
+        proxy_module, "record_usage", lambda **fields: captured.update(fields)
+    )
+    monkeypatch.setattr(proxy_module, "record_proxy_user_agent", lambda path, ua: None)
+
+    request = proxy_module.Request(
+        {
+            "type": "http",
+            "method": "POST",
+            "path": "/v1/chat/completions",
+            "headers": [(b"content-type", b"application/json")],
+        },
+        receive,
+    )
+
+    await proxy_module.forward(request, "/v1/chat/completions")
+
+    # Only "Bye" after last assistant; "Hello world" is before it
+    assert captured["prompt_length"] == 3
+
+
+@pytest.mark.anyio
 async def test_streaming_forward_logs_first_chunk_latency(proxy_module, monkeypatch):
     captured = {}
 
@@ -501,6 +654,91 @@ async def test_streaming_forward_logs_first_chunk_latency(proxy_module, monkeypa
     assert captured["latency_ms"] == 90
     assert captured["prompt_tokens"] == 10
     assert captured["completion_tokens"] == 5
+
+
+@pytest.mark.anyio
+async def test_forward_computes_prompt_length_streaming(proxy_module, monkeypatch):
+    captured = {}
+
+    class FakeStreamResponse:
+        def __init__(self, status_code=200):
+            self.status_code = status_code
+
+        async def aiter_bytes(self):
+            yield b'data: {"type":"response.output_text.delta"}\n\n'
+            yield (
+                b'data: {"response":{"usage":{"input_tokens":10,"output_tokens":5}}}\n\n'
+            )
+
+        async def aread(self):
+            return b""
+
+    class FakeRequest:
+        def __init__(self, method, url, headers, content):
+            self.method = method
+            self.url = url
+            self.headers = headers
+            self.content = content
+
+    class FakeAsyncClient:
+        def __init__(self, timeout):
+            self.timeout = timeout
+
+        def build_request(self, method, url, headers=None, content=None):
+            return FakeRequest(method, url, headers, content)
+
+        async def send(self, request, stream=False):
+            return FakeStreamResponse()
+
+        async def aclose(self):
+            pass
+
+    body = json.dumps(
+        {
+            "model": "test-model",
+            "stream": True,
+            "messages": [
+                {"role": "system", "content": "Be brief."},
+                {"role": "user", "content": "Hello"},
+            ],
+        }
+    ).encode()
+
+    async def receive():
+        return {"type": "http.request", "body": body, "more_body": False}
+
+    class FakeMonotonic:
+        def __init__(self):
+            self.values = [100.0, 100.025, 100.090]
+            self.last = self.values[-1]
+
+        def __call__(self):
+            if self.values:
+                self.last = self.values.pop(0)
+            return self.last
+
+    monkeypatch.setattr(proxy_module.httpx, "AsyncClient", FakeAsyncClient)
+    monkeypatch.setattr(proxy_module.time, "monotonic", FakeMonotonic())
+    monkeypatch.setattr(
+        proxy_module, "record_usage", lambda **fields: captured.update(fields)
+    )
+
+    request = proxy_module.Request(
+        {
+            "type": "http",
+            "method": "POST",
+            "path": "/v1/chat/completions",
+            "headers": [(b"content-type", b"application/json")],
+        },
+        receive,
+    )
+
+    response = await proxy_module.forward(request, "/v1/chat/completions")
+    _ = [chunk async for chunk in response.body_iterator]
+
+    assert response.status_code == 200
+    # Only "Hello" (5 chars), system message excluded
+    assert captured["prompt_length"] == 5
 
 
 @pytest.mark.anyio
