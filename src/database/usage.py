@@ -14,9 +14,11 @@ from sqlalchemy import (
     and_,
     case,
     func,
+    literal_column,
     or_,
     select,
     text,
+    types,
 )
 from sqlalchemy.orm import Session
 
@@ -406,6 +408,26 @@ def _daily_usage_filters(
     return filters
 
 
+def _should_use_daily_table(since: str | None, until: str | None) -> bool:
+    """Return True when the time range is wide enough for daily aggregation.
+
+    For sub-2-day ranges, the daily aggregate table loses precision because it
+    includes full calendar days.  Fall back to the raw usage table for accuracy.
+    """
+    if since is None or until is None:
+        return True
+    try:
+        since_dt = datetime.fromisoformat(since)
+        until_dt = datetime.fromisoformat(until)
+        if since_dt.tzinfo is None:
+            since_dt = since_dt.replace(tzinfo=timezone.utc)
+        if until_dt.tzinfo is None:
+            until_dt = until_dt.replace(tzinfo=timezone.utc)
+        return (until_dt - since_dt).total_seconds() >= 2 * 86400
+    except (ValueError, TypeError):
+        return True
+
+
 def _daily_usage_token_columns(*, include_reasoning: bool = True) -> tuple[Any, ...]:
     columns: list[Any] = [
         func.sum(UsageDaily.prompt_tokens).label("prompt_tokens"),
@@ -427,9 +449,11 @@ def _daily_usage_latency_columns(
 ) -> tuple[Any, ...]:
     columns: list[Any] = []
     if include_avg_latency:
+        # Cast to REAL to avoid integer division truncation on SQLite
         columns.append(
             (
-                func.sum(UsageDaily.latency_sum_ms) / func.sum(UsageDaily.request_count)
+                func.cast(func.sum(UsageDaily.latency_sum_ms), types.REAL)
+                / func.sum(UsageDaily.request_count)
             ).label("avg_latency_ms")
         )
     columns.append(func.sum(UsageDaily.latency_sum_ms).label("latency_sum_ms"))
@@ -582,7 +606,7 @@ def count_usage(
     session_id column), so we fall back to counting rows in the raw ``usage``
     table instead.
     """
-    if session_id is not None:
+    if session_id is not None or not _should_use_daily_table(since, until):
         filters = _usage_filters(
             provider=provider,
             model=model,
@@ -800,6 +824,83 @@ def _build_usage_window_summary(
     return result
 
 
+def _summarize_usage_raw(
+    *,
+    select_cols: tuple[Any, ...],
+    group_cols: tuple[Any, ...],
+    since: str | None = None,
+    until: str | None = None,
+    provider: str | None = None,
+    model: str | None = None,
+    client_source: str | None = None,
+    db_path: str | None = None,
+) -> list[dict[str, Any]]:
+    """Aggregate raw usage table for sub-day ranges."""
+    filters = _usage_filters(
+        provider=provider,
+        model=model,
+        client_source=client_source,
+        since=since,
+        until=until,
+    )
+
+    latency_sum = func.coalesce(
+        func.sum(case((Usage.latency_ms.isnot(None), Usage.latency_ms), else_=0)), 0
+    )
+
+    query = (
+        select(
+            *select_cols,
+            func.count().label("requests"),
+            func.coalesce(func.sum(Usage.prompt_tokens), 0).label("prompt_tokens"),
+            func.coalesce(func.sum(Usage.completion_tokens), 0).label(
+                "completion_tokens"
+            ),
+            func.coalesce(func.sum(Usage.reasoning_tokens), 0).label(
+                "reasoning_tokens"
+            ),
+            func.coalesce(func.sum(Usage.cached_tokens), 0).label("cached_tokens"),
+            func.coalesce(func.sum(Usage.total_tokens), 0).label("total_tokens"),
+            func.avg(Usage.latency_ms).label("avg_latency_ms"),
+            latency_sum.label("latency_sum_ms"),
+            func.coalesce(func.sum(Usage.input_cost_usd), 0).label("input_cost_usd"),
+            func.coalesce(func.sum(Usage.output_cost_usd), 0).label("output_cost_usd"),
+            func.coalesce(func.sum(Usage.total_cost_usd), 0).label("total_cost_usd"),
+            _avg_effective_price_expr(Usage.total_cost_usd, Usage.total_tokens).label(
+                "avg_effective_price_usd"
+            ),
+            _avg_effective_price_per_million_expr(
+                Usage.total_cost_usd, Usage.total_tokens
+            ).label("avg_effective_price_per_million_usd"),
+            func.count(
+                case((or_(Usage.status.is_(None), Usage.status < 400), 1))
+            ).label("successful_requests"),
+            func.count(
+                case((and_(Usage.status.isnot(None), Usage.status >= 400), 1))
+            ).label("failed_requests"),
+            func.count(case((Usage.status == 429, 1))).label("status_429"),
+            func.count(
+                case(
+                    (
+                        and_(
+                            Usage.status >= 400, Usage.status < 500, Usage.status != 429
+                        ),
+                        1,
+                    )
+                )
+            ).label("status_4xx"),
+            func.count(case((Usage.status >= 500, 1))).label("status_5xx"),
+            literal_column("0").label("status_unknown"),
+        )
+        .group_by(*group_cols)
+        .order_by(func.coalesce(func.sum(Usage.total_tokens), 0).desc())
+    )
+    if filters:
+        query = query.where(and_(*filters))
+    with get_engine(db_path).connect() as connection:
+        return [_row_to_dict(row) for row in connection.execute(query)]
+
+
 def summarize_usage_by_source(
     *,
     since: str | None = None,
@@ -809,7 +910,19 @@ def summarize_usage_by_source(
     client_source: str | None = None,
     db_path: str | None = None,
 ) -> list[dict[str, Any]]:
-    """Aggregate usage_daily totals by client_source for dashboard source chart."""
+    """Aggregate usage totals by client_source for dashboard source chart."""
+    if not _should_use_daily_table(since, until):
+        return _summarize_usage_raw(
+            select_cols=(Usage.client_source,),
+            group_cols=(Usage.client_source,),
+            since=since,
+            until=until,
+            provider=provider,
+            model=model,
+            client_source=client_source,
+            db_path=db_path,
+        )
+
     filters = _daily_usage_filters(
         since=since,
         until=until,
@@ -845,7 +958,19 @@ def summarize_usage_by_provider(
     client_source: str | None = None,
     db_path: str | None = None,
 ) -> list[dict[str, Any]]:
-    """Aggregate usage_daily totals by provider for dashboard provider chart."""
+    """Aggregate usage totals by provider for dashboard provider chart."""
+    if not _should_use_daily_table(since, until):
+        return _summarize_usage_raw(
+            select_cols=(Usage.provider,),
+            group_cols=(Usage.provider,),
+            since=since,
+            until=until,
+            provider=provider,
+            model=model,
+            client_source=client_source,
+            db_path=db_path,
+        )
+
     filters = _daily_usage_filters(
         since=since,
         until=until,
@@ -882,7 +1007,22 @@ def summarize_usage_daily(
     client_source: str | None = None,
     db_path: str | None = None,
 ) -> list[dict[str, Any]]:
-    """Aggregate usage_daily totals by provider and model for dashboard summaries."""
+    """Aggregate usage totals by provider and model for dashboard summaries.
+
+    For sub-2-day time ranges, queries the raw usage table for precision.
+    """
+    if not _should_use_daily_table(since, until):
+        return _summarize_usage_raw(
+            select_cols=(Usage.provider, Usage.model),
+            group_cols=(Usage.provider, Usage.model),
+            since=since,
+            until=until,
+            provider=provider,
+            model=model,
+            client_source=client_source,
+            db_path=db_path,
+        )
+
     filters = _daily_usage_filters(
         since=since,
         until=until,
