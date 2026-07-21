@@ -235,5 +235,5 @@ fi
 # ── Final status (only when run standalone) ─────────────────────────
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
   API_PORT=$("${PYTHON}" -c "import yaml; from pathlib import Path; p = Path('${CONFIG_PATH}'); c = yaml.safe_load(p.read_text()) or {}; print(c.get('server', {}).get('api_port', c.get('server', {}).get('port', 4000) + 1))" 2>/dev/null || echo "4001")
-  final_status_ok "http://127.0.0.1:${API_PORT}"
+  final_status_ok "http://${OTLP_HOST}:${API_PORT}"
 fi
