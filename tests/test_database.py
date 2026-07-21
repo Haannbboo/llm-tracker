@@ -1492,6 +1492,142 @@ def test_summarize_usage_daily_filters_by_since(database_module, isolated_home):
     assert summary[0]["requests"] == 1
 
 
+def _log_usage_row(
+    database_module,
+    db_path,
+    ts,
+    prompt,
+    comp,
+    tokens,
+    status=200,
+    provider="anthropic",
+    model="claude-sonnet-4-6",
+    source=None,
+):
+    """Helper to insert a usage row for regression tests."""
+    database_module.log_usage(
+        database_module.Usage(
+            ts=ts,
+            provider=provider,
+            model=model,
+            client_source=source,
+            session_id=None,
+            endpoint="/v1/messages",
+            prompt_tokens=prompt,
+            prompt_length=500,
+            completion_tokens=comp,
+            reasoning_tokens=None,
+            cached_tokens=None,
+            total_tokens=tokens,
+            latency_ms=100,
+            ttft_ms=None,
+            tool_tokens=None,
+            cache_creation_tokens=None,
+            input_cost_usd=0.001,
+            output_cost_usd=0.002,
+            total_cost_usd=0.003,
+            status=status,
+            base_url_id=None,
+        ),
+        db_path=db_path,
+    )
+
+
+def test_summarize_usage_daily_sub_day_range(database_module, isolated_home):
+    """Sub-day time range must use raw usage table, not daily aggregates."""
+    db_path = str(isolated_home / "usage.db")
+    database_module.init_db(db_path)
+
+    # Row at 10:00 on April 17 — inside the 2h window
+    _log_usage_row(database_module, db_path, TS_2026_04_17_10, 100, 50, 150)
+    # Row at 11:00 on April 17 — inside the 2h window
+    _log_usage_row(database_module, db_path, TS_2026_04_17_11, 200, 100, 300)
+    # Row at 10:00 on April 18 — outside the 2h window
+    _log_usage_row(database_module, db_path, TS_2026_04_18_10, 400, 200, 600)
+
+    # 2-hour window on April 17 (sub-day) — should only include first two rows
+    summary = database_module.summarize_usage_daily(
+        since="2026-04-17T09:00:00",
+        until="2026-04-17T12:00:00",
+    )
+    assert len(summary) == 1
+    row = summary[0]
+    assert row["provider"] == "anthropic"
+    assert row["model"] == "claude-sonnet-4-6"
+    assert row["requests"] == 2
+    assert row["prompt_tokens"] == 300
+    assert row["completion_tokens"] == 150
+    assert row["total_tokens"] == 450
+
+
+def test_count_usage_sub_day_range(database_module, isolated_home):
+    """count_usage with sub-day range must count only rows in the window."""
+    db_path = str(isolated_home / "usage.db")
+    database_module.init_db(db_path)
+
+    _log_usage_row(database_module, db_path, TS_2026_04_17_10, 100, 50, 150)
+    _log_usage_row(database_module, db_path, TS_2026_04_17_11, 200, 100, 300)
+    _log_usage_row(database_module, db_path, TS_2026_04_18_10, 400, 200, 600)
+
+    count = database_module.count_usage(
+        since="2026-04-17T09:00:00",
+        until="2026-04-17T12:00:00",
+    )
+    assert count == 2
+
+
+def test_summarize_usage_by_source_sub_day_range(database_module, isolated_home):
+    """by-source with sub-day range must use raw usage table."""
+    db_path = str(isolated_home / "usage.db")
+    database_module.init_db(db_path)
+
+    _log_usage_row(
+        database_module, db_path, TS_2026_04_17_10, 100, 50, 150, source="claude-code"
+    )
+    _log_usage_row(
+        database_module, db_path, TS_2026_04_17_11, 200, 100, 300, source="claude-code"
+    )
+    _log_usage_row(
+        database_module, db_path, TS_2026_04_18_10, 400, 200, 600, source="codex"
+    )
+
+    # Sub-day window — should only include the two claude-code rows
+    summary = database_module.summarize_usage_by_source(
+        since="2026-04-17T09:00:00",
+        until="2026-04-17T12:00:00",
+    )
+    assert len(summary) == 1
+    assert summary[0]["client_source"] == "claude-code"
+    assert summary[0]["requests"] == 2
+    assert summary[0]["total_tokens"] == 450
+
+
+def test_summarize_usage_by_provider_sub_day_range(database_module, isolated_home):
+    """by-provider with sub-day range must use raw usage table."""
+    db_path = str(isolated_home / "usage.db")
+    database_module.init_db(db_path)
+
+    _log_usage_row(
+        database_module, db_path, TS_2026_04_17_10, 100, 50, 150, provider="anthropic"
+    )
+    _log_usage_row(
+        database_module, db_path, TS_2026_04_17_11, 200, 100, 300, provider="anthropic"
+    )
+    _log_usage_row(
+        database_module, db_path, TS_2026_04_18_10, 400, 200, 600, provider="openai"
+    )
+
+    # Sub-day window — should only include the two anthropic rows
+    summary = database_module.summarize_usage_by_provider(
+        since="2026-04-17T09:00:00",
+        until="2026-04-17T12:00:00",
+    )
+    assert len(summary) == 1
+    assert summary[0]["provider"] == "anthropic"
+    assert summary[0]["requests"] == 2
+    assert summary[0]["total_tokens"] == 450
+
+
 def test_aggregate_daily_by_period_reads_from_aggregate_table(
     database_module, isolated_home
 ):
