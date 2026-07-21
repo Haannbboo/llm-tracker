@@ -1543,11 +1543,33 @@ def test_summarize_usage_daily_sub_day_range(database_module, isolated_home):
     database_module.init_db(db_path)
 
     # Row at 10:00 on April 17 — inside the 2h window
-    _log_usage_row(database_module, db_path, TS_2026_04_17_10, 100, 50, 150,
-                   latency_ms=100, status=200, input_cost=0.001, output_cost=0.002, total_cost=0.003)
+    _log_usage_row(
+        database_module,
+        db_path,
+        TS_2026_04_17_10,
+        100,
+        50,
+        150,
+        latency_ms=100,
+        status=200,
+        input_cost=0.001,
+        output_cost=0.002,
+        total_cost=0.003,
+    )
     # Row at 11:00 on April 17 — inside the 2h window
-    _log_usage_row(database_module, db_path, TS_2026_04_17_11, 200, 100, 300,
-                   latency_ms=200, status=500, input_cost=0.004, output_cost=0.006, total_cost=0.010)
+    _log_usage_row(
+        database_module,
+        db_path,
+        TS_2026_04_17_11,
+        200,
+        100,
+        300,
+        latency_ms=200,
+        status=500,
+        input_cost=0.004,
+        output_cost=0.006,
+        total_cost=0.010,
+    )
     # Row at 10:00 on April 18 — outside the 2h window
     _log_usage_row(database_module, db_path, TS_2026_04_18_10, 400, 200, 600)
 
