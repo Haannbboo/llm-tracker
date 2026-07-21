@@ -1503,6 +1503,10 @@ def _log_usage_row(
     provider="anthropic",
     model="claude-sonnet-4-6",
     source=None,
+    latency_ms=100,
+    input_cost=0.001,
+    output_cost=0.002,
+    total_cost=0.003,
 ):
     """Helper to insert a usage row for regression tests."""
     database_module.log_usage(
@@ -1519,13 +1523,13 @@ def _log_usage_row(
             reasoning_tokens=None,
             cached_tokens=None,
             total_tokens=tokens,
-            latency_ms=100,
+            latency_ms=latency_ms,
             ttft_ms=None,
             tool_tokens=None,
             cache_creation_tokens=None,
-            input_cost_usd=0.001,
-            output_cost_usd=0.002,
-            total_cost_usd=0.003,
+            input_cost_usd=input_cost,
+            output_cost_usd=output_cost,
+            total_cost_usd=total_cost,
             status=status,
             base_url_id=None,
         ),
@@ -1539,9 +1543,11 @@ def test_summarize_usage_daily_sub_day_range(database_module, isolated_home):
     database_module.init_db(db_path)
 
     # Row at 10:00 on April 17 — inside the 2h window
-    _log_usage_row(database_module, db_path, TS_2026_04_17_10, 100, 50, 150)
+    _log_usage_row(database_module, db_path, TS_2026_04_17_10, 100, 50, 150,
+                   latency_ms=100, status=200, input_cost=0.001, output_cost=0.002, total_cost=0.003)
     # Row at 11:00 on April 17 — inside the 2h window
-    _log_usage_row(database_module, db_path, TS_2026_04_17_11, 200, 100, 300)
+    _log_usage_row(database_module, db_path, TS_2026_04_17_11, 200, 100, 300,
+                   latency_ms=200, status=500, input_cost=0.004, output_cost=0.006, total_cost=0.010)
     # Row at 10:00 on April 18 — outside the 2h window
     _log_usage_row(database_module, db_path, TS_2026_04_18_10, 400, 200, 600)
 
@@ -1558,6 +1564,10 @@ def test_summarize_usage_daily_sub_day_range(database_module, isolated_home):
     assert row["prompt_tokens"] == 300
     assert row["completion_tokens"] == 150
     assert row["total_tokens"] == 450
+    assert row["successful_requests"] == 1
+    assert row["failed_requests"] == 1
+    assert row["avg_latency_ms"] == 150.0  # (100 + 200) / 2
+    assert abs(row["total_cost_usd"] - 0.013) < 0.0001
 
 
 def test_count_usage_sub_day_range(database_module, isolated_home):
