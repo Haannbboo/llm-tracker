@@ -18,6 +18,7 @@ from sqlalchemy import (
     or_,
     select,
     text,
+    types,
 )
 from sqlalchemy.orm import Session
 
@@ -448,9 +449,11 @@ def _daily_usage_latency_columns(
 ) -> tuple[Any, ...]:
     columns: list[Any] = []
     if include_avg_latency:
+        # Cast to REAL to avoid integer division truncation on SQLite
         columns.append(
             (
-                func.sum(UsageDaily.latency_sum_ms) / func.sum(UsageDaily.request_count)
+                func.cast(func.sum(UsageDaily.latency_sum_ms), types.REAL)
+                / func.sum(UsageDaily.request_count)
             ).label("avg_latency_ms")
         )
     columns.append(func.sum(UsageDaily.latency_sum_ms).label("latency_sum_ms"))
@@ -841,7 +844,6 @@ def _summarize_usage_raw(
         until=until,
     )
 
-    latency_count = func.count(case((Usage.latency_ms.isnot(None), 1)))
     latency_sum = func.coalesce(
         func.sum(case((Usage.latency_ms.isnot(None), Usage.latency_ms), else_=0)), 0
     )
@@ -859,7 +861,7 @@ def _summarize_usage_raw(
             ),
             func.coalesce(func.sum(Usage.cached_tokens), 0).label("cached_tokens"),
             func.coalesce(func.sum(Usage.total_tokens), 0).label("total_tokens"),
-            (latency_sum / func.nullif(latency_count, 0)).label("avg_latency_ms"),
+            func.avg(Usage.latency_ms).label("avg_latency_ms"),
             latency_sum.label("latency_sum_ms"),
             func.coalesce(func.sum(Usage.input_cost_usd), 0).label("input_cost_usd"),
             func.coalesce(func.sum(Usage.output_cost_usd), 0).label("output_cost_usd"),
