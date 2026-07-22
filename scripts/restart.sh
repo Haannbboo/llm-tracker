@@ -84,18 +84,8 @@ else
 fi
 
 # ── Resolve OTLP host from server.base_url ──────────────────────────
-OTLP_HOST=$("${PYTHON}" -c "
-import yaml
-from pathlib import Path
-from urllib.parse import urlparse
-c = yaml.safe_load(Path('${CONFIG_PATH}').read_text()) or {}
-base = c.get('server', {}).get('base_url')
-if base:
-    parsed = urlparse(base)
-    print(parsed.hostname or 'localhost')
-else:
-    print('localhost')
-" 2>/dev/null || echo "localhost")
+_otlp_line=$("${PYTHON}" "${ROOT_DIR}/scripts/read-otlp-config.py" "${CONFIG_PATH}" 2>/dev/null || echo "4002 localhost")
+OTLP_HOST="${_otlp_line#* }"
 info "OTLP host: ${OTLP_HOST}"
 
 # ── Port check ──────────────────────────────────────────────────────
