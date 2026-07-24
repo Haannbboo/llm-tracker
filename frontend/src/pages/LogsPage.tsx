@@ -495,20 +495,23 @@ export function LogsPage({ initialSessionFilter }: Props) {
       case 'tool':
         return (
           <td>
-            {row.tool_name ? (
-              <span style={{
-                padding: '2px 6px',
-                borderRadius: '4px',
-                fontSize: '10px',
-                fontWeight: 600,
-                backgroundColor: getToolColor(row.tool_name).bg,
-                color: getToolColor(row.tool_name).text,
-                animation: 'tool-badge-pulse 2s ease-in-out infinite',
-                whiteSpace: 'nowrap',
-                display: 'inline-block',
-              }}>
-                {row.tool_name}
-              </span>
+            {row.tool_names ? (
+              <div style={{ display: 'flex', gap: '3px', flexWrap: 'wrap' }}>
+                {(row.tool_names as string).split(',').filter(Boolean).map((name: string, i: number) => (
+                  <span key={i} style={{
+                    padding: '2px 6px',
+                    borderRadius: '4px',
+                    fontSize: '10px',
+                    fontWeight: 600,
+                    backgroundColor: getToolColor(name).bg,
+                    color: getToolColor(name).text,
+                    whiteSpace: 'nowrap',
+                    display: 'inline-block',
+                  }}>
+                    {name}
+                  </span>
+                ))}
+              </div>
             ) : null}
           </td>
         )

@@ -94,7 +94,7 @@ def test_init_db_log_usage_and_fetch_rows(database_module, isolated_home):
         "latency_ms": 123,
         "ttft_ms": None,
         "tool_tokens": None,
-        "tool_name": None,
+        "tool_names": None,
         "cache_creation_tokens": None,
         "input_cost_usd": 2e-05,
         "output_cost_usd": 3e-05,
@@ -156,7 +156,7 @@ def test_fetch_recent_usage_returns_expected_row_shape(database_module, isolated
         "latency_ms",
         "ttft_ms",
         "tool_tokens",
-        "tool_name",
+        "tool_names",
         "cache_creation_tokens",
         "input_cost_usd",
         "output_cost_usd",
@@ -166,6 +166,95 @@ def test_fetch_recent_usage_returns_expected_row_shape(database_module, isolated
         "base_url_id",
         "base_url",
     }
+
+
+def test_fetch_recent_usage_aggregates_tool_names(database_module, isolated_home):
+    """Test that tool_names aggregates multiple tool calls per usage into comma-separated string."""
+    from src.recorder import record_tool_call
+
+    db_path = str(isolated_home / "usage.db")
+    database_module.init_db(db_path)
+
+    # Insert a usage row (log_usage doesn't return the object, but populates its id)
+    usage_obj = database_module.Usage(
+        ts=TS_2026_04_17_00,
+        provider="anthropic",
+        model="claude-sonnet-4-20250514",
+        client_source="claude-code",
+        session_id="session-tools",
+        endpoint="/v1/messages",
+        prompt_tokens=100,
+        completion_tokens=50,
+        reasoning_tokens=None,
+        cached_tokens=None,
+        total_tokens=150,
+        latency_ms=200,
+        ttft_ms=None,
+        tool_tokens=None,
+        cache_creation_tokens=None,
+        input_cost_usd=0.002,
+        output_cost_usd=0.003,
+        total_cost_usd=0.005,
+        status=200,
+        base_url_id=None,
+    )
+    database_module.log_usage(usage_obj, db_path=db_path)
+
+    # Insert multiple tool calls for this usage
+    for i, tool_name in enumerate(["read_file", "edit_file", "bash"]):
+        record_tool_call(
+            tool_use_id=f"tool_{i}",
+            usage_id=usage_obj.id,
+            session_id=usage_obj.session_id,
+            tool_name=tool_name,
+            client_source="claude-code",
+            ts=TS_2026_04_17_00 + i,
+            db_path=db_path,
+        )
+
+    # Fetch and verify aggregated tool names
+    rows = database_module.fetch_recent_usage(limit=1, db_path=db_path)
+    assert len(rows) == 1
+    assert rows[0]["tool_names"] is not None
+    # Should contain all three tool names (order may vary)
+    tool_names_set = set(rows[0]["tool_names"].split(","))
+    assert tool_names_set == {"read_file", "edit_file", "bash"}
+
+
+def test_fetch_recent_usage_no_tool_calls(database_module, isolated_home):
+    """Test that tool_names is None when no tool calls exist."""
+    db_path = str(isolated_home / "usage.db")
+    database_module.init_db(db_path)
+
+    database_module.log_usage(
+        database_module.Usage(
+            ts=TS_2026_04_17_00,
+            provider="anthropic",
+            model="claude-sonnet-4-20250514",
+            client_source="claude-code",
+            session_id="session-no-tools",
+            endpoint="/v1/messages",
+            prompt_tokens=100,
+            completion_tokens=50,
+            reasoning_tokens=None,
+            cached_tokens=None,
+            total_tokens=150,
+            latency_ms=200,
+            ttft_ms=None,
+            tool_tokens=None,
+            cache_creation_tokens=None,
+            input_cost_usd=0.002,
+            output_cost_usd=0.003,
+            total_cost_usd=0.005,
+            status=200,
+            base_url_id=None,
+        ),
+        db_path=db_path,
+    )
+
+    rows = database_module.fetch_recent_usage(limit=1, db_path=db_path)
+    assert len(rows) == 1
+    assert rows[0]["tool_names"] is None
 
 
 def test_usage_filters_includes_client_source(database_module, isolated_home):

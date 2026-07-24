@@ -534,6 +534,21 @@ def fetch_recent_usage(
     )
     from ..database.models import ToolCall
 
+    # Subquery: aggregate tool names per usage_id into a comma-separated string.
+    dialect = get_engine(db_path).dialect.name
+    if dialect == "postgresql":
+        tool_names_expr = func.string_agg(ToolCall.tool_name, ",").label("tool_names")
+    else:
+        tool_names_expr = func.group_concat(ToolCall.tool_name, ",").label("tool_names")
+    tool_agg = (
+        select(
+            ToolCall.usage_id,
+            tool_names_expr,
+        )
+        .group_by(ToolCall.usage_id)
+        .subquery()
+    )
+
     query = (
         select(
             Usage.id,
@@ -560,11 +575,11 @@ def fetch_recent_usage(
             Usage.client_ip,
             Usage.base_url_id,
             BaseUrl.base_url.label("base_url"),
-            ToolCall.tool_name.label("tool_name"),
+            tool_agg.c.tool_names.label("tool_names"),
         )
         .select_from(Usage)
         .outerjoin(BaseUrl, Usage.base_url_id == BaseUrl.id)
-        .outerjoin(ToolCall, ToolCall.usage_id == Usage.id)
+        .outerjoin(tool_agg, tool_agg.c.usage_id == Usage.id)
         .order_by(Usage.ts.desc())
         .limit(limit)
         .offset(offset)

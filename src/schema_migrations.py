@@ -848,30 +848,18 @@ def migrate_database(db_path: str | None = None) -> list[str]:
         if _migrate_usage_id_to_uuid(engine):
             applied.append("usage.id_to_uuid")
 
-    # tool_calls table
+    # tool_calls table (postgresql and sqlite3 have same dialect here)
     if not _table_exists(engine, "tool_calls"):
-        if engine.dialect.name == "postgresql":
-            create_sql = """
-                CREATE TABLE tool_calls (
-                    tool_use_id TEXT PRIMARY KEY,
-                    usage_id TEXT REFERENCES usage(id),
-                    session_id TEXT,
-                    tool_name TEXT NOT NULL,
-                    client_source TEXT,
-                    ts BIGINT NOT NULL
-                )
-            """
-        else:
-            create_sql = """
-                CREATE TABLE tool_calls (
-                    tool_use_id TEXT PRIMARY KEY,
-                    usage_id TEXT REFERENCES usage(id),
-                    session_id TEXT,
-                    tool_name TEXT NOT NULL,
-                    client_source TEXT,
-                    ts BIGINT NOT NULL
-                )
-            """
+        create_sql = """
+            CREATE TABLE tool_calls (
+                tool_use_id TEXT PRIMARY KEY,
+                usage_id TEXT REFERENCES usage(id),
+                session_id TEXT,
+                tool_name TEXT NOT NULL,
+                client_source TEXT,
+                ts BIGINT NOT NULL
+            )
+        """
         with engine.begin() as connection:
             connection.execute(text(create_sql))
         applied.append("tool_calls.create")
