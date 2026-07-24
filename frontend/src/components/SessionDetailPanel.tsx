@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import { ClickToCopy } from './CopyButton'
 import { t } from '../i18n/index.ts'
 import { useApp } from '../contexts/AppContext'
-import { formatCompact, formatCost, formatDuration, formatLatency, formatNumber, formatTime, value, getModelIcon, sessionTaskTitle, resolveTimezone } from '../utils'
+import { formatCompact, formatCost, formatDuration, formatLatency, formatNumber, formatTime, value, getModelIcon, sessionTaskTitle, resolveTimezone, ToolBadge } from '../utils'
 import { getModelBadgeBackgroundColor, getModelTextColor } from '../model-badge'
 import type { EvaluatorOption, EvaluatorType, EvaluationJobProgress, SessionEvaluation, SessionOutcome, SessionSummary } from '../types'
 
@@ -437,9 +437,7 @@ export function SessionDetailContent({
             <div style={{ fontSize: '10px', color: 'var(--text-muted)', marginBottom: '6px', textTransform: 'uppercase', letterSpacing: '0.5px', fontWeight: 700 }}>{t('Tool Usage')}</div>
             <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
               {Object.entries(session.tool_calls_json).map(([name, count]) => (
-                <span key={name} className="model-badge" style={{ fontSize: '11px' }}>
-                  {name}×{count}
-                </span>
+                <ToolBadge key={name} name={name} count={count} />
               ))}
             </div>
           </div>

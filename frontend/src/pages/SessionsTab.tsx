@@ -8,7 +8,7 @@ import { t } from '../i18n/index.ts'
 import {
   formatCompact, formatCost, formatDuration, formatLatency, formatNumber,
   formatTime, getModelIcon, getSourceBadgeBg, getSourceBadgeText,
-  shortSessionId, sessionAgentName, sessionDisplayName, sessionTaskTitle, getSinceDate, resolveTimezone,
+  shortSessionId, sessionAgentName, sessionDisplayName, sessionTaskTitle, getSinceDate, resolveTimezone, ToolBadge,
 } from '../utils'
 import { getModelBadgeBackgroundColor, getModelTextColor } from '../model-badge'
 import type { DailyEffectivenessReport, EvaluatorOption, EvaluatorType, EvaluationJobProgress, ModelEffectivenessGroup, SessionOutcome, SessionSummary, SessionsSummary } from '../types'
@@ -710,7 +710,7 @@ export function SessionsTab({
                   <th className="sessions-col-cost" style={{ cursor: 'pointer' }} onClick={() => handleSessionSort('total_cost_usd')}>
                     {t('Cost')} {sessionSortBy === 'total_cost_usd' ? (sessionSortOrder === 'asc' ? '↑' : '↓') : ''}
                   </th>
-                  <th style={{ width: '120px' }}>{t('Tools')}</th>
+                  <th style={{ width: '180px' }}>{t('Tools')}</th>
                   <th style={{ width: '90px' }}>Outcome</th>
                 </tr>
               </thead>
@@ -797,9 +797,7 @@ export function SessionsTab({
                       {session.tool_calls_json ? (
                         <div style={{ display: 'flex', gap: '3px', flexWrap: 'wrap' }}>
                           {Object.entries(session.tool_calls_json).map(([name, count]) => (
-                            <span key={name} className="model-badge" style={{ fontSize: '10px' }}>
-                              {name}×{count}
-                            </span>
+                            <ToolBadge key={name} name={name} count={count} />
                           ))}
                         </div>
                       ) : '—'}

@@ -11,33 +11,8 @@ import { ClickToCopy } from '../components/CopyButton'
 import { t } from '../i18n/index.ts'
 import {
   formatCost, formatLatency, formatNumber, formatRate, formatSpeed, formatTime,
-  value, getProviderIcon, getProviderBadgeBg, getProviderBadgeText, getModelIcon, shortSessionId, resolveTimezone,
+  value, getProviderIcon, getProviderBadgeBg, getProviderBadgeText, getModelIcon, shortSessionId, resolveTimezone, ToolBadge,
 } from '../utils'
-
-const TOOL_COLORS: Record<string, { bg: string; text: string }> = {
-  bash:      { bg: '#2563eb', text: '#fff' },
-  read:      { bg: '#059669', text: '#fff' },
-  edit:      { bg: '#d97706', text: '#fff' },
-  write:     { bg: '#dc2626', text: '#fff' },
-  grep:      { bg: '#7c3aed', text: '#fff' },
-  glob:      { bg: '#0891b2', text: '#fff' },
-  task:      { bg: '#4f46e5', text: '#fff' },
-  webfetch:  { bg: '#be185d', text: '#fff' },
-  websearch: { bg: '#9333ea', text: '#fff' },
-  skill:     { bg: '#0d9488', text: '#fff' },
-  list:      { bg: '#0891b2', text: '#fff' },
-  question:  { bg: '#8b5cf6', text: '#fff' },
-  todowrite: { bg: '#f59e0b', text: '#fff' },
-  lsp:       { bg: '#6366f1', text: '#fff' },
-  exec:      { bg: '#ea580c', text: '#fff' },
-}
-const TOOL_DEFAULT_COLOR = { bg: '#64748b', text: '#fff' }
-
-const TOOL_COLORS_CI = new Map(Object.entries(TOOL_COLORS).map(([k, v]) => [k.toLowerCase(), v]))
-
-function getToolColor(toolName: string) {
-  return TOOL_COLORS_CI.get(toolName.toLowerCase()) || TOOL_DEFAULT_COLOR
-}
 import { getModelBadgeBackgroundColor, getModelTextColor } from '../model-badge'
 import type { DateRangeOption } from '../types'
 
@@ -498,18 +473,7 @@ export function LogsPage({ initialSessionFilter }: Props) {
             {row.tool_names ? (
               <div style={{ display: 'flex', gap: '3px', flexWrap: 'wrap' }}>
                 {(row.tool_names as string).split(',').filter(Boolean).map((name: string, i: number) => (
-                  <span key={i} style={{
-                    padding: '2px 6px',
-                    borderRadius: '4px',
-                    fontSize: '10px',
-                    fontWeight: 600,
-                    backgroundColor: getToolColor(name).bg,
-                    color: getToolColor(name).text,
-                    whiteSpace: 'nowrap',
-                    display: 'inline-block',
-                  }}>
-                    {name}
-                  </span>
+                  <ToolBadge key={i} name={name} />
                 ))}
               </div>
             ) : null}
@@ -739,9 +703,7 @@ export function LogsPage({ initialSessionFilter }: Props) {
                               <span className="detail-label">{t('Tool')}</span>
                               <span className="detail-value">
                                 {expandedToolCalls.map((tc) => (
-                                  <span key={tc.tool_use_id} className="model-badge" style={{ marginRight: 4 }}>
-                                    {tc.tool_name}
-                                  </span>
+                                  <ToolBadge key={tc.tool_use_id} name={tc.tool_name} style={{ marginRight: 4 }} />
                                 ))}
                               </span>
                             </div>

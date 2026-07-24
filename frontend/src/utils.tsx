@@ -529,3 +529,48 @@ export function getSetupAgentKey(name: string) {
   if (normalized.includes('gemini')) return 'gemini'
   return normalized
 }
+
+// ─── Tool color map for tool-name badges ────────────────────────────────────
+
+const TOOL_COLORS: Record<string, { bg: string; text: string }> = {
+  bash:      { bg: '#2563eb', text: '#fff' },
+  read:      { bg: '#059669', text: '#fff' },
+  edit:      { bg: '#d97706', text: '#fff' },
+  write:     { bg: '#dc2626', text: '#fff' },
+  grep:      { bg: '#7c3aed', text: '#fff' },
+  glob:      { bg: '#0891b2', text: '#fff' },
+  task:      { bg: '#4f46e5', text: '#fff' },
+  webfetch:  { bg: '#be185d', text: '#fff' },
+  websearch: { bg: '#9333ea', text: '#fff' },
+  skill:     { bg: '#0d9488', text: '#fff' },
+  list:      { bg: '#0891b2', text: '#fff' },
+  question:  { bg: '#8b5cf6', text: '#fff' },
+  todowrite: { bg: '#f59e0b', text: '#fff' },
+  lsp:       { bg: '#6366f1', text: '#fff' },
+  exec:      { bg: '#ea580c', text: '#fff' },
+  mcp_tool:  { bg: '#e11d48', text: '#fff' },
+}
+const TOOL_DEFAULT_COLOR = { bg: '#64748b', text: '#fff' }
+const TOOL_COLORS_CI = new Map(Object.entries(TOOL_COLORS).map(([k, v]) => [k.toLowerCase(), v]))
+
+export function getToolColor(toolName: string) {
+  return TOOL_COLORS_CI.get(toolName.toLowerCase()) || TOOL_DEFAULT_COLOR
+}
+
+const TOOL_BADGE_STYLE: React.CSSProperties = {
+  padding: '2px 6px',
+  borderRadius: '4px',
+  fontSize: '11px',
+  fontWeight: 600,
+  whiteSpace: 'nowrap',
+  display: 'inline-block',
+}
+
+export function ToolBadge({ name, count, style }: { name: string; count?: number; style?: React.CSSProperties }) {
+  const c = getToolColor(name)
+  return (
+    <span style={{ ...TOOL_BADGE_STYLE, backgroundColor: c.bg, color: c.text, ...style }}>
+      {name}{count != null ? `×${count}` : ''}
+    </span>
+  )
+}
