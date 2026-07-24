@@ -20,6 +20,7 @@ from .models import (
     VALID_OUTCOMES,
     VALID_SOURCES,
     SessionRecord,
+    ToolCall,
     Usage,
 )
 
@@ -176,6 +177,26 @@ def upsert_session_from_usage(usage: Usage, db_path: str | None = None) -> None:
                     )
                 )
             )
+        session.commit()
+
+
+def upsert_session_from_tool_call(
+    tool_call: ToolCall, db_path: str | None = None
+) -> None:
+    """Incrementally update tool_calls_json on the session for a single tool call."""
+    if not tool_call.session_id:
+        return
+
+    engine = get_engine(db_path)
+    with Session(engine) as session:
+        existing = session.get(SessionRecord, tool_call.session_id)
+        if not existing:
+            return
+
+        tools = json.loads(existing.tool_calls_json or "{}")
+        tools[tool_call.tool_name] = tools.get(tool_call.tool_name, 0) + 1
+        existing.tool_calls_json = json.dumps(tools)
+        existing.updated_at = datetime.now(timezone.utc).isoformat()
         session.commit()
 
 
@@ -413,6 +434,11 @@ def _session_record_to_dict(rec: SessionRecord) -> dict[str, Any]:
         "successful_requests": rec.successful_requests,
         "failed_requests": rec.failed_requests,
     }
+    tool_calls = json.loads(rec.tool_calls_json or "{}")
+    if tool_calls:
+        result["tool_calls_json"] = tool_calls
+    else:
+        result["tool_calls_json"] = None
     if rec.outcome is not None:
         result["evaluation"] = {
             "session_id": rec.session_id,

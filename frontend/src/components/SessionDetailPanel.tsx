@@ -431,6 +431,19 @@ export function SessionDetailContent({
             </div>
           </div>
         </div>
+
+        {session.tool_calls_json && Object.keys(session.tool_calls_json).length > 0 && (
+          <div>
+            <div style={{ fontSize: '10px', color: 'var(--text-muted)', marginBottom: '6px', textTransform: 'uppercase', letterSpacing: '0.5px', fontWeight: 700 }}>{t('Tool Usage')}</div>
+            <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+              {Object.entries(session.tool_calls_json).map(([name, count]) => (
+                <span key={name} className="model-badge" style={{ fontSize: '11px' }}>
+                  {name}×{count}
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
 
       <div className="session-eval-section">

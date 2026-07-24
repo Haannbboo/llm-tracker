@@ -13,9 +13,10 @@ const DEFAULT_COL_WIDTHS: Record<RequestLogColumnId, number> = {
   session: 120,
   input: 220,
   output: 130,
-  cost: 110,
+  cost: 80,
   speed: 110,
   status: 80,
+  tool: 100,
 }
 
 export function useLogsData(opts: {

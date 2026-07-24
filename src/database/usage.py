@@ -532,6 +532,8 @@ def fetch_recent_usage(
         status_4xx=status_4xx,
         status_5xx=status_5xx,
     )
+    from ..database.models import ToolCall
+
     query = (
         select(
             Usage.id,
@@ -558,9 +560,11 @@ def fetch_recent_usage(
             Usage.client_ip,
             Usage.base_url_id,
             BaseUrl.base_url.label("base_url"),
+            ToolCall.tool_name.label("tool_name"),
         )
         .select_from(Usage)
         .outerjoin(BaseUrl, Usage.base_url_id == BaseUrl.id)
+        .outerjoin(ToolCall, ToolCall.usage_id == Usage.id)
         .order_by(Usage.ts.desc())
         .limit(limit)
         .offset(offset)

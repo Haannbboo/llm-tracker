@@ -86,6 +86,7 @@ export type UsageRow = {
   latency_ms: number | null
   ttft_ms: number | null
   tool_tokens: number | null
+  tool_name: string | null
   input_cost_usd: number | null
   output_cost_usd: number | null
   total_cost_usd: number | null
@@ -187,6 +188,7 @@ export type SessionSummary = {
   status_4xx: number | null
   status_5xx: number | null
   status_unknown: number | null
+  tool_calls_json: Record<string, number> | null
   evaluation: SessionEvaluation | null
 }
 

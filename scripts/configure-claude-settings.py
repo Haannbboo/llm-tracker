@@ -70,6 +70,34 @@ def main() -> int:
     else:
         _info(f"Claude Code telemetry already up-to-date in {settings_path}")
 
+    # Register tool-call hook (PreToolUse + PostToolUse).
+    hook_script = str(Path(__file__).resolve().parent / "claude-hook.sh")
+    hooks = settings.setdefault("hooks", {})
+    hook_changed = False
+    for event in ("PreToolUse", "PostToolUse"):
+        event_hooks = hooks.setdefault(event, [])
+        # Only add if not already registered.
+        if not any(
+            h.get("matcher") == ".*"
+            and any(
+                hh.get("type") == "command" and hh.get("command") == hook_script
+                for hh in h.get("hooks", [])
+            )
+            for h in event_hooks
+        ):
+            event_hooks.append(
+                {
+                    "matcher": ".*",
+                    "hooks": [{"type": "command", "command": hook_script}],
+                }
+            )
+            hook_changed = True
+    if hook_changed:
+        save_settings(settings_path, settings)
+        _info(f"Tool-call hook registered in {settings_path}")
+    else:
+        _info(f"Tool-call hook already registered in {settings_path}")
+
     return 0
 
 

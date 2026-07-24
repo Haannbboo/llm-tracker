@@ -379,7 +379,7 @@ export function SettingsPage({ providerColors }: Props) {
           <table className="table">
             <thead>
               <tr>
-                <th style={{ width: '220px' }}>{t('Model')}</th>
+                <th style={{ width: '180px' }}>{t('Model')}</th>
                 <th>{t('Input (per 1M)')}</th>
                 <th>{t('Output (per 1M)')}</th>
                 <th>{t('Cache Read (per 1M)')}</th>

@@ -13,6 +13,31 @@ import {
   formatCost, formatLatency, formatNumber, formatRate, formatSpeed, formatTime,
   value, getProviderIcon, getProviderBadgeBg, getProviderBadgeText, getModelIcon, shortSessionId, resolveTimezone,
 } from '../utils'
+
+const TOOL_COLORS: Record<string, { bg: string; text: string }> = {
+  bash:      { bg: '#2563eb', text: '#fff' },
+  read:      { bg: '#059669', text: '#fff' },
+  edit:      { bg: '#d97706', text: '#fff' },
+  write:     { bg: '#dc2626', text: '#fff' },
+  grep:      { bg: '#7c3aed', text: '#fff' },
+  glob:      { bg: '#0891b2', text: '#fff' },
+  task:      { bg: '#4f46e5', text: '#fff' },
+  webfetch:  { bg: '#be185d', text: '#fff' },
+  websearch: { bg: '#9333ea', text: '#fff' },
+  skill:     { bg: '#0d9488', text: '#fff' },
+  list:      { bg: '#0891b2', text: '#fff' },
+  question:  { bg: '#8b5cf6', text: '#fff' },
+  todowrite: { bg: '#f59e0b', text: '#fff' },
+  lsp:       { bg: '#6366f1', text: '#fff' },
+  exec:      { bg: '#ea580c', text: '#fff' },
+}
+const TOOL_DEFAULT_COLOR = { bg: '#64748b', text: '#fff' }
+
+const TOOL_COLORS_CI = new Map(Object.entries(TOOL_COLORS).map(([k, v]) => [k.toLowerCase(), v]))
+
+function getToolColor(toolName: string) {
+  return TOOL_COLORS_CI.get(toolName.toLowerCase()) || TOOL_DEFAULT_COLOR
+}
 import { getModelBadgeBackgroundColor, getModelTextColor } from '../model-badge'
 import type { DateRangeOption } from '../types'
 
@@ -66,6 +91,27 @@ export function LogsPage({ initialSessionFilter }: Props) {
 
   const tableContainerRef = useRef<HTMLDivElement>(null)
   const [tableWidth, setTableWidth] = useState(0)
+
+  // Tool calls for expanded row
+  const [expandedToolCalls, setExpandedToolCalls] = useState<{ tool_name: string; tool_use_id: string }[] | null>(null)
+  useEffect(() => {
+    if (!expandedRow) {
+      setExpandedToolCalls(null)
+      return
+    }
+    let cancelled = false
+    fetch(`/usage/${expandedRow}/tool-calls`)
+      .then((r) => (r.ok ? r.json() : []))
+      .then((data) => {
+        if (!cancelled) setExpandedToolCalls(data)
+      })
+      .catch(() => {
+        if (!cancelled) setExpandedToolCalls(null)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [expandedRow])
 
   useEffect(() => {
     const container = tableContainerRef.current
@@ -129,6 +175,8 @@ export function LogsPage({ initialSessionFilter }: Props) {
         return { position: 'relative' }
       case 'status':
         return { width: colWidths.status, position: 'relative' }
+      case 'tool':
+        return { width: colWidths.tool, position: 'relative' }
       default:
         return { position: 'relative' }
     }
@@ -156,6 +204,8 @@ export function LogsPage({ initialSessionFilter }: Props) {
         return <td><div className="skeleton" style={{ width: 80, height: 14 }} /></td>
       case 'status':
         return <td><div className="skeleton" style={{ width: 40, height: 20, borderRadius: 6 }} /></td>
+      case 'tool':
+        return <td><div className="skeleton" style={{ width: 60, height: 18, borderRadius: 4 }} /></td>
       default:
         return <td />
     }
@@ -442,6 +492,26 @@ export function LogsPage({ initialSessionFilter }: Props) {
             </span>
           </td>
         )
+      case 'tool':
+        return (
+          <td>
+            {row.tool_name ? (
+              <span style={{
+                padding: '2px 6px',
+                borderRadius: '4px',
+                fontSize: '10px',
+                fontWeight: 600,
+                backgroundColor: getToolColor(row.tool_name).bg,
+                color: getToolColor(row.tool_name).text,
+                animation: 'tool-badge-pulse 2s ease-in-out infinite',
+                whiteSpace: 'nowrap',
+                display: 'inline-block',
+              }}>
+                {row.tool_name}
+              </span>
+            ) : null}
+          </td>
+        )
       default:
         return <td />
     }
@@ -659,6 +729,18 @@ export function LogsPage({ initialSessionFilter }: Props) {
                             <div className="detail-group">
                               <span className="detail-label">{t('Client IP')}</span>
                               <span className="detail-value">{row.client_ip}</span>
+                            </div>
+                          )}
+                          {expandedToolCalls && expandedToolCalls.length > 0 && (
+                            <div className="detail-group">
+                              <span className="detail-label">{t('Tool')}</span>
+                              <span className="detail-value">
+                                {expandedToolCalls.map((tc) => (
+                                  <span key={tc.tool_use_id} className="model-badge" style={{ marginRight: 4 }}>
+                                    {tc.tool_name}
+                                  </span>
+                                ))}
+                              </span>
                             </div>
                           )}
                         </div>

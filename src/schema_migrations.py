@@ -848,4 +848,59 @@ def migrate_database(db_path: str | None = None) -> list[str]:
         if _migrate_usage_id_to_uuid(engine):
             applied.append("usage.id_to_uuid")
 
+    # tool_calls table
+    if not _table_exists(engine, "tool_calls"):
+        if engine.dialect.name == "postgresql":
+            create_sql = """
+                CREATE TABLE tool_calls (
+                    tool_use_id TEXT PRIMARY KEY,
+                    usage_id TEXT REFERENCES usage(id),
+                    session_id TEXT,
+                    tool_name TEXT NOT NULL,
+                    client_source TEXT,
+                    ts BIGINT NOT NULL
+                )
+            """
+        else:
+            create_sql = """
+                CREATE TABLE tool_calls (
+                    tool_use_id TEXT PRIMARY KEY,
+                    usage_id TEXT REFERENCES usage(id),
+                    session_id TEXT,
+                    tool_name TEXT NOT NULL,
+                    client_source TEXT,
+                    ts BIGINT NOT NULL
+                )
+            """
+        with engine.begin() as connection:
+            connection.execute(text(create_sql))
+        applied.append("tool_calls.create")
+
+    if _table_exists(engine, "tool_calls"):
+        if _ensure_index(
+            engine,
+            "tool_calls",
+            "ix_tool_calls_usage_id",
+            "CREATE INDEX IF NOT EXISTS ix_tool_calls_usage_id ON tool_calls (usage_id)",
+        ):
+            applied.append("tool_calls.ix_usage_id")
+        if _ensure_index(
+            engine,
+            "tool_calls",
+            "ix_tool_calls_session_id",
+            "CREATE INDEX IF NOT EXISTS ix_tool_calls_session_id ON tool_calls (session_id)",
+        ):
+            applied.append("tool_calls.ix_session_id")
+
+    # tool_calls_json on sessions
+    if _table_exists(engine, "sessions"):
+        if _ensure_column(
+            engine,
+            "sessions",
+            "tool_calls_json",
+            sqlite_definition="TEXT DEFAULT '{}'",
+            postgresql_definition="TEXT DEFAULT '{}'",
+        ):
+            applied.append("sessions.tool_calls_json")
+
     return applied

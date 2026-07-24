@@ -89,6 +89,52 @@ export function buildOtlpPayload(
   }
 }
 
+export function buildToolEventPayload(
+  params: {
+    sessionId: string
+    messageId: string
+    callId: string
+    toolName: string
+    timestampMs: number
+  },
+  serviceName: string,
+): Record<string, any> {
+  const eventName = `${serviceName}.tool_decision`
+  const scopeName = `${serviceName}-llm-tracker`
+  const timeUnixNano = String(params.timestampMs * 1_000_000)
+
+  return {
+    resourceLogs: [
+      {
+        resource: {
+          attributes: [
+            { key: "service.name", value: { stringValue: serviceName } },
+            { key: "session.id", value: { stringValue: params.sessionId } },
+          ],
+        },
+        scopeLogs: [
+          {
+            scope: { name: scopeName },
+            logRecords: [
+              {
+                timeUnixNano,
+                severityNumber: 9,
+                attributes: [
+                  { key: "event.name", value: { stringValue: eventName } },
+                  { key: "session.id", value: { stringValue: params.sessionId } },
+                  { key: "message.id", value: { stringValue: params.messageId } },
+                  { key: "call_id", value: { stringValue: params.callId } },
+                  { key: "tool_name", value: { stringValue: params.toolName } },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+    ],
+  }
+}
+
 export async function emitOtlp(
   payload: Record<string, any>,
   endpoint: string,

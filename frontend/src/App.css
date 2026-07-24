@@ -900,6 +900,18 @@
   }
 }
 
+@keyframes tool-badge-pulse {
+  0%,
+  100% {
+    opacity: 0.85;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.05);
+  }
+}
+
 .evaluation-job-status-queued {
   background: var(--surface-hover);
   border: 1px solid var(--border-color);

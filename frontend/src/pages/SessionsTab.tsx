@@ -710,6 +710,7 @@ export function SessionsTab({
                   <th className="sessions-col-cost" style={{ cursor: 'pointer' }} onClick={() => handleSessionSort('total_cost_usd')}>
                     {t('Cost')} {sessionSortBy === 'total_cost_usd' ? (sessionSortOrder === 'asc' ? '↑' : '↓') : ''}
                   </th>
+                  <th style={{ width: '120px' }}>{t('Tools')}</th>
                   <th style={{ width: '90px' }}>Outcome</th>
                 </tr>
               </thead>
@@ -792,6 +793,17 @@ export function SessionsTab({
                     <td className="sessions-number-cell" style={{ fontSize: '12px' }}>{formatNumber(session.request_count)}</td>
                     <td className="sessions-number-cell" style={{ fontSize: '12px' }}>{formatCompact(session.total_tokens)}</td>
                     <td className="sessions-number-cell" style={{ fontSize: '12px' }}>{formatCost(session.total_cost_usd, 2)}</td>
+                    <td style={{ fontSize: '11px' }}>
+                      {session.tool_calls_json ? (
+                        <div style={{ display: 'flex', gap: '3px', flexWrap: 'wrap' }}>
+                          {Object.entries(session.tool_calls_json).map(([name, count]) => (
+                            <span key={name} className="model-badge" style={{ fontSize: '10px' }}>
+                              {name}×{count}
+                            </span>
+                          ))}
+                        </div>
+                      ) : '—'}
+                    </td>
                     <td>
                       <div style={{ display: 'flex', gap: '6px', alignItems: 'center', flexWrap: 'wrap' }}>
                         <span className={`session-outcome-badge ${getOutcomeBadge(session.evaluation?.outcome).className}`}>
@@ -807,7 +819,7 @@ export function SessionsTab({
                   </tr>
                   {selectedSession?.session_id === session.session_id && (
                     <tr key={session.session_id + '-detail'} className={fadingOutSessions.has(session.session_id) ? 'session-fade-out' : undefined}>
-                      <td colSpan={9} className="session-detail-cell">
+                      <td colSpan={10} className="session-detail-cell">
                         <SessionDetailInline
                           session={session}
                           onNavigateToLogs={handleViewInLogs}

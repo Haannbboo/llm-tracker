@@ -13,6 +13,7 @@ export type RequestLogColumnId =
   | 'cost'
   | 'speed'
   | 'status'
+  | 'tool'
 
 type RequestLogColumn = {
   id: RequestLogColumnId
@@ -28,6 +29,7 @@ export const REQUEST_LOG_COLUMNS: RequestLogColumn[] = [
   { id: 'input', label: 'Input (Prompt)' },
   { id: 'output', label: 'Output' },
   { id: 'cost', label: 'Cost' },
+  { id: 'tool', label: 'Tool' },
   { id: 'speed', label: 'Speed' },
   { id: 'status', label: 'Status' },
 ]
