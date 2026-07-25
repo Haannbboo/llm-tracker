@@ -23,6 +23,7 @@ export function useLogsData(opts: {
   activeFilter: ActiveFilter
   activeSource: string | null
   sessionFilter: string | null
+  toolFilter: string | null
   dateRange: DateRangeOption
   customSince: string
   customUntil: string
@@ -92,6 +93,7 @@ export function useLogsData(opts: {
         }
         if (opts.activeSource) usageUrl.searchParams.set('client_source', opts.activeSource)
         if (opts.sessionFilter) usageUrl.searchParams.set('session_id', opts.sessionFilter)
+        if (opts.toolFilter) usageUrl.searchParams.set('tool_name', opts.toolFilter)
         if (since) usageUrl.searchParams.set('since', since)
         if (until) usageUrl.searchParams.set('until', until)
 
@@ -106,6 +108,7 @@ export function useLogsData(opts: {
         }
         if (opts.activeSource) countUrl.searchParams.set('client_source', opts.activeSource)
         if (opts.sessionFilter) countUrl.searchParams.set('session_id', opts.sessionFilter)
+        if (opts.toolFilter) countUrl.searchParams.set('tool_name', opts.toolFilter)
         if (since) countUrl.searchParams.set('since', since)
         if (until) countUrl.searchParams.set('until', until)
 
@@ -130,7 +133,7 @@ export function useLogsData(opts: {
 
     void fetchLogs()
     return () => controller.abort()
-  }, [opts.activeFilter, opts.activeSource, opts.sessionFilter, opts.dateRange, opts.customSince, opts.customUntil, limit, page, refreshTrigger, setError])
+  }, [opts.activeFilter, opts.activeSource, opts.sessionFilter, opts.toolFilter, opts.dateRange, opts.customSince, opts.customUntil, limit, page, refreshTrigger, setError])
 
   const totalPages = Math.ceil(totalLogs / limit)
 

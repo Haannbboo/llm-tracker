@@ -38,6 +38,7 @@ from .database import (
     daily_session_effectiveness_report,
     delete_session_evaluation,
     distinct_client_sources,
+    distinct_tool_names,
     fetch_recent_usage,
     fetch_session_selector_rows,
     fetch_sessions,
@@ -250,6 +251,7 @@ async def get_usage(
     model: str | None = None,
     client_source: str | None = None,
     session_id: str | None = None,
+    tool_name: str | None = None,
     since: str | None = None,
     until: str | None = None,
     only_failed: bool = False,
@@ -264,6 +266,7 @@ async def get_usage(
         model=model,
         client_source=client_source,
         session_id=session_id,
+        tool_name=tool_name,
         since=since,
         until=until,
         only_failed=only_failed,
@@ -279,6 +282,7 @@ async def get_usage_count(
     model: str | None = None,
     client_source: str | None = None,
     session_id: str | None = None,
+    tool_name: str | None = None,
     since: str | None = None,
     until: str | None = None,
 ):
@@ -288,6 +292,7 @@ async def get_usage_count(
             model=model,
             client_source=client_source,
             session_id=session_id,
+            tool_name=tool_name,
             since=since,
             until=until,
         )
@@ -305,6 +310,14 @@ async def usage_sources(
     until: str | None = None,
 ):
     return distinct_client_sources(since=since, until=until)
+
+
+@app.get("/usage/tools")
+async def usage_tools(
+    since: str | None = None,
+    until: str | None = None,
+):
+    return distinct_tool_names(since=since, until=until)
 
 
 @app.get("/usage/run-summary")

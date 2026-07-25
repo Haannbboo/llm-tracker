@@ -11,7 +11,7 @@ import { ClickToCopy } from '../components/CopyButton'
 import { t } from '../i18n/index.ts'
 import {
   formatCost, formatLatency, formatNumber, formatRate, formatSpeed, formatTime,
-  value, getProviderIcon, getProviderBadgeBg, getProviderBadgeText, getModelIcon, shortSessionId, resolveTimezone, ToolBadge,
+  value, getProviderIcon, getProviderBadgeBg, getProviderBadgeText, getModelIcon, shortSessionId, resolveTimezone, ToolBadge, getSinceDate,
 } from '../utils'
 import { getModelBadgeBackgroundColor, getModelTextColor } from '../model-badge'
 import type { DateRangeOption } from '../types'
@@ -53,16 +53,35 @@ export function LogsPage({ initialSessionFilter }: Props) {
   // Session filter state (local to logs view)
   const [sessionFilter, setSessionFilter] = useState<string | null>(initialSessionFilter ?? storedSessionFilter)
 
+  // Tool filter state (local to logs view)
+  const [toolFilter, setToolFilter] = useState<string | null>(null)
+
   // Logs data hook
   const {
     usageRows, totalLogs, totalPages,
     limit, setLimit, page, setPage, jumpPage, setJumpPage, resetPage,
     logsLoading, expandedRow, setExpandedRow,
     colWidths, resizedColumns, handleResizeStart,
-  } = useLogsData({ activeFilter, activeSource, sessionFilter, dateRange, customSince, customUntil })
+  } = useLogsData({ activeFilter, activeSource, sessionFilter, toolFilter, dateRange, customSince, customUntil })
 
   // Sessions data for the session filter dropdown
   const { sessions } = useSessionSelectorData({ activeSource, dateRange, customSince, customUntil })
+
+  // Distinct tool names for the tool filter dropdown (fetched from API, filtered by time range)
+  const [availableTools, setAvailableTools] = useState<string[]>([])
+  useEffect(() => {
+    const controller = new AbortController()
+    const since = dateRange === 'custom' ? customSince : getSinceDate(dateRange)
+    const until = dateRange === 'custom' ? customUntil : null
+    const url = new URL('/usage/tools', window.location.origin)
+    if (since) url.searchParams.set('since', since)
+    if (until) url.searchParams.set('until', until)
+    fetch(url.toString(), { signal: controller.signal })
+      .then(r => r.ok ? r.json() : [])
+      .then(data => { if (!controller.signal.aborted) setAvailableTools(data) })
+      .catch((err) => { if (err?.name !== 'AbortError') console.warn('Failed to fetch tools', err) })
+    return () => controller.abort()
+  }, [dateRange, customSince, customUntil, activeSource])
 
   const tableContainerRef = useRef<HTMLDivElement>(null)
   const [tableWidth, setTableWidth] = useState(0)
@@ -522,6 +541,20 @@ export function LogsPage({ initialSessionFilter }: Props) {
         </div>
 
         <div className="filter-group">
+          <div className="filter-label">{t('Tool')}</div>
+          <select
+            className="input-plain"
+            value={toolFilter || ''}
+            onChange={(e) => { setToolFilter(e.target.value || null); resetPage(); }}
+          >
+            <option value="">{t('All Tools')}</option>
+            {availableTools.map(name => (
+              <option key={name} value={name}>{name}</option>
+            ))}
+          </select>
+        </div>
+
+        <div className="filter-group">
           <div className="filter-label">{t('Date Range')}</div>
           <select
             className="input-plain"
@@ -578,6 +611,7 @@ export function LogsPage({ initialSessionFilter }: Props) {
               setActiveFilter(null)
               setActiveSource(null)
               setSessionFilter(null)
+              setToolFilter(null)
               setDateRange('24h')
               setCustomSince('')
               setCustomUntil('')

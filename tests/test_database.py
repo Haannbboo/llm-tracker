@@ -4776,3 +4776,213 @@ def test_fetch_recent_usage_filters_by_since_until_with_epoch_ts(
         limit=100, since=since_iso, db_path=db_path
     )
     assert len(rows) == 1  # only Apr 18 row
+
+
+# ─── Tool name filtering ─────────────────────────────────────────────────────
+
+
+def _insert_usage_with_tools(
+    database_module,
+    isolated_home,
+    db_path,
+    ts,
+    tools,
+    session_id="s1",
+    client_source="claude-code",
+):
+    """Helper: insert one usage row and its tool calls.
+
+    *ts* is in **microseconds** (same as Usage.ts).  Tool calls are stored with
+    millisecond timestamps (as the OTLP layer does), so we divide by 1000.
+    """
+    from src.recorder import record_tool_call
+
+    usage_obj = database_module.Usage(
+        ts=ts,
+        provider="anthropic",
+        model="claude-sonnet-4-20250514",
+        client_source=client_source,
+        session_id=session_id,
+        endpoint="/v1/messages",
+        prompt_tokens=100,
+        completion_tokens=50,
+        reasoning_tokens=None,
+        cached_tokens=None,
+        total_tokens=150,
+        latency_ms=200,
+        ttft_ms=None,
+        tool_tokens=None,
+        cache_creation_tokens=None,
+        input_cost_usd=0.002,
+        output_cost_usd=0.003,
+        total_cost_usd=0.005,
+        status=200,
+        base_url_id=None,
+    )
+    database_module.log_usage(usage_obj, db_path=db_path)
+    ts_ms = ts // 1000
+    for i, tool_name in enumerate(tools):
+        record_tool_call(
+            tool_use_id=f"tool_{usage_obj.id}_{i}",
+            usage_id=usage_obj.id,
+            session_id=session_id,
+            tool_name=tool_name,
+            client_source=client_source,
+            ts=ts_ms + i,
+            db_path=db_path,
+        )
+    return usage_obj
+
+
+def test_distinct_tool_names(database_module, isolated_home):
+    db_path = str(isolated_home / "usage.db")
+    database_module.init_db(db_path)
+
+    _insert_usage_with_tools(
+        database_module,
+        isolated_home,
+        db_path,
+        TS_2026_04_17_00,
+        ["bash", "read"],
+        session_id="s1",
+    )
+    _insert_usage_with_tools(
+        database_module,
+        isolated_home,
+        db_path,
+        TS_2026_04_17_00_01,
+        ["edit", "bash"],
+        session_id="s2",
+    )
+
+    result = database_module.distinct_tool_names(db_path=db_path)
+    assert result == ["bash", "edit", "read"]  # sorted, deduped
+
+
+def test_distinct_tool_names_with_time_range(database_module, isolated_home):
+    db_path = str(isolated_home / "usage.db")
+    database_module.init_db(db_path)
+
+    _insert_usage_with_tools(
+        database_module,
+        isolated_home,
+        db_path,
+        TS_2026_04_17_00,
+        ["bash"],
+        session_id="s1",
+    )
+    _insert_usage_with_tools(
+        database_module,
+        isolated_home,
+        db_path,
+        TS_2026_04_18_00,
+        ["edit"],
+        session_id="s2",
+    )
+
+    # Only tools from Apr 17
+    result = database_module.distinct_tool_names(
+        since="2026-04-17T00:00:00+00:00",
+        until="2026-04-17T23:59:59+00:00",
+        db_path=db_path,
+    )
+    assert result == ["bash"]
+
+    # All tools
+    result = database_module.distinct_tool_names(db_path=db_path)
+    assert result == ["bash", "edit"]
+
+
+def test_fetch_recent_usage_filters_by_tool_name(database_module, isolated_home):
+    db_path = str(isolated_home / "usage.db")
+    database_module.init_db(db_path)
+
+    _insert_usage_with_tools(
+        database_module,
+        isolated_home,
+        db_path,
+        TS_2026_04_17_00,
+        ["bash", "read"],
+        session_id="s1",
+    )
+    _insert_usage_with_tools(
+        database_module,
+        isolated_home,
+        db_path,
+        TS_2026_04_17_00_01,
+        ["edit"],
+        session_id="s2",
+    )
+
+    rows = database_module.fetch_recent_usage(
+        limit=10, tool_name="bash", db_path=db_path
+    )
+    assert len(rows) == 1
+    assert "bash" in rows[0]["tool_names"]
+
+    rows = database_module.fetch_recent_usage(
+        limit=10, tool_name="edit", db_path=db_path
+    )
+    assert len(rows) == 1
+    assert "edit" in rows[0]["tool_names"]
+
+    rows = database_module.fetch_recent_usage(
+        limit=10, tool_name="nonexistent", db_path=db_path
+    )
+    assert len(rows) == 0
+
+    rows = database_module.fetch_recent_usage(limit=10, db_path=db_path)
+    assert len(rows) == 2
+
+
+def test_count_usage_filters_by_tool_name(database_module, isolated_home):
+    db_path = str(isolated_home / "usage.db")
+    database_module.init_db(db_path)
+
+    _insert_usage_with_tools(
+        database_module,
+        isolated_home,
+        db_path,
+        TS_2026_04_17_00,
+        ["bash"],
+        session_id="s1",
+    )
+    _insert_usage_with_tools(
+        database_module,
+        isolated_home,
+        db_path,
+        TS_2026_04_17_00_01,
+        ["edit"],
+        session_id="s2",
+    )
+    _insert_usage_with_tools(
+        database_module,
+        isolated_home,
+        db_path,
+        TS_2026_04_17_00_02,
+        ["bash", "read"],
+        session_id="s3",
+    )
+
+    assert database_module.count_usage(tool_name="bash", db_path=db_path) == 2
+    assert database_module.count_usage(tool_name="edit", db_path=db_path) == 1
+    assert database_module.count_usage(tool_name="nonexistent", db_path=db_path) == 0
+    assert database_module.count_usage(db_path=db_path) == 3
+
+
+def test_usage_filters_tool_name_empty_string(database_module, isolated_home):
+    """Empty string tool_name should be treated as a real filter (matching nothing), not skipped."""
+    db_path = str(isolated_home / "usage.db")
+    database_module.init_db(db_path)
+
+    _insert_usage_with_tools(
+        database_module,
+        isolated_home,
+        db_path,
+        TS_2026_04_17_00,
+        ["bash"],
+        session_id="s1",
+    )
+
+    rows = database_module.fetch_recent_usage(limit=10, tool_name="", db_path=db_path)
+    assert len(rows) == 0  # no tool calls with empty name

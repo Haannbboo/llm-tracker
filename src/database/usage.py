@@ -24,7 +24,7 @@ from sqlalchemy.orm import Session
 
 from ..utils import micros_to_secs, secs_to_micros
 from .engine import get_engine
-from .models import BaseUrl, Usage, UsageDaily
+from .models import BaseUrl, ToolCall, Usage, UsageDaily
 
 
 def _iso_to_micros(value: str) -> int:
@@ -39,6 +39,11 @@ def _iso_to_micros(value: str) -> int:
         dt = dt.replace(tzinfo=timezone.utc)
     epoch_s = calendar.timegm(dt.timetuple())
     return secs_to_micros(epoch_s) + dt.microsecond
+
+
+def _iso_to_millis(value: str) -> int:
+    """Convert an ISO-8601 datetime string to integer milliseconds since epoch."""
+    return _iso_to_micros(value) // 1000
 
 
 # === Price helpers ===
@@ -353,6 +358,7 @@ def _usage_filters(
     model: str | None = None,
     client_source: str | None = None,
     session_id: str | None = None,
+    tool_name: str | None = None,
     since: str | None = None,
     until: str | None = None,
     only_failed: bool = False,
@@ -369,6 +375,12 @@ def _usage_filters(
         filters.append(Usage.client_source == client_source)
     if session_id:
         filters.append(Usage.session_id == session_id)
+    if tool_name is not None:
+        filters.append(
+            select(ToolCall.tool_use_id)
+            .where(ToolCall.usage_id == Usage.id, ToolCall.tool_name == tool_name)
+            .exists()
+        )
     if since:
         filters.append(Usage.ts >= _iso_to_micros(since))
     if until:
@@ -511,6 +523,7 @@ def fetch_recent_usage(
     model: str | None = None,
     client_source: str | None = None,
     session_id: str | None = None,
+    tool_name: str | None = None,
     since: str | None = None,
     until: str | None = None,
     only_failed: bool = False,
@@ -525,6 +538,7 @@ def fetch_recent_usage(
         model=model,
         client_source=client_source,
         session_id=session_id,
+        tool_name=tool_name,
         since=since,
         until=until,
         only_failed=only_failed,
@@ -532,8 +546,6 @@ def fetch_recent_usage(
         status_4xx=status_4xx,
         status_5xx=status_5xx,
     )
-    from ..database.models import ToolCall
-
     # Subquery: aggregate tool names per usage_id into a comma-separated string.
     dialect = get_engine(db_path).dialect.name
     if dialect == "postgresql":
@@ -609,12 +621,36 @@ def distinct_client_sources(
         return [row[0] for row in connection.execute(query)]
 
 
+def distinct_tool_names(
+    *,
+    since: str | None = None,
+    until: str | None = None,
+    db_path: str | None = None,
+) -> list[str]:
+    """Return distinct tool_name values from tool_calls within the time range.
+
+    ``ToolCall.ts`` is stored in milliseconds (unlike ``Usage.ts`` which uses
+    microseconds), so this function uses ``_iso_to_millis``.
+    """
+    filters: list[Any] = []
+    if since:
+        filters.append(ToolCall.ts >= _iso_to_millis(since))
+    if until:
+        filters.append(ToolCall.ts <= _iso_to_millis(until))
+    query = select(ToolCall.tool_name).distinct().order_by(ToolCall.tool_name).limit(20)
+    if filters:
+        query = query.where(and_(*filters))
+    with get_engine(db_path).connect() as connection:
+        return [row[0] for row in connection.execute(query)]
+
+
 def count_usage(
     *,
     provider: str | None = None,
     model: str | None = None,
     client_source: str | None = None,
     session_id: str | None = None,
+    tool_name: str | None = None,
     since: str | None = None,
     until: str | None = None,
     db_path: str | None = None,
@@ -625,12 +661,17 @@ def count_usage(
     session_id column), so we fall back to counting rows in the raw ``usage``
     table instead.
     """
-    if session_id is not None or not _should_use_daily_table(since, until):
+    if (
+        session_id is not None
+        or tool_name is not None
+        or not _should_use_daily_table(since, until)
+    ):
         filters = _usage_filters(
             provider=provider,
             model=model,
             client_source=client_source,
             session_id=session_id,
+            tool_name=tool_name,
             since=since,
             until=until,
         )

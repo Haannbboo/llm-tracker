@@ -19,6 +19,10 @@ export const zh: Record<string, string> = {
   // Source filter
   'All Sources': '全部来源',
 
+  // Tool filter
+  'Tool': '工具',
+  'All Tools': '全部工具',
+
   // Dashboard widgets
   'Token Usage': 'Token 用量',
   'Requests': '请求数',

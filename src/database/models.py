@@ -244,6 +244,6 @@ class ToolCall(Base):
         String, ForeignKey("usage.id"), nullable=True, index=True
     )
     session_id: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
-    tool_name: Mapped[str] = mapped_column(String, nullable=False)
+    tool_name: Mapped[str] = mapped_column(String, nullable=False, index=True)
     client_source: Mapped[str | None] = mapped_column(String, nullable=True)
     ts: Mapped[int] = mapped_column(BigInteger, nullable=False)
