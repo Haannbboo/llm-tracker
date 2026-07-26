@@ -204,6 +204,13 @@ models:
       output: 2.0
       cacheRead: 0.08
 
+  # Doubao (Volcengine)
+  doubao-seed-2-1-turbo-260628:
+    cost:
+      input: 0.42
+      output: 2.1
+      cacheRead: 0.084
+
 providers:
   my-provider:
     base_url: https://api.example.com/v1

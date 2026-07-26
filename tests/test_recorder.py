@@ -2,15 +2,13 @@
 
 import pytest
 
-from src.database import init_db
 from src.database.usage import fetch_recent_usage
 
 
 @pytest.fixture
-def test_db(isolated_home):
-    db_path = str(isolated_home / "usage.db")
-    init_db(db_path)
-    return db_path
+def test_db(fresh_db):
+    # Schema already initialized by fresh_db; truncation between tests.
+    return fresh_db.db_path
 
 
 def test_record_usage_inserts_row(test_db):

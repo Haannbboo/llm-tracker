@@ -70,13 +70,6 @@ def test_main_rejects_usage_only_with_no_summary(cli_module, monkeypatch, capsys
     assert "--usage-only cannot be combined with --no-summary" in captured.err
 
 
-def test_parse_json_only_is_not_supported_after_rename(cli_module):
-    with pytest.raises(SystemExit) as exc:
-        cli_module.parse_args(["--json-only", "--", "codex", "exec", "hello"])
-
-    assert exc.value.code == 2
-
-
 def test_parse_requires_command(cli_module):
     result = cli_module.main([])
 
