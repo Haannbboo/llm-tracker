@@ -225,3 +225,67 @@ def test_record_usage_records_zero_tokens_on_unknown_status(test_db):
     rows = fetch_recent_usage(limit=10, db_path=test_db)
     assert len(rows) == 1
     assert rows[0]["status"] is None
+
+
+def test_record_tool_call_links_to_usage(test_db):
+    """record_tool_call creates a tool_calls row linked to the usage row."""
+    from src.recorder import record_tool_call, record_usage
+
+    usage = record_usage(
+        provider="openai",
+        model="gpt-4",
+        endpoint="/v1/chat/completions",
+        prompt_tokens=10,
+        completion_tokens=5,
+        status=200,
+        db_path=test_db,
+    )
+    assert usage is not None
+
+    record_tool_call(
+        tool_use_id="call_abc123",
+        usage_id=usage.id,
+        tool_name="get_weather",
+        client_source="test",
+        ts=usage.ts,
+        db_path=test_db,
+    )
+
+    # Verify via fetch_recent_usage which already joins tool_names
+    rows = fetch_recent_usage(limit=10, db_path=test_db)
+    assert len(rows) == 1
+    assert rows[0]["tool_names"] == "get_weather"
+
+
+def test_record_tool_call_multiple_per_usage(test_db):
+    """Multiple tool calls from one usage row all get linked."""
+    from src.recorder import record_tool_call, record_usage
+
+    usage = record_usage(
+        provider="anthropic",
+        model="claude-sonnet-4-5",
+        endpoint="/v1/messages",
+        prompt_tokens=20,
+        completion_tokens=10,
+        status=200,
+        db_path=test_db,
+    )
+    assert usage is not None
+
+    for tool_id, tool_name in [
+        ("toolu_1", "bash"),
+        ("toolu_2", "file_read"),
+    ]:
+        record_tool_call(
+            tool_use_id=tool_id,
+            usage_id=usage.id,
+            tool_name=tool_name,
+            ts=usage.ts,
+            db_path=test_db,
+        )
+
+    rows = fetch_recent_usage(limit=10, db_path=test_db)
+    assert len(rows) == 1
+    # tool_names are comma-separated (order depends on DB query)
+    tool_names = set(rows[0]["tool_names"].split(","))
+    assert tool_names == {"bash", "file_read"}

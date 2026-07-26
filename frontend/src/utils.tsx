@@ -383,9 +383,12 @@ export function getSourceBadgeText(name: string): string {
   return SOURCE_BADGES[name]?.text[theme] ?? (theme === 'dark' ? '#94a3b8' : '#475569')
 }
 
-export function getSourceIcon(source: string) {
+export function getSourceIcon(source: string, theme: Theme = getTheme()) {
   const s = source.toLowerCase()
   const style = ICON_STYLE
+  const dark = theme === 'dark'
+  if (s.includes('hermes')) return <img src={dark ? '/models/hermesagent-dark.png' : '/models/hermesagent.svg'} alt="" style={style} />
+  if (s.includes('codex')) return <img src="/models/codex-color.svg" alt="" style={style} />
   if (s.includes('opencode') || s.includes('open-code')) return <img src="/models/opencode.svg" alt="" style={style} />
   if (s.includes('claude')) return <img src="/models/claude-ai-icon.svg" alt="" style={style} />
   return null

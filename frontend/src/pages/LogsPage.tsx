@@ -262,8 +262,23 @@ export function LogsPage({ initialSessionFilter }: Props) {
             <div style={{
               display: 'inline-flex',
               alignItems: 'center',
+              maxWidth: '120px',
             }}>
-              {getSourceIcon(row.client_source ?? '')}
+              {getSourceIcon(row.client_source ?? '') ?? (
+                <span style={{
+                  fontSize: '11px',
+                  fontWeight: 600,
+                  padding: '2px 6px',
+                  borderRadius: '4px',
+                  backgroundColor: getSourceBadgeBg(row.client_source ?? ''),
+                  color: getSourceBadgeText(row.client_source ?? ''),
+                  whiteSpace: 'nowrap',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                }}>
+                  {row.client_source || '—'}
+                </span>
+              )}
             </div>
           </td>
         )
