@@ -409,8 +409,9 @@ def _daily_usage_filters(
     filters: list[Any] = []
     if since:
         filters.append(UsageDaily.date >= since[:10])
-    if until:
-        filters.append(UsageDaily.date <= until[:10])
+    _until = until or datetime.now(timezone.utc).isoformat()
+    if _until:
+        filters.append(UsageDaily.date <= _until[:10])
     if provider:
         filters.append(UsageDaily.provider == provider)
     if model:
@@ -426,15 +427,18 @@ def _should_use_daily_table(since: str | None, until: str | None) -> bool:
     For sub-2-day ranges, the daily aggregate table loses precision because it
     includes full calendar days.  Fall back to the raw usage table for accuracy.
     """
-    if since is None or until is None:
+    if since is None:
         return True
     try:
         since_dt = datetime.fromisoformat(since)
-        until_dt = datetime.fromisoformat(until)
         if since_dt.tzinfo is None:
             since_dt = since_dt.replace(tzinfo=timezone.utc)
-        if until_dt.tzinfo is None:
-            until_dt = until_dt.replace(tzinfo=timezone.utc)
+        if until is None:
+            until_dt = datetime.now(timezone.utc)
+        else:
+            until_dt = datetime.fromisoformat(until)
+            if until_dt.tzinfo is None:
+                until_dt = until_dt.replace(tzinfo=timezone.utc)
         return (until_dt - since_dt).total_seconds() >= 2 * 86400
     except (ValueError, TypeError):
         return True

@@ -2,7 +2,7 @@ import { useState, useMemo, useEffect } from 'react'
 import type { Theme } from '../theme'
 import type { UsageSummary } from '../types'
 import { getModelColor, getModelBadgeBackgroundColor, getModelTextColor } from '../model-badge'
-import { getModelIcon, getProviderIcon, getProviderBadgeBg, getProviderBadgeText, getSourceBadgeBg, getSourceBadgeText, PALETTE } from '../utils'
+import { getModelIcon, getProviderIcon, getProviderBadgeBg, getProviderBadgeText, getSourceBadgeBg, getSourceBadgeText, getSourceIcon, PALETTE } from '../utils'
 import { HorizontalBarChart } from './HorizontalBarChart'
 import type { BarItem, Metric } from './HorizontalBarChart'
 import { SparklineTrendPanel } from './SparklineTrendPanel'
@@ -201,7 +201,7 @@ export function TopUsageChart({
       const cached = row.cached_tokens ?? 0
       return {
         name,
-        icon: null,
+        icon: getSourceIcon(name),
         tokens,
         promptTokens: prompt,
         completionTokens: row.completion_tokens ?? 0,

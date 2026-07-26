@@ -7,7 +7,7 @@ import { ClickToCopy } from '../components/CopyButton'
 import { t } from '../i18n/index.ts'
 import {
   formatCompact, formatCost, formatDuration, formatLatency, formatNumber,
-  formatTime, getModelIcon, getSourceBadgeBg, getSourceBadgeText,
+  formatTime, getModelIcon, getSourceBadgeBg, getSourceBadgeText, getSourceIcon,
   shortSessionId, sessionAgentName, sessionDisplayName, sessionTaskTitle, getSinceDate, resolveTimezone, ToolBadge,
 } from '../utils'
 import { getModelBadgeBackgroundColor, getModelTextColor } from '../model-badge'
@@ -758,9 +758,13 @@ export function SessionsTab({
                           borderRadius: '4px',
                           fontSize: '11px',
                           fontWeight: 600,
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '4px',
                           background: getSourceBadgeBg(session.client_source),
                           color: getSourceBadgeText(session.client_source),
                         }}>
+                          {getSourceIcon(session.client_source)}
                           {sessionAgentName(session.client_source)}
                         </span>
                         {session.model && (

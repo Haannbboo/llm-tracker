@@ -167,11 +167,10 @@ export function formatTime(input: string | number, tz?: string) {
 
 export function getSinceDate(option: DateRangeOption): string | null {
   if (option === 'custom' || option === 'all') return null
-  const now = new Date()
-  if (option === '24h') now.setHours(now.getHours() - 24)
-  else if (option === '7d') now.setDate(now.getDate() - 7)
-  else if (option === '30d') now.setDate(now.getDate() - 30)
-  return now.toISOString()
+  if (option === '24h') return new Date(Date.now() - 24 * 3600_000).toISOString()
+  if (option === '7d') return new Date(Date.now() - 7 * 86400_000).toISOString()
+  if (option === '30d') return new Date(Date.now() - 30 * 86400_000).toISOString()
+  return null
 }
 
 function tzDateParts(date: Date, tz?: string): { year: number; month: number; day: number; hour: number } {
@@ -200,21 +199,22 @@ export function fillGaps(data: DailyUsage[], granularity: 'hour' | 'day', period
 
   const map = new Map(data.map(d => [d.period, d]))
   const result: DailyUsage[] = []
-  const now = new Date()
 
   if (granularity === 'hour') {
-    // Step back from the current UTC instant by (periodCount-1) hours
-    const startMs = now.getTime() - (periodCount - 1) * 3600_000
-    for (let i = 0; i < periodCount; i++) {
+    const since = new Date()
+    since.setHours(since.getHours() - periodCount)
+    const startMs = since.getTime()
+    for (let i = 0; i <= periodCount; i++) {
       const d = new Date(startMs + i * 3600_000)
       const p = tzDateParts(d, effectiveTz)
       const key = `${p.year}-${String(p.month).padStart(2, '0')}-${String(p.day).padStart(2, '0')} ${String(p.hour).padStart(2, '0')}:00`
       result.push(map.get(key) ?? zeroRow(key))
     }
   } else {
-    // Step back from the current UTC instant by (periodCount-1) days
-    const startMs = now.getTime() - (periodCount - 1) * 86400_000
-    for (let i = 0; i < periodCount; i++) {
+    const since = new Date()
+    since.setDate(since.getDate() - periodCount)
+    const startMs = since.getTime()
+    for (let i = 0; i <= periodCount; i++) {
       const d = new Date(startMs + i * 86400_000)
       const p = tzDateParts(d, effectiveTz)
       const key = `${p.year}-${String(p.month).padStart(2, '0')}-${String(p.day).padStart(2, '0')}`
@@ -289,9 +289,10 @@ export function getModelIcon(model: string, theme: Theme = getTheme()) {
   if (m.includes('gemini') || m.includes('google') || m.includes('gemma')) return <img src="/models/google-gemini-icon.svg" alt="" style={style} />
   if (m.includes('minimax') || m.includes('mimimax')) return <img src="/models/minimax-color.svg" alt="" style={style} />
   if (m.includes('mimo') || m.includes('xiaomi')) return <img src="/models/xiaomi.svg" alt="" style={style} />
-  if (m.includes('inclusionai')) return <img src="/models/inclusionai.png" alt="" style={style} />
+  if (m.includes('inclusionai') || m.includes('ling')) return <img src="/models/inclusionai.png" alt="" style={style} />
   if (m.includes('poolside')) return <img src="/models/poolside.svg" alt="" style={style} />
   if (m.includes('deepseek')) return <img src="/models/deepseek.svg" alt="" style={style} />
+  if (m.includes('doubao') || m.includes('seed')) return <img src="/models/doubao.svg" alt="" style={style} />
   if (m.includes('openrouter')) return <img src={dark ? '/models/openrouter-dark.svg' : '/models/openrouter.svg'} alt="" style={style} />
   if (m.startsWith('z-ai/') || m.includes('glm')) return <img src="/models/z-ai.svg" alt="" style={style} />
   if (m.includes('stepfun') || m.includes('step-')) return <img src="/models/stepfun-color.svg" alt="" style={style} />
@@ -312,8 +313,11 @@ const PROVIDER_BADGES: Record<string, { color: string; bg: BadgeTheme; text: Bad
   openrouter: { color: '#6366f1', bg: { light: '#6366f126', dark: '#6366f140' }, text: { light: '#6366f1', dark: '#a5b4fc' } },
   poolside: { color: '#f97316', bg: { light: '#f9731626', dark: '#f9731640' }, text: { light: '#c2410c', dark: '#fdba74' } },
   deepseek: { color: '#4d7cff', bg: { light: '#4d7cff26', dark: '#4d7cff40' }, text: { light: '#1d4ed8', dark: '#93b4ff' } },
+  doubao: { color: '#00CBD4', bg: { light: '#00CBD426', dark: '#00CBD440' }, text: { light: '#00a0a8', dark: '#5ee7f0' } },
+  seed: { color: '#00CBD4', bg: { light: '#00CBD426', dark: '#00CBD440' }, text: { light: '#00a0a8', dark: '#5ee7f0' } },
   'z-ai': { color: '#1F63EC', bg: { light: '#1F63EC26', dark: '#1F63EC40' }, text: { light: '#1F63EC', dark: '#7daaf5' } },
   stepfun: { color: '#01A9FF', bg: { light: '#01A9FF26', dark: '#01A9FF40' }, text: { light: '#006f9f', dark: '#7dd5fc' } },
+  volce: { color: '#0095FD', bg: { light: '#0095FD26', dark: '#0095FD40' }, text: { light: '#0070c0', dark: '#66c2ff' } },
 }
 
 function findProviderBadge(provider: string) {
@@ -347,11 +351,14 @@ export function getProviderIcon(provider: string, theme: Theme = getTheme()) {
   if (p.includes('minimax')) return <img src="/models/minimax-color.svg" alt="" style={style} />
   if (p.includes('xiaomi')) return <img src="/models/xiaomi.svg" alt="" style={style} />
   if (p.includes('openrouter')) return <img src={dark ? '/models/openrouter-dark.svg' : '/models/openrouter.svg'} alt="" style={style} />
-  if (p.includes('inclusionai')) return <img src="/models/inclusionai.png" alt="" style={style} />
+  if (p.includes('opencode')) return <img src="/models/opencode.svg" alt="" style={style} />
+  if (p.includes('inclusionai') || p.includes('ling')) return <img src="/models/inclusionai.png" alt="" style={style} />
   if (p.includes('poolside')) return <img src="/models/poolside.svg" alt="" style={style} />
   if (p.includes('deepseek')) return <img src="/models/deepseek.svg" alt="" style={style} />
+  if (p.includes('doubao') || p.includes('seed')) return <img src="/models/doubao.svg" alt="" style={style} />
   if (p.includes('z-ai')) return <img src="/models/z-ai.svg" alt="" style={style} />
   if (p.includes('stepfun')) return <img src="/models/stepfun-color.svg" alt="" style={style} />
+  if (p.includes('volce')) return <img src="/models/volcengine.svg" alt="" style={style} />
   if (p.includes('nvidia')) return <img src="/models/nvidia.svg" alt="" style={style} />
   if (p.includes('cohere')) return <img src="/models/cohere.svg" alt="" style={style} />
   return null
@@ -374,6 +381,14 @@ export function getSourceBadgeBg(name: string): string {
 export function getSourceBadgeText(name: string): string {
   const theme = getTheme()
   return SOURCE_BADGES[name]?.text[theme] ?? (theme === 'dark' ? '#94a3b8' : '#475569')
+}
+
+export function getSourceIcon(source: string) {
+  const s = source.toLowerCase()
+  const style = ICON_STYLE
+  if (s.includes('opencode') || s.includes('open-code')) return <img src="/models/opencode.svg" alt="" style={style} />
+  if (s.includes('claude')) return <img src="/models/claude-ai-icon.svg" alt="" style={style} />
+  return null
 }
 
 export function shortSessionId(id: string) {

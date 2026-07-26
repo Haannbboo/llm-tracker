@@ -11,7 +11,7 @@ import { ClickToCopy } from '../components/CopyButton'
 import { t } from '../i18n/index.ts'
 import {
   formatCost, formatLatency, formatNumber, formatRate, formatSpeed, formatTime,
-  value, getProviderIcon, getProviderBadgeBg, getProviderBadgeText, getModelIcon, shortSessionId, resolveTimezone, ToolBadge, getSinceDate,
+  value, getProviderIcon, getProviderBadgeBg, getProviderBadgeText, getModelIcon, getSourceIcon, getSourceBadgeBg, getSourceBadgeText, shortSessionId, resolveTimezone, ToolBadge, getSinceDate,
 } from '../utils'
 import { getModelBadgeBackgroundColor, getModelTextColor } from '../model-badge'
 import type { DateRangeOption } from '../types'
@@ -258,19 +258,12 @@ export function LogsPage({ initialSessionFilter }: Props) {
         )
       case 'source':
         return (
-          <td style={{ padding: '8px' }}>
+          <td style={{ padding: '8px', paddingLeft: '16px' }}>
             <div style={{
-              padding: '2px 8px',
-              borderRadius: '4px',
               display: 'inline-flex',
-              fontSize: '10px',
-              backgroundColor: 'var(--tab-toggle-bg)',
-              color: 'var(--text-secondary)',
-              width: 'fit-content',
-              border: '1px solid var(--border-color)',
-              fontWeight: 600
+              alignItems: 'center',
             }}>
-              {row.client_source || '—'}
+              {getSourceIcon(row.client_source ?? '')}
             </div>
           </td>
         )
@@ -696,6 +689,24 @@ export function LogsPage({ initialSessionFilter }: Props) {
                               </span>
                             </div>
                           )}
+                          <div className="detail-group">
+                            <span className="detail-label">{t('Source')}</span>
+                            <span className="detail-value" style={{
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '4px',
+                              padding: '2px 8px',
+                              borderRadius: '4px',
+                              fontSize: '11px',
+                              fontWeight: 600,
+                              width: 'fit-content',
+                              backgroundColor: getSourceBadgeBg(row.client_source ?? ''),
+                              color: getSourceBadgeText(row.client_source ?? ''),
+                            }}>
+                              {getSourceIcon(row.client_source ?? '')}
+                              {row.client_source || '—'}
+                            </span>
+                          </div>
                           <div className="detail-group">
                             <span className="detail-label">{t('Latency')}</span>
                             <span className="detail-value">{formatLatency(row.latency_ms)}</span>
