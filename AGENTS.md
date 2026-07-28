@@ -121,11 +121,9 @@ install.sh (root) → bootstrap.sh → start.sh
 - `bootstrap.sh` — installs deps (via embedded `_install_deps()`), starts services via `start.sh`, runs post-start verification.
 - `start.sh` — supervisord, port checks, agent config, schema migrations, serves `frontend/dist`.
 
-Quick backend iteration:
+Quick backend iteration: `llm-tracker restart` (see `scripts/restart.sh`) gracefully restarts the supervisord-managed services to pick up backend changes locally.
 
-```bash
-~/.venv/bin/supervisorctl -c ~/.llm-tracker/supervisord.conf restart llm-tracker-api
-```
+The human views frontend changes through the built version, not Vite dev — after frontend edits, run `llm-tracker bootstrap` to rebuild `frontend/dist` (`npm install && npm run build`) so the changes show up.
 
 Frontend dev:
 
