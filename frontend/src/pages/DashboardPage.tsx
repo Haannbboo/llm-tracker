@@ -126,7 +126,6 @@ export function DashboardPage({ onNavigateToLogs }: Props) {
           sources={sources}
           error={error}
           setActiveFilter={setActiveFilter}
-          resetPage={resetPage}
           onNavigateToLogs={onNavigateToLogs}
         />
       )}

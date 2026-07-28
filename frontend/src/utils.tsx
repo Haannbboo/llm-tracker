@@ -524,6 +524,7 @@ export function getProviderDisplayName(provider: string): string {
   if (normalized.includes('openrouter')) return 'OpenRouter'
   if (normalized.includes('stepfun')) return 'StepFun'
   if (normalized.includes('poolside')) return 'Poolside'
+  if (normalized.includes('volce')) return 'Volce'
   if (normalized.includes('deepseek')) return 'DeepSeek'
   if (normalized.includes('z-ai')) return 'Z-AI'
   if (normalized.startsWith('tencent/')) return 'Tencent'

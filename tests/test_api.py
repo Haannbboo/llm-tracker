@@ -502,6 +502,29 @@ def test_usage_by_source_endpoint_passes_all_filters(api_module, monkeypatch):
     assert captured["model"] == "gpt-4o"
 
 
+def test_usage_by_tool_endpoint(api_module, monkeypatch):
+    captured = {}
+
+    def fake_by_tool(**kwargs):
+        captured.update(kwargs)
+        return [{"tool_name": "bash", "count": 2}, {"tool_name": "read", "count": 1}]
+
+    monkeypatch.setattr(api_module, "summarize_tool_calls", fake_by_tool)
+
+    response = TestClient(api_module.app).get(
+        "/usage/by-tool",
+        params={"since": "2026-01-01", "client_source": "claude-code"},
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data == [
+        {"tool_name": "bash", "count": 2},
+        {"tool_name": "read", "count": 1},
+    ]
+    assert captured["since"] == "2026-01-01"
+    assert captured["client_source"] == "claude-code"
+
+
 def test_usage_by_provider_endpoint_includes_avg_effective_price_per_million(
     api_module, monkeypatch
 ):

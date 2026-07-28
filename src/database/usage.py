@@ -965,6 +965,42 @@ def _summarize_usage_raw(
         return [_row_to_dict(row) for row in connection.execute(query)]
 
 
+def summarize_tool_calls(
+    *,
+    since: str | None = None,
+    until: str | None = None,
+    provider: str | None = None,
+    model: str | None = None,
+    client_source: str | None = None,
+    only_failed: bool = False,
+    db_path: str | None = None,
+) -> list[dict[str, Any]]:
+    """Aggregate tool call counts by tool_name, filtered like the usage log."""
+    filters = _usage_filters(
+        provider=provider,
+        model=model,
+        client_source=client_source,
+        since=since,
+        until=until,
+        only_failed=only_failed,
+    )
+    query = (
+        select(
+            ToolCall.tool_name,
+            func.count(ToolCall.tool_use_id).label("count"),
+        )
+        .select_from(ToolCall)
+        .join(Usage, Usage.id == ToolCall.usage_id)
+        .group_by(ToolCall.tool_name)
+        .order_by(func.count(ToolCall.tool_use_id).desc())
+        .limit(20)
+    )
+    if filters:
+        query = query.where(and_(*filters))
+    with get_engine(db_path).connect() as connection:
+        return [_row_to_dict(row) for row in connection.execute(query)]
+
+
 def summarize_usage_by_source(
     *,
     since: str | None = None,

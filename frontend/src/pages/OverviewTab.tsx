@@ -1,14 +1,13 @@
 import { useCountUp } from '../useCountUp'
 import { TrendChart } from '../charts/TrendChart'
-import { CacheHitRateChart } from '../charts/CacheHitRateChart'
 import { TopUsageChart } from '../charts/TopUsageChart'
+import { ToolCallsChart } from '../charts/ToolCallsChart'
 import { DailyHeatmap } from '../charts/DailyHeatmap'
-import { InsightCards } from '../InsightCards'
 import { Sparkline } from '../Sparkline'
 import { CopyButton } from '../components/CopyButton'
 import { t } from '../i18n/index.ts'
 import {
-  formatCompact, formatCost, formatLatency, formatNumber, formatRate,
+  formatCompact, formatCost, formatLatency, formatNumber, formatRate, formatThroughput,
   value, getAgentDisplayName,
 } from '../utils'
 
@@ -37,7 +36,6 @@ type OverviewTabProps = {
   sources: string[]
   error: string | null
   setActiveFilter: (value: any) => void
-  resetPage: () => void
   onNavigateToLogs: (filters?: any) => void
 }
 
@@ -66,7 +64,6 @@ export function OverviewTab({
   sources,
   error,
   setActiveFilter,
-  resetPage,
   onNavigateToLogs,
 }: OverviewTabProps) {
   const animatedTotalTokens = useCountUp(dashboardInitialLoading ? 0 : totals.totalTokens)
@@ -74,6 +71,7 @@ export function OverviewTab({
   const animatedCost = useCountUp(dashboardInitialLoading ? 0 : totals.totalCost)
   const animatedRpm = useCountUp(dashboardInitialLoading ? 0 : totals.rpm)
   const animatedLatency = useCountUp(dashboardInitialLoading ? 0 : totals.avgLatency)
+  const animatedThroughput = useCountUp(dashboardInitialLoading ? 0 : totals.avgThroughput)
 
   return (
     <>
@@ -339,7 +337,7 @@ export function OverviewTab({
       <div className={`dashboard-refresh-surface ${dashboardRefreshing ? 'is-refreshing' : ''}`}>
       <div className="widgets-grid">
         {dashboardInitialLoading ? (
-          Array.from({ length: 5 }, (_, i) => (
+          Array.from({ length: 6 }, (_, i) => (
             <div key={i} className="widget">
               <div className="widget-body" style={{ flexDirection: 'column', alignItems: 'stretch', justifyContent: 'center', gap: '10px' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -538,6 +536,23 @@ export function OverviewTab({
             </div>
           </div>
         </div>
+
+        <div className="widget">
+          <div className="widget-body" style={{ flexDirection: 'column', alignItems: 'stretch', justifyContent: 'center' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                <div className="icon-box icon-purple">🚀</div>
+                <div>
+                  <div className="stat-label">{t('Average Throughput')}</div>
+                  <div className="stat-value">{formatThroughput(animatedThroughput)}</div>
+                </div>
+              </div>
+              <div style={{ width: '100px' }}>
+                <Sparkline data={dailyUsage.map(d => value(d.avg_throughput))} color="var(--color-purple)" />
+              </div>
+            </div>
+          </div>
+        </div>
           </>
         )}
       </div>
@@ -552,34 +567,7 @@ export function OverviewTab({
           />
         </div>
         <div style={{ flex: 1, minWidth: 0 }}>
-          <InsightCards
-            summary={summary}
-            dailyUsage={dailyUsage}
-            onClick={(id, metadata) => {
-              if (id === 'reliability') {
-                if (metadata && (metadata as any).status) {
-                  const status = (metadata as any).status;
-                  setActiveFilter({
-                    provider: '',
-                    model: null,
-                    status_429: status === 429,
-                    status_4xx: status === 400,
-                    status_5xx: status === 500
-                  })
-                } else {
-                  setActiveFilter({ provider: '', model: null, only_failed: true })
-                }
-                onNavigateToLogs()
-                resetPage()
-              } else if ((id === 'cost' || id === 'latency') && metadata) {
-                setActiveFilter({
-                  provider: metadata.provider || '',
-                  model: metadata.model || null
-                })
-                resetPage()
-              }
-            }}
-          />
+          <ToolCallsChart filterParams={dashboardFilterParams} />
         </div>
       </div>
 
@@ -593,18 +581,10 @@ export function OverviewTab({
             showDots={dateRange !== 'all'}
           />
         </div>
-        <div style={{ flex: '1 1 0', minWidth: 0, display: 'flex', gap: '24px' }}>
-          <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
-            <CacheHitRateChart
-              data={dailyUsage}
-              title={t('Cache Hit Rate')}
-            />
-          </div>
-          <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: '16px' }}>
+        <div style={{ flex: '1 1 0', minWidth: 0, display: 'flex', flexDirection: 'column', gap: '16px' }}>
             <DailyHeatmap mode="activity" data={heatmapData} />
             <DailyHeatmap mode="success-rate" data={heatmapData} />
           </div>
-        </div>
       </div>
       </div>
 

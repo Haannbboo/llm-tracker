@@ -192,6 +192,10 @@ PROVIDER_DEFAULTS: dict[str, str] = {
     "opencode": "unknown",
 }
 
+PROVIDER_ALIASES: dict[str, str] = {
+    "volces": "Volce",
+}
+
 
 def parse_provider_metadata(
     agent: str, provider_id: str | None = None
@@ -221,6 +225,8 @@ def parse_provider_metadata(
         provider = _derive_provider_from_base_url(base_url) or "unknown"
     if provider == "unknown":
         provider = PROVIDER_DEFAULTS.get(agent, "unknown")
+
+    provider = PROVIDER_ALIASES.get(provider, provider)
 
     return ProviderMetadata(provider=provider, base_url=base_url, source=source)
 

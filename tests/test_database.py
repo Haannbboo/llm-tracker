@@ -4892,6 +4892,31 @@ def test_distinct_tool_names_with_time_range(fresh_db):
     assert result == ["bash", "edit"]
 
 
+def test_summarize_tool_calls(fresh_db):
+    database_module = fresh_db.database_module
+    db_path = fresh_db.db_path
+    database_module.init_db(db_path)
+
+    _insert_usage_with_tools(
+        database_module,
+        db_path,
+        TS_2026_04_17_00,
+        ["bash", "read"],
+        session_id="s1",
+    )
+    _insert_usage_with_tools(
+        database_module,
+        db_path,
+        TS_2026_04_17_00_01,
+        ["Bash"],
+        session_id="s2",
+    )
+
+    result = database_module.summarize_tool_calls(db_path=db_path)
+    counts = {row["tool_name"]: row["count"] for row in result}
+    assert counts == {"bash": 2, "read": 1}
+
+
 def test_fetch_recent_usage_filters_by_tool_name(fresh_db):
     database_module = fresh_db.database_module
     db_path = fresh_db.db_path

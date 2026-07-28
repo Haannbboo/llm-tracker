@@ -49,6 +49,7 @@ from .database import (
     list_active_evaluation_jobs_with_progress,
     list_session_evaluation_jobs_with_progress,
     summarize_sessions,
+    summarize_tool_calls,
     summarize_usage_by_provider,
     summarize_usage_by_source,
     summarize_usage_daily,
@@ -376,6 +377,25 @@ async def usage_by_source(
         provider=provider,
         model=model,
         client_source=client_source,
+    )
+
+
+@app.get("/usage/by-tool")
+async def usage_by_tool(
+    since: str | None = None,
+    until: str | None = None,
+    provider: str | None = None,
+    model: str | None = None,
+    client_source: str | None = None,
+    only_failed: bool = False,
+):
+    return summarize_tool_calls(
+        since=since,
+        until=until,
+        provider=provider,
+        model=model,
+        client_source=client_source,
+        only_failed=only_failed,
     )
 
 

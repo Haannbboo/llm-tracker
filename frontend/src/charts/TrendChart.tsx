@@ -22,11 +22,17 @@ export function TrendChart({
   const tz = resolveTimezone(timezone)
   const [metric, setMetric] = useState<'tokens' | 'cost' | 'throughput'>('tokens');
   const [hoveredIdx, setHoveredIdx] = useState<number | null>(null);
+  const [showCacheHit, setShowCacheHit] = useState(false);
   const filled = useMemo(() => fillGaps(data, granularity, periodCount, tz), [data, granularity, periodCount, tz]);
   const maxTokens = Math.max(...filled.map(x => value(x.total_tokens)), 1);
   const maxCost = Math.max(...filled.map(x => value(x.total_cost_usd)), 0.001);
   const maxThroughput = Math.max(...filled.map(x => value(x.avg_throughput)), 1);
   const maxRequests = Math.max(...filled.map(x => value(x.requests)), 1);
+  const hitRates = filled.map(d => {
+    const p = value(d.prompt_tokens);
+    return p > 0 ? (value(d.cached_tokens) / p) * 100 : 0;
+  });
+  const maxHitRate = Math.max(...hitRates, 100);
   const paddingX = 60;
   const chartWidth = 1000 - (paddingX * 2);
 
@@ -35,6 +41,8 @@ export function TrendChart({
   const hInput = hoveredData ? Math.max(0, value(hoveredData.prompt_tokens) - hCached) : 0;
   const hOutput = hoveredData ? value(hoveredData.completion_tokens) : 0;
   const hThroughput = hoveredData ? value(hoveredData.avg_throughput) : 0;
+  const hHitRate = hoveredData && value(hoveredData.prompt_tokens) > 0
+    ? (hCached / value(hoveredData.prompt_tokens)) * 100 : 0;
 
   return (
     <div className="widget" style={{ minHeight: '400px', width: '100%', position: 'relative' }}>
@@ -76,10 +84,14 @@ export function TrendChart({
                 </div>
               </>
             )}
-            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-              <div style={{ width: '12px', height: '3px', background: 'var(--color-pink)', borderRadius: '2px' }} />
-              <span style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)' }}>{t('Requests')}</span>
-            </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <div style={{ width: '12px', height: '3px', background: 'var(--color-pink)', borderRadius: '2px' }} />
+                  <span style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)' }}>{t('Requests')}</span>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer', opacity: showCacheHit ? 1 : 0.4 }} onClick={() => setShowCacheHit(!showCacheHit)}>
+                   <div style={{ width: '12px', height: '3px', background: 'var(--color-green)', borderRadius: '2px' }} />
+                   <span style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)' }}>{t('Cache Hit Rate')}</span>
+                 </div>
           </div>
           <div className="tab-toggle">
             <button
@@ -175,6 +187,11 @@ export function TrendChart({
                 <TooltipRow label={t('Requests:')} labelColor="var(--color-pink)">
                   <span style={{ fontWeight: 600, color: 'var(--color-pink)' }}>{formatNumber(hoveredData.requests)}</span>
                 </TooltipRow>
+                {value(hoveredData.prompt_tokens) > 0 && (
+                  <TooltipRow label={t('Cache Hit Rate:')} labelColor="var(--color-green)">
+                    <span style={{ fontWeight: 600, color: 'var(--color-green)' }}>{hHitRate.toFixed(1)}%</span>
+                  </TooltipRow>
+                )}
               </ChartTooltip>
             )}
 
@@ -359,7 +376,62 @@ export function TrendChart({
                   </>
                 );
               })()}
-            </svg>
+{showCacheHit && (
+                <>
+                  {(() => {
+                    const points = filled.map((_, i) => {
+                      const x = paddingX + (i + 0.5) / filled.length * chartWidth;
+                      const rate = hitRates[i] || 0;
+                      const y = 200 - (rate / maxHitRate) * 200;
+                      return `${x},${y}`;
+                    }).join(' ');
+
+                    return (
+                      <>
+                        <polyline
+                          points={points}
+                          fill="none"
+                          stroke="var(--color-green)"
+                          strokeWidth="2"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          style={{ pointerEvents: 'none', opacity: hoveredIdx === null ? 0.7 : 0.3 }}
+                        />
+                        {showDots && filled.map((_, i) => {
+                          const x = paddingX + (i + 0.5) / filled.length * chartWidth;
+                          const rate = hitRates[i] || 0;
+                          const y = 200 - (rate / maxHitRate) * 200;
+                          return (
+                            <circle
+                              key={i}
+                              cx={x} cy={y} r={hoveredIdx === i ? "4.5" : "2.5"}
+                              fill="var(--chart-dot-fill)"
+                              stroke="var(--color-green)"
+                              strokeWidth={hoveredIdx === i ? "3" : "1.5"}
+                              style={{ pointerEvents: 'none', transition: 'all 0.2s', opacity: hoveredIdx === null || hoveredIdx === i ? 0.7 : 0.2 }}
+                            />
+                          );
+                        })}
+                      </>
+                    );
+                  })()}
+                </>
+              )}
+
+                {/* Right Y-axis labels */}
+                {showCacheHit && [0, 25, 50, 75, 100].map(tick => (
+                  <text
+                    key={tick}
+                    x={1000 - paddingX + 5}
+                    y={200 - (tick / maxHitRate) * 200 + 3}
+                    fill="var(--text-muted)"
+                    fontSize="9"
+                    textAnchor="start"
+                  >
+                    {tick}%
+                  </text>
+                ))}
+             </svg>
 
             <div style={{
               display: 'flex',

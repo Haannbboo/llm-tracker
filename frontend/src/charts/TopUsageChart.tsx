@@ -255,7 +255,7 @@ export function TopUsageChart({
           ))}
         </div>
         <div style={{ display: 'flex', gap: '2px', background: 'var(--tab-toggle-bg)', borderRadius: '6px', padding: '2px' }}>
-          {(['tokens', 'cost', 'throughput', 'successRate', 'cacheHitRate'] as Metric[]).map(m => (
+          {(['tokens', 'cost', 'throughput', 'cacheHitRate', 'successRate'] as Metric[]).map(m => (
             <button
               key={m}
               className={`tab-toggle-btn ${metric === m ? 'active' : ''}`}

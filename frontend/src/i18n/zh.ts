@@ -51,6 +51,7 @@ export const zh: Record<string, string> = {
   'Top Models': '热门模型',
   'Top Providers': '热门供应商',
   'Top Sources': '热门来源',
+  'Tool Calls': '工具调用',
 
   // Chart labels
   'Top': '热门',
@@ -66,6 +67,7 @@ export const zh: Record<string, string> = {
   'Tokens': 'Tokens',
   'Cost': '费用',
   'Throughput': '吞吐量',
+  'Average Throughput': '平均速度',
   'Speed': '速度',
   'Success': '成功率',
   'Cache': '缓存',
@@ -87,12 +89,6 @@ export const zh: Record<string, string> = {
   'Total Cost:': '总费用：',
   'Tokens:': 'Tokens：',
   'Requests:': '请求数：',
-
-  // CacheHitRateChart
-  'Hit Rate': '命中率',
-  'avg': '平均',
-  'Hit Rate:': '命中率：',
-  'Prompt:': '提示词：',
 
   // DailyHeatmap
   'Daily Activity': '每日活动',
@@ -426,18 +422,7 @@ export const zh: Record<string, string> = {
   'Heuristic': '启发式',
   'LLM': 'LLM',
 
-  // InsightCards
-  'Top Cost Driver': '最大成本支出',
-  'Latency Watch': '延迟预警',
-  'Usage Trend': '用量趋势',
-  'Reliability Watch': '稳定性预警',
   'Failed Requests': '失败请求',
-  'Trending Up': '上涨中',
-  'Trending Down': '下降中',
-  'change': '变化',
-  'failed requests': '个失败请求',
-  'Check logs for details': '查看日志了解详情',
-  'System healthy': '系统运行良好',
 
   'Service Version': '服务版本',
   'Version': '版本',

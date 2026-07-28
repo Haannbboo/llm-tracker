@@ -87,6 +87,11 @@ def record_usage(
     return usage
 
 
+def normalize_tool_name(tool_name: str) -> str:
+    """Fold tool name casing so e.g. `Bash`/`bash` aggregate as one tool."""
+    return tool_name.lower()
+
+
 def record_tool_call(
     *,
     tool_use_id: str,
@@ -108,7 +113,7 @@ def record_tool_call(
         tool_use_id=tool_use_id,
         usage_id=usage_id,
         session_id=session_id,
-        tool_name=tool_name,
+        tool_name=normalize_tool_name(tool_name),
         client_source=client_source,
         ts=ts,
     )
