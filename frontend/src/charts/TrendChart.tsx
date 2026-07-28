@@ -46,10 +46,10 @@ export function TrendChart({
 
   return (
     <div className="widget" style={{ minHeight: '400px', width: '100%', position: 'relative' }}>
-      <div className="widget-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+      <div className="widget-header" style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'center', gap: '8px' }}>
         <span>📈 {title}</span>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
-          <div style={{ display: 'flex', gap: '16px' }}>
+        <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '16px' }}>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '16px' }}>
             {metric === 'tokens' ? (
               <>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>

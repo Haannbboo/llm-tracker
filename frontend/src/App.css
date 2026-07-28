@@ -642,6 +642,7 @@
   align-items: flex-start;
   border-bottom: 1px solid var(--border-color);
   display: flex;
+  flex-wrap: wrap;
   gap: 16px;
   justify-content: space-between;
   padding: 16px 18px;
@@ -719,6 +720,7 @@
   align-items: flex-start;
   border-bottom: 1px solid var(--border-color);
   display: flex;
+  flex-wrap: wrap;
   gap: 16px;
   justify-content: space-between;
   padding: 16px 18px;
@@ -834,6 +836,7 @@
   align-items: flex-start;
   border-bottom: 1px solid var(--border-color);
   display: flex;
+  flex-wrap: wrap;
   gap: 16px;
   justify-content: space-between;
   padding: 12px 16px;
@@ -1800,6 +1803,43 @@
     grid-template-columns: repeat(2, 1fr);
   }
   .content-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.overview-split-row {
+  display: flex;
+  gap: 24px;
+  align-items: stretch;
+}
+
+.overview-trend-row {
+  height: 400px;
+}
+
+@media (max-width: 640px) {
+  .widgets-grid {
+    grid-template-columns: 1fr;
+  }
+  .dashboard-filter-row {
+    flex-wrap: wrap;
+  }
+  .overview-split-row {
+    flex-direction: column;
+  }
+  .overview-trend-row {
+    height: auto;
+  }
+  .overview-trend-row > div {
+    min-height: 320px;
+  }
+  .daily-effectiveness-metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .daily-effectiveness-lists {
+    grid-template-columns: 1fr;
+  }
+  .evaluation-job-row {
     grid-template-columns: 1fr;
   }
 }

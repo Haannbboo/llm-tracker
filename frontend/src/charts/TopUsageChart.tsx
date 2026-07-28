@@ -240,10 +240,12 @@ export function TopUsageChart({
         padding: '8px 12px',
         borderTop: '1px solid var(--border-color)',
         display: 'flex',
+        flexWrap: 'wrap',
         justifyContent: 'space-between',
         alignItems: 'center',
+        gap: '8px',
       }}>
-        <div style={{ display: 'flex', gap: '2px', background: 'var(--tab-toggle-bg)', borderRadius: '6px', padding: '2px' }}>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '2px', background: 'var(--tab-toggle-bg)', borderRadius: '6px', padding: '2px' }}>
           {(['model', 'provider', 'source'] as Dimension[]).map(d => (
             <button
               key={d}
@@ -254,7 +256,7 @@ export function TopUsageChart({
             </button>
           ))}
         </div>
-        <div style={{ display: 'flex', gap: '2px', background: 'var(--tab-toggle-bg)', borderRadius: '6px', padding: '2px' }}>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '2px', background: 'var(--tab-toggle-bg)', borderRadius: '6px', padding: '2px' }}>
           {(['tokens', 'cost', 'throughput', 'cacheHitRate', 'successRate'] as Metric[]).map(m => (
             <button
               key={m}
@@ -272,11 +274,11 @@ export function TopUsageChart({
   if (!showTrend) return chart
 
   return (
-    <div style={{ display: 'flex', gap: '16px', alignItems: 'stretch' }}>
-      <div style={{ flex: 2 }}>
+    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '16px', alignItems: 'stretch' }}>
+      <div style={{ flex: '2 1 320px' }}>
         {chart}
       </div>
-      <div style={{ flex: 1, minWidth: 0 }}>
+      <div style={{ flex: '1 1 240px', minWidth: 0 }}>
         <SparklineTrendPanel
           data={trendData}
           metric={metric}

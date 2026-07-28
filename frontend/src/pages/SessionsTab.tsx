@@ -669,8 +669,8 @@ export function SessionsTab({
               {t('Hide no-op')}
             </button>
           </div>
-          <div className="panel-body" style={{ padding: 0 }}>
-            <table className="table sessions-table">
+          <div className="panel-body" style={{ padding: 0, overflowX: 'auto' }}>
+            <table className="table sessions-table" style={{ minWidth: '900px' }}>
               <thead>
                 <tr>
                   <th style={{ width: '40px' }}></th>

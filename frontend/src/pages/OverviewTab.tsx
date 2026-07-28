@@ -557,7 +557,7 @@ export function OverviewTab({
         )}
       </div>
 
-      <div style={{ display: 'flex', gap: '24px', marginBottom: '24px', alignItems: 'stretch' }}>
+      <div className="overview-split-row" style={{ marginBottom: '24px' }}>
         <div style={{ flex: 1, minWidth: 0 }}>
           <TopUsageChart
             summary={summary}
@@ -571,7 +571,7 @@ export function OverviewTab({
         </div>
       </div>
 
-      <div style={{ display: 'flex', gap: '24px', height: '400px' }}>
+      <div className="overview-split-row overview-trend-row">
         <div style={{ flex: '1 1 0', minWidth: 0 }}>
           <TrendChart
             data={dailyUsage}
