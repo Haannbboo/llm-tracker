@@ -117,7 +117,9 @@ def record_tool_call(
         client_source=client_source,
         ts=ts,
     )
-    with SASession(engine) as session:
-        session.merge(tc)
+    with SASession(engine, expire_on_commit=False) as session:
+        if session.get(ToolCall, tool_use_id) is not None:
+            return  # already recorded; avoid double-counting on redelivery
+        session.add(tc)
         session.commit()
     upsert_session_from_tool_call(tc, db_path=db_path)

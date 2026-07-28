@@ -221,7 +221,7 @@ class StreamToolCallAccumulator:
         resp = payload.get("response") or {}
         item = resp.get("output_item") or payload.get("item") or {}
         if item.get("type") == "function_call":
-            idx = item.get("output_index") or 0
+            idx = resp.get("output_index") or payload.get("output_index") or 0
             entry = self._calls.setdefault(idx, {"tool_use_id": "", "tool_name": ""})
             if item.get("call_id"):
                 entry["tool_use_id"] = item["call_id"]

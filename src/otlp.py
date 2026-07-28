@@ -657,7 +657,10 @@ def _parse_log_record(
                     "ts": int(record.get("timeUnixNano", "0")) // 1_000_000,
                 }
             )
-    elif event_name == "opencode.tool_decision" and service_name == "opencode":
+    elif (
+        service_name in ({"opencode"} | KILO_SERVICE_NAMES)
+        and event_name == f"{service_name}.tool_decision"
+    ):
         message_id = _attr(attrs, "message.id")
         tool_name = _attr(attrs, "tool_name") or ""
         if message_id and tool_name:

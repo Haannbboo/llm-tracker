@@ -238,6 +238,7 @@ def merge_usage_database(
             .outerjoin(BaseUrl, Usage.base_url_id == BaseUrl.id)
             .order_by(Usage.id.asc())
         ).all()
+        tool_calls = source.execute(select(ToolCall)).scalars().all()
 
     with Session(target_engine) as target:
         for row, base_url in rows:
@@ -256,6 +257,17 @@ def merge_usage_database(
                 )
             )
             inserted += 1
+        for tc in tool_calls:
+            target.merge(
+                ToolCall(
+                    tool_use_id=tc.tool_use_id,
+                    usage_id=tc.usage_id,
+                    session_id=tc.session_id,
+                    tool_name=tc.tool_name,
+                    client_source=tc.client_source,
+                    ts=tc.ts,
+                )
+            )
         target.commit()
 
     return inserted

@@ -764,6 +764,48 @@ def test_merge_usage_database_copies_usage_and_base_url_metadata(
     assert base_urls[0].source == "proxy_config"
 
 
+def test_merge_usage_database_copies_tool_calls(database_module, isolated_home):
+    from src.recorder import record_tool_call
+
+    run_db = str(isolated_home / "run.db")
+    main_db = str(isolated_home / "main.db")
+    database_module.init_db(run_db)
+    database_module.init_db(main_db)
+
+    usage_obj = database_module.Usage(
+        ts=TS_2026_05_03_18,
+        provider="test-provider",
+        model="test-model",
+        client_source="codex",
+        session_id="session-run-1",
+        endpoint="otlp",
+        prompt_tokens=10,
+        completion_tokens=5,
+        total_tokens=15,
+        latency_ms=100,
+        status=200,
+    )
+    database_module.log_usage(usage_obj, db_path=run_db)
+    record_tool_call(
+        tool_use_id="tool-run-1",
+        usage_id=usage_obj.id,
+        session_id="session-run-1",
+        tool_name="bash",
+        client_source="codex",
+        ts=TS_2026_05_03_18,
+        db_path=run_db,
+    )
+
+    database_module.merge_usage_database(
+        source_db_path=run_db,
+        target_db_path=main_db,
+    )
+
+    rows = database_module.fetch_recent_usage(limit=10, db_path=main_db)
+    assert len(rows) == 1
+    assert rows[0]["tool_names"] == "bash"
+
+
 def test_summarize_usage_window_groups_by_session_source_and_model(fresh_db):
     database_module = fresh_db.database_module
     db_path = fresh_db.db_path

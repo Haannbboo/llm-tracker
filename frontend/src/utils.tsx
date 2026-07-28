@@ -200,21 +200,21 @@ export function fillGaps(data: DailyUsage[], granularity: 'hour' | 'day', period
   const map = new Map(data.map(d => [d.period, d]))
   const result: DailyUsage[] = []
 
+  const now = new Date()
+
   if (granularity === 'hour') {
-    const since = new Date()
-    since.setHours(since.getHours() - periodCount)
-    const startMs = since.getTime()
-    for (let i = 0; i <= periodCount; i++) {
+    // Step back from the current instant by (periodCount-1) hours
+    const startMs = now.getTime() - (periodCount - 1) * 3600_000
+    for (let i = 0; i < periodCount; i++) {
       const d = new Date(startMs + i * 3600_000)
       const p = tzDateParts(d, effectiveTz)
       const key = `${p.year}-${String(p.month).padStart(2, '0')}-${String(p.day).padStart(2, '0')} ${String(p.hour).padStart(2, '0')}:00`
       result.push(map.get(key) ?? zeroRow(key))
     }
   } else {
-    const since = new Date()
-    since.setDate(since.getDate() - periodCount)
-    const startMs = since.getTime()
-    for (let i = 0; i <= periodCount; i++) {
+    // Step back from the current instant by (periodCount-1) days
+    const startMs = now.getTime() - (periodCount - 1) * 86400_000
+    for (let i = 0; i < periodCount; i++) {
       const d = new Date(startMs + i * 86400_000)
       const p = tzDateParts(d, effectiveTz)
       const key = `${p.year}-${String(p.month).padStart(2, '0')}-${String(p.day).padStart(2, '0')}`
