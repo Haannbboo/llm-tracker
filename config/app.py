@@ -47,6 +47,16 @@ def load_config(path: str | None = None) -> dict[str, Any]:
     server.setdefault("api_port", server["port"] + 1)
     server.setdefault("otlp_port", server["api_port"] + 1)
 
+    auth = config.setdefault("auth", {})
+    auth.setdefault("enabled", False)
+    auth.setdefault("allowlist", [])
+    # Google OAuth credentials are env-only, never YAML (by decision in
+    # docs/design/specs/pr1-auth-foundation.md); env always wins.
+    auth["google_client_id"] = os.environ.get("LLMTRACKER_AUTH__GOOGLE_CLIENT_ID", "")
+    auth["google_client_secret"] = os.environ.get(
+        "LLMTRACKER_AUTH__GOOGLE_CLIENT_SECRET", ""
+    )
+
     evaluation = config.setdefault("evaluation", {})
     evaluation.setdefault("auto_enabled", True)
     evaluation.setdefault("quiet_delay_seconds", 600)

@@ -24,6 +24,34 @@ class Base(DeclarativeBase):
 metadata = Base.metadata
 
 
+class User(Base):
+    __tablename__ = "users"
+
+    id: Mapped[str] = mapped_column(
+        String, primary_key=True, default=lambda: str(uuid4())
+    )
+    email: Mapped[str] = mapped_column(String, nullable=False, unique=True)
+    name: Mapped[str | None] = mapped_column(String, nullable=True)
+    created_at: Mapped[int] = mapped_column(BigInteger, nullable=False)
+
+
+class AuthToken(Base):
+    __tablename__ = "auth_tokens"
+
+    id: Mapped[str] = mapped_column(
+        String, primary_key=True, default=lambda: str(uuid4())
+    )
+    user_id: Mapped[str] = mapped_column(
+        String, ForeignKey("users.id"), nullable=False, index=True
+    )
+    kind: Mapped[str] = mapped_column(String, nullable=False)
+    device_name: Mapped[str | None] = mapped_column(String, nullable=True)
+    token_hash: Mapped[str] = mapped_column(String, nullable=False, unique=True)
+    created_at: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    last_used_at: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    revoked_at: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+
+
 class BaseUrl(Base):
     __tablename__ = "base_urls"
 

@@ -162,6 +162,8 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
             "  status                   show service status\n"
             "  update [--check|--dry-run]  fetch, pull, bootstrap, and restart\n"
             "  summary <session_id>     show the saved LLM summary for a tracked session\n"
+            "  token create --email <email> [--kind cli|ingest|web] [--name <device>]\n"
+            "                           mint an auth token (operator-only, runs on the server box)\n"
             "  codex ...                run Codex with tracking\n"
             "  claude ...               run Claude Code with tracking\n"
             "  gemini ...               run Gemini CLI with tracking\n"
@@ -253,6 +255,36 @@ def run_update_command(command: list[str]) -> int:
         cmd.append("--dry-run")
 
     return subprocess.run(cmd).returncode
+
+
+def parse_token_args(command: list[str]) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        prog="llm-tracker token",
+        description="Manage auth tokens (operator-only; talks to the configured DB).",
+    )
+    subparsers = parser.add_subparsers(dest="action", required=True)
+    create = subparsers.add_parser(
+        "create", help="mint a token for a user, creating the user if needed"
+    )
+    create.add_argument("--email", required=True, help="user email")
+    create.add_argument(
+        "--kind", choices=("cli", "ingest", "web"), default="cli", help="token kind"
+    )
+    create.add_argument("--name", help="device name to label the token with")
+    return parser.parse_args(command[1:])
+
+
+def run_token_command(command: list[str]) -> int:
+    token_args = parse_token_args(command)
+    from .database import init_db, mint_token
+
+    init_db()
+    token, user = mint_token(
+        token_args.email, kind=token_args.kind, device_name=token_args.name
+    )
+    print(f"Minted {token_args.kind} token for {user.email} (shown once):")
+    print(token)
+    return 0
 
 
 def parse_session_summary_args(command: list[str]) -> argparse.Namespace:
@@ -767,6 +799,8 @@ def main(argv: list[str] | None = None) -> int:
         return run_session_summary_command(args.command, json_output=args.json)
     if args.command[0] == "update":
         return run_update_command(args.command)
+    if args.command[0] == "token":
+        return run_token_command(args.command)
 
     options = options_from_args(args)
     if options.summary_dest == "file" and not options.summary_file:

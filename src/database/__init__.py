@@ -9,6 +9,7 @@ The steady-state pattern in this module is:
 from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
+from .auth import TOKEN_KINDS, hash_token, mint_token, resolve_token
 from .base_url import get_or_create_base_url, resolve_base_url_id
 from .engine import DB_URL_ENV_VAR, get_db_url, get_engine, init_db
 from .evaluation_jobs import (
@@ -32,12 +33,14 @@ from .evaluation_jobs import (
 from .models import (
     VALID_OUTCOMES,
     VALID_SOURCES,
+    AuthToken,
     Base,
     BaseUrl,
     EvaluationJob,
     SessionRecord,
     Usage,
     UsageDaily,
+    User,
     metadata,
 )
 from .sessions import (
@@ -83,15 +86,18 @@ def record_usage(*args, **kwargs):
 
 
 __all__ = [
+    "AuthToken",
     "Base",
     "BaseUrl",
     "DB_URL_ENV_VAR",
     "EvaluationJob",
     "Session",
     "SessionRecord",
+    "TOKEN_KINDS",
     "USAGE_COPY_FIELDS",
     "Usage",
     "UsageDaily",
+    "User",
     "VALID_EVALUATION_JOB_TRIGGERS",
     "VALID_OUTCOMES",
     "VALID_SOURCES",
@@ -121,6 +127,7 @@ __all__ = [
     "get_or_create_base_url",
     "get_session_evaluation",
     "get_usage_high_watermark_ts",
+    "hash_token",
     "init_db",
     "list_active_evaluation_jobs",
     "list_active_evaluation_jobs_with_progress",
@@ -133,9 +140,11 @@ __all__ = [
     "update_queued_evaluation_job_evaluator",
     "merge_usage_database",
     "metadata",
+    "mint_token",
     "rebuild_sessions_from_usage",
     "record_usage",
     "resolve_base_url_id",
+    "resolve_token",
     "select",
     "summarize_session_tool_calls",
     "summarize_sessions",
