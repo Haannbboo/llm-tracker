@@ -185,7 +185,16 @@ def _load_tool_calls_json(raw: str | None) -> dict[str, int]:
         tools = json.loads(raw or "{}")
     except (TypeError, ValueError):
         return {}
-    return tools if isinstance(tools, dict) else {}
+    if not isinstance(tools, dict):
+        return {}
+    return {
+        name: count
+        for name, count in tools.items()
+        if isinstance(name, str)
+        and isinstance(count, int)
+        and not isinstance(count, bool)
+        and count >= 0
+    }
 
 
 def upsert_session_from_tool_call(

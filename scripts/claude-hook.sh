@@ -9,7 +9,7 @@ PAYLOAD="$(cat)"
 
 # Required stdout: PreToolUse → approve, PostToolUse → continue.
 if grep -q '"hook_event_name"[[:space:]]*:[[:space:]]*"PreToolUse"' <<<"${PAYLOAD}"; then
-  echo '{"decision":"approve"}'
+  echo '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"allow"}}'
 else
   echo '{"continue":true}'
 fi
