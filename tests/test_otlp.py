@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
@@ -959,3 +960,56 @@ def test_consume_hook_ttft_fifo_order(otlp_module, monkeypatch, isolated_home: P
     assert ttft2 == 300
     assert lat2 == 400
     assert not queue_path.exists()  # queue exhausted
+
+
+def test_claude_tool_decision_missing_tool_use_id_gets_random_fallback(otlp_module):
+    """A missing tool_use_id must not fall back to a shared "" PK, which would
+    collide across unrelated sessions and silently drop tool calls."""
+    record = {
+        "attributes": _attrs(
+            {"event.name": "tool_decision", "prompt.id": "p1", "tool_name": "Bash"}
+        ),
+        "timeUnixNano": "1000000000",
+    }
+
+    otlp_module._parse_log_record(record, "claude-code", "session-1")
+
+    buffered = otlp_module._claude_tool_buffer["p1"]
+    assert len(buffered) == 1
+    assert buffered[0]["tool_use_id"]
+    assert buffered[0]["tool_use_id"].startswith("generated:")
+
+
+def test_claude_tool_decision_missing_tool_use_id_ids_are_unique(otlp_module):
+    record = {
+        "attributes": _attrs(
+            {"event.name": "tool_decision", "prompt.id": "p1", "tool_name": "Bash"}
+        ),
+        "timeUnixNano": "1000000000",
+    }
+
+    otlp_module._parse_log_record(record, "claude-code", "session-1")
+    otlp_module._parse_log_record(record, "claude-code", "session-1")
+
+    ids = [entry["tool_use_id"] for entry in otlp_module._claude_tool_buffer["p1"]]
+    assert len(ids) == 2
+    assert len(set(ids)) == 2
+
+
+def test_receive_logs_evicts_stale_tool_buffer_entries(otlp_module):
+    """Tool-call buffer entries older than 10 minutes must be swept so an
+    aborted turn doesn't leak the entry for the life of the process."""
+    client = TestClient(otlp_module.app)
+    now_ms = int(time.time() * 1000)
+    otlp_module._claude_tool_buffer["stale"] = [
+        {"tool_name": "bash", "tool_use_id": "toolu_1", "ts": now_ms - 700_000}
+    ]
+    otlp_module._claude_tool_buffer["fresh"] = [
+        {"tool_name": "bash", "tool_use_id": "toolu_2", "ts": now_ms}
+    ]
+
+    response = client.post("/v1/logs", json={})
+
+    assert response.status_code == 200
+    assert "stale" not in otlp_module._claude_tool_buffer
+    assert "fresh" in otlp_module._claude_tool_buffer

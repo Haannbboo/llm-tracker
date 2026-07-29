@@ -513,7 +513,11 @@ def test_usage_by_tool_endpoint(api_module, monkeypatch):
 
     response = TestClient(api_module.app).get(
         "/usage/by-tool",
-        params={"since": "2026-01-01", "client_source": "claude-code"},
+        params={
+            "since": "2026-01-01",
+            "client_source": "claude-code",
+            "status_429": "true",
+        },
     )
     assert response.status_code == 200
     data = response.json()
@@ -523,6 +527,9 @@ def test_usage_by_tool_endpoint(api_module, monkeypatch):
     ]
     assert captured["since"] == "2026-01-01"
     assert captured["client_source"] == "claude-code"
+    assert captured["status_429"] is True
+    assert captured["status_4xx"] is False
+    assert captured["status_5xx"] is False
 
 
 def test_usage_by_provider_endpoint_includes_avg_effective_price_per_million(

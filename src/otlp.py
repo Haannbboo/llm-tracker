@@ -1,6 +1,7 @@
 import json
 import os
 import time
+import uuid
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 
@@ -34,6 +35,13 @@ codex_state: dict = {}
 _claude_tool_buffer: dict[str, list[dict]] = {}
 _codex_tool_buffer: dict[str, list[dict]] = {}
 _opencode_tool_buffer: dict[str, list[dict]] = {}  # keyed by message.id
+
+
+def _fallback_tool_use_id() -> str:
+    # ponytail: random id when the provider omits one, so distinct calls
+    # never collide on the empty-string PK. Doesn't cover providers that
+    # emit real but non-globally-unique ids (e.g. some self-hosted gateways).
+    return f"generated:{uuid.uuid4().hex}"
 
 
 def _attr(attributes: list, key: str):
@@ -641,7 +649,8 @@ def _parse_log_record(
             _claude_tool_buffer.setdefault(prompt_id, []).append(
                 {
                     "tool_name": _attr(attrs, "tool_name") or "",
-                    "tool_use_id": _attr(attrs, "tool_use_id") or "",
+                    "tool_use_id": _attr(attrs, "tool_use_id")
+                    or _fallback_tool_use_id(),
                     "ts": int(record.get("timeUnixNano", "0")) // 1_000_000,
                 }
             )
@@ -653,7 +662,7 @@ def _parse_log_record(
             _codex_tool_buffer.setdefault(conv_id, []).append(
                 {
                     "tool_name": tool_name,
-                    "tool_use_id": _attr(attrs, "call_id") or "",
+                    "tool_use_id": _attr(attrs, "call_id") or _fallback_tool_use_id(),
                     "ts": int(record.get("timeUnixNano", "0")) // 1_000_000,
                 }
             )
@@ -667,7 +676,7 @@ def _parse_log_record(
             _opencode_tool_buffer.setdefault(message_id, []).append(
                 {
                     "tool_name": tool_name,
-                    "tool_use_id": _attr(attrs, "call_id") or "",
+                    "tool_use_id": _attr(attrs, "call_id") or _fallback_tool_use_id(),
                     "ts": int(record.get("timeUnixNano", "0")) // 1_000_000,
                 }
             )
@@ -765,6 +774,19 @@ async def receive_logs(request: Request):
     ]
     for k in stale_keys:
         del codex_state[k]
+
+    # Evict tool buffers whose last entry is older than 10 minutes (aborted
+    # turns/dropped connections that never get matched to a usage event).
+    now_ms = now // 1000
+    for buf in (_claude_tool_buffer, _codex_tool_buffer, _opencode_tool_buffer):
+        stale_buf_keys = [
+            k
+            for k, entries in buf.items()
+            if entries and now_ms - entries[-1]["ts"] > 600_000
+        ]
+        for k in stale_buf_keys:
+            del buf[k]
+
     PROMPT_LENGTH_TRACKER.evict_stale()
 
     client_ip = request.client.host if request.client else None

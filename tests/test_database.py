@@ -3338,6 +3338,52 @@ def test_rebuild_sessions_from_usage(fresh_db):
     assert float(s2["total_cost_usd"]) == pytest.approx(0.015, abs=1e-6)
 
 
+def test_rebuild_sessions_from_usage_recomputes_tool_calls_json(fresh_db):
+    """Tool calls must survive a rebuild via the tool_calls table, not be
+    dropped just because rebuild only used to read from usage rows."""
+    from src.recorder import record_tool_call
+
+    database_module = fresh_db.database_module
+    db_path = fresh_db.db_path
+    database_module.init_db(db_path)
+
+    usage = database_module.Usage(
+        ts=TS_2026_05_09_10,
+        provider="anthropic",
+        model="claude-sonnet-4-6",
+        client_source="claude-code",
+        session_id="sess-tools",
+        endpoint="/v1/messages",
+        prompt_tokens=100,
+        completion_tokens=50,
+        total_tokens=150,
+        latency_ms=200,
+        ttft_ms=100,
+        input_cost_usd=0.001,
+        output_cost_usd=0.002,
+        total_cost_usd=0.003,
+        status=200,
+    )
+    database_module.log_usage(usage, db_path=db_path)
+
+    for tool_id, tool_name in [("t1", "bash"), ("t2", "bash"), ("t3", "read")]:
+        record_tool_call(
+            tool_use_id=tool_id,
+            usage_id=usage.id,
+            session_id="sess-tools",
+            tool_name=tool_name,
+            ts=TS_2026_05_09_10,
+            db_path=db_path,
+        )
+
+    count = database_module.rebuild_sessions_from_usage(db_path=db_path)
+    assert count == 1
+
+    result = database_module.fetch_sessions(db_path=db_path)
+    assert len(result) == 1
+    assert result[0]["tool_calls_json"] == {"bash": 2, "read": 1}
+
+
 # ---------------------------------------------------------------------------
 # Slice 1: Store Manual Session Evaluations
 # ---------------------------------------------------------------------------
@@ -4998,6 +5044,29 @@ def test_fetch_recent_usage_filters_by_tool_name(fresh_db):
 
     rows = database_module.fetch_recent_usage(limit=10, db_path=db_path)
     assert len(rows) == 2
+
+
+def test_fetch_recent_usage_filters_by_tool_name_case_insensitive(fresh_db):
+    """tool_name is normalized to lowercase at write time; the filter must
+    normalize on read too, or original-cased callers match nothing."""
+    database_module = fresh_db.database_module
+    db_path = fresh_db.db_path
+    database_module.init_db(db_path)
+
+    _insert_usage_with_tools(
+        database_module,
+        db_path,
+        TS_2026_04_17_00,
+        ["Bash"],
+        session_id="s1",
+    )
+
+    rows = database_module.fetch_recent_usage(
+        limit=10, tool_name="Bash", db_path=db_path
+    )
+    assert len(rows) == 1
+
+    assert database_module.count_usage(tool_name="Bash", db_path=db_path) == 1
 
 
 def test_count_usage_filters_by_tool_name(fresh_db):

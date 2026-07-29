@@ -81,7 +81,7 @@ export function LogsPage({ initialSessionFilter }: Props) {
       .then(data => { if (!controller.signal.aborted) setAvailableTools(data) })
       .catch((err) => { if (err?.name !== 'AbortError') console.warn('Failed to fetch tools', err) })
     return () => controller.abort()
-  }, [dateRange, customSince, customUntil, activeSource])
+  }, [dateRange, customSince, customUntil])
 
   const tableContainerRef = useRef<HTMLDivElement>(null)
   const [tableWidth, setTableWidth] = useState(0)

@@ -388,9 +388,14 @@ def _usage_filters(
     if session_id:
         filters.append(Usage.session_id == session_id)
     if tool_name is not None:
+        from ..recorder import normalize_tool_name
+
         filters.append(
             select(ToolCall.tool_use_id)
-            .where(ToolCall.usage_id == Usage.id, ToolCall.tool_name == tool_name)
+            .where(
+                ToolCall.usage_id == Usage.id,
+                ToolCall.tool_name == normalize_tool_name(tool_name),
+            )
             .exists()
         )
     if since:
@@ -658,6 +663,35 @@ def distinct_tool_names(
         query = query.where(and_(*filters))
     with get_engine(db_path).connect() as connection:
         return [row[0] for row in connection.execute(query)]
+
+
+TOOL_CALLS_QUERY_LIMIT = 500
+
+
+def fetch_tool_calls(
+    *,
+    usage_id: str | None = None,
+    session_id: str | None = None,
+    db_path: str | None = None,
+) -> list[dict[str, Any]]:
+    """Return tool calls for a single usage row or session, ordered by ts."""
+    column = ToolCall.usage_id if usage_id is not None else ToolCall.session_id
+    value = usage_id if usage_id is not None else session_id
+    query = (
+        select(
+            ToolCall.tool_use_id,
+            ToolCall.usage_id,
+            ToolCall.session_id,
+            ToolCall.tool_name,
+            ToolCall.client_source,
+            ToolCall.ts,
+        )
+        .where(column == value)
+        .order_by(ToolCall.ts)
+        .limit(TOOL_CALLS_QUERY_LIMIT)
+    )
+    with get_engine(db_path).connect() as connection:
+        return [_row_to_dict(row) for row in connection.execute(query)]
 
 
 def count_usage(
@@ -985,6 +1019,9 @@ def summarize_tool_calls(
     model: str | None = None,
     client_source: str | None = None,
     only_failed: bool = False,
+    status_429: bool = False,
+    status_4xx: bool = False,
+    status_5xx: bool = False,
     db_path: str | None = None,
 ) -> list[dict[str, Any]]:
     """Aggregate tool call counts by tool_name, filtered like the usage log."""
@@ -995,6 +1032,9 @@ def summarize_tool_calls(
         since=since,
         until=until,
         only_failed=only_failed,
+        status_429=status_429,
+        status_4xx=status_4xx,
+        status_5xx=status_5xx,
     )
     query = (
         select(

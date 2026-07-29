@@ -289,3 +289,74 @@ def test_record_tool_call_multiple_per_usage(test_db):
     # tool_names are comma-separated (order depends on DB query)
     tool_names = set(rows[0]["tool_names"].split(","))
     assert tool_names == {"bash", "file_read"}
+
+
+def test_record_tool_call_duplicate_id_is_noop(test_db):
+    """Redelivery of the same tool_use_id must not raise or double-count."""
+    from src.recorder import record_tool_call, record_usage
+
+    usage = record_usage(
+        provider="openai",
+        model="gpt-4",
+        endpoint="/v1/chat/completions",
+        prompt_tokens=1,
+        completion_tokens=1,
+        status=200,
+        db_path=test_db,
+    )
+    assert usage is not None
+
+    for _ in range(2):
+        record_tool_call(
+            tool_use_id="dup_1",
+            usage_id=usage.id,
+            tool_name="bash",
+            ts=usage.ts,
+            db_path=test_db,
+        )
+
+    rows = fetch_recent_usage(limit=10, db_path=test_db)
+    assert len(rows) == 1
+    assert rows[0]["tool_names"] == "bash"
+
+
+def test_record_tool_call_integrity_error_is_noop(test_db, monkeypatch):
+    """A concurrent redelivery that races past the pre-check must still no-op
+    instead of letting IntegrityError propagate out of the OTLP handler."""
+    from sqlalchemy.orm import Session as SASession
+
+    from src.recorder import record_tool_call, record_usage
+
+    usage = record_usage(
+        provider="openai",
+        model="gpt-4",
+        endpoint="/v1/chat/completions",
+        prompt_tokens=1,
+        completion_tokens=1,
+        status=200,
+        db_path=test_db,
+    )
+    assert usage is not None
+
+    record_tool_call(
+        tool_use_id="race_1",
+        usage_id=usage.id,
+        tool_name="bash",
+        ts=usage.ts,
+        db_path=test_db,
+    )
+
+    # Simulate a second request racing past the "already recorded" pre-check.
+    monkeypatch.setattr(SASession, "get", lambda self, *a, **k: None)
+
+    record_tool_call(
+        tool_use_id="race_1",
+        usage_id=usage.id,
+        tool_name="bash",
+        ts=usage.ts,
+        db_path=test_db,
+    )
+
+    rows = fetch_recent_usage(limit=10, db_path=test_db)
+    assert len(rows) == 1
+    assert rows[0]["tool_names"] == "bash"

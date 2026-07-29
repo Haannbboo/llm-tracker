@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import time
 
+from sqlalchemy.exc import IntegrityError
+
 from .costs import calculate_costs
 from .database.base_url import resolve_base_url_id
 from .database.models import ToolCall, Usage
@@ -121,5 +123,10 @@ def record_tool_call(
         if session.get(ToolCall, tool_use_id) is not None:
             return  # already recorded; avoid double-counting on redelivery
         session.add(tc)
-        session.commit()
+        try:
+            session.commit()
+        except IntegrityError:
+            # Concurrent redelivery raced us to the same PK; already recorded.
+            session.rollback()
+            return
     upsert_session_from_tool_call(tc, db_path=db_path)

@@ -180,6 +180,14 @@ def upsert_session_from_usage(usage: Usage, db_path: str | None = None) -> None:
         session.commit()
 
 
+def _load_tool_calls_json(raw: str | None) -> dict[str, int]:
+    try:
+        tools = json.loads(raw or "{}")
+    except (TypeError, ValueError):
+        return {}
+    return tools if isinstance(tools, dict) else {}
+
+
 def upsert_session_from_tool_call(
     tool_call: ToolCall, db_path: str | None = None
 ) -> None:
@@ -193,11 +201,27 @@ def upsert_session_from_tool_call(
         if not existing:
             return
 
-        tools = json.loads(existing.tool_calls_json or "{}")
+        tools = _load_tool_calls_json(existing.tool_calls_json)
         tools[tool_call.tool_name] = tools.get(tool_call.tool_name, 0) + 1
         existing.tool_calls_json = json.dumps(tools)
         existing.updated_at = datetime.now(timezone.utc).isoformat()
         session.commit()
+
+
+def summarize_session_tool_calls(
+    session_id: str, db_path: str | None = None
+) -> list[dict[str, Any]] | None:
+    """Return [{tool_name, count}] for a session, or None if it doesn't exist."""
+    engine = get_engine(db_path)
+    with Session(engine) as session:
+        rec = session.get(SessionRecord, session_id)
+        if not rec:
+            return None
+        tools = _load_tool_calls_json(rec.tool_calls_json)
+        return [
+            {"tool_name": name, "count": count}
+            for name, count in sorted(tools.items(), key=lambda x: -x[1])
+        ]
 
 
 def rebuild_sessions_from_usage(db_path: str | None = None) -> int:
@@ -217,25 +241,33 @@ def rebuild_sessions_from_usage(db_path: str | None = None) -> int:
             .scalars()
             .all()
         )
+        tool_call_rows = session.execute(
+            select(ToolCall.session_id, ToolCall.tool_name).where(
+                ToolCall.session_id.isnot(None), ToolCall.session_id != ""
+            )
+        ).all()
 
     grouped: dict[str, list[Usage]] = {}
     for row in rows:
         grouped.setdefault(row.session_id, []).append(row)  # type: ignore[arg-type]
+
+    # Recompute tool_calls_json from the tool_calls table (not from Usage) so
+    # calls recorded before their session existed aren't lost on rebuild.
+    tool_calls_by_session: dict[str, dict[str, int]] = {}
+    for session_id, tool_name in tool_call_rows:
+        counts = tool_calls_by_session.setdefault(session_id, {})
+        counts[tool_name] = counts.get(tool_name, 0) + 1
 
     now = datetime.now(timezone.utc).isoformat()
     count = 0
 
     with Session(engine) as session:
         for sid, usages in grouped.items():
-            session.add(
-                SessionRecord(
-                    **_session_record_kwargs(
-                        sid,
-                        usages,
-                        now=now,
-                    )
-                )
-            )
+            kwargs = _session_record_kwargs(sid, usages, now=now)
+            tool_counts = tool_calls_by_session.get(sid)
+            if tool_counts:
+                kwargs["tool_calls_json"] = json.dumps(tool_counts)
+            session.add(SessionRecord(**kwargs))
             count += 1
 
         session.commit()

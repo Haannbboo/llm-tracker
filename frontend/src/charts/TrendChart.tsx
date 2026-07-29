@@ -88,10 +88,15 @@ export function TrendChart({
                   <div style={{ width: '12px', height: '3px', background: 'var(--color-pink)', borderRadius: '2px' }} />
                   <span style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)' }}>{t('Requests')}</span>
                 </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer', opacity: showCacheHit ? 1 : 0.4 }} onClick={() => setShowCacheHit(!showCacheHit)}>
+                <button
+                  type="button"
+                  aria-pressed={showCacheHit}
+                  onClick={() => setShowCacheHit(!showCacheHit)}
+                  style={{ display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer', opacity: showCacheHit ? 1 : 0.4, background: 'none', border: 'none', padding: 0, font: 'inherit' }}
+                >
                    <div style={{ width: '12px', height: '3px', background: 'var(--color-green)', borderRadius: '2px' }} />
                    <span style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)' }}>{t('Cache Hit Rate')}</span>
-                 </div>
+                 </button>
           </div>
           <div className="tab-toggle">
             <button

@@ -42,12 +42,14 @@ from .database import (
     fetch_recent_usage,
     fetch_session_selector_rows,
     fetch_sessions,
+    fetch_tool_calls,
     get_evaluation_job_progress,
     get_session_evaluation,
     get_usage_high_watermark_ts,
     init_db,
     list_active_evaluation_jobs_with_progress,
     list_session_evaluation_jobs_with_progress,
+    summarize_session_tool_calls,
     summarize_sessions,
     summarize_tool_calls,
     summarize_usage_by_provider,
@@ -388,6 +390,9 @@ async def usage_by_tool(
     model: str | None = None,
     client_source: str | None = None,
     only_failed: bool = False,
+    status_429: bool = False,
+    status_4xx: bool = False,
+    status_5xx: bool = False,
 ):
     return summarize_tool_calls(
         since=since,
@@ -396,6 +401,9 @@ async def usage_by_tool(
         model=model,
         client_source=client_source,
         only_failed=only_failed,
+        status_429=status_429,
+        status_4xx=status_4xx,
+        status_5xx=status_5xx,
     )
 
 
@@ -697,79 +705,20 @@ async def update_evaluation_job(job_id: str, update: EvaluationJobUpdate):
 
 @app.get("/usage/{usage_id}/tool-calls")
 async def get_usage_tool_calls(usage_id: str):
-    from .database import get_engine
-    from .database.models import ToolCall
-
-    engine = get_engine()
-    from sqlalchemy.orm import Session
-
-    with Session(engine) as session:
-        rows = (
-            session.query(ToolCall)
-            .filter(ToolCall.usage_id == usage_id)
-            .order_by(ToolCall.ts)
-            .all()
-        )
-        return [
-            {
-                "tool_use_id": r.tool_use_id,
-                "usage_id": r.usage_id,
-                "session_id": r.session_id,
-                "tool_name": r.tool_name,
-                "client_source": r.client_source,
-                "ts": r.ts,
-            }
-            for r in rows
-        ]
+    return fetch_tool_calls(usage_id=usage_id)
 
 
 @app.get("/sessions/{session_id}/tool-calls")
 async def get_session_tool_calls(session_id: str):
-    from .database import get_engine
-    from .database.models import ToolCall
-
-    engine = get_engine()
-    from sqlalchemy.orm import Session
-
-    with Session(engine) as session:
-        rows = (
-            session.query(ToolCall)
-            .filter(ToolCall.session_id == session_id)
-            .order_by(ToolCall.ts)
-            .all()
-        )
-        return [
-            {
-                "tool_use_id": r.tool_use_id,
-                "usage_id": r.usage_id,
-                "session_id": r.session_id,
-                "tool_name": r.tool_name,
-                "client_source": r.client_source,
-                "ts": r.ts,
-            }
-            for r in rows
-        ]
+    return fetch_tool_calls(session_id=session_id)
 
 
 @app.get("/sessions/{session_id}/tool-calls/summary")
 async def get_session_tool_calls_summary(session_id: str):
-    from .database import get_engine
-    from .database.models import SessionRecord
-
-    engine = get_engine()
-    from sqlalchemy.orm import Session
-
-    with Session(engine) as session:
-        rec = session.get(SessionRecord, session_id)
-        if not rec:
-            raise HTTPException(status_code=404, detail="Session not found")
-        import json
-
-        tools = json.loads(rec.tool_calls_json or "{}")
-        return [
-            {"tool_name": name, "count": count}
-            for name, count in sorted(tools.items(), key=lambda x: -x[1])
-        ]
+    summary = summarize_session_tool_calls(session_id)
+    if summary is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+    return summary
 
 
 @app.get("/config")

@@ -798,7 +798,7 @@ export function SessionsTab({
                     <td className="sessions-number-cell" style={{ fontSize: '12px' }}>{formatCompact(session.total_tokens)}</td>
                     <td className="sessions-number-cell" style={{ fontSize: '12px' }}>{formatCost(session.total_cost_usd, 2)}</td>
                     <td style={{ fontSize: '11px' }}>
-                      {session.tool_calls_json ? (
+                      {session.tool_calls_json && Object.keys(session.tool_calls_json).length > 0 ? (
                         <div style={{ display: 'flex', gap: '3px', flexWrap: 'wrap' }}>
                           {Object.entries(session.tool_calls_json).map(([name, count]) => (
                             <ToolBadge key={name} name={name} count={count} />
