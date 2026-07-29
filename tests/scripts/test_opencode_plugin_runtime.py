@@ -36,6 +36,7 @@ def _copy_clean_plugin_workspace(tmp_path: Path) -> Path:
     return plugins_dir / "opencode"
 
 
+@pytest.mark.slow
 def test_opencode_plugin_emits_status_for_failed_assistant_messages(tmp_path):
     if not shutil.which("npm") or not shutil.which("node"):
         pytest.skip("node and npm are required for the OpenCode plugin runtime test")
@@ -221,6 +222,7 @@ def test_opencode_plugin_emits_status_for_failed_assistant_messages(tmp_path):
     assert "error.type" not in payloads[3]
 
 
+@pytest.mark.slow
 def test_opencode_plugin_otlp_emit_uses_abort_signal(tmp_path):
     if not shutil.which("npm") or not shutil.which("node"):
         pytest.skip("node and npm are required for the OpenCode plugin runtime test")

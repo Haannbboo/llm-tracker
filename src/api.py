@@ -38,16 +38,20 @@ from .database import (
     daily_session_effectiveness_report,
     delete_session_evaluation,
     distinct_client_sources,
+    distinct_tool_names,
     fetch_recent_usage,
     fetch_session_selector_rows,
     fetch_sessions,
+    fetch_tool_calls,
     get_evaluation_job_progress,
     get_session_evaluation,
     get_usage_high_watermark_ts,
     init_db,
     list_active_evaluation_jobs_with_progress,
     list_session_evaluation_jobs_with_progress,
+    summarize_session_tool_calls,
     summarize_sessions,
+    summarize_tool_calls,
     summarize_usage_by_provider,
     summarize_usage_by_source,
     summarize_usage_daily,
@@ -250,6 +254,7 @@ async def get_usage(
     model: str | None = None,
     client_source: str | None = None,
     session_id: str | None = None,
+    tool_name: str | None = None,
     since: str | None = None,
     until: str | None = None,
     only_failed: bool = False,
@@ -264,6 +269,7 @@ async def get_usage(
         model=model,
         client_source=client_source,
         session_id=session_id,
+        tool_name=tool_name,
         since=since,
         until=until,
         only_failed=only_failed,
@@ -279,6 +285,7 @@ async def get_usage_count(
     model: str | None = None,
     client_source: str | None = None,
     session_id: str | None = None,
+    tool_name: str | None = None,
     since: str | None = None,
     until: str | None = None,
 ):
@@ -288,6 +295,7 @@ async def get_usage_count(
             model=model,
             client_source=client_source,
             session_id=session_id,
+            tool_name=tool_name,
             since=since,
             until=until,
         )
@@ -305,6 +313,14 @@ async def usage_sources(
     until: str | None = None,
 ):
     return distinct_client_sources(since=since, until=until)
+
+
+@app.get("/usage/tools")
+async def usage_tools(
+    since: str | None = None,
+    until: str | None = None,
+):
+    return distinct_tool_names(since=since, until=until)
 
 
 @app.get("/usage/run-summary")
@@ -363,6 +379,31 @@ async def usage_by_source(
         provider=provider,
         model=model,
         client_source=client_source,
+    )
+
+
+@app.get("/usage/by-tool")
+async def usage_by_tool(
+    since: str | None = None,
+    until: str | None = None,
+    provider: str | None = None,
+    model: str | None = None,
+    client_source: str | None = None,
+    only_failed: bool = False,
+    status_429: bool = False,
+    status_4xx: bool = False,
+    status_5xx: bool = False,
+):
+    return summarize_tool_calls(
+        since=since,
+        until=until,
+        provider=provider,
+        model=model,
+        client_source=client_source,
+        only_failed=only_failed,
+        status_429=status_429,
+        status_4xx=status_4xx,
+        status_5xx=status_5xx,
     )
 
 
@@ -660,6 +701,24 @@ async def update_evaluation_job(job_id: str, update: EvaluationJobUpdate):
         )
     refreshed = get_evaluation_job_progress(job_id)
     return refreshed or updated
+
+
+@app.get("/usage/{usage_id}/tool-calls")
+async def get_usage_tool_calls(usage_id: str):
+    return fetch_tool_calls(usage_id=usage_id)
+
+
+@app.get("/sessions/{session_id}/tool-calls")
+async def get_session_tool_calls(session_id: str):
+    return fetch_tool_calls(session_id=session_id)
+
+
+@app.get("/sessions/{session_id}/tool-calls/summary")
+async def get_session_tool_calls_summary(session_id: str):
+    summary = summarize_session_tool_calls(session_id)
+    if summary is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+    return summary
 
 
 @app.get("/config")

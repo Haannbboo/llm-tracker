@@ -2,15 +2,13 @@
 
 import pytest
 
-from src.database import init_db
 from src.database.usage import fetch_recent_usage
 
 
 @pytest.fixture
-def test_db(isolated_home):
-    db_path = str(isolated_home / "usage.db")
-    init_db(db_path)
-    return db_path
+def test_db(fresh_db):
+    # Schema already initialized by fresh_db; truncation between tests.
+    return fresh_db.db_path
 
 
 def test_record_usage_inserts_row(test_db):
@@ -227,3 +225,138 @@ def test_record_usage_records_zero_tokens_on_unknown_status(test_db):
     rows = fetch_recent_usage(limit=10, db_path=test_db)
     assert len(rows) == 1
     assert rows[0]["status"] is None
+
+
+def test_record_tool_call_links_to_usage(test_db):
+    """record_tool_call creates a tool_calls row linked to the usage row."""
+    from src.recorder import record_tool_call, record_usage
+
+    usage = record_usage(
+        provider="openai",
+        model="gpt-4",
+        endpoint="/v1/chat/completions",
+        prompt_tokens=10,
+        completion_tokens=5,
+        status=200,
+        db_path=test_db,
+    )
+    assert usage is not None
+
+    record_tool_call(
+        tool_use_id="call_abc123",
+        usage_id=usage.id,
+        tool_name="get_weather",
+        client_source="test",
+        ts=usage.ts,
+        db_path=test_db,
+    )
+
+    # Verify via fetch_recent_usage which already joins tool_names
+    rows = fetch_recent_usage(limit=10, db_path=test_db)
+    assert len(rows) == 1
+    assert rows[0]["tool_names"] == "get_weather"
+
+
+def test_record_tool_call_multiple_per_usage(test_db):
+    """Multiple tool calls from one usage row all get linked."""
+    from src.recorder import record_tool_call, record_usage
+
+    usage = record_usage(
+        provider="anthropic",
+        model="claude-sonnet-4-5",
+        endpoint="/v1/messages",
+        prompt_tokens=20,
+        completion_tokens=10,
+        status=200,
+        db_path=test_db,
+    )
+    assert usage is not None
+
+    for tool_id, tool_name in [
+        ("toolu_1", "bash"),
+        ("toolu_2", "file_read"),
+    ]:
+        record_tool_call(
+            tool_use_id=tool_id,
+            usage_id=usage.id,
+            tool_name=tool_name,
+            ts=usage.ts,
+            db_path=test_db,
+        )
+
+    rows = fetch_recent_usage(limit=10, db_path=test_db)
+    assert len(rows) == 1
+    # tool_names are comma-separated (order depends on DB query)
+    tool_names = set(rows[0]["tool_names"].split(","))
+    assert tool_names == {"bash", "file_read"}
+
+
+def test_record_tool_call_duplicate_id_is_noop(test_db):
+    """Redelivery of the same tool_use_id must not raise or double-count."""
+    from src.recorder import record_tool_call, record_usage
+
+    usage = record_usage(
+        provider="openai",
+        model="gpt-4",
+        endpoint="/v1/chat/completions",
+        prompt_tokens=1,
+        completion_tokens=1,
+        status=200,
+        db_path=test_db,
+    )
+    assert usage is not None
+
+    for _ in range(2):
+        record_tool_call(
+            tool_use_id="dup_1",
+            usage_id=usage.id,
+            tool_name="bash",
+            ts=usage.ts,
+            db_path=test_db,
+        )
+
+    rows = fetch_recent_usage(limit=10, db_path=test_db)
+    assert len(rows) == 1
+    assert rows[0]["tool_names"] == "bash"
+
+
+def test_record_tool_call_integrity_error_is_noop(test_db, monkeypatch):
+    """A concurrent redelivery that races past the pre-check must still no-op
+    instead of letting IntegrityError propagate out of the OTLP handler."""
+    from sqlalchemy.orm import Session as SASession
+
+    from src.recorder import record_tool_call, record_usage
+
+    usage = record_usage(
+        provider="openai",
+        model="gpt-4",
+        endpoint="/v1/chat/completions",
+        prompt_tokens=1,
+        completion_tokens=1,
+        status=200,
+        db_path=test_db,
+    )
+    assert usage is not None
+
+    record_tool_call(
+        tool_use_id="race_1",
+        usage_id=usage.id,
+        tool_name="bash",
+        ts=usage.ts,
+        db_path=test_db,
+    )
+
+    # Simulate a second request racing past the "already recorded" pre-check.
+    monkeypatch.setattr(SASession, "get", lambda self, *a, **k: None)
+
+    record_tool_call(
+        tool_use_id="race_1",
+        usage_id=usage.id,
+        tool_name="bash",
+        ts=usage.ts,
+        db_path=test_db,
+    )
+
+    rows = fetch_recent_usage(limit=10, db_path=test_db)
+    assert len(rows) == 1
+    assert rows[0]["tool_names"] == "bash"

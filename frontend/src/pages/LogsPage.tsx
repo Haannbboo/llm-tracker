@@ -11,7 +11,7 @@ import { ClickToCopy } from '../components/CopyButton'
 import { t } from '../i18n/index.ts'
 import {
   formatCost, formatLatency, formatNumber, formatRate, formatSpeed, formatTime,
-  value, getProviderIcon, getProviderBadgeBg, getProviderBadgeText, getModelIcon, shortSessionId, resolveTimezone,
+  value, getProviderIcon, getProviderBadgeBg, getProviderBadgeText, getModelIcon, getSourceIcon, getSourceBadgeBg, getSourceBadgeText, shortSessionId, resolveTimezone, ToolBadge, getSinceDate,
 } from '../utils'
 import { getModelBadgeBackgroundColor, getModelTextColor } from '../model-badge'
 import type { DateRangeOption } from '../types'
@@ -53,19 +53,59 @@ export function LogsPage({ initialSessionFilter }: Props) {
   // Session filter state (local to logs view)
   const [sessionFilter, setSessionFilter] = useState<string | null>(initialSessionFilter ?? storedSessionFilter)
 
+  // Tool filter state (local to logs view)
+  const [toolFilter, setToolFilter] = useState<string | null>(null)
+
   // Logs data hook
   const {
     usageRows, totalLogs, totalPages,
     limit, setLimit, page, setPage, jumpPage, setJumpPage, resetPage,
     logsLoading, expandedRow, setExpandedRow,
     colWidths, resizedColumns, handleResizeStart,
-  } = useLogsData({ activeFilter, activeSource, sessionFilter, dateRange, customSince, customUntil })
+  } = useLogsData({ activeFilter, activeSource, sessionFilter, toolFilter, dateRange, customSince, customUntil })
 
   // Sessions data for the session filter dropdown
   const { sessions } = useSessionSelectorData({ activeSource, dateRange, customSince, customUntil })
 
+  // Distinct tool names for the tool filter dropdown (fetched from API, filtered by time range)
+  const [availableTools, setAvailableTools] = useState<string[]>([])
+  useEffect(() => {
+    const controller = new AbortController()
+    const since = dateRange === 'custom' ? customSince : getSinceDate(dateRange)
+    const until = dateRange === 'custom' ? customUntil : null
+    const url = new URL('/usage/tools', window.location.origin)
+    if (since) url.searchParams.set('since', since)
+    if (until) url.searchParams.set('until', until)
+    fetch(url.toString(), { signal: controller.signal })
+      .then(r => r.ok ? r.json() : [])
+      .then(data => { if (!controller.signal.aborted) setAvailableTools(data) })
+      .catch((err) => { if (err?.name !== 'AbortError') console.warn('Failed to fetch tools', err) })
+    return () => controller.abort()
+  }, [dateRange, customSince, customUntil])
+
   const tableContainerRef = useRef<HTMLDivElement>(null)
   const [tableWidth, setTableWidth] = useState(0)
+
+  // Tool calls for expanded row
+  const [expandedToolCalls, setExpandedToolCalls] = useState<{ tool_name: string; tool_use_id: string }[] | null>(null)
+  useEffect(() => {
+    if (!expandedRow) {
+      setExpandedToolCalls(null)
+      return
+    }
+    let cancelled = false
+    fetch(`/usage/${expandedRow}/tool-calls`)
+      .then((r) => (r.ok ? r.json() : []))
+      .then((data) => {
+        if (!cancelled) setExpandedToolCalls(data)
+      })
+      .catch(() => {
+        if (!cancelled) setExpandedToolCalls(null)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [expandedRow])
 
   useEffect(() => {
     const container = tableContainerRef.current
@@ -129,6 +169,8 @@ export function LogsPage({ initialSessionFilter }: Props) {
         return { position: 'relative' }
       case 'status':
         return { width: colWidths.status, position: 'relative' }
+      case 'tool':
+        return { width: colWidths.tool, position: 'relative' }
       default:
         return { position: 'relative' }
     }
@@ -156,6 +198,8 @@ export function LogsPage({ initialSessionFilter }: Props) {
         return <td><div className="skeleton" style={{ width: 80, height: 14 }} /></td>
       case 'status':
         return <td><div className="skeleton" style={{ width: 40, height: 20, borderRadius: 6 }} /></td>
+      case 'tool':
+        return <td><div className="skeleton" style={{ width: 60, height: 18, borderRadius: 4 }} /></td>
       default:
         return <td />
     }
@@ -214,19 +258,27 @@ export function LogsPage({ initialSessionFilter }: Props) {
         )
       case 'source':
         return (
-          <td style={{ padding: '8px' }}>
+          <td style={{ padding: '8px', paddingLeft: '16px' }}>
             <div style={{
-              padding: '2px 8px',
-              borderRadius: '4px',
               display: 'inline-flex',
-              fontSize: '10px',
-              backgroundColor: 'var(--tab-toggle-bg)',
-              color: 'var(--text-secondary)',
-              width: 'fit-content',
-              border: '1px solid var(--border-color)',
-              fontWeight: 600
+              alignItems: 'center',
+              maxWidth: '120px',
             }}>
-              {row.client_source || '—'}
+              {getSourceIcon(row.client_source ?? '') ?? (
+                <span style={{
+                  fontSize: '11px',
+                  fontWeight: 600,
+                  padding: '2px 6px',
+                  borderRadius: '4px',
+                  backgroundColor: getSourceBadgeBg(row.client_source ?? ''),
+                  color: getSourceBadgeText(row.client_source ?? ''),
+                  whiteSpace: 'nowrap',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                }}>
+                  {row.client_source || '—'}
+                </span>
+              )}
             </div>
           </td>
         )
@@ -442,6 +494,18 @@ export function LogsPage({ initialSessionFilter }: Props) {
             </span>
           </td>
         )
+      case 'tool':
+        return (
+          <td>
+            {row.tool_names ? (
+              <div style={{ display: 'flex', gap: '3px', flexWrap: 'wrap' }}>
+                {(row.tool_names as string).split(',').filter(Boolean).map((name: string, i: number) => (
+                  <ToolBadge key={i} name={name} />
+                ))}
+              </div>
+            ) : null}
+          </td>
+        )
       default:
         return <td />
     }
@@ -482,6 +546,20 @@ export function LogsPage({ initialSessionFilter }: Props) {
             onChange={(id) => { setSessionFilter(id); resetPage(); }}
             sourceColors={providerColors}
           />
+        </div>
+
+        <div className="filter-group">
+          <div className="filter-label">{t('Tool')}</div>
+          <select
+            className="input-plain"
+            value={toolFilter || ''}
+            onChange={(e) => { setToolFilter(e.target.value || null); resetPage(); }}
+          >
+            <option value="">{t('All Tools')}</option>
+            {availableTools.map(name => (
+              <option key={name} value={name}>{name}</option>
+            ))}
+          </select>
         </div>
 
         <div className="filter-group">
@@ -541,6 +619,7 @@ export function LogsPage({ initialSessionFilter }: Props) {
               setActiveFilter(null)
               setActiveSource(null)
               setSessionFilter(null)
+              setToolFilter(null)
               setDateRange('24h')
               setCustomSince('')
               setCustomUntil('')
@@ -626,6 +705,24 @@ export function LogsPage({ initialSessionFilter }: Props) {
                             </div>
                           )}
                           <div className="detail-group">
+                            <span className="detail-label">{t('Source')}</span>
+                            <span className="detail-value" style={{
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '4px',
+                              padding: '2px 8px',
+                              borderRadius: '4px',
+                              fontSize: '11px',
+                              fontWeight: 600,
+                              width: 'fit-content',
+                              backgroundColor: getSourceBadgeBg(row.client_source ?? ''),
+                              color: getSourceBadgeText(row.client_source ?? ''),
+                            }}>
+                              {getSourceIcon(row.client_source ?? '')}
+                              {row.client_source || '—'}
+                            </span>
+                          </div>
+                          <div className="detail-group">
                             <span className="detail-label">{t('Latency')}</span>
                             <span className="detail-value">{formatLatency(row.latency_ms)}</span>
                           </div>
@@ -659,6 +756,16 @@ export function LogsPage({ initialSessionFilter }: Props) {
                             <div className="detail-group">
                               <span className="detail-label">{t('Client IP')}</span>
                               <span className="detail-value">{row.client_ip}</span>
+                            </div>
+                          )}
+                          {expandedToolCalls && expandedToolCalls.length > 0 && (
+                            <div className="detail-group">
+                              <span className="detail-label">{t('Tool')}</span>
+                              <span className="detail-value">
+                                {expandedToolCalls.map((tc) => (
+                                  <ToolBadge key={tc.tool_use_id} name={tc.tool_name} style={{ marginRight: 4 }} />
+                                ))}
+                              </span>
                             </div>
                           )}
                         </div>

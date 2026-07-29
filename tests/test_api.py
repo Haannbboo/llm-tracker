@@ -502,6 +502,36 @@ def test_usage_by_source_endpoint_passes_all_filters(api_module, monkeypatch):
     assert captured["model"] == "gpt-4o"
 
 
+def test_usage_by_tool_endpoint(api_module, monkeypatch):
+    captured = {}
+
+    def fake_by_tool(**kwargs):
+        captured.update(kwargs)
+        return [{"tool_name": "bash", "count": 2}, {"tool_name": "read", "count": 1}]
+
+    monkeypatch.setattr(api_module, "summarize_tool_calls", fake_by_tool)
+
+    response = TestClient(api_module.app).get(
+        "/usage/by-tool",
+        params={
+            "since": "2026-01-01",
+            "client_source": "claude-code",
+            "status_429": "true",
+        },
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data == [
+        {"tool_name": "bash", "count": 2},
+        {"tool_name": "read", "count": 1},
+    ]
+    assert captured["since"] == "2026-01-01"
+    assert captured["client_source"] == "claude-code"
+    assert captured["status_429"] is True
+    assert captured["status_4xx"] is False
+    assert captured["status_5xx"] is False
+
+
 def test_usage_by_provider_endpoint_includes_avg_effective_price_per_million(
     api_module, monkeypatch
 ):
@@ -1622,3 +1652,67 @@ def test_spa_missing_asset_does_not_return_html(api_module):
 
     assert response.status_code == 404
     assert "text/html" not in response.headers.get("content-type", "")
+
+
+# ─── /usage/tools endpoint ────────────────────────────────────────────────────
+
+
+def test_usage_tools_endpoint_exists(api_module, monkeypatch):
+    monkeypatch.setattr(
+        api_module, "distinct_tool_names", lambda **kw: ["bash", "read"]
+    )
+    response = TestClient(api_module.app).get("/usage/tools")
+    assert response.status_code == 200
+    assert response.json() == ["bash", "read"]
+
+
+def test_usage_tools_passes_time_filters(api_module, monkeypatch):
+    captured = {}
+
+    def fake_distinct(**kwargs):
+        captured.update(kwargs)
+        return []
+
+    monkeypatch.setattr(api_module, "distinct_tool_names", fake_distinct)
+
+    TestClient(api_module.app).get(
+        "/usage/tools",
+        params={
+            "since": "2026-04-17T00:00:00+00:00",
+            "until": "2026-04-18T00:00:00+00:00",
+        },
+    )
+    assert captured["since"] == "2026-04-17T00:00:00+00:00"
+    assert captured["until"] == "2026-04-18T00:00:00+00:00"
+
+
+def test_usage_endpoint_passes_tool_name(api_module, monkeypatch):
+    captured = {}
+
+    def fake_fetch(**kwargs):
+        captured.update(kwargs)
+        return []
+
+    monkeypatch.setattr(api_module, "fetch_recent_usage", fake_fetch)
+
+    response = TestClient(api_module.app).get(
+        "/usage", params={"tool_name": "bash", "limit": "10"}
+    )
+    assert response.status_code == 200
+    assert captured["tool_name"] == "bash"
+
+
+def test_usage_count_passes_tool_name(api_module, monkeypatch):
+    captured = {}
+
+    def fake_count(**kwargs):
+        captured.update(kwargs)
+        return 0
+
+    monkeypatch.setattr(api_module, "count_usage", fake_count)
+
+    response = TestClient(api_module.app).get(
+        "/usage/count", params={"tool_name": "edit"}
+    )
+    assert response.status_code == 200
+    assert captured["tool_name"] == "edit"

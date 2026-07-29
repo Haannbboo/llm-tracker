@@ -1,6 +1,7 @@
 import json
 import os
 import time
+import uuid
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 
@@ -8,7 +9,7 @@ from fastapi import FastAPI, Request
 
 from .database import init_db
 from .provider_parser import parse_provider_metadata
-from .recorder import record_usage
+from .recorder import record_tool_call, record_usage
 from .utils import secs_to_micros
 
 GEMINI_EVENT = "gemini_cli.api_response"
@@ -29,6 +30,18 @@ KNOWN_SERVICE_NAMES = (
 
 # State cache for merging Codex events: run/conversation key -> {duration_ms, ttft_ms, timestamp}
 codex_state: dict = {}
+
+# Tool-name buffers: keyed by correlation ID, values are lists of {tool_name, tool_use_id, ts}
+_claude_tool_buffer: dict[str, list[dict]] = {}
+_codex_tool_buffer: dict[str, list[dict]] = {}
+_opencode_tool_buffer: dict[str, list[dict]] = {}  # keyed by message.id
+
+
+def _fallback_tool_use_id() -> str:
+    # ponytail: random id when the provider omits one, so distinct calls
+    # never collide on the empty-string PK. Doesn't cover providers that
+    # emit real but non-globally-unique ids (e.g. some self-hosted gateways).
+    return f"generated:{uuid.uuid4().hex}"
 
 
 def _attr(attributes: list, key: str):
@@ -313,6 +326,13 @@ def _extract_claude_fields(
     usage_session_id = _attr(attrs, "session.id") or session_id or None
 
     total = prompt_tokens + int(output_tokens or 0) + int(cache_create or 0)
+
+    # Pop buffered tool calls for this prompt.id
+    prompt_id = _attr(attrs, "prompt.id")
+    tool_info: list[dict] = []
+    if prompt_id and prompt_id in _claude_tool_buffer:
+        tool_info = _claude_tool_buffer.pop(prompt_id)
+
     return {
         "ts": ts,
         "provider": metadata.provider,
@@ -337,13 +357,26 @@ def _extract_claude_fields(
         "base_url": metadata.base_url,
         "base_url_provider": metadata.provider,
         "base_url_source": metadata.source,
+        "_tool_info": tool_info,
     }
 
 
 def _parse_claude_record(
     record: dict, attrs: list, session_id: str, client_ip: str | None = None
 ) -> None:
-    record_usage(**_extract_claude_fields(record, attrs, session_id, client_ip))
+    fields = _extract_claude_fields(record, attrs, session_id, client_ip)
+    tool_calls = fields.pop("_tool_info", [])
+    usage = record_usage(**fields)
+    if usage:
+        for tool_info in tool_calls:
+            record_tool_call(
+                tool_use_id=tool_info["tool_use_id"],
+                usage_id=usage.id,
+                session_id=usage.session_id,
+                tool_name=tool_info["tool_name"],
+                client_source="claude-code",
+                ts=tool_info["ts"],
+            )
 
 
 def _extract_opencode_fields(
@@ -391,6 +424,12 @@ def _extract_opencode_fields(
 
     normalized_total = prompt_tokens + int(completion_tokens or 0)
 
+    # Pop buffered tool calls for this message.id
+    message_id = _attr(attrs, "message.id")
+    tool_info: list[dict] = []
+    if message_id and message_id in _opencode_tool_buffer:
+        tool_info = _opencode_tool_buffer.pop(message_id)
+
     return {
         "ts": ts,
         "provider": provider_from_attr or metadata.provider,
@@ -415,6 +454,7 @@ def _extract_opencode_fields(
         "base_url": metadata.base_url,
         "base_url_provider": metadata.provider,
         "base_url_source": metadata.source,
+        "_tool_info": tool_info,
     }
 
 
@@ -425,11 +465,21 @@ def _parse_opencode_record(
     client_source: str = "opencode",
     client_ip: str | None = None,
 ) -> None:
-    record_usage(
-        **_extract_opencode_fields(
-            record, attrs, session_id, client_source=client_source, client_ip=client_ip
-        )
+    fields = _extract_opencode_fields(
+        record, attrs, session_id, client_source=client_source, client_ip=client_ip
     )
+    tool_calls = fields.pop("_tool_info", [])
+    usage = record_usage(**fields)
+    if usage:
+        for tool_info in tool_calls:
+            record_tool_call(
+                tool_use_id=tool_info["tool_use_id"],
+                usage_id=usage.id,
+                session_id=usage.session_id,
+                tool_name=tool_info["tool_name"],
+                client_source=client_source,
+                ts=tool_info["ts"],
+            )
 
 
 def _handle_codex_state_event(attrs: list) -> bool:
@@ -518,6 +568,12 @@ def _extract_codex_fields(
     metadata = parse_provider_metadata("codex")
     model = _attr(attrs, "model") or "codex-unknown"
 
+    # Pop buffered tool calls for this conversation.id
+    conv_id = _attr(attrs, "conversation.id")
+    tool_info: list[dict] = []
+    if conv_id and conv_id in _codex_tool_buffer:
+        tool_info = _codex_tool_buffer.pop(conv_id)
+
     return {
         "ts": ts,
         "provider": metadata.provider,
@@ -542,6 +598,7 @@ def _extract_codex_fields(
         "base_url": metadata.base_url,
         "base_url_provider": metadata.provider,
         "base_url_source": metadata.source,
+        "_tool_info": tool_info,
     }
 
 
@@ -552,7 +609,18 @@ def _parse_codex_record(
         return
     fields = _extract_codex_fields(record, attrs, service_name, client_ip)
     if fields is not None:
-        record_usage(**fields)
+        tool_calls = fields.pop("_tool_info", [])
+        usage = record_usage(**fields)
+        if usage:
+            for tool_info in tool_calls:
+                record_tool_call(
+                    tool_use_id=tool_info["tool_use_id"],
+                    usage_id=usage.id,
+                    session_id=usage.session_id,
+                    tool_name=tool_info["tool_name"],
+                    client_source="codex",
+                    ts=tool_info["ts"],
+                )
 
 
 def _parse_log_record(
@@ -574,6 +642,45 @@ def _parse_log_record(
     )
     event_name = _attr(attrs, "event.name") or ""
 
+    # Buffer tool_decision events for later association with usage rows
+    if event_name == "tool_decision" and service_name == "claude-code":
+        prompt_id = _attr(attrs, "prompt.id")
+        if prompt_id:
+            _claude_tool_buffer.setdefault(prompt_id, []).append(
+                {
+                    "tool_name": _attr(attrs, "tool_name") or "",
+                    "tool_use_id": _attr(attrs, "tool_use_id")
+                    or _fallback_tool_use_id(),
+                    "ts": int(record.get("timeUnixNano", "0")) // 1_000_000,
+                }
+            )
+    elif event_name == "codex.tool_decision" and service_name in CODEX_SERVICE_NAMES:
+        conv_id = _attr(attrs, "conversation.id")
+        tool_name = _attr(attrs, "tool_name") or ""
+        # Skip the exec wrapper — only keep native tool names
+        if conv_id and tool_name != "exec":
+            _codex_tool_buffer.setdefault(conv_id, []).append(
+                {
+                    "tool_name": tool_name,
+                    "tool_use_id": _attr(attrs, "call_id") or _fallback_tool_use_id(),
+                    "ts": int(record.get("timeUnixNano", "0")) // 1_000_000,
+                }
+            )
+    elif (
+        service_name in ({"opencode"} | KILO_SERVICE_NAMES)
+        and event_name == f"{service_name}.tool_decision"
+    ):
+        message_id = _attr(attrs, "message.id")
+        tool_name = _attr(attrs, "tool_name") or ""
+        if message_id and tool_name:
+            _opencode_tool_buffer.setdefault(message_id, []).append(
+                {
+                    "tool_name": tool_name,
+                    "tool_use_id": _attr(attrs, "call_id") or _fallback_tool_use_id(),
+                    "ts": int(record.get("timeUnixNano", "0")) // 1_000_000,
+                }
+            )
+
     if event_name == GEMINI_EVENT:
         fields: dict | None = _extract_gemini_fields(
             record, attrs, usage_session_id or "", client_ip
@@ -586,13 +693,35 @@ def _parse_log_record(
         fields = _extract_claude_fields(
             record, attrs, usage_session_id or "", client_ip
         )
-        record_usage(**fields)
+        tool_calls = fields.pop("_tool_info", [])
+        usage = record_usage(**fields)
+        if usage:
+            for tool_info in tool_calls:
+                record_tool_call(
+                    tool_use_id=tool_info["tool_use_id"],
+                    usage_id=usage.id,
+                    session_id=usage.session_id,
+                    tool_name=tool_info["tool_name"],
+                    client_source="claude-code",
+                    ts=tool_info["ts"],
+                )
     elif event_name == CODEX_EVENT and service_name in CODEX_SERVICE_NAMES:
         if _handle_codex_state_event(attrs):
             return
         fields = _extract_codex_fields(record, attrs, service_name, client_ip)
         if fields is not None:
-            record_usage(**fields)
+            tool_calls = fields.pop("_tool_info", [])
+            usage = record_usage(**fields)
+            if usage:
+                for tool_info in tool_calls:
+                    record_tool_call(
+                        tool_use_id=tool_info["tool_use_id"],
+                        usage_id=usage.id,
+                        session_id=usage.session_id,
+                        tool_name=tool_info["tool_name"],
+                        client_source="codex",
+                        ts=tool_info["ts"],
+                    )
     elif event_name == CODEX_API_REQUEST_EVENT and service_name in CODEX_SERVICE_NAMES:
         _handle_codex_state_event(attrs)
     elif event_name == OPENCODE_EVENT and service_name == "opencode":
@@ -645,6 +774,19 @@ async def receive_logs(request: Request):
     ]
     for k in stale_keys:
         del codex_state[k]
+
+    # Evict tool buffers whose last entry is older than 10 minutes (aborted
+    # turns/dropped connections that never get matched to a usage event).
+    now_ms = now // 1000
+    for buf in (_claude_tool_buffer, _codex_tool_buffer, _opencode_tool_buffer):
+        stale_buf_keys = [
+            k
+            for k, entries in buf.items()
+            if entries and now_ms - entries[-1]["ts"] > 600_000
+        ]
+        for k in stale_buf_keys:
+            del buf[k]
+
     PROMPT_LENGTH_TRACKER.evict_stale()
 
     client_ip = request.client.host if request.client else None

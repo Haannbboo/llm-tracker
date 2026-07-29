@@ -7,8 +7,8 @@ import { ClickToCopy } from '../components/CopyButton'
 import { t } from '../i18n/index.ts'
 import {
   formatCompact, formatCost, formatDuration, formatLatency, formatNumber,
-  formatTime, getModelIcon, getSourceBadgeBg, getSourceBadgeText,
-  shortSessionId, sessionAgentName, sessionDisplayName, sessionTaskTitle, getSinceDate, resolveTimezone,
+  formatTime, getModelIcon, getSourceBadgeBg, getSourceBadgeText, getSourceIcon,
+  shortSessionId, sessionAgentName, sessionDisplayName, sessionTaskTitle, getSinceDate, resolveTimezone, ToolBadge,
 } from '../utils'
 import { getModelBadgeBackgroundColor, getModelTextColor } from '../model-badge'
 import type { DailyEffectivenessReport, EvaluatorOption, EvaluatorType, EvaluationJobProgress, ModelEffectivenessGroup, SessionOutcome, SessionSummary, SessionsSummary } from '../types'
@@ -669,8 +669,8 @@ export function SessionsTab({
               {t('Hide no-op')}
             </button>
           </div>
-          <div className="panel-body" style={{ padding: 0 }}>
-            <table className="table sessions-table">
+          <div className="panel-body" style={{ padding: 0, overflowX: 'auto' }}>
+            <table className="table sessions-table" style={{ minWidth: '900px' }}>
               <thead>
                 <tr>
                   <th style={{ width: '40px' }}></th>
@@ -710,6 +710,7 @@ export function SessionsTab({
                   <th className="sessions-col-cost" style={{ cursor: 'pointer' }} onClick={() => handleSessionSort('total_cost_usd')}>
                     {t('Cost')} {sessionSortBy === 'total_cost_usd' ? (sessionSortOrder === 'asc' ? '↑' : '↓') : ''}
                   </th>
+                  <th style={{ width: '180px' }}>{t('Tools')}</th>
                   <th style={{ width: '90px' }}>Outcome</th>
                 </tr>
               </thead>
@@ -757,9 +758,13 @@ export function SessionsTab({
                           borderRadius: '4px',
                           fontSize: '11px',
                           fontWeight: 600,
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '4px',
                           background: getSourceBadgeBg(session.client_source),
                           color: getSourceBadgeText(session.client_source),
                         }}>
+                          {getSourceIcon(session.client_source)}
                           {sessionAgentName(session.client_source)}
                         </span>
                         {session.model && (
@@ -792,6 +797,15 @@ export function SessionsTab({
                     <td className="sessions-number-cell" style={{ fontSize: '12px' }}>{formatNumber(session.request_count)}</td>
                     <td className="sessions-number-cell" style={{ fontSize: '12px' }}>{formatCompact(session.total_tokens)}</td>
                     <td className="sessions-number-cell" style={{ fontSize: '12px' }}>{formatCost(session.total_cost_usd, 2)}</td>
+                    <td style={{ fontSize: '11px' }}>
+                      {session.tool_calls_json && Object.keys(session.tool_calls_json).length > 0 ? (
+                        <div style={{ display: 'flex', gap: '3px', flexWrap: 'wrap' }}>
+                          {Object.entries(session.tool_calls_json).map(([name, count]) => (
+                            <ToolBadge key={name} name={name} count={count} />
+                          ))}
+                        </div>
+                      ) : '—'}
+                    </td>
                     <td>
                       <div style={{ display: 'flex', gap: '6px', alignItems: 'center', flexWrap: 'wrap' }}>
                         <span className={`session-outcome-badge ${getOutcomeBadge(session.evaluation?.outcome).className}`}>
@@ -807,7 +821,7 @@ export function SessionsTab({
                   </tr>
                   {selectedSession?.session_id === session.session_id && (
                     <tr key={session.session_id + '-detail'} className={fadingOutSessions.has(session.session_id) ? 'session-fade-out' : undefined}>
-                      <td colSpan={9} className="session-detail-cell">
+                      <td colSpan={10} className="session-detail-cell">
                         <SessionDetailInline
                           session={session}
                           onNavigateToLogs={handleViewInLogs}

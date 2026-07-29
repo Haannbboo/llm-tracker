@@ -184,6 +184,9 @@ class SessionRecord(Base):
     primary_model: Mapped[str | None] = mapped_column(String, nullable=True)
     providers_json: Mapped[str | None] = mapped_column(String, nullable=True)
     models_json: Mapped[str | None] = mapped_column(String, nullable=True)
+    tool_calls_json: Mapped[str | None] = mapped_column(
+        String, nullable=True, server_default=text("'{}'")
+    )
     last_usage_id: Mapped[str | None] = mapped_column(String, nullable=True)
     updated_at: Mapped[str] = mapped_column(String, nullable=False)
     # Evaluation columns (NULL = not evaluated)
@@ -231,3 +234,16 @@ Index(
     sqlite_where=EvaluationJob.status.in_(("queued", "running")),
     postgresql_where=EvaluationJob.status.in_(("queued", "running")),
 )
+
+
+class ToolCall(Base):
+    __tablename__ = "tool_calls"
+
+    tool_use_id: Mapped[str] = mapped_column(String, primary_key=True)
+    usage_id: Mapped[str | None] = mapped_column(
+        String, ForeignKey("usage.id"), nullable=True, index=True
+    )
+    session_id: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
+    tool_name: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    client_source: Mapped[str | None] = mapped_column(String, nullable=True)
+    ts: Mapped[int] = mapped_column(BigInteger, nullable=False)

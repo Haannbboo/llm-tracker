@@ -27,7 +27,7 @@ from config.app import (
 )
 
 from .database import init_db
-from .recorder import record_usage
+from .recorder import record_tool_call, record_usage
 from .utils import extract_stream_usage, extract_usage
 
 REQUEST_TIMEOUT_SECONDS = 300
@@ -145,6 +145,124 @@ def parse_json_body(body: bytes) -> dict[str, Any]:
     return json.loads(body)
 
 
+def extract_tool_calls(response: dict[str, Any]) -> list[dict[str, str]]:
+    """Extract tool calls from a full response body.
+
+    Supports OpenAI chat/completions, Anthropic messages, and OpenAI responses.
+    Returns list of {"tool_use_id": ..., "tool_name": ...}.
+    """
+    results: list[dict[str, str]] = []
+
+    # OpenAI chat/completions
+    for choice in response.get("choices") or []:
+        msg = choice.get("message") or {}
+        for tc in msg.get("tool_calls") or []:
+            tool_use_id = tc.get("id") or ""
+            fn = tc.get("function") or {}
+            tool_name = fn.get("name") or ""
+            if tool_use_id:
+                results.append({"tool_use_id": tool_use_id, "tool_name": tool_name})
+
+    # Anthropic messages
+    content = response.get("content")
+    if isinstance(content, list):
+        for part in content:
+            if isinstance(part, dict) and part.get("type") == "tool_use":
+                tool_use_id = part.get("id") or ""
+                tool_name = part.get("name") or ""
+                if tool_use_id:
+                    results.append({"tool_use_id": tool_use_id, "tool_name": tool_name})
+
+    # OpenAI responses API
+    output = response.get("output")
+    if isinstance(output, list):
+        for item in output:
+            if isinstance(item, dict) and item.get("type") == "function_call":
+                tool_use_id = item.get("call_id") or ""
+                tool_name = item.get("name") or ""
+                if tool_use_id:
+                    results.append({"tool_use_id": tool_use_id, "tool_name": tool_name})
+
+    return results
+
+
+class StreamToolCallAccumulator:
+    """Accumulate tool call info from streaming delta chunks."""
+
+    def __init__(self) -> None:
+        self._calls: dict[int, dict[str, str]] = {}
+
+    def accumulate(self, payload: dict[str, Any]) -> None:
+        # OpenAI chat/completions deltas
+        for choice in payload.get("choices") or []:
+            delta = choice.get("delta") or {}
+            for tc in delta.get("tool_calls") or []:
+                idx = tc.get("index", 0)
+                entry = self._calls.setdefault(
+                    idx, {"tool_use_id": "", "tool_name": ""}
+                )
+                if tc.get("id"):
+                    entry["tool_use_id"] += tc["id"]
+                fn = tc.get("function") or {}
+                if fn.get("name"):
+                    entry["tool_name"] += fn["name"]
+
+        # Anthropic: content_block_start
+        block = payload.get("content_block") or {}
+        if block.get("type") == "tool_use":
+            idx = payload.get("index", 0)
+            entry = self._calls.setdefault(idx, {"tool_use_id": "", "tool_name": ""})
+            if block.get("id"):
+                entry["tool_use_id"] = block["id"]
+            if block.get("name"):
+                entry["tool_name"] = block["name"]
+
+        # OpenAI responses: output_item.added
+        resp = payload.get("response") or {}
+        item = resp.get("output_item") or payload.get("item") or {}
+        if item.get("type") == "function_call":
+            idx = resp.get("output_index") or payload.get("output_index") or 0
+            entry = self._calls.setdefault(idx, {"tool_use_id": "", "tool_name": ""})
+            if item.get("call_id"):
+                entry["tool_use_id"] = item["call_id"]
+            if item.get("name"):
+                entry["tool_name"] = item["name"]
+
+        # OpenAI responses: output_item.delta
+        delta = resp.get("delta") or payload.get("delta") or {}
+        if delta.get("type") == "function_call_delta":
+            idx = resp.get("output_index") or payload.get("output_index") or 0
+            entry = self._calls.setdefault(idx, {"tool_use_id": "", "tool_name": ""})
+            if delta.get("call_id"):
+                entry["tool_use_id"] += delta["call_id"]
+            if delta.get("name"):
+                entry["tool_name"] += delta["name"]
+
+    def get_tool_calls(self) -> list[dict[str, str]]:
+        return [
+            self._calls[idx]
+            for idx in sorted(self._calls)
+            if self._calls[idx]["tool_use_id"]
+        ]
+
+
+def _record_tool_calls_for_usage(
+    usage, tool_calls: list[dict[str, str]], client_source: str | None
+) -> None:
+    """Record tool calls linked to a usage row. ToolCall.ts uses milliseconds."""
+    if not usage or not tool_calls:
+        return
+    ts_ms = usage.ts // 1000  # usage.ts is microseconds, ToolCall.ts is milliseconds
+    for tc in tool_calls:
+        record_tool_call(
+            tool_use_id=tc["tool_use_id"],
+            usage_id=usage.id,
+            tool_name=tc["tool_name"],
+            client_source=client_source,
+            ts=ts_ms,
+        )
+
+
 def _content_text_length(content: Any) -> int:
     """Return character count of a message content value."""
     if isinstance(content, str):
@@ -227,6 +345,7 @@ async def _forward_stream_or_error(
         usage_fields = extract_usage({})
         ttft_ms: int | None = None
         buffer = ""
+        tool_accumulator = StreamToolCallAccumulator()
 
         try:
             async for chunk in upstream.aiter_bytes():
@@ -246,12 +365,13 @@ async def _forward_stream_or_error(
                         stream_usage = extract_stream_usage(payload)
                         if stream_usage is not None:
                             usage_fields = stream_usage
+                        tool_accumulator.accumulate(payload)
                 except Exception:
                     continue
         finally:
             await client.aclose()
             latency_ms = int((time.monotonic() - started_at) * 1000)
-            record_usage(
+            usage = record_usage(
                 provider=provider.name,
                 model=model,
                 client_source=client_source,
@@ -270,6 +390,10 @@ async def _forward_stream_or_error(
                 base_url=provider.base_url,
                 base_url_provider=provider.name,
                 base_url_source="proxy_config",
+            )
+
+            _record_tool_calls_for_usage(
+                usage, tool_accumulator.get_tool_calls(), client_source
             )
 
     return StreamingResponse(_relay(), media_type="text/event-stream")
@@ -321,7 +445,8 @@ async def forward(request: Request, path: str):
     response_json = response.json()
 
     usage_fields = extract_usage(response_json.get("usage", {}))
-    record_usage(
+    tool_calls = extract_tool_calls(response_json)
+    usage = record_usage(
         provider=provider.name,
         model=model,
         client_source=client_source,
@@ -341,6 +466,8 @@ async def forward(request: Request, path: str):
         base_url_provider=provider.name,
         base_url_source="proxy_config",
     )
+
+    _record_tool_calls_for_usage(usage, tool_calls, client_source)
 
     return JSONResponse(content=response_json, status_code=response.status_code)
 

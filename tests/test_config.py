@@ -753,3 +753,14 @@ def test_replace_contents_concurrent_readers_never_see_empty(config_module):
         thread.join()
 
     assert not errors
+
+
+def test_set_evaluation_evaluator(config_module, tmp_path):
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text("evaluation:\n  evaluator: codex\n", encoding="utf-8")
+
+    config_module.set_evaluation_evaluator("claude", str(config_path))
+
+    content = config_path.read_text(encoding="utf-8")
+    assert "evaluator: claude" in content
+    assert config_module.CONFIG["evaluation"]["evaluator"] == "claude"

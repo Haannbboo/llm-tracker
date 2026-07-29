@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import { ClickToCopy } from './CopyButton'
 import { t } from '../i18n/index.ts'
 import { useApp } from '../contexts/AppContext'
-import { formatCompact, formatCost, formatDuration, formatLatency, formatNumber, formatTime, value, getModelIcon, sessionTaskTitle, resolveTimezone } from '../utils'
+import { formatCompact, formatCost, formatDuration, formatLatency, formatNumber, formatTime, value, getModelIcon, sessionTaskTitle, resolveTimezone, ToolBadge } from '../utils'
 import { getModelBadgeBackgroundColor, getModelTextColor } from '../model-badge'
 import type { EvaluatorOption, EvaluatorType, EvaluationJobProgress, SessionEvaluation, SessionOutcome, SessionSummary } from '../types'
 
@@ -431,6 +431,17 @@ export function SessionDetailContent({
             </div>
           </div>
         </div>
+
+        {session.tool_calls_json && Object.keys(session.tool_calls_json).length > 0 && (
+          <div>
+            <div style={{ fontSize: '10px', color: 'var(--text-muted)', marginBottom: '6px', textTransform: 'uppercase', letterSpacing: '0.5px', fontWeight: 700 }}>{t('Tool Usage')}</div>
+            <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+              {Object.entries(session.tool_calls_json).map(([name, count]) => (
+                <ToolBadge key={name} name={name} count={count} />
+              ))}
+            </div>
+          </div>
+        )}
       </div>
 
       <div className="session-eval-section">

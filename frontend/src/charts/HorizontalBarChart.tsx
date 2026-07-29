@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { formatCompact, formatCost, formatRate, formatThroughput } from '../utils'
+import { formatCompact, formatCost, formatNumber, formatRate, formatThroughput } from '../utils'
 import { ChartTooltip, TooltipDivider, TooltipRow } from './ChartTooltip'
 import { t } from '../i18n/index.ts'
 
@@ -20,7 +20,7 @@ export type BarItem = {
   badgeText: string
 }
 
-export type Metric = 'tokens' | 'cost' | 'throughput' | 'successRate' | 'cacheHitRate'
+export type Metric = 'tokens' | 'cost' | 'throughput' | 'successRate' | 'cacheHitRate' | 'count'
 
 export function HorizontalBarChart({
   title,
@@ -38,7 +38,7 @@ export function HorizontalBarChart({
   const [hoveredItem, setHoveredItem] = useState<string | null>(null)
 
   const getMetricValue = (item: BarItem) => {
-    if (metric === 'tokens') return item.tokens
+    if (metric === 'tokens' || metric === 'count') return item.tokens
     if (metric === 'cost') return item.cost
     if (metric === 'successRate') return item.successRate ?? 100
     if (metric === 'cacheHitRate') return item.cacheHitRate ?? 0
@@ -56,7 +56,7 @@ export function HorizontalBarChart({
   const hovered = hoveredItem ? sorted.find((item) => item.name === hoveredItem) ?? null : null
 
   return (
-    <div className="widget" style={{ flex: 1 }}>
+    <div className="widget" style={{ flex: 1, height: '100%' }}>
       <div className="widget-header">
         <span>{icon} {title}</span>
       </div>
@@ -112,7 +112,7 @@ export function HorizontalBarChart({
                   </div>
                   <div style={{ display: 'flex', alignItems: 'baseline', gap: '6px' }}>
                     <span style={{ color: 'var(--text-secondary)', fontWeight: 700 }}>
-                      {metric === 'tokens' ? formatCompact(currentVal) : metric === 'cost' ? formatCost(currentVal, 2) : metric === 'successRate' || metric === 'cacheHitRate' ? `${currentVal.toFixed(1)}%` : formatThroughput(currentVal)}
+                      {metric === 'tokens' ? formatCompact(currentVal) : metric === 'count' ? formatNumber(currentVal) : metric === 'cost' ? formatCost(currentVal, 2) : metric === 'successRate' || metric === 'cacheHitRate' ? `${currentVal.toFixed(1)}%` : formatThroughput(currentVal)}
                     </span>
                     {metric === 'cost' && s.pricePerMillion != null && (
                       <span style={{ fontSize: '10px', color: 'var(--text-muted)' }}>

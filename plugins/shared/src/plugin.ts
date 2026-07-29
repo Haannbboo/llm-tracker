@@ -1,6 +1,6 @@
 import { finiteNumber, statusCodeFromError, errorName } from "./helpers.js"
 import { makePromptState } from "./prompt.js"
-import { buildOtlpPayload, emitOtlp } from "./otlp.js"
+import { buildOtlpPayload, buildToolEventPayload, emitOtlp } from "./otlp.js"
 
 const DEFAULT_ENDPOINT = "http://localhost:4005/v1/logs"
 
@@ -116,6 +116,7 @@ export function createPlugin(clientSource: string) {
   const processed = new Set<string>()
   const pending = new Set<string>()
   const promptState = makePromptState()
+  const emittedTools = new Set<string>()
 
   return async (input: any, options?: Record<string, any>) => {
     const endpoint = getEndpoint(options) ?? DEFAULT_ENDPOINT
@@ -127,6 +128,32 @@ export function createPlugin(clientSource: string) {
           if (!part) return
           promptState.rememberPromptPart(part)
           promptState.rememberFirstAssistantPart(part, Date.now())
+
+          // Emit tool_decision event when a ToolPart completes.
+          if (
+            part.type === "tool" &&
+            part.state?.status === "completed" &&
+            part.tool &&
+            part.callID &&
+            !emittedTools.has(part.callID)
+          ) {
+            emittedTools.add(part.callID)
+            if (emittedTools.size > 10_000) {
+              const entries = Array.from(emittedTools)
+              for (let i = 0; i < entries.length / 2; i++) emittedTools.delete(entries[i])
+            }
+            const toolPayload = buildToolEventPayload(
+              {
+                sessionId: part.sessionID,
+                messageId: part.messageID,
+                callId: part.callID,
+                toolName: part.tool,
+                timestampMs: Date.now(),
+              },
+              clientSource,
+            )
+            await emitOtlp(toolPayload, endpoint)
+          }
           return
         }
 

@@ -94,6 +94,7 @@ def test_init_db_log_usage_and_fetch_rows(database_module, isolated_home):
         "latency_ms": 123,
         "ttft_ms": None,
         "tool_tokens": None,
+        "tool_names": None,
         "cache_creation_tokens": None,
         "input_cost_usd": 2e-05,
         "output_cost_usd": 3e-05,
@@ -105,8 +106,9 @@ def test_init_db_log_usage_and_fetch_rows(database_module, isolated_home):
     }
 
 
-def test_fetch_recent_usage_returns_expected_row_shape(database_module, isolated_home):
-    db_path = str(isolated_home / "usage.db")
+def test_fetch_recent_usage_returns_expected_row_shape(fresh_db):
+    database_module = fresh_db.database_module
+    db_path = fresh_db.db_path
     database_module.init_db(db_path)
 
     database_module.log_usage(
@@ -155,6 +157,7 @@ def test_fetch_recent_usage_returns_expected_row_shape(database_module, isolated
         "latency_ms",
         "ttft_ms",
         "tool_tokens",
+        "tool_names",
         "cache_creation_tokens",
         "input_cost_usd",
         "output_cost_usd",
@@ -166,8 +169,100 @@ def test_fetch_recent_usage_returns_expected_row_shape(database_module, isolated
     }
 
 
-def test_usage_filters_includes_client_source(database_module, isolated_home):
-    db_path = str(isolated_home / "usage.db")
+def test_fetch_recent_usage_aggregates_tool_names(fresh_db):
+    """Test that tool_names aggregates multiple tool calls per usage into comma-separated string."""
+    database_module = fresh_db.database_module
+    db_path = fresh_db.db_path
+    from src.recorder import record_tool_call
+
+    database_module.init_db(db_path)
+
+    # Insert a usage row (log_usage doesn't return the object, but populates its id)
+    usage_obj = database_module.Usage(
+        ts=TS_2026_04_17_00,
+        provider="anthropic",
+        model="claude-sonnet-4-20250514",
+        client_source="claude-code",
+        session_id="session-tools",
+        endpoint="/v1/messages",
+        prompt_tokens=100,
+        completion_tokens=50,
+        reasoning_tokens=None,
+        cached_tokens=None,
+        total_tokens=150,
+        latency_ms=200,
+        ttft_ms=None,
+        tool_tokens=None,
+        cache_creation_tokens=None,
+        input_cost_usd=0.002,
+        output_cost_usd=0.003,
+        total_cost_usd=0.005,
+        status=200,
+        base_url_id=None,
+    )
+    database_module.log_usage(usage_obj, db_path=db_path)
+
+    # Insert multiple tool calls for this usage
+    for i, tool_name in enumerate(["read_file", "edit_file", "bash"]):
+        record_tool_call(
+            tool_use_id=f"tool_{i}",
+            usage_id=usage_obj.id,
+            session_id=usage_obj.session_id,
+            tool_name=tool_name,
+            client_source="claude-code",
+            ts=TS_2026_04_17_00 + i,
+            db_path=db_path,
+        )
+
+    # Fetch and verify aggregated tool names
+    rows = database_module.fetch_recent_usage(limit=1, db_path=db_path)
+    assert len(rows) == 1
+    assert rows[0]["tool_names"] is not None
+    # Should contain all three tool names (order may vary)
+    tool_names_set = set(rows[0]["tool_names"].split(","))
+    assert tool_names_set == {"read_file", "edit_file", "bash"}
+
+
+def test_fetch_recent_usage_no_tool_calls(fresh_db):
+    """Test that tool_names is None when no tool calls exist."""
+    database_module = fresh_db.database_module
+    db_path = fresh_db.db_path
+    database_module.init_db(db_path)
+
+    database_module.log_usage(
+        database_module.Usage(
+            ts=TS_2026_04_17_00,
+            provider="anthropic",
+            model="claude-sonnet-4-20250514",
+            client_source="claude-code",
+            session_id="session-no-tools",
+            endpoint="/v1/messages",
+            prompt_tokens=100,
+            completion_tokens=50,
+            reasoning_tokens=None,
+            cached_tokens=None,
+            total_tokens=150,
+            latency_ms=200,
+            ttft_ms=None,
+            tool_tokens=None,
+            cache_creation_tokens=None,
+            input_cost_usd=0.002,
+            output_cost_usd=0.003,
+            total_cost_usd=0.005,
+            status=200,
+            base_url_id=None,
+        ),
+        db_path=db_path,
+    )
+
+    rows = database_module.fetch_recent_usage(limit=1, db_path=db_path)
+    assert len(rows) == 1
+    assert rows[0]["tool_names"] is None
+
+
+def test_usage_filters_includes_client_source(fresh_db):
+    database_module = fresh_db.database_module
+    db_path = fresh_db.db_path
     database_module.init_db(db_path)
 
     for source in ["claude-code", "codex"]:
@@ -213,8 +308,9 @@ def test_usage_filters_includes_client_source(database_module, isolated_home):
     assert len(rows) == 2
 
 
-def test_count_usage_filters_by_client_source(database_module, isolated_home):
-    db_path = str(isolated_home / "usage.db")
+def test_count_usage_filters_by_client_source(fresh_db):
+    database_module = fresh_db.database_module
+    db_path = fresh_db.db_path
     database_module.init_db(db_path)
 
     for source in ["claude-code", "claude-code", "codex"]:
@@ -249,10 +345,9 @@ def test_count_usage_filters_by_client_source(database_module, isolated_home):
     assert database_module.count_usage() == 3
 
 
-def test_aggregate_usage_by_period_filters_by_client_source(
-    database_module, isolated_home
-):
-    db_path = str(isolated_home / "usage.db")
+def test_aggregate_usage_by_period_filters_by_client_source(fresh_db):
+    database_module = fresh_db.database_module
+    db_path = fresh_db.db_path
     database_module.init_db(db_path)
 
     for ts, source, tokens in [
@@ -293,10 +388,9 @@ def test_aggregate_usage_by_period_filters_by_client_source(
     assert len(result) == 2
 
 
-def test_summarize_usage_daily_includes_avg_effective_price(
-    database_module, isolated_home
-):
-    db_path = str(isolated_home / "usage.db")
+def test_summarize_usage_daily_includes_avg_effective_price(fresh_db):
+    database_module = fresh_db.database_module
+    db_path = fresh_db.db_path
     database_module.init_db(db_path)
 
     database_module.log_usage(
@@ -354,10 +448,9 @@ def test_summarize_usage_daily_includes_avg_effective_price(
     assert rows[0]["avg_effective_price_usd"] == pytest.approx(0.0015 / 450, abs=1e-8)
 
 
-def test_summarize_usage_by_provider_includes_avg_effective_price(
-    database_module, isolated_home
-):
-    db_path = str(isolated_home / "usage.db")
+def test_summarize_usage_by_provider_includes_avg_effective_price(fresh_db):
+    database_module = fresh_db.database_module
+    db_path = fresh_db.db_path
     database_module.init_db(db_path)
 
     for model, total_tokens, total_cost in [
@@ -541,8 +634,9 @@ def test_migrate_database_adds_usage_columns(
     assert defaults["total_cost_usd"] == "0"
 
 
-def test_get_usage_high_watermark_ts_returns_latest_ts(database_module, isolated_home):
-    db_path = str(isolated_home / "usage.db")
+def test_get_usage_high_watermark_ts_returns_latest_ts(fresh_db):
+    database_module = fresh_db.database_module
+    db_path = fresh_db.db_path
     database_module.init_db(db_path)
 
     assert database_module.get_usage_high_watermark_ts(db_path=db_path) == 0
@@ -670,10 +764,51 @@ def test_merge_usage_database_copies_usage_and_base_url_metadata(
     assert base_urls[0].source == "proxy_config"
 
 
-def test_summarize_usage_window_groups_by_session_source_and_model(
-    database_module, isolated_home
-):
-    db_path = str(isolated_home / "usage.db")
+def test_merge_usage_database_copies_tool_calls(database_module, isolated_home):
+    from src.recorder import record_tool_call
+
+    run_db = str(isolated_home / "run.db")
+    main_db = str(isolated_home / "main.db")
+    database_module.init_db(run_db)
+    database_module.init_db(main_db)
+
+    usage_obj = database_module.Usage(
+        ts=TS_2026_05_03_18,
+        provider="test-provider",
+        model="test-model",
+        client_source="codex",
+        session_id="session-run-1",
+        endpoint="otlp",
+        prompt_tokens=10,
+        completion_tokens=5,
+        total_tokens=15,
+        latency_ms=100,
+        status=200,
+    )
+    database_module.log_usage(usage_obj, db_path=run_db)
+    record_tool_call(
+        tool_use_id="tool-run-1",
+        usage_id=usage_obj.id,
+        session_id="session-run-1",
+        tool_name="bash",
+        client_source="codex",
+        ts=TS_2026_05_03_18,
+        db_path=run_db,
+    )
+
+    database_module.merge_usage_database(
+        source_db_path=run_db,
+        target_db_path=main_db,
+    )
+
+    rows = database_module.fetch_recent_usage(limit=10, db_path=main_db)
+    assert len(rows) == 1
+    assert rows[0]["tool_names"] == "bash"
+
+
+def test_summarize_usage_window_groups_by_session_source_and_model(fresh_db):
+    database_module = fresh_db.database_module
+    db_path = fresh_db.db_path
     database_module.init_db(db_path)
 
     rows = [
@@ -783,10 +918,9 @@ def test_summarize_usage_window_groups_by_session_source_and_model(
     assert summary["models"][1]["model"] == "gpt-test"
 
 
-def test_summarize_usage_window_filters_after_and_until_ts(
-    database_module, isolated_home
-):
-    db_path = str(isolated_home / "usage.db")
+def test_summarize_usage_window_filters_after_and_until_ts(fresh_db):
+    database_module = fresh_db.database_module
+    db_path = fresh_db.db_path
     database_module.init_db(db_path)
 
     for index in range(3):
@@ -828,10 +962,9 @@ def test_summarize_usage_window_filters_after_and_until_ts(
     assert summary["sessions"][0]["session_id"] == "session-1"
 
 
-def test_summarize_usage_window_filters_metadata_and_includes_rows(
-    database_module, isolated_home
-):
-    db_path = str(isolated_home / "usage.db")
+def test_summarize_usage_window_filters_metadata_and_includes_rows(fresh_db):
+    database_module = fresh_db.database_module
+    db_path = fresh_db.db_path
     database_module.init_db(db_path)
 
     rows = [
@@ -904,8 +1037,9 @@ def test_summarize_usage_window_filters_metadata_and_includes_rows(
     assert summary["rows"][0]["model"] == "gpt-test"
 
 
-def test_summarize_usage_window_empty_window(database_module, isolated_home):
-    db_path = str(isolated_home / "usage.db")
+def test_summarize_usage_window_empty_window(fresh_db):
+    database_module = fresh_db.database_module
+    db_path = fresh_db.db_path
     database_module.init_db(db_path)
 
     summary = database_module.summarize_usage_window(
@@ -924,8 +1058,9 @@ def test_summarize_usage_window_empty_window(database_module, isolated_home):
     assert summary["models"] == []
 
 
-def test_aggregate_usage_by_period_includes_cost_totals(database_module, isolated_home):
-    db_path = str(isolated_home / "usage.db")
+def test_aggregate_usage_by_period_includes_cost_totals(fresh_db):
+    database_module = fresh_db.database_module
+    db_path = fresh_db.db_path
     database_module.init_db(db_path)
 
     database_module.log_usage(
@@ -996,10 +1131,9 @@ def test_aggregate_usage_by_period_includes_cost_totals(database_module, isolate
     ]
 
 
-def test_get_or_create_base_url_reuses_exact_url_and_updates_metadata(
-    database_module, isolated_home
-):
-    db_path = str(isolated_home / "usage.db")
+def test_get_or_create_base_url_reuses_exact_url_and_updates_metadata(fresh_db):
+    database_module = fresh_db.database_module
+    db_path = fresh_db.db_path
     database_module.init_db(db_path)
 
     base_url_id = database_module.get_or_create_base_url(
@@ -1179,8 +1313,9 @@ def test_ensure_column_ignores_duplicate_column_from_concurrent_migration(
     )
 
 
-def test_upsert_daily_aggregate_inserts_and_updates(database_module, isolated_home):
-    db_path = str(isolated_home / "usage.db")
+def test_upsert_daily_aggregate_inserts_and_updates(fresh_db):
+    database_module = fresh_db.database_module
+    db_path = fresh_db.db_path
     database_module.init_db(db_path)
 
     usage1 = database_module.Usage(
@@ -1256,10 +1391,9 @@ def test_upsert_daily_aggregate_inserts_and_updates(database_module, isolated_ho
     assert float(rows[0].total_cost_usd) == 0.009
 
 
-def test_upsert_daily_aggregate_handles_null_client_source(
-    database_module, isolated_home
-):
-    db_path = str(isolated_home / "usage.db")
+def test_upsert_daily_aggregate_handles_null_client_source(fresh_db):
+    database_module = fresh_db.database_module
+    db_path = fresh_db.db_path
     database_module.init_db(db_path)
 
     usage = database_module.Usage(
@@ -1294,8 +1428,9 @@ def test_upsert_daily_aggregate_handles_null_client_source(
     assert rows[0].request_count == 1
 
 
-def test_upsert_daily_aggregate_separates_by_date(database_module, isolated_home):
-    db_path = str(isolated_home / "usage.db")
+def test_upsert_daily_aggregate_separates_by_date(fresh_db):
+    database_module = fresh_db.database_module
+    db_path = fresh_db.db_path
     database_module.init_db(db_path)
 
     for ts in [TS_2026_04_17_10, TS_2026_04_18_10]:
@@ -1331,8 +1466,9 @@ def test_upsert_daily_aggregate_separates_by_date(database_module, isolated_home
     assert dates == {"2026-04-17", "2026-04-18"}
 
 
-def test_log_usage_automaticaly_upserts_daily_aggregate(database_module, isolated_home):
-    db_path = str(isolated_home / "usage.db")
+def test_log_usage_automaticaly_upserts_daily_aggregate(fresh_db):
+    database_module = fresh_db.database_module
+    db_path = fresh_db.db_path
     database_module.init_db(db_path)
 
     database_module.log_usage(
@@ -1369,10 +1505,9 @@ def test_log_usage_automaticaly_upserts_daily_aggregate(database_module, isolate
     assert rows[0].prompt_tokens == 100
 
 
-def test_summarize_usage_daily_reads_from_aggregate_table(
-    database_module, isolated_home
-):
-    db_path = str(isolated_home / "usage.db")
+def test_summarize_usage_daily_reads_from_aggregate_table(fresh_db):
+    database_module = fresh_db.database_module
+    db_path = fresh_db.db_path
     database_module.init_db(db_path)
 
     # Insert two rows on same day, same provider/model
@@ -1419,8 +1554,9 @@ def test_summarize_usage_daily_reads_from_aggregate_table(
     assert row["failed_requests"] == 1
 
 
-def test_summarize_usage_daily_filters_by_provider(database_module, isolated_home):
-    db_path = str(isolated_home / "usage.db")
+def test_summarize_usage_daily_filters_by_provider(fresh_db):
+    database_module = fresh_db.database_module
+    db_path = fresh_db.db_path
     database_module.init_db(db_path)
 
     for provider, model, ts in [
@@ -1457,8 +1593,9 @@ def test_summarize_usage_daily_filters_by_provider(database_module, isolated_hom
     assert summary[0]["provider"] == "anthropic"
 
 
-def test_summarize_usage_daily_filters_by_since(database_module, isolated_home):
-    db_path = str(isolated_home / "usage.db")
+def test_summarize_usage_daily_filters_by_since(fresh_db):
+    database_module = fresh_db.database_module
+    db_path = fresh_db.db_path
     database_module.init_db(db_path)
 
     for ts in [TS_2026_04_17_10, TS_2026_04_20_10]:
@@ -1537,9 +1674,10 @@ def _log_usage_row(
     )
 
 
-def test_summarize_usage_daily_sub_day_range(database_module, isolated_home):
+def test_summarize_usage_daily_sub_day_range(fresh_db):
     """Sub-day time range must use raw usage table, not daily aggregates."""
-    db_path = str(isolated_home / "usage.db")
+    database_module = fresh_db.database_module
+    db_path = fresh_db.db_path
     database_module.init_db(db_path)
 
     # Row at 10:00 on April 17 — inside the 2h window
@@ -1592,9 +1730,10 @@ def test_summarize_usage_daily_sub_day_range(database_module, isolated_home):
     assert abs(row["total_cost_usd"] - 0.013) < 0.0001
 
 
-def test_count_usage_sub_day_range(database_module, isolated_home):
+def test_count_usage_sub_day_range(fresh_db):
     """count_usage with sub-day range must count only rows in the window."""
-    db_path = str(isolated_home / "usage.db")
+    database_module = fresh_db.database_module
+    db_path = fresh_db.db_path
     database_module.init_db(db_path)
 
     _log_usage_row(database_module, db_path, TS_2026_04_17_10, 100, 50, 150)
@@ -1608,9 +1747,10 @@ def test_count_usage_sub_day_range(database_module, isolated_home):
     assert count == 2
 
 
-def test_summarize_usage_by_source_sub_day_range(database_module, isolated_home):
+def test_summarize_usage_by_source_sub_day_range(fresh_db):
     """by-source with sub-day range must use raw usage table."""
-    db_path = str(isolated_home / "usage.db")
+    database_module = fresh_db.database_module
+    db_path = fresh_db.db_path
     database_module.init_db(db_path)
 
     _log_usage_row(
@@ -1634,9 +1774,10 @@ def test_summarize_usage_by_source_sub_day_range(database_module, isolated_home)
     assert summary[0]["total_tokens"] == 450
 
 
-def test_summarize_usage_by_provider_sub_day_range(database_module, isolated_home):
+def test_summarize_usage_by_provider_sub_day_range(fresh_db):
     """by-provider with sub-day range must use raw usage table."""
-    db_path = str(isolated_home / "usage.db")
+    database_module = fresh_db.database_module
+    db_path = fresh_db.db_path
     database_module.init_db(db_path)
 
     _log_usage_row(
@@ -1660,10 +1801,9 @@ def test_summarize_usage_by_provider_sub_day_range(database_module, isolated_hom
     assert summary[0]["total_tokens"] == 450
 
 
-def test_aggregate_daily_by_period_reads_from_aggregate_table(
-    database_module, isolated_home
-):
-    db_path = str(isolated_home / "usage.db")
+def test_aggregate_daily_by_period_reads_from_aggregate_table(fresh_db):
+    database_module = fresh_db.database_module
+    db_path = fresh_db.db_path
     database_module.init_db(db_path)
 
     for ts, tokens in [
@@ -1708,8 +1848,9 @@ def test_aggregate_daily_by_period_reads_from_aggregate_table(
     assert result[1]["prompt_tokens"] == 300
 
 
-def test_aggregate_daily_by_period_filters_by_provider(database_module, isolated_home):
-    db_path = str(isolated_home / "usage.db")
+def test_aggregate_daily_by_period_filters_by_provider(fresh_db):
+    database_module = fresh_db.database_module
+    db_path = fresh_db.db_path
     database_module.init_db(db_path)
 
     for provider, model in [("anthropic", "claude-sonnet-4-6"), ("openai", "gpt-4")]:
@@ -1927,10 +2068,9 @@ def test_migrate_database_backfill_idempotent(
     assert rows[0].request_count == 1
 
 
-def test_aggregate_usage_by_period_hourly_with_tz_offset(
-    database_module, isolated_home
-):
-    db_path = str(isolated_home / "usage.db")
+def test_aggregate_usage_by_period_hourly_with_tz_offset(fresh_db):
+    database_module = fresh_db.database_module
+    db_path = fresh_db.db_path
     database_module.init_db(db_path)
 
     # Two rows 1 hour apart in UTC
@@ -1977,10 +2117,9 @@ def test_aggregate_usage_by_period_hourly_with_tz_offset(
     assert result[1]["total_tokens"] == 200
 
 
-def test_aggregate_usage_by_period_hourly_merges_same_hour(
-    database_module, isolated_home
-):
-    db_path = str(isolated_home / "usage.db")
+def test_aggregate_usage_by_period_hourly_merges_same_hour(fresh_db):
+    database_module = fresh_db.database_module
+    db_path = fresh_db.db_path
     database_module.init_db(db_path)
 
     # Two rows in the same UTC hour
@@ -2024,10 +2163,9 @@ def test_aggregate_usage_by_period_hourly_merges_same_hour(
     assert result[0]["avg_latency_ms"] == 200
 
 
-def test_aggregate_usage_by_period_hourly_counts_failures(
-    database_module, isolated_home
-):
-    db_path = str(isolated_home / "usage.db")
+def test_aggregate_usage_by_period_hourly_counts_failures(fresh_db):
+    database_module = fresh_db.database_module
+    db_path = fresh_db.db_path
     database_module.init_db(db_path)
 
     for ts, status in [
@@ -2068,10 +2206,9 @@ def test_aggregate_usage_by_period_hourly_counts_failures(
     assert result[0]["failed_requests"] == 1
 
 
-def test_aggregate_usage_by_period_hourly_negative_tz_offset(
-    database_module, isolated_home
-):
-    db_path = str(isolated_home / "usage.db")
+def test_aggregate_usage_by_period_hourly_negative_tz_offset(fresh_db):
+    database_module = fresh_db.database_module
+    db_path = fresh_db.db_path
     database_module.init_db(db_path)
 
     database_module.log_usage(
@@ -2110,8 +2247,9 @@ def test_aggregate_usage_by_period_hourly_negative_tz_offset(
     assert result[0]["total_tokens"] == 20
 
 
-def test_aggregate_usage_by_period_with_epoch_ts(database_module, isolated_home):
-    db_path = str(isolated_home / "usage.db")
+def test_aggregate_usage_by_period_with_epoch_ts(fresh_db):
+    database_module = fresh_db.database_module
+    db_path = fresh_db.db_path
     database_module.init_db(db_path)
 
     database_module.log_usage(
@@ -2146,9 +2284,10 @@ def test_aggregate_usage_by_period_with_epoch_ts(database_module, isolated_home)
     assert result[0]["requests"] == 1
 
 
-def test_aggregate_daily_by_dimension_groups_by_model(database_module, isolated_home):
+def test_aggregate_daily_by_dimension_groups_by_model(fresh_db):
     """aggregate_daily_by_dimension returns daily data grouped by model."""
-    db_path = str(isolated_home / "usage.db")
+    database_module = fresh_db.database_module
+    db_path = fresh_db.db_path
     database_module.init_db(db_path)
 
     # Insert test data across 2 days for 2 models
@@ -2201,11 +2340,10 @@ def test_aggregate_daily_by_dimension_groups_by_model(database_module, isolated_
     assert by_model_and_date[("gpt-4o", "2026-05-07")]["total_tokens"] == 500
 
 
-def test_aggregate_daily_by_dimension_groups_by_provider(
-    database_module, isolated_home
-):
+def test_aggregate_daily_by_dimension_groups_by_provider(fresh_db):
     """aggregate_daily_by_dimension returns daily data grouped by provider."""
-    db_path = str(isolated_home / "usage.db")
+    database_module = fresh_db.database_module
+    db_path = fresh_db.db_path
     database_module.init_db(db_path)
 
     for ts, provider, model, tokens, cost in [
@@ -2250,8 +2388,9 @@ def test_aggregate_daily_by_dimension_groups_by_provider(
     assert by_provider["openai"]["total_tokens"] == 500
 
 
-def test_fetch_sessions_groups_by_session_id(database_module, isolated_home):
-    db_path = str(isolated_home / "usage.db")
+def test_fetch_sessions_groups_by_session_id(fresh_db):
+    database_module = fresh_db.database_module
+    db_path = fresh_db.db_path
     database_module.init_db(db_path)
 
     for i in range(3):
@@ -2307,8 +2446,9 @@ def test_fetch_sessions_groups_by_session_id(database_module, isolated_home):
     assert result[1]["total_tokens"] == 450
 
 
-def test_fetch_sessions_excludes_null_session_id(database_module, isolated_home):
-    db_path = str(isolated_home / "usage.db")
+def test_fetch_sessions_excludes_null_session_id(fresh_db):
+    database_module = fresh_db.database_module
+    db_path = fresh_db.db_path
     database_module.init_db(db_path)
 
     database_module.log_usage(
@@ -2333,8 +2473,9 @@ def test_fetch_sessions_excludes_null_session_id(database_module, isolated_home)
     assert len(result) == 0
 
 
-def test_fetch_sessions_filters_by_client_source(database_module, isolated_home):
-    db_path = str(isolated_home / "usage.db")
+def test_fetch_sessions_filters_by_client_source(fresh_db):
+    database_module = fresh_db.database_module
+    db_path = fresh_db.db_path
     database_module.init_db(db_path)
 
     for source, sid in [("claude-code", "s1"), ("codex", "s2")]:
@@ -2361,10 +2502,9 @@ def test_fetch_sessions_filters_by_client_source(database_module, isolated_home)
     assert result[0]["session_id"] == "s2"
 
 
-def test_fetch_sessions_hide_noop_keeps_single_request_opencode(
-    database_module, isolated_home
-):
-    db_path = str(isolated_home / "usage.db")
+def test_fetch_sessions_hide_noop_keeps_single_request_opencode(fresh_db):
+    database_module = fresh_db.database_module
+    db_path = fresh_db.db_path
     database_module.init_db(db_path)
 
     for source, sid in [("opencode", "oc-1"), ("codex", "codex-1")]:
@@ -2398,10 +2538,9 @@ def test_fetch_sessions_hide_noop_keeps_single_request_opencode(
     assert [row["session_id"] for row in result] == ["oc-1"]
 
 
-def test_fetch_sessions_hide_noop_keeps_single_request_kilo(
-    database_module, isolated_home
-):
-    db_path = str(isolated_home / "usage.db")
+def test_fetch_sessions_hide_noop_keeps_single_request_kilo(fresh_db):
+    database_module = fresh_db.database_module
+    db_path = fresh_db.db_path
     database_module.init_db(db_path)
 
     for source, sid in [("kilo", "kilo-1"), ("codex", "codex-1")]:
@@ -2435,10 +2574,9 @@ def test_fetch_sessions_hide_noop_keeps_single_request_kilo(
     assert [row["session_id"] for row in result] == ["kilo-1"]
 
 
-def test_fetch_sessions_accepts_browser_iso_boundary_filters(
-    database_module, isolated_home
-):
-    db_path = str(isolated_home / "usage.db")
+def test_fetch_sessions_accepts_browser_iso_boundary_filters(fresh_db):
+    database_module = fresh_db.database_module
+    db_path = fresh_db.db_path
     database_module.init_db(db_path)
 
     database_module.log_usage(
@@ -2468,8 +2606,9 @@ def test_fetch_sessions_accepts_browser_iso_boundary_filters(
     assert [session["session_id"] for session in result] == ["boundary"]
 
 
-def test_fetch_sessions_sorting(database_module, isolated_home):
-    db_path = str(isolated_home / "usage.db")
+def test_fetch_sessions_sorting(fresh_db):
+    database_module = fresh_db.database_module
+    db_path = fresh_db.db_path
     database_module.init_db(db_path)
 
     for i, sid in enumerate(["s-low", "s-high"]):
@@ -2498,8 +2637,9 @@ def test_fetch_sessions_sorting(database_module, isolated_home):
     assert result[1]["session_id"] == "s-high"
 
 
-def test_fetch_sessions_sort_by_duration(database_module, isolated_home):
-    db_path = str(isolated_home / "usage.db")
+def test_fetch_sessions_sort_by_duration(fresh_db):
+    database_module = fresh_db.database_module
+    db_path = fresh_db.db_path
     database_module.init_db(db_path)
 
     # Short session: single request
@@ -2548,8 +2688,9 @@ def test_fetch_sessions_sort_by_duration(database_module, isolated_home):
     assert result[1]["session_id"] == "short"
 
 
-def test_fetch_sessions_pagination(database_module, isolated_home):
-    db_path = str(isolated_home / "usage.db")
+def test_fetch_sessions_pagination(fresh_db):
+    database_module = fresh_db.database_module
+    db_path = fresh_db.db_path
     database_module.init_db(db_path)
 
     for i in range(5):
@@ -2575,10 +2716,9 @@ def test_fetch_sessions_pagination(database_module, isolated_home):
     assert len(result) == 2
 
 
-def test_fetch_session_selector_rows_returns_only_dropdown_fields(
-    database_module, isolated_home
-):
-    db_path = str(isolated_home / "usage.db")
+def test_fetch_session_selector_rows_returns_only_dropdown_fields(fresh_db):
+    database_module = fresh_db.database_module
+    db_path = fresh_db.db_path
     database_module.init_db(db_path)
 
     database_module.log_usage(
@@ -2613,10 +2753,9 @@ def test_fetch_session_selector_rows_returns_only_dropdown_fields(
     assert "evaluation" not in result[0]
 
 
-def test_fetch_session_selector_rows_applies_filters_sort_and_pagination(
-    database_module, isolated_home
-):
-    db_path = str(isolated_home / "usage.db")
+def test_fetch_session_selector_rows_applies_filters_sort_and_pagination(fresh_db):
+    database_module = fresh_db.database_module
+    db_path = fresh_db.db_path
     database_module.init_db(db_path)
 
     for index, source in enumerate(["claude-code", "codex", "codex"]):
@@ -2651,8 +2790,9 @@ def test_fetch_session_selector_rows_applies_filters_sort_and_pagination(
     assert [row["session_id"] for row in result] == ["s2"]
 
 
-def test_count_sessions(database_module, isolated_home):
-    db_path = str(isolated_home / "usage.db")
+def test_count_sessions(fresh_db):
+    database_module = fresh_db.database_module
+    db_path = fresh_db.db_path
     database_module.init_db(db_path)
 
     for sid in ["s1", "s2", "s1"]:
@@ -2677,8 +2817,9 @@ def test_count_sessions(database_module, isolated_home):
     assert database_module.count_sessions(db_path=db_path) == 2
 
 
-def test_count_usage_with_session_id(database_module, isolated_home):
-    db_path = str(isolated_home / "usage.db")
+def test_count_usage_with_session_id(fresh_db):
+    database_module = fresh_db.database_module
+    db_path = fresh_db.db_path
     database_module.init_db(db_path)
 
     for sid in ["s1", "s1", "s2"]:
@@ -2705,8 +2846,9 @@ def test_count_usage_with_session_id(database_module, isolated_home):
     assert database_module.count_usage(session_id="nonexistent", db_path=db_path) == 0
 
 
-def test_count_usage_with_session_id_and_other_filters(database_module, isolated_home):
-    db_path = str(isolated_home / "usage.db")
+def test_count_usage_with_session_id_and_other_filters(fresh_db):
+    database_module = fresh_db.database_module
+    db_path = fresh_db.db_path
     database_module.init_db(db_path)
 
     # Same session, two different providers
@@ -2750,8 +2892,9 @@ def test_count_usage_with_session_id_and_other_filters(database_module, isolated
     )
 
 
-def test_summarize_sessions(database_module, isolated_home):
-    db_path = str(isolated_home / "usage.db")
+def test_summarize_sessions(fresh_db):
+    database_module = fresh_db.database_module
+    db_path = fresh_db.db_path
     database_module.init_db(db_path)
 
     for i in range(3):
@@ -2801,8 +2944,9 @@ def test_summarize_sessions(database_module, isolated_home):
     assert result["avg_duration_s"] == 60
 
 
-def test_fetch_recent_usage_only_failed_filter(database_module, isolated_home):
-    db_path = str(isolated_home / "usage.db")
+def test_fetch_recent_usage_only_failed_filter(fresh_db):
+    database_module = fresh_db.database_module
+    db_path = fresh_db.db_path
     database_module.init_db(db_path)
 
     with database_module.Session(database_module.get_engine(db_path)) as session:
@@ -2928,10 +3072,11 @@ def test_migration_adds_status_columns(database_module, isolated_home, load_modu
 # ---------------------------------------------------------------------------
 
 
-def test_session_record_created_from_usage_ingestion(database_module, isolated_home):
+def test_session_record_created_from_usage_ingestion(fresh_db):
     """TDD step 1: Ingesting two usage rows with same session_id creates one
     sessions row with summed tokens/cost/request count and min/max timestamps."""
-    db_path = str(isolated_home / "usage.db")
+    database_module = fresh_db.database_module
+    db_path = fresh_db.db_path
     database_module.init_db(db_path)
 
     database_module.log_usage(
@@ -2999,10 +3144,11 @@ def test_session_record_created_from_usage_ingestion(database_module, isolated_h
     assert session.failed_requests == 0
 
 
-def test_session_record_primary_model_picks_higher_cost(database_module, isolated_home):
+def test_session_record_primary_model_picks_higher_cost(fresh_db):
     """TDD step 2: Two models in one session; primary_model picks the one
     with higher cumulative cost."""
-    db_path = str(isolated_home / "usage.db")
+    database_module = fresh_db.database_module
+    db_path = fresh_db.db_path
     database_module.init_db(db_path)
 
     # Model A: cost 0.003
@@ -3071,10 +3217,11 @@ def test_session_record_primary_model_picks_higher_cost(database_module, isolate
     assert set(providers.keys()) == {"anthropic", "openai"}
 
 
-def test_fetch_sessions_reads_from_persisted_table(database_module, isolated_home):
+def test_fetch_sessions_reads_from_persisted_table(fresh_db):
     """TDD step 3: fetch_sessions() reads from the persisted sessions table,
     not freshly grouped usage."""
-    db_path = str(isolated_home / "usage.db")
+    database_module = fresh_db.database_module
+    db_path = fresh_db.db_path
     database_module.init_db(db_path)
 
     # Directly insert a SessionRecord (bypassing log_usage)
@@ -3118,10 +3265,11 @@ def test_fetch_sessions_reads_from_persisted_table(database_module, isolated_hom
     assert result[0]["duration_s"] == 3600
 
 
-def test_rebuild_sessions_from_usage(database_module, isolated_home):
+def test_rebuild_sessions_from_usage(fresh_db):
     """TDD step 4: Seed usage rows, run rebuild_sessions_from_usage(),
     assert persisted rows match old aggregation behavior."""
-    db_path = str(isolated_home / "usage.db")
+    database_module = fresh_db.database_module
+    db_path = fresh_db.db_path
     database_module.init_db(db_path)
 
     # Seed usage rows for two sessions
@@ -3190,6 +3338,52 @@ def test_rebuild_sessions_from_usage(database_module, isolated_home):
     assert float(s2["total_cost_usd"]) == pytest.approx(0.015, abs=1e-6)
 
 
+def test_rebuild_sessions_from_usage_recomputes_tool_calls_json(fresh_db):
+    """Tool calls must survive a rebuild via the tool_calls table, not be
+    dropped just because rebuild only used to read from usage rows."""
+    from src.recorder import record_tool_call
+
+    database_module = fresh_db.database_module
+    db_path = fresh_db.db_path
+    database_module.init_db(db_path)
+
+    usage = database_module.Usage(
+        ts=TS_2026_05_09_10,
+        provider="anthropic",
+        model="claude-sonnet-4-6",
+        client_source="claude-code",
+        session_id="sess-tools",
+        endpoint="/v1/messages",
+        prompt_tokens=100,
+        completion_tokens=50,
+        total_tokens=150,
+        latency_ms=200,
+        ttft_ms=100,
+        input_cost_usd=0.001,
+        output_cost_usd=0.002,
+        total_cost_usd=0.003,
+        status=200,
+    )
+    database_module.log_usage(usage, db_path=db_path)
+
+    for tool_id, tool_name in [("t1", "bash"), ("t2", "bash"), ("t3", "read")]:
+        record_tool_call(
+            tool_use_id=tool_id,
+            usage_id=usage.id,
+            session_id="sess-tools",
+            tool_name=tool_name,
+            ts=TS_2026_05_09_10,
+            db_path=db_path,
+        )
+
+    count = database_module.rebuild_sessions_from_usage(db_path=db_path)
+    assert count == 1
+
+    result = database_module.fetch_sessions(db_path=db_path)
+    assert len(result) == 1
+    assert result[0]["tool_calls_json"] == {"bash": 2, "read": 1}
+
+
 # ---------------------------------------------------------------------------
 # Slice 1: Store Manual Session Evaluations
 # ---------------------------------------------------------------------------
@@ -3214,9 +3408,10 @@ def _insert_session_record(database_module, db_path, session_id="sess-1", **over
         session.commit()
 
 
-def test_upsert_session_evaluation_creates_new(database_module, isolated_home):
+def test_upsert_session_evaluation_creates_new(fresh_db):
     """Manual upsert clears task titles even when callers provide them."""
-    db_path = str(isolated_home / "usage.db")
+    database_module = fresh_db.database_module
+    db_path = fresh_db.db_path
     database_module.init_db(db_path)
     _insert_session_record(database_module, db_path)
 
@@ -3245,11 +3440,10 @@ def test_upsert_session_evaluation_creates_new(database_module, isolated_home):
     assert result["evaluated_at"] is not None
 
 
-def test_upsert_session_evaluation_preserves_llm_task_titles(
-    database_module, isolated_home
-):
+def test_upsert_session_evaluation_preserves_llm_task_titles(fresh_db):
     """LLM upsert preserves English and localized task titles."""
-    db_path = str(isolated_home / "usage.db")
+    database_module = fresh_db.database_module
+    db_path = fresh_db.db_path
     database_module.init_db(db_path)
     _insert_session_record(database_module, db_path)
 
@@ -3268,11 +3462,10 @@ def test_upsert_session_evaluation_preserves_llm_task_titles(
     assert result["task_title_zh"] == "修复仪表板导航"
 
 
-def test_fetch_sessions_includes_task_title_zh_in_evaluation(
-    database_module, isolated_home
-):
+def test_fetch_sessions_includes_task_title_zh_in_evaluation(fresh_db):
     """fetch_sessions includes localized task title in nested evaluation."""
-    db_path = str(isolated_home / "usage.db")
+    database_module = fresh_db.database_module
+    db_path = fresh_db.db_path
     database_module.init_db(db_path)
     _insert_session_record(database_module, db_path)
 
@@ -3291,9 +3484,10 @@ def test_fetch_sessions_includes_task_title_zh_in_evaluation(
     assert result[0]["evaluation"]["task_title_zh"] == "调整筛选器"
 
 
-def test_upsert_session_evaluation_overwrites_existing(database_module, isolated_home):
+def test_upsert_session_evaluation_overwrites_existing(fresh_db):
     """Second upsert replaces the first evaluation."""
-    db_path = str(isolated_home / "usage.db")
+    database_module = fresh_db.database_module
+    db_path = fresh_db.db_path
     database_module.init_db(db_path)
     _insert_session_record(database_module, db_path)
 
@@ -3317,11 +3511,10 @@ def test_upsert_session_evaluation_overwrites_existing(database_module, isolated
     assert result["failure_reason"] == "Agent got stuck"
 
 
-def test_upsert_session_evaluation_raises_when_session_not_found(
-    database_module, isolated_home
-):
+def test_upsert_session_evaluation_raises_when_session_not_found(fresh_db):
     """Upsert raises ValueError when session doesn't exist."""
-    db_path = str(isolated_home / "usage.db")
+    database_module = fresh_db.database_module
+    db_path = fresh_db.db_path
     database_module.init_db(db_path)
 
     with pytest.raises(ValueError, match="Session not found"):
@@ -3333,11 +3526,10 @@ def test_upsert_session_evaluation_raises_when_session_not_found(
         )
 
 
-def test_get_session_evaluation_returns_none_when_not_evaluated(
-    database_module, isolated_home
-):
+def test_get_session_evaluation_returns_none_when_not_evaluated(fresh_db):
     """GET returns None when session exists but has no evaluation."""
-    db_path = str(isolated_home / "usage.db")
+    database_module = fresh_db.database_module
+    db_path = fresh_db.db_path
     database_module.init_db(db_path)
     _insert_session_record(database_module, db_path)
 
@@ -3345,20 +3537,20 @@ def test_get_session_evaluation_returns_none_when_not_evaluated(
     assert result is None
 
 
-def test_get_session_evaluation_returns_none_when_session_absent(
-    database_module, isolated_home
-):
+def test_get_session_evaluation_returns_none_when_session_absent(fresh_db):
     """GET returns None when session doesn't exist."""
-    db_path = str(isolated_home / "usage.db")
+    database_module = fresh_db.database_module
+    db_path = fresh_db.db_path
     database_module.init_db(db_path)
 
     result = database_module.get_session_evaluation("nonexistent", db_path=db_path)
     assert result is None
 
 
-def test_delete_session_evaluation_clears_columns(database_module, isolated_home):
+def test_delete_session_evaluation_clears_columns(fresh_db):
     """DELETE clears evaluation columns and returns True."""
-    db_path = str(isolated_home / "usage.db")
+    database_module = fresh_db.database_module
+    db_path = fresh_db.db_path
     database_module.init_db(db_path)
     _insert_session_record(database_module, db_path)
 
@@ -3389,11 +3581,10 @@ def test_delete_session_evaluation_clears_columns(database_module, isolated_home
     assert record.task_title_zh is None
 
 
-def test_delete_session_evaluation_returns_false_when_session_absent(
-    database_module, isolated_home
-):
+def test_delete_session_evaluation_returns_false_when_session_absent(fresh_db):
     """DELETE returns False when session doesn't exist."""
-    db_path = str(isolated_home / "usage.db")
+    database_module = fresh_db.database_module
+    db_path = fresh_db.db_path
     database_module.init_db(db_path)
 
     deleted = database_module.delete_session_evaluation("nonexistent", db_path=db_path)
@@ -3405,9 +3596,10 @@ def test_delete_session_evaluation_returns_false_when_session_absent(
 # ---------------------------------------------------------------------------
 
 
-def test_model_effectiveness_groups_by_primary_model(database_module, isolated_home):
+def test_model_effectiveness_groups_by_primary_model(fresh_db):
     """Aggregation attributes each session to its primary_model only."""
-    db_path = str(isolated_home / "usage.db")
+    database_module = fresh_db.database_module
+    db_path = fresh_db.db_path
     database_module.init_db(db_path)
 
     _insert_session_record(
@@ -3465,11 +3657,10 @@ def test_model_effectiveness_groups_by_primary_model(database_module, isolated_h
     assert gpt["cost_per_solved"] == pytest.approx(0.75)
 
 
-def test_model_effectiveness_unknown_and_no_op_do_not_pollute_solve_rate(
-    database_module, isolated_home
-):
+def test_model_effectiveness_unknown_and_no_op_do_not_pollute_solve_rate(fresh_db):
     """Unknown and no-op sessions are visible but excluded from solve_rate."""
-    db_path = str(isolated_home / "usage.db")
+    database_module = fresh_db.database_module
+    db_path = fresh_db.db_path
     database_module.init_db(db_path)
 
     _insert_session_record(
@@ -3522,11 +3713,10 @@ def test_model_effectiveness_unknown_and_no_op_do_not_pollute_solve_rate(
     assert group["cost_per_solved"] == pytest.approx(0.40)
 
 
-def test_model_effectiveness_groups_by_source_and_filters(
-    database_module, isolated_home
-):
+def test_model_effectiveness_groups_by_source_and_filters(fresh_db):
     """Aggregation supports client source grouping with date/source filters."""
-    db_path = str(isolated_home / "usage.db")
+    database_module = fresh_db.database_module
+    db_path = fresh_db.db_path
     database_module.init_db(db_path)
 
     _insert_session_record(
@@ -3578,11 +3768,10 @@ def test_model_effectiveness_groups_by_source_and_filters(
     assert group["failed_count"] == 0
 
 
-def test_model_effectiveness_cost_per_solved_null_when_zero_solved(
-    database_module, isolated_home
-):
+def test_model_effectiveness_cost_per_solved_null_when_zero_solved(fresh_db):
     """cost_per_solved is null when there are no solved sessions."""
-    db_path = str(isolated_home / "usage.db")
+    database_module = fresh_db.database_module
+    db_path = fresh_db.db_path
     database_module.init_db(db_path)
 
     _insert_session_record(
@@ -3622,10 +3811,9 @@ def test_model_effectiveness_cost_per_solved_null_when_zero_solved(
 # ---------------------------------------------------------------------------
 
 
-def test_daily_effectiveness_report_aggregates_day_metrics_in_sql(
-    database_module, isolated_home
-):
-    db_path = str(isolated_home / "usage.db")
+def test_daily_effectiveness_report_aggregates_day_metrics_in_sql(fresh_db):
+    database_module = fresh_db.database_module
+    db_path = fresh_db.db_path
     database_module.init_db(db_path)
 
     _insert_session_record(
@@ -3706,10 +3894,9 @@ def test_daily_effectiveness_report_aggregates_day_metrics_in_sql(
     assert report["needs_attention"] == ["gemini / gemini-flash had 1 stuck session"]
 
 
-def test_daily_effectiveness_report_returns_sql_model_source_groups(
-    database_module, isolated_home
-):
-    db_path = str(isolated_home / "usage.db")
+def test_daily_effectiveness_report_returns_sql_model_source_groups(fresh_db):
+    database_module = fresh_db.database_module
+    db_path = fresh_db.db_path
     database_module.init_db(db_path)
 
     _insert_session_record(
@@ -3766,10 +3953,9 @@ def test_daily_effectiveness_report_returns_sql_model_source_groups(
     )
 
 
-def test_daily_effectiveness_report_rejects_invalid_date(
-    database_module, isolated_home
-):
-    db_path = str(isolated_home / "usage.db")
+def test_daily_effectiveness_report_rejects_invalid_date(fresh_db):
+    database_module = fresh_db.database_module
+    db_path = fresh_db.db_path
     database_module.init_db(db_path)
 
     with pytest.raises(ValueError, match="Invalid date"):
@@ -3784,10 +3970,9 @@ def test_daily_effectiveness_report_rejects_invalid_date(
 # ---------------------------------------------------------------------------
 
 
-def test_create_session_evaluation_job_persists_queued_job(
-    database_module, isolated_home
-):
-    db_path = str(isolated_home / "usage.db")
+def test_create_session_evaluation_job_persists_queued_job(fresh_db):
+    database_module = fresh_db.database_module
+    db_path = fresh_db.db_path
     database_module.init_db(db_path)
     _insert_session_record(
         database_module,
@@ -3812,8 +3997,9 @@ def test_create_session_evaluation_job_persists_queued_job(
     assert polled == job
 
 
-def test_create_session_evaluation_job_records_trigger(database_module, isolated_home):
-    db_path = str(isolated_home / "usage.db")
+def test_create_session_evaluation_job_records_trigger(fresh_db):
+    database_module = fresh_db.database_module
+    db_path = fresh_db.db_path
     database_module.init_db(db_path)
     _insert_session_record(
         database_module, db_path, "sess-manual", client_source="codex"
@@ -3829,10 +4015,9 @@ def test_create_session_evaluation_job_records_trigger(database_module, isolated
     assert manual["trigger"] == "manual"
 
 
-def test_create_session_evaluation_job_defaults_trigger_to_manual(
-    database_module, isolated_home
-):
-    db_path = str(isolated_home / "usage.db")
+def test_create_session_evaluation_job_defaults_trigger_to_manual(fresh_db):
+    database_module = fresh_db.database_module
+    db_path = fresh_db.db_path
     database_module.init_db(db_path)
     _insert_session_record(
         database_module, db_path, "sess-default", client_source="codex"
@@ -3847,10 +4032,9 @@ def test_create_session_evaluation_job_defaults_trigger_to_manual(
     assert job["trigger"] == "manual"
 
 
-def test_find_active_session_evaluation_job_reuses_non_stale_job(
-    database_module, isolated_home
-):
-    db_path = str(isolated_home / "usage.db")
+def test_find_active_session_evaluation_job_reuses_non_stale_job(fresh_db):
+    database_module = fresh_db.database_module
+    db_path = fresh_db.db_path
     database_module.init_db(db_path)
     _insert_session_record(database_module, db_path, "sess-llm", client_source="codex")
 
@@ -3870,9 +4054,10 @@ def test_find_active_session_evaluation_job_reuses_non_stale_job(
 
 
 def test_create_session_evaluation_job_reuses_active_job_after_unique_conflict(
-    database_module, isolated_home
+    fresh_db,
 ):
-    db_path = str(isolated_home / "usage.db")
+    database_module = fresh_db.database_module
+    db_path = fresh_db.db_path
     database_module.init_db(db_path)
     _insert_session_record(database_module, db_path, "sess-llm", client_source="codex")
 
@@ -3890,10 +4075,9 @@ def test_create_session_evaluation_job_reuses_active_job_after_unique_conflict(
     assert second["job_id"] == first["job_id"]
 
 
-def test_create_session_evaluation_job_persists_evaluator_type(
-    database_module, isolated_home
-):
-    db_path = str(isolated_home / "usage.db")
+def test_create_session_evaluation_job_persists_evaluator_type(fresh_db):
+    database_module = fresh_db.database_module
+    db_path = fresh_db.db_path
     database_module.init_db(db_path)
     _insert_session_record(
         database_module, db_path, "sess-claude", client_source="codex"
@@ -3915,10 +4099,9 @@ def test_create_session_evaluation_job_persists_evaluator_type(
     )
 
 
-def test_update_queued_evaluation_job_evaluator_preserves_queue_position(
-    database_module, isolated_home
-):
-    db_path = str(isolated_home / "usage.db")
+def test_update_queued_evaluation_job_evaluator_preserves_queue_position(fresh_db):
+    database_module = fresh_db.database_module
+    db_path = fresh_db.db_path
     database_module.init_db(db_path)
     _insert_session_record(database_module, db_path, "first", client_source="codex")
     _insert_session_record(database_module, db_path, "second", client_source="codex")
@@ -3949,10 +4132,9 @@ def test_update_queued_evaluation_job_evaluator_preserves_queue_position(
     assert after["queue_position"] == before["queue_position"]
 
 
-def test_update_queued_evaluation_job_evaluator_rejects_running_job(
-    database_module, isolated_home
-):
-    db_path = str(isolated_home / "usage.db")
+def test_update_queued_evaluation_job_evaluator_rejects_running_job(fresh_db):
+    database_module = fresh_db.database_module
+    db_path = fresh_db.db_path
     database_module.init_db(db_path)
     _insert_session_record(database_module, db_path, "running", client_source="codex")
     job = database_module.create_session_evaluation_job(
@@ -3978,10 +4160,9 @@ def test_update_queued_evaluation_job_evaluator_rejects_running_job(
     )
 
 
-def test_list_session_evaluation_jobs_with_progress_includes_history(
-    database_module, isolated_home
-):
-    db_path = str(isolated_home / "usage.db")
+def test_list_session_evaluation_jobs_with_progress_includes_history(fresh_db):
+    database_module = fresh_db.database_module
+    db_path = fresh_db.db_path
     database_module.init_db(db_path)
     _insert_session_record(
         database_module, db_path, "sess-history", client_source="codex"
@@ -4023,10 +4204,9 @@ def test_list_session_evaluation_jobs_with_progress_includes_history(
     assert jobs[1]["error"] == "Evaluator exited with code 1\nfull stderr details"
 
 
-def test_stale_session_evaluation_job_is_failed_before_new_job(
-    database_module, isolated_home
-):
-    db_path = str(isolated_home / "usage.db")
+def test_stale_session_evaluation_job_is_failed_before_new_job(fresh_db):
+    database_module = fresh_db.database_module
+    db_path = fresh_db.db_path
     database_module.init_db(db_path)
     _insert_session_record(database_module, db_path, "sess-llm", client_source="codex")
 
@@ -4050,10 +4230,9 @@ def test_stale_session_evaluation_job_is_failed_before_new_job(
     assert stale["error"] == "Evaluation job timed out"
 
 
-def test_running_session_evaluation_job_uses_started_at_for_stale_check(
-    database_module, isolated_home
-):
-    db_path = str(isolated_home / "usage.db")
+def test_running_session_evaluation_job_uses_started_at_for_stale_check(fresh_db):
+    database_module = fresh_db.database_module
+    db_path = fresh_db.db_path
     database_module.init_db(db_path)
     _insert_session_record(
         database_module, db_path, "sess-running", client_source="codex"
@@ -4083,9 +4262,10 @@ def test_running_session_evaluation_job_uses_started_at_for_stale_check(
 
 
 def test_claim_next_evaluation_job_orders_manual_before_auto_then_newest_session(
-    database_module, isolated_home
+    fresh_db,
 ):
-    db_path = str(isolated_home / "usage.db")
+    database_module = fresh_db.database_module
+    db_path = fresh_db.db_path
     database_module.init_db(db_path)
     _insert_session_record(
         database_module,
@@ -4138,9 +4318,10 @@ def test_claim_next_evaluation_job_orders_manual_before_auto_then_newest_session
 
 
 def test_claim_next_evaluation_job_skips_candidate_claimed_by_competing_worker(
-    database_module, isolated_home, monkeypatch
+    fresh_db, monkeypatch
 ):
-    db_path = str(isolated_home / "usage.db")
+    database_module = fresh_db.database_module
+    db_path = fresh_db.db_path
     database_module.init_db(db_path)
     _insert_session_record(
         database_module,
@@ -4204,10 +4385,9 @@ def test_claim_next_evaluation_job_skips_candidate_claimed_by_competing_worker(
     )
 
 
-def test_get_evaluation_job_progress_reports_queue_position(
-    database_module, isolated_home
-):
-    db_path = str(isolated_home / "usage.db")
+def test_get_evaluation_job_progress_reports_queue_position(fresh_db):
+    database_module = fresh_db.database_module
+    db_path = fresh_db.db_path
     database_module.init_db(db_path)
     _insert_session_record(database_module, db_path, "running", client_source="codex")
     _insert_session_record(database_module, db_path, "queued-1", client_source="codex")
@@ -4252,10 +4432,9 @@ def test_get_evaluation_job_progress_reports_queue_position(
     )
 
 
-def test_evaluation_job_active_helpers_count_list_and_fail_stale_running_jobs(
-    database_module, isolated_home
-):
-    db_path = str(isolated_home / "usage.db")
+def test_evaluation_job_active_helpers_count_list_and_fail_stale_running_jobs(fresh_db):
+    database_module = fresh_db.database_module
+    db_path = fresh_db.db_path
     database_module.init_db(db_path)
     _insert_session_record(database_module, db_path, "stale", client_source="codex")
     _insert_session_record(database_module, db_path, "fresh", client_source="codex")
@@ -4315,9 +4494,10 @@ def test_evaluation_job_active_helpers_count_list_and_fail_stale_running_jobs(
 
 
 def test_fail_stale_running_evaluation_jobs_does_not_overwrite_terminal_update(
-    database_module, isolated_home, monkeypatch
+    fresh_db, monkeypatch
 ):
-    db_path = str(isolated_home / "usage.db")
+    database_module = fresh_db.database_module
+    db_path = fresh_db.db_path
     database_module.init_db(db_path)
     _insert_session_record(database_module, db_path, "stale", client_source="codex")
 
@@ -4370,9 +4550,10 @@ def test_fail_stale_running_evaluation_jobs_does_not_overwrite_terminal_update(
 
 
 def test_find_active_session_evaluation_job_does_not_overwrite_terminal_update(
-    database_module, isolated_home, monkeypatch
+    fresh_db, monkeypatch
 ):
-    db_path = str(isolated_home / "usage.db")
+    database_module = fresh_db.database_module
+    db_path = fresh_db.db_path
     database_module.init_db(db_path)
     _insert_session_record(database_module, db_path, "stale", client_source="codex")
 
@@ -4421,10 +4602,9 @@ def test_find_active_session_evaluation_job_does_not_overwrite_terminal_update(
     assert current["finished_at"] == "2026-05-14T09:05:30+00:00"
 
 
-def test_mark_evaluation_job_succeeded_does_not_overwrite_failed_job(
-    database_module, isolated_home
-):
-    db_path = str(isolated_home / "usage.db")
+def test_mark_evaluation_job_succeeded_does_not_overwrite_failed_job(fresh_db):
+    database_module = fresh_db.database_module
+    db_path = fresh_db.db_path
     database_module.init_db(db_path)
     _insert_session_record(database_module, db_path, "failed", client_source="codex")
 
@@ -4448,10 +4628,9 @@ def test_mark_evaluation_job_succeeded_does_not_overwrite_failed_job(
     assert current["error"] == "first failure"
 
 
-def test_mark_evaluation_job_running_does_not_revive_failed_job(
-    database_module, isolated_home
-):
-    db_path = str(isolated_home / "usage.db")
+def test_mark_evaluation_job_running_does_not_revive_failed_job(fresh_db):
+    database_module = fresh_db.database_module
+    db_path = fresh_db.db_path
     database_module.init_db(db_path)
     _insert_session_record(database_module, db_path, "failed", client_source="codex")
 
@@ -4551,6 +4730,7 @@ def test_migration_adds_session_task_title_zh(
     )
 
 
+@pytest.mark.slow
 def test_migrate_database_adds_evaluation_job_trigger(
     schema_migrations_module, database_module, isolated_home
 ):
@@ -4571,6 +4751,7 @@ def test_migrate_database_adds_evaluation_job_trigger(
     )
 
 
+@pytest.mark.slow
 def test_migrate_database_adds_evaluation_job_evaluator_type(
     schema_migrations_module, database_module, isolated_home
 ):
@@ -4603,8 +4784,9 @@ def test_migrate_database_adds_evaluation_job_evaluator_type(
     assert row[0] == "codex"
 
 
-def test_upsert_daily_aggregate_with_epoch_ts(database_module, isolated_home):
-    db_path = str(isolated_home / "usage.db")
+def test_upsert_daily_aggregate_with_epoch_ts(fresh_db):
+    database_module = fresh_db.database_module
+    db_path = fresh_db.db_path
     database_module.init_db(db_path)
 
     database_module.log_usage(
@@ -4645,10 +4827,9 @@ def test_upsert_daily_aggregate_with_epoch_ts(database_module, isolated_home):
         assert daily.date == "2026-04-17"
 
 
-def test_fetch_recent_usage_filters_by_since_until_with_epoch_ts(
-    database_module, isolated_home
-):
-    db_path = str(isolated_home / "usage.db")
+def test_fetch_recent_usage_filters_by_since_until_with_epoch_ts(fresh_db):
+    database_module = fresh_db.database_module
+    db_path = fresh_db.db_path
     database_module.init_db(db_path)
 
     # Insert two rows at different times
@@ -4685,3 +4866,255 @@ def test_fetch_recent_usage_filters_by_since_until_with_epoch_ts(
         limit=100, since=since_iso, db_path=db_path
     )
     assert len(rows) == 1  # only Apr 18 row
+
+
+# ─── Tool name filtering ─────────────────────────────────────────────────────
+
+
+def _insert_usage_with_tools(
+    database_module,
+    db_path,
+    ts,
+    tools,
+    session_id="s1",
+    client_source="claude-code",
+):
+    """Helper: insert one usage row and its tool calls.
+
+    *ts* is in **microseconds** (same as Usage.ts).  Tool calls are stored with
+    millisecond timestamps (as the OTLP layer does), so we divide by 1000.
+    """
+    from src.recorder import record_tool_call
+
+    usage_obj = database_module.Usage(
+        ts=ts,
+        provider="anthropic",
+        model="claude-sonnet-4-20250514",
+        client_source=client_source,
+        session_id=session_id,
+        endpoint="/v1/messages",
+        prompt_tokens=100,
+        completion_tokens=50,
+        reasoning_tokens=None,
+        cached_tokens=None,
+        total_tokens=150,
+        latency_ms=200,
+        ttft_ms=None,
+        tool_tokens=None,
+        cache_creation_tokens=None,
+        input_cost_usd=0.002,
+        output_cost_usd=0.003,
+        total_cost_usd=0.005,
+        status=200,
+        base_url_id=None,
+    )
+    database_module.log_usage(usage_obj, db_path=db_path)
+    ts_ms = ts // 1000
+    for i, tool_name in enumerate(tools):
+        record_tool_call(
+            tool_use_id=f"tool_{usage_obj.id}_{i}",
+            usage_id=usage_obj.id,
+            session_id=session_id,
+            tool_name=tool_name,
+            client_source=client_source,
+            ts=ts_ms + i,
+            db_path=db_path,
+        )
+    return usage_obj
+
+
+def test_distinct_tool_names(fresh_db):
+    database_module = fresh_db.database_module
+    db_path = fresh_db.db_path
+    database_module.init_db(db_path)
+
+    _insert_usage_with_tools(
+        database_module,
+        db_path,
+        TS_2026_04_17_00,
+        ["bash", "read"],
+        session_id="s1",
+    )
+    _insert_usage_with_tools(
+        database_module,
+        db_path,
+        TS_2026_04_17_00_01,
+        ["edit", "bash"],
+        session_id="s2",
+    )
+
+    result = database_module.distinct_tool_names(db_path=db_path)
+    assert result == ["bash", "edit", "read"]  # sorted, deduped
+
+
+def test_distinct_tool_names_with_time_range(fresh_db):
+    database_module = fresh_db.database_module
+    db_path = fresh_db.db_path
+    database_module.init_db(db_path)
+
+    _insert_usage_with_tools(
+        database_module,
+        db_path,
+        TS_2026_04_17_00,
+        ["bash"],
+        session_id="s1",
+    )
+    _insert_usage_with_tools(
+        database_module,
+        db_path,
+        TS_2026_04_18_00,
+        ["edit"],
+        session_id="s2",
+    )
+
+    # Only tools from Apr 17
+    result = database_module.distinct_tool_names(
+        since="2026-04-17T00:00:00+00:00",
+        until="2026-04-17T23:59:59+00:00",
+        db_path=db_path,
+    )
+    assert result == ["bash"]
+
+    # All tools
+    result = database_module.distinct_tool_names(db_path=db_path)
+    assert result == ["bash", "edit"]
+
+
+def test_summarize_tool_calls(fresh_db):
+    database_module = fresh_db.database_module
+    db_path = fresh_db.db_path
+    database_module.init_db(db_path)
+
+    _insert_usage_with_tools(
+        database_module,
+        db_path,
+        TS_2026_04_17_00,
+        ["bash", "read"],
+        session_id="s1",
+    )
+    _insert_usage_with_tools(
+        database_module,
+        db_path,
+        TS_2026_04_17_00_01,
+        ["Bash"],
+        session_id="s2",
+    )
+
+    result = database_module.summarize_tool_calls(db_path=db_path)
+    counts = {row["tool_name"]: row["count"] for row in result}
+    assert counts == {"bash": 2, "read": 1}
+
+
+def test_fetch_recent_usage_filters_by_tool_name(fresh_db):
+    database_module = fresh_db.database_module
+    db_path = fresh_db.db_path
+    database_module.init_db(db_path)
+
+    _insert_usage_with_tools(
+        database_module,
+        db_path,
+        TS_2026_04_17_00,
+        ["bash", "read"],
+        session_id="s1",
+    )
+    _insert_usage_with_tools(
+        database_module,
+        db_path,
+        TS_2026_04_17_00_01,
+        ["edit"],
+        session_id="s2",
+    )
+
+    rows = database_module.fetch_recent_usage(
+        limit=10, tool_name="bash", db_path=db_path
+    )
+    assert len(rows) == 1
+    assert "bash" in rows[0]["tool_names"]
+
+    rows = database_module.fetch_recent_usage(
+        limit=10, tool_name="edit", db_path=db_path
+    )
+    assert len(rows) == 1
+    assert "edit" in rows[0]["tool_names"]
+
+    rows = database_module.fetch_recent_usage(
+        limit=10, tool_name="nonexistent", db_path=db_path
+    )
+    assert len(rows) == 0
+
+    rows = database_module.fetch_recent_usage(limit=10, db_path=db_path)
+    assert len(rows) == 2
+
+
+def test_fetch_recent_usage_filters_by_tool_name_case_insensitive(fresh_db):
+    """tool_name is normalized to lowercase at write time; the filter must
+    normalize on read too, or original-cased callers match nothing."""
+    database_module = fresh_db.database_module
+    db_path = fresh_db.db_path
+    database_module.init_db(db_path)
+
+    _insert_usage_with_tools(
+        database_module,
+        db_path,
+        TS_2026_04_17_00,
+        ["Bash"],
+        session_id="s1",
+    )
+
+    rows = database_module.fetch_recent_usage(
+        limit=10, tool_name="Bash", db_path=db_path
+    )
+    assert len(rows) == 1
+
+    assert database_module.count_usage(tool_name="Bash", db_path=db_path) == 1
+
+
+def test_count_usage_filters_by_tool_name(fresh_db):
+    database_module = fresh_db.database_module
+    db_path = fresh_db.db_path
+    database_module.init_db(db_path)
+
+    _insert_usage_with_tools(
+        database_module,
+        db_path,
+        TS_2026_04_17_00,
+        ["bash"],
+        session_id="s1",
+    )
+    _insert_usage_with_tools(
+        database_module,
+        db_path,
+        TS_2026_04_17_00_01,
+        ["edit"],
+        session_id="s2",
+    )
+    _insert_usage_with_tools(
+        database_module,
+        db_path,
+        TS_2026_04_17_00_02,
+        ["bash", "read"],
+        session_id="s3",
+    )
+
+    assert database_module.count_usage(tool_name="bash", db_path=db_path) == 2
+    assert database_module.count_usage(tool_name="edit", db_path=db_path) == 1
+    assert database_module.count_usage(tool_name="nonexistent", db_path=db_path) == 0
+    assert database_module.count_usage(db_path=db_path) == 3
+
+
+def test_usage_filters_tool_name_empty_string(fresh_db):
+    """Empty string tool_name should be treated as a real filter (matching nothing), not skipped."""
+    database_module = fresh_db.database_module
+    db_path = fresh_db.db_path
+    database_module.init_db(db_path)
+
+    _insert_usage_with_tools(
+        database_module,
+        db_path,
+        TS_2026_04_17_00,
+        ["bash"],
+        session_id="s1",
+    )
+
+    rows = database_module.fetch_recent_usage(limit=10, tool_name="", db_path=db_path)
+    assert len(rows) == 0  # no tool calls with empty name

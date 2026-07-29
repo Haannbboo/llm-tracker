@@ -3,9 +3,9 @@ from __future__ import annotations
 import importlib
 import os
 import sys
-from collections.abc import Callable
+from collections.abc import Callable, Generator
 from pathlib import Path
-from types import ModuleType
+from types import ModuleType, SimpleNamespace
 
 import pytest
 
@@ -85,7 +85,9 @@ def clear_project_modules() -> None:
 
 
 @pytest.fixture
-def isolated_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+def isolated_home(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> Generator[Path, None, None]:
     config_dir = tmp_path / ".llm-tracker"
     config_dir.mkdir(parents=True, exist_ok=True)
     config_path = config_dir / "config.yaml"
@@ -97,8 +99,18 @@ def isolated_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setenv("LLM_TRACKER_CONFIG", str(config_path))
     clear_project_modules()
+    # Patch CONFIG["db"] so cached modules see the test's DB path.
+    import config.app
+
+    monkeypatch.setitem(
+        config.app.CONFIG,
+        "db",
+        {
+            "path": str(tmp_path / "usage.db"),
+            "url": f"sqlite:///{tmp_path / 'usage.db'}",
+        },
+    )
     yield tmp_path
-    clear_project_modules()
 
 
 @pytest.fixture
@@ -167,3 +179,67 @@ def utils_module(load_module: Callable[[str], ModuleType]) -> ModuleType:
 @pytest.fixture
 def runtime_ports_module(load_module: Callable[[str], ModuleType]) -> ModuleType:
     return load_module("config.runtime_ports")
+
+
+# ponytail: lightweight DB fixture — one DB per session, truncate tables between tests.
+# Use this for database tests that just need a clean DB with latest schema.
+# Use isolated_home for tests that need full module teardown or custom schemas.
+
+# Tables to truncate between tests (in dependency order for FK safety).
+# IMPORTANT: Add any new table created by schema migrations here, otherwise
+# data will leak between fresh_db tests and cause spurious failures.
+# Verify with: list of tables should match inspect(engine).get_table_names()
+_TRUNCATE_TABLES = [
+    "usage_daily",
+    "tool_calls",
+    "evaluation_jobs",
+    "sessions",
+    "usage",
+    "base_urls",
+]
+
+
+@pytest.fixture(scope="session")
+def _session_db(tmp_path_factory):
+    """Session-scoped DB with latest schema — shared across all fresh_db tests."""
+    import src.database as db
+    import src.schema_migrations as sm
+
+    db_path = str(tmp_path_factory.mktemp("dbsession") / "usage.db")
+    db.init_db(db_path)
+    sm.migrate_database(db_path)
+    return db_path
+
+
+@pytest.fixture
+def fresh_db(_session_db: str, monkeypatch: pytest.MonkeyPatch):
+    """Function-scoped clean database (truncated, not recreated).
+
+    Returns an object with .db_path, .database_module, .schema_migrations_module.
+    The schema is created once per test session; between tests all tables are truncated.
+    CONFIG["db"] is patched so default-arg calls hit the test DB.
+    """
+    # Import each time — fast because sys.modules caches.
+    # Only slow after isolated_home clears modules (rare, ~17 tests).
+    import config.app
+    import src.database as db
+    import src.schema_migrations as sm
+
+    db_path = _session_db
+    db_url = f"sqlite:///{db_path}"
+
+    # Patch CONFIG so functions called without db_path use the test DB
+    monkeypatch.setitem(config.app.CONFIG["db"], "path", db_path)
+    monkeypatch.setitem(config.app.CONFIG["db"], "url", db_url)
+
+    # Truncate all tables for a clean slate (much faster than recreating DB)
+    engine = db.get_engine(db_path)
+    with engine.begin() as conn:
+        for table in _TRUNCATE_TABLES:
+            conn.execute(db.text(f"DELETE FROM {table}"))
+
+    return SimpleNamespace(
+        db_path=db_path,
+        database_module=db,
+        schema_migrations_module=sm,
+    )

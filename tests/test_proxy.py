@@ -964,3 +964,137 @@ def test_resolve_provider_falls_back_to_stripping(proxy_module, monkeypatch):
     provider, upstream_model = proxy_module.resolve_provider("openai/gpt-4o")
     assert provider.name == "openai"
     assert upstream_model == "gpt-4o"  # Should be stripped
+
+
+class TestExtractToolCalls:
+    def test_chat_completions_tool_calls(self, proxy_module):
+        result = proxy_module.extract_tool_calls(
+            {
+                "choices": [
+                    {
+                        "message": {
+                            "tool_calls": [
+                                {"id": "call_abc", "function": {"name": "get_weather"}},
+                                {"id": "call_def", "function": {"name": "search"}},
+                            ]
+                        }
+                    }
+                ]
+            }
+        )
+        assert result == [
+            {"tool_use_id": "call_abc", "tool_name": "get_weather"},
+            {"tool_use_id": "call_def", "tool_name": "search"},
+        ]
+
+    def test_anthropic_messages_tool_use(self, proxy_module):
+        result = proxy_module.extract_tool_calls(
+            {
+                "content": [
+                    {"type": "text", "text": "hello"},
+                    {"type": "tool_use", "id": "toolu_123", "name": "calculator"},
+                ]
+            }
+        )
+        assert result == [{"tool_use_id": "toolu_123", "tool_name": "calculator"}]
+
+    def test_responses_api_function_call(self, proxy_module):
+        result = proxy_module.extract_tool_calls(
+            {
+                "output": [
+                    {"type": "message", "content": [{"type": "text", "text": "ok"}]},
+                    {
+                        "type": "function_call",
+                        "call_id": "call_xyz",
+                        "name": "file_read",
+                    },
+                ]
+            }
+        )
+        assert result == [{"tool_use_id": "call_xyz", "tool_name": "file_read"}]
+
+    def test_no_tool_calls_returns_empty(self, proxy_module):
+        assert proxy_module.extract_tool_calls({}) == []
+        assert (
+            proxy_module.extract_tool_calls(
+                {"choices": [{"message": {"content": "hi"}}]}
+            )
+            == []
+        )
+
+
+class TestStreamToolCallAccumulator:
+    def test_openai_delta_accumulation(self, proxy_module):
+        acc = proxy_module.StreamToolCallAccumulator()
+        acc.accumulate(
+            {
+                "choices": [
+                    {
+                        "delta": {
+                            "tool_calls": [
+                                {
+                                    "index": 0,
+                                    "id": "call_1",
+                                    "function": {"name": "get_wea"},
+                                }
+                            ]
+                        }
+                    }
+                ]
+            }
+        )
+        acc.accumulate(
+            {
+                "choices": [
+                    {
+                        "delta": {
+                            "tool_calls": [{"index": 0, "function": {"name": "ther"}}]
+                        }
+                    }
+                ]
+            }
+        )
+        acc.accumulate(
+            {
+                "choices": [
+                    {
+                        "delta": {
+                            "tool_calls": [
+                                {
+                                    "index": 1,
+                                    "id": "call_2",
+                                    "function": {"name": "search"},
+                                }
+                            ]
+                        }
+                    }
+                ]
+            }
+        )
+        result = acc.get_tool_calls()
+        assert len(result) == 2
+        assert result[0] == {"tool_use_id": "call_1", "tool_name": "get_weather"}
+        assert result[1] == {"tool_use_id": "call_2", "tool_name": "search"}
+
+    def test_anthropic_content_block_start(self, proxy_module):
+        acc = proxy_module.StreamToolCallAccumulator()
+        acc.accumulate(
+            {
+                "type": "content_block_start",
+                "index": 0,
+                "content_block": {
+                    "type": "tool_use",
+                    "id": "toolu_abc",
+                    "name": "bash",
+                },
+            }
+        )
+        assert acc.get_tool_calls() == [
+            {"tool_use_id": "toolu_abc", "tool_name": "bash"}
+        ]
+
+    def test_empty_and_unrelated_payloads(self, proxy_module):
+        acc = proxy_module.StreamToolCallAccumulator()
+        acc.accumulate({"choices": [{"delta": {"content": "hello"}}]})
+        acc.accumulate({"usage": {"prompt_tokens": 10}})
+        assert acc.get_tool_calls() == []
