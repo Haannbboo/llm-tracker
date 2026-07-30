@@ -534,13 +534,10 @@ def run_with_isolated_tracking(
 
     try:
         try:
-            otlp_service = start_temp_service(
-                name="otlp",
-                module="src.otlp",
-                db_url=run_db_url,
-            )
-            services.append(otlp_service)
-
+            # OTLP and the proxy are alternative collection channels for the same
+            # child process; running both would double-record its usage. Start
+            # only the one the run actually needs.
+            otlp_logs_endpoint = None
             proxy_base_urls = None
             if options.proxy_env:
                 proxy_service = start_temp_service(
@@ -550,6 +547,14 @@ def run_with_isolated_tracking(
                 )
                 services.append(proxy_service)
                 proxy_base_urls = temp_proxy_base_urls(proxy_service.port)
+            else:
+                otlp_service = start_temp_service(
+                    name="otlp",
+                    module="src.otlp",
+                    db_url=run_db_url,
+                )
+                services.append(otlp_service)
+                otlp_logs_endpoint = f"http://127.0.0.1:{otlp_service.port}/v1/logs"
         except Exception as exc:
             cleanup_run_dir = False
             print(
@@ -559,7 +564,6 @@ def run_with_isolated_tracking(
             )
             return 1
 
-        otlp_logs_endpoint = f"http://127.0.0.1:{otlp_service.port}/v1/logs"
         completed = subprocess.run(
             build_child_command(
                 command,

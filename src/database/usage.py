@@ -67,6 +67,124 @@ def _avg_effective_price_per_million_expr(
 
 # === Entity / Persistence Helpers ===
 
+# ponytail: proxy and OTLP share no request id and neither reliably lands
+# first (observed empirically: OpenCode's proxy write beat its OTLP write),
+# so dedup checks both directions and matches on token counts within this
+# window instead of an exact key. Widen the window, or add a real shared id,
+# if collisions or missed matches become a problem. This also can't close the
+# race where both writers' lookups run before either has committed its own
+# insert (they're separate processes in separate transactions) — if that
+# happens, both still insert. Accepted gap: fixing it needs a DB-level
+# uniqueness constraint on a real shared key, which doesn't exist yet.
+DEDUP_WINDOW_MICROS = 15_000_000
+
+# `provider` is not a reliable match field: OTLP's opencode/kilo parser
+# reports the agent's own configured provider alias (e.g. "llm-tracker
+# proxy" when opencode points at the local proxy), while the proxy reports
+# the real resolved upstream (e.g. "Volce") for the same request. So dedup
+# matches on client_source family + model + tokens only.
+#
+# Kilo is a fork that reuses OpenCode's config schema and OTLP field
+# extraction (both parsed by _extract_opencode_fields in otlp.py), but the
+# proxy's user-agent sniffing (parse_client_source in proxy.py) has no
+# separate Kilo case — if Kilo's outbound requests don't rebrand their UA,
+# the proxy would label them "opencode" while OTLP labels them "kilo".
+# Folding them into one family keeps dedup working either way.
+_CLIENT_SOURCE_FAMILIES: dict[str, str] = {
+    "claude": "claude",
+    "claude-code": "claude",
+    "codex": "codex",
+    "gemini": "gemini",
+    "gemini-cli": "gemini",
+    "opencode": "opencode",
+    "kilo": "opencode",
+}
+_CLIENT_SOURCES_BY_FAMILY: dict[str, list[str]] = {}
+for _label, _family in _CLIENT_SOURCE_FAMILIES.items():
+    _CLIENT_SOURCES_BY_FAMILY.setdefault(_family, []).append(_label)
+
+
+def merge_duplicate_usage(
+    *,
+    client_source: str | None,
+    is_otlp: bool,
+    model: str,
+    prompt_tokens: int | None,
+    completion_tokens: int | None,
+    cached_tokens: int | None,
+    total_tokens: int | None,
+    ts: int,
+    session_id: str | None,
+    client_ip: str | None,
+    db_path: str | None = None,
+) -> Usage | None:
+    """Find a same-shaped usage row already recorded by the other collection path
+    and enrich it instead of inserting a duplicate.
+
+    `is_otlp` is whether the call currently being recorded is OTLP-sourced;
+    the lookup searches the opposite path (OTLP looks for a proxy row and
+    vice versa) so a request captured by both never double-counts.
+
+    Only `session_id` and `client_ip` are merged onto the existing row. OTLP
+    is treated as authoritative for session_id (it carries the agent's real
+    session, while the proxy never has one): an incoming OTLP call can
+    overwrite these fields, an incoming proxy call only fills them in if the
+    existing row doesn't already have them. Other fields (tokens, cost,
+    latency, status, provider, ...) are left untouched even on a match:
+    they're already folded into `usage_daily`/`sessions` running sums the
+    moment the existing row was inserted, so changing them here would desync
+    those aggregates without a matching correction.
+    """
+    family = _CLIENT_SOURCE_FAMILIES.get(client_source or "")
+    if family is None:
+        return None
+    other_path_sources = _CLIENT_SOURCES_BY_FAMILY[family]
+    endpoint_filter = Usage.endpoint != "otlp" if is_otlp else Usage.endpoint == "otlp"
+
+    engine = get_engine(db_path)
+    with Session(engine, expire_on_commit=False) as session:
+        existing = session.scalar(
+            select(Usage)
+            .where(
+                and_(
+                    endpoint_filter,
+                    Usage.client_source.in_(other_path_sources),
+                    Usage.model == model,
+                    Usage.prompt_tokens == prompt_tokens,
+                    Usage.completion_tokens == completion_tokens,
+                    Usage.cached_tokens == cached_tokens,
+                    Usage.total_tokens == total_tokens,
+                    Usage.ts >= ts - DEDUP_WINDOW_MICROS,
+                    Usage.ts <= ts + DEDUP_WINDOW_MICROS,
+                )
+            )
+            .order_by(func.abs(Usage.ts - ts))
+            .with_for_update()
+            .limit(1)
+        )
+        if existing is None:
+            return None
+
+        session_id_was_empty = not existing.session_id
+        for field, value in (("session_id", session_id), ("client_ip", client_ip)):
+            if value is not None and (is_otlp or getattr(existing, field) is None):
+                setattr(existing, field, value)
+        session.commit()
+
+    if session_id_was_empty and existing.session_id:
+        try:
+            from .sessions import upsert_session_from_usage
+
+            upsert_session_from_usage(existing, db_path=db_path)
+        except Exception:
+            import logging
+
+            logging.getLogger(__name__).warning(
+                "Failed to update session record for merged usage ts=%s", existing.ts
+            )
+
+    return existing
+
 
 def log_usage(usage: Usage, db_path: str | None = None) -> None:
     """Persist a single usage row and update the daily aggregation table."""

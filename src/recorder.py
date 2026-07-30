@@ -13,7 +13,7 @@ from sqlalchemy.exc import IntegrityError
 from .costs import calculate_costs
 from .database.base_url import resolve_base_url_id
 from .database.models import ToolCall, Usage
-from .database.usage import log_usage
+from .database.usage import log_usage, merge_duplicate_usage
 
 
 def record_usage(
@@ -49,6 +49,27 @@ def record_usage(
         return None
 
     usage_ts = ts if ts is not None else time.time_ns() // 1000
+
+    # Proxy and OTLP are independent collection paths for the same agent;
+    # either can land first, so check for a same-shaped row already recorded
+    # by the other path, enrich it, and return it instead of inserting a
+    # duplicate (the caller can still attach tool calls to its id).
+    duplicate = merge_duplicate_usage(
+        client_source=client_source,
+        is_otlp=(endpoint == "otlp"),
+        model=model,
+        prompt_tokens=prompt_tokens,
+        completion_tokens=completion_tokens,
+        cached_tokens=cached_tokens,
+        total_tokens=total_tokens,
+        ts=usage_ts,
+        session_id=session_id,
+        client_ip=client_ip,
+        db_path=db_path,
+    )
+    if duplicate is not None:
+        return duplicate
+
     costs = calculate_costs(
         prompt_tokens=prompt_tokens,
         completion_tokens=completion_tokens,

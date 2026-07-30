@@ -360,3 +360,183 @@ def test_record_tool_call_integrity_error_is_noop(test_db, monkeypatch):
     rows = fetch_recent_usage(limit=10, db_path=test_db)
     assert len(rows) == 1
     assert rows[0]["tool_names"] == "bash"
+
+
+def _record_otlp_usage(test_db, **overrides):
+    from src.recorder import record_usage
+
+    fields = dict(
+        ts=1779148800000000,
+        provider="anthropic",
+        model="claude-3",
+        client_source="claude-code",
+        session_id="otlp-session-1",
+        endpoint="otlp",
+        prompt_tokens=100,
+        completion_tokens=50,
+        cached_tokens=0,
+        total_tokens=150,
+        status=200,
+        db_path=test_db,
+    )
+    fields.update(overrides)
+    return record_usage(**fields)
+
+
+def _record_proxy_usage(test_db, **overrides):
+    from src.recorder import record_usage
+
+    fields = dict(
+        ts=1779148800000000 + 2_000_000,  # 2s later, within the dedup window
+        provider="anthropic",
+        model="claude-3",
+        client_source="claude",
+        endpoint="/v1/messages",
+        prompt_tokens=100,
+        completion_tokens=50,
+        cached_tokens=0,
+        total_tokens=150,
+        status=200,
+        db_path=test_db,
+    )
+    fields.update(overrides)
+    return record_usage(**fields)
+
+
+def test_record_usage_merges_proxy_duplicate_into_existing_otlp_row(test_db):
+    """OTLP first, proxy second: proxy fills gaps but never overwrites OTLP's session_id."""
+    otlp_usage = _record_otlp_usage(test_db)
+    assert otlp_usage is not None
+
+    proxy_usage = _record_proxy_usage(
+        test_db, session_id="proxy-would-be-session", client_ip="10.0.0.5"
+    )
+
+    assert proxy_usage is not None
+    assert proxy_usage.id == otlp_usage.id
+    rows = fetch_recent_usage(limit=10, db_path=test_db)
+    assert len(rows) == 1
+    row = rows[0]
+    assert row["endpoint"] == "otlp"
+    assert row["session_id"] == "otlp-session-1"  # OTLP's session_id wins
+    assert row["client_ip"] == "10.0.0.5"  # gap-filled from the proxy
+
+
+def test_record_usage_merges_otlp_duplicate_into_existing_proxy_row(test_db):
+    """Proxy first, OTLP second (the observed OpenCode ordering): OTLP can
+    overwrite, backfilling the session_id the proxy never has."""
+    from sqlalchemy.orm import Session as SASession
+
+    from src.database.engine import get_engine
+    from src.database.models import SessionRecord
+
+    proxy_usage = _record_proxy_usage(test_db, session_id=None, client_ip="10.0.0.5")
+    assert proxy_usage is not None
+
+    otlp_usage = _record_otlp_usage(
+        test_db,
+        ts=1779148800000000 + 4_000_000,
+        provider="volce",  # deliberately mismatched, like the real OpenCode case
+        session_id="otlp-session-1",
+    )
+
+    assert otlp_usage is not None
+    assert otlp_usage.id == proxy_usage.id
+    rows = fetch_recent_usage(limit=10, db_path=test_db)
+    assert len(rows) == 1
+    row = rows[0]
+    assert row["endpoint"] == "/v1/messages"  # surviving row is the proxy's
+    assert row["provider"] == "anthropic"  # proxy's provider is untouched
+    assert row["session_id"] == "otlp-session-1"  # backfilled from OTLP
+    assert row["client_ip"] == "10.0.0.5"  # proxy's own value untouched
+
+    # Backfilling session_id for the first time should also populate the
+    # sessions table, using the proxy row's own (accurate) tokens/cost.
+    with SASession(get_engine(test_db)) as session:
+        record = session.get(SessionRecord, "otlp-session-1")
+        assert record is not None
+        assert record.request_count == 1
+        assert record.total_tokens == 150
+
+
+def test_record_usage_keeps_proxy_row_when_tokens_differ(test_db):
+    assert _record_otlp_usage(test_db) is not None
+
+    proxy_usage = _record_proxy_usage(test_db, prompt_tokens=999)
+
+    assert proxy_usage is not None
+    rows = fetch_recent_usage(limit=10, db_path=test_db)
+    assert len(rows) == 2
+
+
+def test_record_usage_keeps_proxy_row_when_outside_dedup_window(test_db):
+    assert _record_otlp_usage(test_db) is not None
+
+    proxy_usage = _record_proxy_usage(test_db, ts=1779148800000000 + 60_000_000)
+
+    assert proxy_usage is not None
+    rows = fetch_recent_usage(limit=10, db_path=test_db)
+    assert len(rows) == 2
+
+
+def test_record_usage_keeps_proxy_row_for_unrecognized_client_source(test_db):
+    """No known OTLP-tracked family for this client_source, so no dedup lookup."""
+    assert _record_otlp_usage(test_db) is not None
+
+    proxy_usage = _record_proxy_usage(test_db, client_source="some-other-cli")
+
+    assert proxy_usage is not None
+    rows = fetch_recent_usage(limit=10, db_path=test_db)
+    assert len(rows) == 2
+
+
+def test_record_usage_otlp_rows_are_never_deduped_against_each_other(test_db):
+    """The dedup check only matches the opposite collection path."""
+    first = _record_otlp_usage(test_db)
+    second = _record_otlp_usage(test_db, ts=1779148800000000 + 1_000_000)
+
+    assert first is not None
+    assert second is not None
+    assert first.id != second.id
+    rows = fetch_recent_usage(limit=10, db_path=test_db)
+    assert len(rows) == 2
+
+
+def test_record_usage_merges_kilo_and_opencode_across_the_family(test_db):
+    """Kilo is a fork sharing OpenCode's OTLP extraction; the proxy may still
+    label its traffic "opencode" if Kilo doesn't rebrand its user agent."""
+    otlp_usage = _record_otlp_usage(test_db, client_source="kilo")
+    assert otlp_usage is not None
+
+    proxy_usage = _record_proxy_usage(test_db, client_source="opencode")
+
+    assert proxy_usage is not None
+    assert proxy_usage.id == otlp_usage.id
+    rows = fetch_recent_usage(limit=10, db_path=test_db)
+    assert len(rows) == 1
+
+
+def test_record_usage_dedup_handles_none_token_fields(test_db):
+    """A malformed/partial response with None tokens shouldn't crash the
+    dedup lookup or falsely match a row with different (non-None) tokens."""
+    otlp_usage = _record_otlp_usage(
+        test_db,
+        prompt_tokens=None,
+        completion_tokens=None,
+        cached_tokens=5,
+        total_tokens=None,
+    )
+    assert otlp_usage is not None
+
+    proxy_usage = _record_proxy_usage(
+        test_db,
+        prompt_tokens=None,
+        completion_tokens=None,
+        cached_tokens=5,
+        total_tokens=None,
+    )
+
+    assert proxy_usage is not None
+    assert proxy_usage.id == otlp_usage.id
+    rows = fetch_recent_usage(limit=10, db_path=test_db)
+    assert len(rows) == 1
