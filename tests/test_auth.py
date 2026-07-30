@@ -4,21 +4,26 @@ from fastapi.testclient import TestClient
 from sqlalchemy import text
 
 
-def _mint(fresh_db, email="a@example.com", kind="cli"):
+def _mint(fresh_db, email="a@example.com", kind="cli", device_name=None):
     from src.database.auth import mint_token
 
-    return mint_token(email, kind=kind, db_path=fresh_db.db_path)
+    return mint_token(
+        email, kind=kind, device_name=device_name, db_path=fresh_db.db_path
+    )
 
 
 def test_mint_and_resolve_roundtrip(fresh_db):
     from src.database.auth import resolve_token
 
-    token, user = _mint(fresh_db)
+    token, user = _mint(fresh_db, device_name="laptop")
     assert token.startswith("llmt_cli_")
     resolved = resolve_token(token, db_path=fresh_db.db_path)
     assert resolved is not None
-    assert resolved.id == user.id
-    assert resolved.email == "a@example.com"
+    resolved_user, resolved_token = resolved
+    assert resolved_user.id == user.id
+    assert resolved_user.email == "a@example.com"
+    assert resolved_token.kind == "cli"
+    assert resolved_token.device_name == "laptop"
 
 
 def test_mint_rejects_invalid_kind(fresh_db):
@@ -149,7 +154,7 @@ def test_auth_me_enabled(api_module, fresh_db, monkeypatch):
     import config.app
 
     monkeypatch.setitem(config.app.CONFIG, "auth", {"enabled": True, "allowlist": []})
-    token, _ = _mint(fresh_db)
+    token, _ = _mint(fresh_db, device_name="unraid-vm")
     client = TestClient(api_module.app)
 
     assert client.get("/auth/me").status_code == 401
@@ -168,6 +173,7 @@ def test_auth_me_enabled(api_module, fresh_db, monkeypatch):
     body = response.json()
     assert body["auth_enabled"] is True
     assert body["user"]["email"] == "a@example.com"
+    assert body["token"] == {"kind": "cli", "device_name": "unraid-vm"}
 
     engine = fresh_db.database_module.get_engine(fresh_db.db_path)
     with engine.begin() as conn:

@@ -219,16 +219,19 @@ def get_current_user(request: Request) -> User | None:
     token = token.strip()
     if scheme.lower() != "bearer" or not token:
         raise HTTPException(status_code=401, detail="invalid token")
-    user = resolve_token(token)
-    if user is None:
+    resolved = resolve_token(token)
+    if resolved is None:
         raise HTTPException(status_code=401, detail="invalid token")
+    user, auth_token = resolved
+    request.state.auth_token = auth_token
     return user
 
 
 @app.get("/auth/me")
-def auth_me(user: User | None = Depends(get_current_user)):
+def auth_me(request: Request, user: User | None = Depends(get_current_user)):
     if user is None:
         return {"auth_enabled": False, "user": None}
+    auth_token = request.state.auth_token
     return {
         "auth_enabled": True,
         "user": {
@@ -237,6 +240,11 @@ def auth_me(user: User | None = Depends(get_current_user)):
             "name": user.name,
             "created_at": user.created_at,
         },
+        "token": (
+            {"kind": auth_token.kind, "device_name": auth_token.device_name}
+            if auth_token
+            else None
+        ),
     }
 
 

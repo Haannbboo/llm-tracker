@@ -11,6 +11,7 @@ import secrets
 import time
 
 from sqlalchemy import select
+from sqlalchemy import update as sa_update
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
@@ -68,8 +69,10 @@ def mint_token(
     return token, user
 
 
-def resolve_token(token: str, db_path: str | None = None) -> User | None:
-    """Return the token's user, or None for unknown/revoked tokens.
+def resolve_token(
+    token: str, db_path: str | None = None
+) -> tuple[User, AuthToken] | None:
+    """Return the token's user and the token row, or None for unknown/revoked.
 
     DB errors propagate (fail closed); only a failed last_used_at update is
     swallowed.
@@ -86,9 +89,15 @@ def resolve_token(token: str, db_path: str | None = None) -> User | None:
         auth_token, user = row
         if auth_token.revoked_at is not None:
             return None
-        try:
-            auth_token.last_used_at = _now_micros()
-            session.commit()
-        except SQLAlchemyError:
-            session.rollback()
-        return user
+        session.expunge_all()
+    try:
+        with Session(engine, expire_on_commit=False) as update_session:
+            update_session.execute(
+                sa_update(AuthToken)
+                .where(AuthToken.id == auth_token.id)
+                .values(last_used_at=_now_micros())
+            )
+            update_session.commit()
+    except SQLAlchemyError:
+        pass
+    return user, auth_token
