@@ -279,9 +279,13 @@ def run_token_command(command: list[str]) -> int:
     from .database import init_db, mint_token
 
     init_db()
-    token, user = mint_token(
-        token_args.email, kind=token_args.kind, device_name=token_args.name
-    )
+    try:
+        token, user = mint_token(
+            token_args.email, kind=token_args.kind, device_name=token_args.name
+        )
+    except ValueError as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
     print(f"Minted {token_args.kind} token for {user.email} (shown once):")
     print(token)
     return 0

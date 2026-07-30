@@ -215,3 +215,10 @@ def test_token_create_cli(cli_module, capsys):
     assert exit_code == 0
     assert "llmt_cli_" in captured.out
     assert "cli@example.com" in captured.out
+
+
+def test_token_create_cli_rejects_blank_email(cli_module, capsys):
+    exit_code = cli_module.main(["token", "create", "--email", "   "])
+    captured = capsys.readouterr()
+    assert exit_code == 2
+    assert "email" in captured.err.lower()

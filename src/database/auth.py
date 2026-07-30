@@ -7,6 +7,7 @@ only as sha256 hashes.
 from __future__ import annotations
 
 import hashlib
+import logging
 import secrets
 import time
 
@@ -99,5 +100,7 @@ def resolve_token(
             )
             update_session.commit()
     except SQLAlchemyError:
-        pass
+        logging.getLogger(__name__).warning(
+            "Failed to update last_used_at for token id=%s", auth_token.id
+        )
     return user, auth_token
