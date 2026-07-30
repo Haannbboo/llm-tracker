@@ -11,7 +11,7 @@ from typing import Literal
 import httpx
 import tomllib
 import yaml
-from fastapi import FastAPI, HTTPException, Query, Request, Response
+from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, model_validator
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -30,6 +30,7 @@ from ._version import get_version
 from .database import (
     VALID_OUTCOMES,
     VALID_SOURCES,
+    User,
     aggregate_daily_by_dimension,
     aggregate_model_effectiveness,
     aggregate_usage_by_period,
@@ -49,6 +50,7 @@ from .database import (
     init_db,
     list_active_evaluation_jobs_with_progress,
     list_session_evaluation_jobs_with_progress,
+    resolve_token,
     summarize_session_tool_calls,
     summarize_sessions,
     summarize_tool_calls,
@@ -201,6 +203,49 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="llm-tracker-api", lifespan=lifespan)
+
+
+def get_current_user(request: Request) -> User | None:
+    """Resolve the request's bearer token to a user.
+
+    Returns None when auth is disabled. When enabled, raises 401 for
+    missing/malformed/unknown/revoked tokens (one message for all cases —
+    callers must not learn which). DB errors propagate as 500: fail closed.
+    """
+    if not CONFIG.get("auth", {}).get("enabled"):
+        return None
+    header = request.headers.get("authorization") or ""
+    scheme, _, token = header.partition(" ")
+    token = token.strip()
+    if scheme.lower() != "bearer" or not token:
+        raise HTTPException(status_code=401, detail="invalid token")
+    resolved = resolve_token(token)
+    if resolved is None:
+        raise HTTPException(status_code=401, detail="invalid token")
+    user, auth_token = resolved
+    request.state.auth_token = auth_token
+    return user
+
+
+@app.get("/auth/me")
+def auth_me(request: Request, user: User | None = Depends(get_current_user)):
+    if user is None:
+        return {"auth_enabled": False, "user": None}
+    auth_token = request.state.auth_token
+    return {
+        "auth_enabled": True,
+        "user": {
+            "id": user.id,
+            "email": user.email,
+            "name": user.name,
+            "created_at": user.created_at,
+        },
+        "token": (
+            {"kind": auth_token.kind, "device_name": auth_token.device_name}
+            if auth_token
+            else None
+        ),
+    }
 
 
 def _is_usage_read_path(path: str) -> bool:
@@ -1220,6 +1265,7 @@ if _frontend_dist.is_dir():
     _index_html = _frontend_dist / "index.html"
 
     _SPA_API_PREFIXES = (
+        "/auth/",
         "/usage",
         "/sessions",
         "/model-effectiveness",

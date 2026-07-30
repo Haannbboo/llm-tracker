@@ -764,3 +764,50 @@ def test_set_evaluation_evaluator(config_module, tmp_path):
     content = config_path.read_text(encoding="utf-8")
     assert "evaluator: claude" in content
     assert config_module.CONFIG["evaluation"]["evaluator"] == "claude"
+
+
+def test_load_config_auth_defaults(config_module, tmp_path, monkeypatch):
+    monkeypatch.delenv("LLMTRACKER_AUTH__GOOGLE_CLIENT_ID", raising=False)
+    monkeypatch.delenv("LLMTRACKER_AUTH__GOOGLE_CLIENT_SECRET", raising=False)
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text("providers: {}\n", encoding="utf-8")
+
+    config = config_module.load_config(str(config_path))
+
+    assert config["auth"]["enabled"] is False
+    assert config["auth"]["allowlist"] == []
+    assert config["auth"]["google_client_id"] == ""
+    assert config["auth"]["google_client_secret"] == ""
+
+
+def test_load_config_google_creds_are_env_only(config_module, tmp_path, monkeypatch):
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        "auth:\n  enabled: true\n  google_client_id: from-yaml\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("LLMTRACKER_AUTH__GOOGLE_CLIENT_ID", "from-env")
+    monkeypatch.setenv("LLMTRACKER_AUTH__GOOGLE_CLIENT_SECRET", "from-env-secret")
+
+    config = config_module.load_config(str(config_path))
+
+    assert config["auth"]["enabled"] is True
+    assert config["auth"]["google_client_id"] == "from-env"
+    assert config["auth"]["google_client_secret"] == "from-env-secret"
+
+
+def test_load_config_ignores_yaml_google_creds_when_env_unset(
+    config_module, tmp_path, monkeypatch
+):
+    monkeypatch.delenv("LLMTRACKER_AUTH__GOOGLE_CLIENT_ID", raising=False)
+    monkeypatch.delenv("LLMTRACKER_AUTH__GOOGLE_CLIENT_SECRET", raising=False)
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        "auth:\n  google_client_id: from-yaml\n  google_client_secret: from-yaml\n",
+        encoding="utf-8",
+    )
+
+    config = config_module.load_config(str(config_path))
+
+    assert config["auth"]["google_client_id"] == ""
+    assert config["auth"]["google_client_secret"] == ""
