@@ -318,15 +318,27 @@ export function LogsPage({ initialSessionFilter }: Props) {
                   </span>
                 )}
               </div>
-              {value(row.cached_tokens) > 0 && (
-                <div style={{ fontSize: '9px', color: 'var(--color-green)', fontWeight: 700 }}>
-                  {t('Cache read')} {formatNumber(row.cached_tokens)} ({Math.round((value(row.cached_tokens) / (value(row.prompt_tokens) || 1)) * 100)}%)
-                </div>
-              )}
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '2px' }}>
+                {value(row.cached_tokens) > 0 && (
+                  <div style={{ fontSize: '9px', color: 'var(--color-green)', fontWeight: 700 }}>
+                    {/* cache_creation_tokens is disjoint from prompt_tokens (Anthropic semantics),
+                        so it's added to the denominator for a true hit rate. */}
+                    {t('Cache read')} {formatNumber(row.cached_tokens)} ({Math.round((value(row.cached_tokens) / ((value(row.prompt_tokens) + value(row.cache_creation_tokens)) || 1)) * 100)}%)
+                  </div>
+                )}
+                {value(row.cache_creation_tokens) > 0 && (
+                  <div style={{ fontSize: '9px', color: 'var(--color-purple)', fontWeight: 700 }}>
+                    {t('Cache write')} {formatNumber(row.cache_creation_tokens)}
+                  </div>
+                )}
+              </div>
             </div>
             <div className="has-tooltip" style={{ width: '100%', borderBottom: 'none' }}>
               {(() => {
                 const promptUncached = Math.max(0, value(row.prompt_tokens) - value(row.cached_tokens));
+                const cacheCreation = value(row.cache_creation_tokens);
+                // total_tokens includes cache_creation_tokens for Anthropic responses,
+                // so it's rendered as its own segment or the bar won't fill correctly.
                 const total = value(row.total_tokens) || 1;
                 return (
                   <>
@@ -342,6 +354,9 @@ export function LogsPage({ initialSessionFilter }: Props) {
                     }}>
                       <div style={{ height: '100%', background: 'var(--color-green)', width: `${(value(row.cached_tokens) / total) * 100}%` }} />
                       <div style={{ height: '100%', background: 'var(--color-blue)', width: `${(promptUncached / total) * 100}%`, opacity: 0.7 }} />
+                      {cacheCreation > 0 && (
+                        <div style={{ height: '100%', background: 'var(--color-indigo)', width: `${(cacheCreation / total) * 100}%` }} />
+                      )}
                       <div style={{ height: '100%', background: 'var(--color-purple)', width: `${(value(row.completion_tokens) / total) * 100}%` }} />
                     </div>
                     <div className="tooltip-text">
@@ -354,6 +369,12 @@ export function LogsPage({ initialSessionFilter }: Props) {
                           <span style={{ color: 'var(--color-blue)' }}>&bull; {t('Input')}:</span>
                           <span style={{ fontWeight: 600 }}>{formatNumber(promptUncached)}</span>
                         </div>
+                        {cacheCreation > 0 && (
+                          <div style={{ display: 'flex', justifyContent: 'space-between', gap: '12px' }}>
+                            <span style={{ color: 'var(--color-indigo)' }}>&bull; {t('Cache write')}:</span>
+                            <span style={{ fontWeight: 600 }}>{formatNumber(cacheCreation)}</span>
+                          </div>
+                        )}
                         <div style={{ display: 'flex', justifyContent: 'space-between', gap: '12px' }}>
                           <span style={{ color: 'var(--color-purple)' }}>&bull; {t('Output')}:</span>
                           <span style={{ fontWeight: 600 }}>{formatNumber(row.completion_tokens)}</span>
@@ -413,12 +434,19 @@ export function LogsPage({ initialSessionFilter }: Props) {
 
               const prompt = value(row.prompt_tokens);
               const cached = value(row.cached_tokens);
+              const cacheCreation = value(row.cache_creation_tokens);
               const inputCost = value(row.input_cost_usd);
               const outputCost = value(row.output_cost_usd);
 
-              const cacheRatio = prompt > 0 ? (cached / prompt) : 0;
-              const cacheCost = inputCost * cacheRatio;
-              const actualInputCost = inputCost - cacheCost;
+              // cache_creation_tokens is disjoint from prompt_tokens (Anthropic
+              // semantics), so it's included in the base for these proportional
+              // splits -- otherwise cache-write dollars get silently folded into "Input".
+              const totalInputTokens = prompt + cacheCreation;
+              const cacheReadRatio = totalInputTokens > 0 ? (cached / totalInputTokens) : 0;
+              const cacheWriteRatio = totalInputTokens > 0 ? (cacheCreation / totalInputTokens) : 0;
+              const cacheCost = inputCost * cacheReadRatio;
+              const cacheWriteCost = inputCost * cacheWriteRatio;
+              const actualInputCost = inputCost - cacheCost - cacheWriteCost;
 
               const uncachedTokens = Math.max(0, prompt - cached);
               const completionTokens = value(row.completion_tokens);
@@ -457,6 +485,17 @@ export function LogsPage({ initialSessionFilter }: Props) {
                             <div style={{ color: 'var(--color-green)' }}>{formatCost(cacheCost)}</div>
                             {modelConfig?.cacheRead !== undefined && (
                               <div style={{ fontSize: '9px', color: 'rgba(255, 255, 255, 0.4)' }}>{formatNumber(cached)} tokens x {formatRate(modelConfig.cacheRead)}</div>
+                            )}
+                          </div>
+                        </div>
+                      )}
+                      {cacheWriteCost > 0 && (
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+                          <span style={{ color: 'rgba(255, 255, 255, 0.6)' }}>{t('Cache write:')}</span>
+                          <div style={{ textAlign: 'right' }}>
+                            <div style={{ color: 'var(--color-purple)' }}>{formatCost(cacheWriteCost)}</div>
+                            {modelConfig?.cacheWrite !== undefined && (
+                              <div style={{ fontSize: '9px', color: 'rgba(255, 255, 255, 0.4)' }}>{formatNumber(cacheCreation)} tokens x {formatRate(modelConfig.cacheWrite)}</div>
                             )}
                           </div>
                         </div>

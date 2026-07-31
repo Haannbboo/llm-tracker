@@ -122,6 +122,34 @@ def test_build_forward_headers_injects_provider_api_key(proxy_module):
     assert headers["x-request-id"] == "abc123"
 
 
+def test_build_forward_headers_injects_x_api_key_for_anthropic_auth_scheme(
+    proxy_module,
+):
+    request = proxy_module.Request(
+        {
+            "type": "http",
+            "method": "POST",
+            "path": "/v1/messages",
+            "headers": [
+                (b"host", b"localhost:4000"),
+                (b"x-request-id", b"abc123"),
+            ],
+        }
+    )
+    provider = proxy_module.ProviderConfig(
+        name="anthropic",
+        base_url="https://api.anthropic.com/v1",
+        api_key="sk-ant-test-key",
+        auth_scheme="x-api-key",
+    )
+
+    headers = proxy_module.build_forward_headers(request, provider)
+
+    assert headers["x-api-key"] == "sk-ant-test-key"
+    assert "authorization" not in headers
+    assert headers["x-request-id"] == "abc123"
+
+
 def test_build_forward_headers_passes_through_without_provider_key(proxy_module):
     request = proxy_module.Request(
         {
@@ -654,6 +682,83 @@ async def test_streaming_forward_logs_first_chunk_latency(proxy_module, monkeypa
     assert captured["latency_ms"] == 90
     assert captured["prompt_tokens"] == 10
     assert captured["completion_tokens"] == 5
+
+
+@pytest.mark.anyio
+async def test_streaming_forward_merges_anthropic_message_start_and_delta_usage(
+    proxy_module, monkeypatch
+):
+    """Anthropic streams input/cache tokens in message_start and output tokens
+    in a later message_delta; the proxy must merge both instead of the final
+    event clobbering the first."""
+    captured = {}
+
+    class FakeStreamResponse:
+        status_code = 200
+
+        async def aiter_bytes(self):
+            yield (
+                b'data: {"type":"message_start","message":{"usage":'
+                b'{"input_tokens":25,"cache_creation_input_tokens":8,'
+                b'"cache_read_input_tokens":3,"output_tokens":1}}}\n\n'
+            )
+            yield b'data: {"type":"content_block_delta","delta":{"text":"hi"}}\n\n'
+            yield b'data: {"type":"message_delta","usage":{"output_tokens":15}}\n\n'
+
+        async def aread(self):
+            return b""
+
+    class FakeRequest:
+        def __init__(self, method, url, headers, content):
+            self.method = method
+            self.url = url
+            self.headers = headers
+            self.content = content
+
+    class FakeAsyncClient:
+        def __init__(self, timeout):
+            self.timeout = timeout
+
+        def build_request(self, method, url, headers=None, content=None):
+            return FakeRequest(method, url, headers, content)
+
+        async def send(self, request, stream=False):
+            return FakeStreamResponse()
+
+        async def aclose(self):
+            pass
+
+    async def receive():
+        return {
+            "type": "http.request",
+            "body": b'{"model":"test-model","stream":true}',
+            "more_body": False,
+        }
+
+    monkeypatch.setattr(proxy_module.httpx, "AsyncClient", FakeAsyncClient)
+    monkeypatch.setattr(
+        proxy_module, "record_usage", lambda **fields: captured.update(fields)
+    )
+
+    request = proxy_module.Request(
+        {
+            "type": "http",
+            "method": "POST",
+            "path": "/v1/messages",
+            "headers": [(b"content-type", b"application/json")],
+        },
+        receive,
+    )
+
+    response = await proxy_module.forward(request, "/v1/messages")
+    _ = [chunk async for chunk in response.body_iterator]
+
+    # Anthropic's input_tokens (25) excludes cache_read_input_tokens (3) --
+    # they're disjoint buckets -- so prompt_tokens folds in the cache read.
+    assert captured["prompt_tokens"] == 28
+    assert captured["cached_tokens"] == 3
+    assert captured["cache_creation_tokens"] == 8
+    assert captured["completion_tokens"] == 15
 
 
 @pytest.mark.anyio

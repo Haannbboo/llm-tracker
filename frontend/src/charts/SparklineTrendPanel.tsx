@@ -9,6 +9,7 @@ type DailyDimensionData = {
   total_tokens: number | null
   prompt_tokens: number | null
   cached_tokens: number | null
+  cache_creation_tokens: number | null
   total_cost_usd: number | null
   completion_tokens: number | null
   latency_sum_ms: number | null
@@ -31,8 +32,10 @@ function getMetricValue(row: DailyDimensionData, metric: Metric): number {
     return latency > 0 ? ((row.completion_tokens ?? 0) * 1000) / latency : 0
   }
   if (metric === 'cacheHitRate') {
-    const prompt = row.prompt_tokens ?? 0
-    return prompt > 0 ? ((row.cached_tokens ?? 0) / prompt) * 100 : 0
+    // cache_creation_tokens is disjoint from prompt_tokens (Anthropic semantics),
+    // so it must be added to the denominator for a true hit rate.
+    const totalInput = (row.prompt_tokens ?? 0) + (row.cache_creation_tokens ?? 0)
+    return totalInput > 0 ? ((row.cached_tokens ?? 0) / totalInput) * 100 : 0
   }
   // successRate
   const total = (row.successful_requests ?? 0) + (row.failed_requests ?? 0)

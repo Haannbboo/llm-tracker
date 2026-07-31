@@ -101,6 +101,7 @@ def calculate_costs(
     prompt_tokens: int | None,
     completion_tokens: int | None,
     cached_tokens: int | None,
+    cache_creation_tokens: int | None = None,
     provider: str | None = None,
     model: str | None = None,
     model_cost: ModelCost | None = None,
@@ -114,17 +115,26 @@ def calculate_costs(
     prompt = int(prompt_tokens or 0)
     completion = int(completion_tokens or 0)
     cached = int(cached_tokens or 0)
+    cache_created = int(cache_creation_tokens or 0)
     uncached = max(prompt - cached, 0)
 
     input_cost = Decimal(uncached) * Decimal(str(cost.input)) / Decimal(1_000_000)
     cached_input_cost = (
         Decimal(cached) * Decimal(str(cost.cache_read)) / Decimal(1_000_000)
     )
+    # Cache-write tokens (Anthropic's cache_creation_input_tokens) have no
+    # dedicated cost column, so they're folded into the input-cost bucket.
+    cache_write_cost = (
+        Decimal(cache_created)
+        * Decimal(str(cost.cache_write or 0.0))
+        / Decimal(1_000_000)
+    )
     output_cost = Decimal(completion) * Decimal(str(cost.output)) / Decimal(1_000_000)
     multiplier = get_provider_price_multiplier(provider)
 
+    total_input_cost = input_cost + cached_input_cost + cache_write_cost
     return {
-        "input_cost_usd": (input_cost + cached_input_cost) * multiplier,
+        "input_cost_usd": total_input_cost * multiplier,
         "output_cost_usd": output_cost * multiplier,
-        "total_cost_usd": (input_cost + cached_input_cost + output_cost) * multiplier,
+        "total_cost_usd": (total_input_cost + output_cost) * multiplier,
     }

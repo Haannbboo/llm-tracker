@@ -152,6 +152,7 @@ def build_maps(
             base_url=provider["base_url"],
             price_multiplier=float(provider.get("price_multiplier", 1.0)),
             api_key=provider.get("api_key") or None,
+            auth_scheme=provider.get("auth_scheme", "bearer"),
         )
         provider_map[provider_name] = provider_config
         for model in _iter_provider_models(provider):

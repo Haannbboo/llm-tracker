@@ -28,9 +28,11 @@ export function TrendChart({
   const maxCost = Math.max(...filled.map(x => value(x.total_cost_usd)), 0.001);
   const maxThroughput = Math.max(...filled.map(x => value(x.avg_throughput)), 1);
   const maxRequests = Math.max(...filled.map(x => value(x.requests)), 1);
+  // cache_creation_tokens is a disjoint bucket on top of prompt_tokens (Anthropic
+  // semantics), so it must be added to the denominator for a true hit rate.
   const hitRates = filled.map(d => {
-    const p = value(d.prompt_tokens);
-    return p > 0 ? (value(d.cached_tokens) / p) * 100 : 0;
+    const totalInput = value(d.prompt_tokens) + value(d.cache_creation_tokens);
+    return totalInput > 0 ? (value(d.cached_tokens) / totalInput) * 100 : 0;
   });
   const maxHitRate = Math.max(...hitRates, 100);
   const paddingX = 60;
@@ -41,8 +43,8 @@ export function TrendChart({
   const hInput = hoveredData ? Math.max(0, value(hoveredData.prompt_tokens) - hCached) : 0;
   const hOutput = hoveredData ? value(hoveredData.completion_tokens) : 0;
   const hThroughput = hoveredData ? value(hoveredData.avg_throughput) : 0;
-  const hHitRate = hoveredData && value(hoveredData.prompt_tokens) > 0
-    ? (hCached / value(hoveredData.prompt_tokens)) * 100 : 0;
+  const hTotalInput = hoveredData ? value(hoveredData.prompt_tokens) + value(hoveredData.cache_creation_tokens) : 0;
+  const hHitRate = hTotalInput > 0 ? (hCached / hTotalInput) * 100 : 0;
 
   return (
     <div className="widget" style={{ minHeight: '400px', width: '100%', position: 'relative' }}>
@@ -138,9 +140,9 @@ export function TrendChart({
                     </TooltipRow>
                     <TooltipRow label={t('Cached:')} labelColor="var(--color-green)">
                       <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                        {value(hoveredData.prompt_tokens) > 0 && (
+                        {hTotalInput > 0 && (
                           <span style={{ fontSize: '10px', color: 'var(--color-green)', opacity: 0.8 }}>
-                            ({((hCached / value(hoveredData.prompt_tokens)) * 100).toFixed(1)}%)
+                            ({hHitRate.toFixed(1)}%)
                           </span>
                         )}
                         <span style={{ fontWeight: 600 }}>{formatNumber(hCached)}</span>
@@ -192,7 +194,7 @@ export function TrendChart({
                 <TooltipRow label={t('Requests:')} labelColor="var(--color-pink)">
                   <span style={{ fontWeight: 600, color: 'var(--color-pink)' }}>{formatNumber(hoveredData.requests)}</span>
                 </TooltipRow>
-                {value(hoveredData.prompt_tokens) > 0 && (
+                {hTotalInput > 0 && (
                   <TooltipRow label={t('Cache Hit Rate:')} labelColor="var(--color-green)">
                     <span style={{ fontWeight: 600, color: 'var(--color-green)' }}>{hHitRate.toFixed(1)}%</span>
                   </TooltipRow>

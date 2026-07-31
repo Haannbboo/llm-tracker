@@ -189,7 +189,7 @@ export function fillGaps(data: DailyUsage[], granularity: 'hour' | 'day', period
   const effectiveTz = tz
   const zeroRow = (period: string): DailyUsage => ({
     period, requests: 0, prompt_tokens: 0, completion_tokens: 0,
-    cached_tokens: 0, total_tokens: 0, input_cost_usd: 0,
+    cached_tokens: 0, cache_creation_tokens: 0, total_tokens: 0, input_cost_usd: 0,
     output_cost_usd: 0, total_cost_usd: 0, avg_latency_ms: 0,
     latency_sum_ms: 0,
     avg_throughput: 0,
@@ -489,12 +489,15 @@ export function buildSessionInsights(sessions: import('./types').SessionSummary[
   }
 
   if (cacheSaver) {
+    // cache_creation_tokens is disjoint from prompt_tokens (Anthropic semantics),
+    // so it must be added to the denominator for a true hit rate.
+    const cacheSaverTotalInput = cacheSaver.prompt_tokens + cacheSaver.cache_creation_tokens
     insights.push({
       key: 'cache-saver',
       title: 'Best Cache Saver',
       session: cacheSaver,
       value: formatCompact(cacheSaver.cached_tokens),
-      detail: `${cacheSaver.prompt_tokens > 0 ? Math.round((cacheSaver.cached_tokens / cacheSaver.prompt_tokens) * 100) : 0}% cache hit estimate`,
+      detail: `${cacheSaverTotalInput > 0 ? Math.round((cacheSaver.cached_tokens / cacheSaverTotalInput) * 100) : 0}% cache hit estimate`,
       tone: 'success',
     })
   }

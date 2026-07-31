@@ -293,13 +293,23 @@ export function SessionDetailContent({
         <div>
           <div style={{ fontSize: '10px', color: 'var(--text-muted)', marginBottom: '6px', textTransform: 'uppercase', letterSpacing: '0.5px', fontWeight: 700 }}>{t('Cache Hit Rate')}</div>
           <div style={{ width: '120px' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', marginBottom: '4px' }}>
-              <span style={{ fontWeight: 700, color: 'var(--color-green)' }}>{session.prompt_tokens > 0 ? Math.round((session.cached_tokens / session.prompt_tokens) * 100) : 0}%</span>
-              <span style={{ color: 'var(--text-muted)' }}>{formatCompact(session.cached_tokens)} {t('tokens')}</span>
-            </div>
-            <div style={{ height: '6px', background: 'var(--progress-bg)', borderRadius: '3px', overflow: 'hidden', border: '1px solid var(--border-color)' }}>
-              <div style={{ height: '100%', background: 'var(--color-green)', width: `${session.prompt_tokens > 0 ? (session.cached_tokens / session.prompt_tokens) * 100 : 0}%` }} />
-            </div>
+            {(() => {
+              // cache_creation_tokens is disjoint from prompt_tokens (Anthropic
+              // semantics), so it must be added to the denominator for a true hit rate.
+              const totalInput = session.prompt_tokens + session.cache_creation_tokens
+              const hitRate = totalInput > 0 ? (session.cached_tokens / totalInput) * 100 : 0
+              return (
+                <>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', marginBottom: '4px' }}>
+                    <span style={{ fontWeight: 700, color: 'var(--color-green)' }}>{Math.round(hitRate)}%</span>
+                    <span style={{ color: 'var(--text-muted)' }}>{formatCompact(session.cached_tokens)} {t('tokens')}</span>
+                  </div>
+                  <div style={{ height: '6px', background: 'var(--progress-bg)', borderRadius: '3px', overflow: 'hidden', border: '1px solid var(--border-color)' }}>
+                    <div style={{ height: '100%', background: 'var(--color-green)', width: `${hitRate}%` }} />
+                  </div>
+                </>
+              )
+            })()}
           </div>
         </div>
 
@@ -396,12 +406,18 @@ export function SessionDetailContent({
             <div className="has-tooltip" style={{ borderBottom: 'none', display: 'block', width: '100%' }}>
               {(() => {
                 const promptUncached = Math.max(0, value(session.prompt_tokens) - value(session.cached_tokens));
+                const cacheCreation = value(session.cache_creation_tokens);
+                // total_tokens includes cache_creation_tokens for Anthropic sessions,
+                // so it's rendered as its own segment or the bar won't fill correctly.
                 const barTotal = value(session.total_tokens) || 1;
                 return (
                   <>
                     <div style={{ height: '6px', background: 'var(--progress-bg)', borderRadius: '3px', overflow: 'hidden', border: '1px solid var(--border-color)', display: 'flex', width: '100%' }}>
                       <div style={{ height: '100%', background: 'var(--color-green)', width: `${(value(session.cached_tokens) / barTotal) * 100}%` }} />
                       <div style={{ height: '100%', background: 'var(--color-blue)', width: `${(promptUncached / barTotal) * 100}%`, opacity: 0.7 }} />
+                      {cacheCreation > 0 && (
+                        <div style={{ height: '100%', background: 'var(--color-indigo)', width: `${(cacheCreation / barTotal) * 100}%` }} />
+                      )}
                       <div style={{ height: '100%', background: 'var(--color-purple)', width: `${(value(session.completion_tokens) / barTotal) * 100}%` }} />
                     </div>
                     <div className="tooltip-text" style={{ width: '180px', marginLeft: '-90px' }}>
@@ -414,6 +430,12 @@ export function SessionDetailContent({
                           <span style={{ color: 'var(--color-blue)' }}>● {t('Input')}:</span>
                           <span>{formatNumber(promptUncached)}</span>
                         </div>
+                        {cacheCreation > 0 && (
+                          <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                            <span style={{ color: 'var(--color-indigo)' }}>● {t('Cache write')}:</span>
+                            <span>{formatNumber(cacheCreation)}</span>
+                          </div>
+                        )}
                         <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                           <span style={{ color: 'var(--color-purple)' }}>● {t('Output')}:</span>
                           <span>{formatNumber(session.completion_tokens)}</span>
@@ -424,9 +446,12 @@ export function SessionDetailContent({
                 );
               })()}
             </div>
-            <div style={{ display: 'flex', gap: '8px', marginTop: '6px', fontSize: '9px', fontWeight: 600 }}>
+            <div style={{ display: 'flex', gap: '8px', marginTop: '6px', fontSize: '9px', fontWeight: 600, flexWrap: 'wrap' }}>
               <span style={{ color: 'var(--color-green)' }}>● {t('Cache')}</span>
               <span style={{ color: 'var(--color-blue)' }}>● {t('In')}</span>
+              {value(session.cache_creation_tokens) > 0 && (
+                <span style={{ color: 'var(--color-indigo)' }}>● {t('Cache write')}</span>
+              )}
               <span style={{ color: 'var(--color-purple)' }}>● {t('Out')}</span>
             </div>
           </div>

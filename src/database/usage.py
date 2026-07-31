@@ -474,9 +474,12 @@ def _finalize_usage_summary(
     if ttft_values:
         summary["avg_ttft_ms"] = sum(ttft_values) / len(ttft_values)
 
-    prompt_tokens = summary["prompt_tokens"]
+    # prompt_tokens already includes cached_tokens as a subset (see extract_usage
+    # in src/utils.py); cache_creation_tokens is a disjoint bucket on top of that,
+    # so it must be added to the denominator to get true cache efficiency.
+    total_input_tokens = summary["prompt_tokens"] + summary["cache_creation_tokens"]
     summary["cache_hit_rate"] = (
-        summary["cached_tokens"] / prompt_tokens if prompt_tokens else 0.0
+        summary["cached_tokens"] / total_input_tokens if total_input_tokens else 0.0
     )
 
     return summary
@@ -589,6 +592,7 @@ def _daily_usage_token_columns(*, include_reasoning: bool = True) -> tuple[Any, 
     columns.extend(
         [
             func.sum(UsageDaily.cached_tokens).label("cached_tokens"),
+            func.sum(UsageDaily.cache_creation_tokens).label("cache_creation_tokens"),
             func.sum(UsageDaily.total_tokens).label("total_tokens"),
         ]
     )
@@ -1088,6 +1092,9 @@ def _summarize_usage_raw(
                 "reasoning_tokens"
             ),
             func.coalesce(func.sum(Usage.cached_tokens), 0).label("cached_tokens"),
+            func.coalesce(func.sum(Usage.cache_creation_tokens), 0).label(
+                "cache_creation_tokens"
+            ),
             func.coalesce(func.sum(Usage.total_tokens), 0).label("total_tokens"),
             func.avg(Usage.latency_ms).label("avg_latency_ms"),
             latency_sum.label("latency_sum_ms"),
@@ -1419,6 +1426,9 @@ def aggregate_usage_by_period(
                 / func.nullif(func.sum(Usage.latency_ms), 0)
             ).label("avg_throughput"),
             func.coalesce(func.sum(Usage.cached_tokens), 0).label("cached_tokens"),
+            func.coalesce(func.sum(Usage.cache_creation_tokens), 0).label(
+                "cache_creation_tokens"
+            ),
             func.coalesce(func.sum(Usage.total_tokens), 0).label("total_tokens"),
             func.coalesce(func.sum(Usage.input_cost_usd), 0).label("input_cost_usd"),
             func.coalesce(func.sum(Usage.output_cost_usd), 0).label("output_cost_usd"),
@@ -1451,6 +1461,7 @@ def aggregate_usage_by_period(
                     "completion_tokens": row.completion_tokens,
                     "avg_throughput": _normalize_value(row.avg_throughput),
                     "cached_tokens": row.cached_tokens,
+                    "cache_creation_tokens": row.cache_creation_tokens,
                     "total_tokens": row.total_tokens,
                     "input_cost_usd": _normalize_value(row.input_cost_usd),
                     "output_cost_usd": _normalize_value(row.output_cost_usd),
@@ -1532,6 +1543,7 @@ def aggregate_daily_by_dimension(
             func.sum(UsageDaily.request_count).label("requests"),
             func.sum(UsageDaily.prompt_tokens).label("prompt_tokens"),
             func.sum(UsageDaily.cached_tokens).label("cached_tokens"),
+            func.sum(UsageDaily.cache_creation_tokens).label("cache_creation_tokens"),
             func.sum(UsageDaily.total_tokens).label("total_tokens"),
             func.sum(UsageDaily.total_cost_usd).label("total_cost_usd"),
             func.sum(UsageDaily.completion_tokens).label("completion_tokens"),

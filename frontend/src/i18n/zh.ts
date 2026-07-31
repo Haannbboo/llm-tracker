@@ -141,10 +141,12 @@ export const zh: Record<string, string> = {
   '(Prompt:': '（提示词：',
   ' chars)': ' 字符）',
   'Cache read': '缓存读取',
+  'Cache write': '缓存写入',
   'Reasoning': '推理',
 
   // Cost tooltip
   'Cache:': '缓存：',
+  'Cache write:': '缓存写入：',
 
   // TTFT/Latency titles
   'Time To First Token': '首 Token 时间',

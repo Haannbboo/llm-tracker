@@ -6,6 +6,7 @@ export type UsageSummary = {
   completion_tokens: number | null
   reasoning_tokens: number | null
   cached_tokens: number | null
+  cache_creation_tokens: number | null
   total_tokens: number | null
   avg_latency_ms: number | null
   latency_sum_ms: number | null
@@ -82,6 +83,7 @@ export type UsageRow = {
   completion_tokens: number | null
   reasoning_tokens: number | null
   cached_tokens: number | null
+  cache_creation_tokens: number | null
   total_tokens: number | null
   latency_ms: number | null
   ttft_ms: number | null
@@ -100,6 +102,7 @@ export type DailyUsage = {
   prompt_tokens: number | null
   completion_tokens: number | null
   cached_tokens: number | null
+  cache_creation_tokens: number | null
   total_tokens: number | null
   input_cost_usd: number | null
   output_cost_usd: number | null
@@ -178,6 +181,7 @@ export type SessionSummary = {
   prompt_tokens: number
   completion_tokens: number
   cached_tokens: number
+  cache_creation_tokens: number
   total_cost_usd: number
   avg_latency_ms: number
   latency_sum_ms: number

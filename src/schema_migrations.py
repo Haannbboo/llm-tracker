@@ -563,6 +563,13 @@ def migrate_database(db_path: str | None = None) -> list[str]:
             "CREATE INDEX IF NOT EXISTS ix_usage_client_ip ON usage (client_ip)",
         ):
             applied.append("usage.ix_client_ip")
+        if _ensure_index(
+            engine,
+            "usage",
+            "ix_usage_session_id",
+            "CREATE INDEX IF NOT EXISTS ix_usage_session_id ON usage (session_id)",
+        ):
+            applied.append("usage.ix_session_id")
 
     if _table_exists(engine, "base_urls"):
         if _drop_column(engine, "base_urls", "validation_status"):
@@ -805,6 +812,56 @@ def migrate_database(db_path: str | None = None) -> list[str]:
                 postgresql_definition=definition,
             ):
                 applied.append(f"sessions.{col}")
+
+    sessions_cache_creation_added = False
+    if _table_exists(engine, "sessions"):
+        sessions_cache_creation_added = _ensure_column(
+            engine,
+            "sessions",
+            "cache_creation_tokens",
+            sqlite_definition="INTEGER NOT NULL DEFAULT 0",
+            postgresql_definition="INTEGER NOT NULL DEFAULT 0",
+        )
+        if sessions_cache_creation_added:
+            applied.append("sessions.cache_creation_tokens")
+
+        # Also check if backfill is needed even if the column already existed
+        # (e.g. a previous run added the column but crashed/restarted before
+        # the backfill below completed).
+        if not sessions_cache_creation_added and _table_exists(engine, "usage"):
+            with engine.connect() as connection:
+                needs_backfill = connection.execute(
+                    text(
+                        "SELECT 1 FROM sessions s WHERE s.cache_creation_tokens = 0 "
+                        "AND EXISTS (SELECT 1 FROM usage u WHERE u.session_id = s.session_id "
+                        "AND u.cache_creation_tokens > 0) LIMIT 1"
+                    )
+                ).scalar()
+                if needs_backfill:
+                    sessions_cache_creation_added = True
+
+    # New column defaults existing rows to 0; backfill from usage so sessions
+    # created before this migration report accurate cache-write totals. A
+    # targeted UPDATE (not rebuild_sessions_from_usage, which deletes and
+    # recreates rows and would drop evaluation columns it doesn't set).
+    if sessions_cache_creation_added and _table_exists(engine, "usage"):
+        with engine.begin() as connection:
+            connection.execute(
+                text(
+                    """
+                    UPDATE sessions
+                    SET cache_creation_tokens = (
+                        SELECT COALESCE(SUM(u.cache_creation_tokens), 0)
+                        FROM usage u
+                        WHERE u.session_id = sessions.session_id
+                    )
+                    WHERE EXISTS (
+                        SELECT 1 FROM usage u WHERE u.session_id = sessions.session_id
+                    )
+                    """
+                )
+            )
+        applied.append("sessions.cache_creation_tokens_backfill")
 
     if _table_exists(engine, "sessions"):
         if _ensure_index(

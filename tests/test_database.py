@@ -903,7 +903,9 @@ def test_summarize_usage_window_groups_by_session_source_and_model(fresh_db):
     assert summary["summary"]["tool_tokens"] == 4
     assert summary["summary"]["cache_creation_tokens"] == 30
     assert summary["summary"]["total_tokens"] == 430
-    assert summary["summary"]["cache_hit_rate"] == 150 / 350
+    # cache_hit_rate = cached / (prompt + cache_creation), since cache_creation
+    # tokens are a disjoint bucket on top of prompt_tokens (Anthropic semantics).
+    assert summary["summary"]["cache_hit_rate"] == 150 / (350 + 30)
     assert summary["summary"]["avg_latency_ms"] == 2000
     assert summary["summary"]["avg_ttft_ms"] == 100
     assert summary["summary"]["total_cost_usd"] == 1.15
@@ -1120,6 +1122,7 @@ def test_aggregate_usage_by_period_includes_cost_totals(fresh_db):
             "completion_tokens": 15,
             "avg_throughput": 50.0,
             "cached_tokens": 6,
+            "cache_creation_tokens": 0,
             "total_tokens": 45,
             "input_cost_usd": 6e-05,
             "output_cost_usd": 9e-05,
@@ -4728,6 +4731,115 @@ def test_migration_adds_session_task_title_zh(
     assert "task_title_zh" in schema_migrations_module._table_column_names(
         engine, "sessions"
     )
+
+
+def test_migration_adds_session_cache_creation_tokens(
+    database_module, schema_migrations_module, isolated_home
+):
+    db_path = str(isolated_home / "usage.db")
+    database_module.init_db(db_path)
+    engine = database_module.get_engine(db_path)
+
+    with engine.begin() as connection:
+        connection.execute(
+            database_module.text(
+                "ALTER TABLE sessions DROP COLUMN cache_creation_tokens"
+            )
+        )
+
+    applied = schema_migrations_module.migrate_database(db_path)
+    applied_again = schema_migrations_module.migrate_database(db_path)
+
+    assert "sessions.cache_creation_tokens" in applied
+    assert "sessions.cache_creation_tokens" not in applied_again
+    assert "cache_creation_tokens" in schema_migrations_module._table_column_names(
+        engine, "sessions"
+    )
+
+
+def test_migration_backfills_session_cache_creation_tokens_without_touching_evaluation(
+    database_module, schema_migrations_module, isolated_home
+):
+    """The new column defaults existing rows to 0; the migration must backfill
+    it from usage without wiping evaluation fields (unlike rebuild_sessions_from_usage,
+    which deletes and recreates rows and would drop them)."""
+    db_path = str(isolated_home / "usage.db")
+    database_module.init_db(db_path)
+    engine = database_module.get_engine(db_path)
+
+    database_module.log_usage(
+        database_module.Usage(
+            ts=TS_2026_05_09_10,
+            provider="anthropic",
+            model="claude-sonnet-4-6",
+            client_source="claude-code",
+            session_id="sess-backfill",
+            endpoint="/v1/messages",
+            prompt_tokens=100,
+            completion_tokens=50,
+            cached_tokens=20,
+            cache_creation_tokens=500,
+            total_tokens=650,
+            input_cost_usd=0.01,
+            output_cost_usd=0.02,
+            total_cost_usd=0.03,
+            status=200,
+        ),
+        db_path=db_path,
+    )
+
+    database_module.upsert_session_evaluation(
+        "sess-backfill",
+        outcome="solved",
+        source="llm",
+        task_title="Test task",
+        db_path=db_path,
+    )
+
+    from sqlalchemy.orm import Session
+
+    def assert_backfilled_and_evaluation_intact():
+        with Session(engine) as session:
+            record = session.get(database_module.SessionRecord, "sess-backfill")
+            assert record.cache_creation_tokens == 500
+            assert record.outcome == "solved"
+            assert record.task_title == "Test task"
+
+    # Scenario 1: column never existed (fresh upgrade path).
+    with engine.begin() as connection:
+        connection.execute(
+            database_module.text(
+                "ALTER TABLE sessions DROP COLUMN cache_creation_tokens"
+            )
+        )
+
+    applied = schema_migrations_module.migrate_database(db_path)
+    assert "sessions.cache_creation_tokens" in applied
+    assert "sessions.cache_creation_tokens_backfill" in applied
+    assert_backfilled_and_evaluation_intact()
+
+    # Scenario 2: once truly in sync, a subsequent run should not redo the
+    # (expensive) full-table backfill.
+    applied_again = schema_migrations_module.migrate_database(db_path)
+    assert "sessions.cache_creation_tokens" not in applied_again
+    assert "sessions.cache_creation_tokens_backfill" not in applied_again
+
+    # Scenario 3: crash recovery -- column exists (from a prior run that added
+    # it) but the backfill UPDATE never ran, e.g. the process died in between.
+    # The next migrate_database() call must detect the drift and self-heal
+    # instead of leaving the column permanently stuck at 0.
+    with engine.begin() as connection:
+        connection.execute(
+            database_module.text(
+                "UPDATE sessions SET cache_creation_tokens = 0 "
+                "WHERE session_id = 'sess-backfill'"
+            )
+        )
+
+    applied_after_crash = schema_migrations_module.migrate_database(db_path)
+    assert "sessions.cache_creation_tokens" not in applied_after_crash
+    assert "sessions.cache_creation_tokens_backfill" in applied_after_crash
+    assert_backfilled_and_evaluation_intact()
 
 
 @pytest.mark.slow

@@ -23,6 +23,7 @@ class ProviderConfig:
     base_url: str
     price_multiplier: float = 1.0
     api_key: str | None = field(default=None, repr=False)
+    auth_scheme: str = "bearer"  # "bearer" or "x-api-key" (Anthropic-native)
 
 
 @dataclass(frozen=True)

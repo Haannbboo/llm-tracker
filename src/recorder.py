@@ -74,6 +74,7 @@ def record_usage(
         prompt_tokens=prompt_tokens,
         completion_tokens=completion_tokens,
         cached_tokens=cached_tokens,
+        cache_creation_tokens=cache_creation_tokens,
         provider=provider,
         model=model,
     )

@@ -318,6 +318,44 @@ def test_calculate_costs_clamps_negative_uncached_input(costs_module, config_mod
     }
 
 
+def test_calculate_costs_includes_cache_write_cost(costs_module, config_module):
+    result = costs_module.calculate_costs(
+        prompt_tokens=1000,
+        completion_tokens=500,
+        cached_tokens=200,
+        cache_creation_tokens=100,
+        model_cost=config_module.ModelCost(
+            input=2.0, output=4.0, cache_read=0.5, cache_write=3.0
+        ),
+    )
+
+    # input: (1000-200)*2.0/1e6=0.0016, cache_read: 200*0.5/1e6=0.0001,
+    # cache_write: 100*3.0/1e6=0.0003, output: 500*4.0/1e6=0.002
+    assert result == {
+        "input_cost_usd": Decimal("0.0020"),
+        "output_cost_usd": Decimal("0.002"),
+        "total_cost_usd": Decimal("0.0040"),
+    }
+
+
+def test_calculate_costs_treats_missing_cache_write_price_as_zero(
+    costs_module, config_module
+):
+    result = costs_module.calculate_costs(
+        prompt_tokens=1000,
+        completion_tokens=0,
+        cached_tokens=0,
+        cache_creation_tokens=500,
+        model_cost=config_module.ModelCost(input=2.0, output=4.0, cache_read=0.5),
+    )
+
+    assert result == {
+        "input_cost_usd": Decimal("0.002"),
+        "output_cost_usd": Decimal("0"),
+        "total_cost_usd": Decimal("0.002"),
+    }
+
+
 def test_calculate_costs_applies_provider_price_multiplier(costs_module, config_module):
     config_module.MODEL_COSTS.clear()
     config_module.PROVIDER_MODEL_COSTS.clear()
