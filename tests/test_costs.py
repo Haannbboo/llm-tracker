@@ -80,6 +80,125 @@ def test_resolve_model_cost_matches_model_names_case_insensitively(
     )
 
 
+def test_resolve_model_cost_matches_containing_model_name(costs_module, config_module):
+    config_module.MODEL_COSTS.clear()
+    config_module.MODEL_COSTS.update(
+        {
+            "openrouter/xiaomi/mimo-v2.5-pro": config_module.ModelCost(
+                input=1.0,
+                output=3.0,
+                cache_read=0.2,
+            )
+        }
+    )
+    config_module.PROVIDER_MODEL_COSTS.clear()
+
+    assert costs_module.resolve_model_cost(
+        "openrouter", "mimo-v2.5-pro"
+    ) == config_module.ModelCost(input=1.0, output=3.0, cache_read=0.2)
+
+
+def test_resolve_model_cost_uses_cheapest_containing_match(costs_module, config_module):
+    config_module.MODEL_COSTS.clear()
+    config_module.MODEL_COSTS.update(
+        {
+            "openrouter/xiaomi/mimo-v2.5-pro": config_module.ModelCost(
+                input=1.0,
+                output=3.0,
+                cache_read=0.2,
+            ),
+            "gateway/xiaomi/mimo-v2.5-pro": config_module.ModelCost(
+                input=0.5,
+                output=1.0,
+                cache_read=0.1,
+            ),
+        }
+    )
+    config_module.PROVIDER_MODEL_COSTS.clear()
+
+    assert costs_module.resolve_model_cost(
+        "openrouter", "mimo-v2.5-pro"
+    ) == config_module.ModelCost(input=0.5, output=1.0, cache_read=0.1)
+
+
+def test_resolve_model_cost_does_not_match_model_variant(costs_module, config_module):
+    config_module.MODEL_COSTS.clear()
+    config_module.MODEL_COSTS.update(
+        {
+            "openrouter/openai/gpt-5-mini": config_module.ModelCost(
+                input=0.25,
+                output=2.0,
+                cache_read=0.025,
+            )
+        }
+    )
+    config_module.PROVIDER_MODEL_COSTS.clear()
+
+    assert costs_module.resolve_model_cost("openrouter", "gpt-5") is None
+
+
+def test_resolve_model_cost_prefers_provider_containing_match(
+    costs_module, config_module
+):
+    config_module.MODEL_COSTS.clear()
+    config_module.MODEL_COSTS.update(
+        {
+            "openrouter/xiaomi/mimo-v2.5-pro": config_module.ModelCost(
+                input=0.1,
+                output=0.1,
+                cache_read=0.1,
+            )
+        }
+    )
+    config_module.PROVIDER_MODEL_COSTS.clear()
+    config_module.PROVIDER_MODEL_COSTS.update(
+        {
+            "x": {
+                "gateway/mimo-v2.5-pro": config_module.ModelCost(
+                    input=2.0,
+                    output=3.0,
+                    cache_read=0.2,
+                )
+            }
+        }
+    )
+
+    assert costs_module.resolve_model_cost(
+        "x", "mimo-v2.5-pro"
+    ) == config_module.ModelCost(input=2.0, output=3.0, cache_read=0.2)
+
+
+def test_resolve_model_cost_global_exact_beats_provider_containing(
+    costs_module, config_module
+):
+    config_module.MODEL_COSTS.clear()
+    config_module.MODEL_COSTS.update(
+        {
+            "mimo-v2.5-pro": config_module.ModelCost(
+                input=1.0,
+                output=2.0,
+                cache_read=0.1,
+            )
+        }
+    )
+    config_module.PROVIDER_MODEL_COSTS.clear()
+    config_module.PROVIDER_MODEL_COSTS.update(
+        {
+            "x": {
+                "gateway/mimo-v2.5-pro": config_module.ModelCost(
+                    input=5.0,
+                    output=6.0,
+                    cache_read=0.5,
+                )
+            }
+        }
+    )
+
+    assert costs_module.resolve_model_cost(
+        "x", "mimo-v2.5-pro"
+    ) == config_module.ModelCost(input=1.0, output=2.0, cache_read=0.1)
+
+
 def test_resolve_model_cost_returns_none_for_unknown_model(costs_module, config_module):
     config_module.MODEL_COSTS.clear()
     config_module.PROVIDER_MODEL_COSTS.clear()

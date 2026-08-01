@@ -15,6 +15,8 @@ const proxiedRoutes = [
   '/evaluation-jobs/active',
   '/evaluation-jobs/job-123',
   '/sessions/session-123/evaluation-jobs',
+  '/pricing',
+  '/pricing/z-ai/glm-5.1-20260406',
 ]
 
 for (const route of proxiedRoutes) {

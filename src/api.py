@@ -19,6 +19,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from config.app import (
     CONFIG,
     CONFIG_PATH,
+    ResolvedCost,
     _apply_patch,
     _config_lock,
     refresh_runtime_config,
@@ -27,6 +28,7 @@ from config.app import (
 from config.server_config import load_server_config
 
 from ._version import get_version
+from .costs import resolve_cost_match
 from .database import (
     VALID_OUTCOMES,
     VALID_SOURCES,
@@ -940,6 +942,71 @@ async def get_pricing(provider: str | None = None):
             result[key] = _pricing_entry(resolved_cost, provider_name, 1.0)
 
     return result
+
+
+@app.get("/pricing/{model:path}")
+async def get_model_pricing(model: str, provider: str | None = None):
+    """Return resolved pricing for a single model.
+
+    Follows the same resolution used at record time: config overrides first,
+    then LiteLLM, with a containing-name fallback when no exact match exists.
+    """
+    from config.app import resolve_all_costs
+    from config.pricing import get_remote_pricing
+
+    if not model:
+        raise HTTPException(status_code=422, detail="model must not be empty")
+
+    with _config_lock:
+        config_snapshot = dict(CONFIG)
+
+    resolved = resolve_all_costs(config_snapshot, get_remote_pricing())
+    model_costs = {key: rc.cost for key, rc in resolved.global_costs.items()}
+    provider_model_costs = {
+        provider_name: {key: rc.cost for key, rc in costs.items()}
+        for provider_name, costs in resolved.provider_costs.items()
+    }
+
+    multiplier = 1.0
+    if provider is not None:
+        provider_config = config_snapshot.get("providers", {}).get(provider, {})
+        if isinstance(provider_config, dict):
+            multiplier = float(provider_config.get("price_multiplier", 1.0))
+
+    match = resolve_cost_match(provider, model, model_costs, provider_model_costs)
+    if match is None:
+        return {
+            "model": model,
+            "provider": provider,
+            "resolved": False,
+            "scope": None,
+            "source": None,
+            "input": 0.0,
+            "output": 0.0,
+            "cache_read": 0.0,
+            "cache_write": None,
+            "effective_input": 0.0,
+            "effective_output": 0.0,
+            "effective_cache_read": 0.0,
+            "effective_cache_write": None,
+            "multiplier": multiplier,
+        }
+
+    if match.scope == "provider" and provider is not None:
+        source = resolved.provider_costs[provider][match.key].source
+        scope = provider
+    else:
+        source = resolved.global_costs[match.key].source
+        scope = "global"
+
+    return {
+        "model": match.key,
+        "provider": provider,
+        "resolved": True,
+        **_pricing_entry(
+            ResolvedCost(cost=match.cost, source=source), scope, multiplier
+        ),
+    }
 
 
 @app.post("/test-connectivity")

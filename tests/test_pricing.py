@@ -147,6 +147,10 @@ def test_is_chat_model_embedding():
     assert _is_chat_model({"mode": "embedding"}) is False
 
 
+def test_is_chat_model_responses():
+    assert _is_chat_model({"mode": "responses"}) is True
+
+
 def test_parse_model_entry_converts_per_token_to_per_million():
     entry = {
         "mode": "chat",
@@ -175,6 +179,23 @@ def test_parse_model_entry_no_cache_read():
     assert result is not None
     _, cost = result
     assert cost.cache_read == 0.0
+
+
+def test_parse_model_entry_responses_with_cache_read():
+    entry = {
+        "mode": "responses",
+        "input_cost_per_token": 1.25e-06,
+        "output_cost_per_token": 1e-05,
+        "cache_read_input_token_cost": 1.25e-07,
+    }
+    result = _parse_model_entry("gpt-5-codex", entry)
+
+    assert result is not None
+    key, cost = result
+    assert key == "gpt-5-codex"
+    assert cost.input == 1.25
+    assert cost.output == 10.0
+    assert cost.cache_read == 0.125
 
 
 def test_parse_model_entry_with_cache_creation_cost():
@@ -775,6 +796,218 @@ def test_pricing_provider_override_beats_global_and_fallback_gets_multiplier(
     assert data["global-only"]["input"] == 3.0
     assert data["global-only"]["multiplier"] == 2.0
     assert data["global-only"]["effective_input"] == 6.0
+
+
+def test_single_model_pricing_contains_litellm_match(api_module, monkeypatch):
+    api_module.CONFIG.clear()
+    api_module.CONFIG.update({"models": {}, "providers": {}})
+    monkeypatch.setattr(
+        "config.pricing.get_remote_pricing",
+        lambda: {
+            "openrouter/xiaomi/mimo-v2.5-pro": ModelCost(
+                input=1.0, output=3.0, cache_read=0.2
+            )
+        },
+    )
+
+    response = TestClient(api_module.app).get("/pricing/mimo-v2.5-pro")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["resolved"] is True
+    assert data["model"] == "openrouter/xiaomi/mimo-v2.5-pro"
+    assert data["scope"] == "global"
+    assert data["source"] == "litellm"
+    assert data["input"] == 1.0
+    assert data["output"] == 3.0
+    assert data["cache_read"] == 0.2
+    assert data["multiplier"] == 1.0
+
+
+def test_single_model_pricing_yaml_override_beats_litellm(api_module, monkeypatch):
+    api_module.CONFIG.clear()
+    api_module.CONFIG.update(
+        {
+            "models": {
+                "test-model": {"cost": {"input": 2.0, "output": 4.0, "cacheRead": 0.2}},
+            },
+            "providers": {},
+        }
+    )
+    monkeypatch.setattr(
+        "config.pricing.get_remote_pricing",
+        lambda: {"test-model": ModelCost(input=9.0, output=9.0, cache_read=9.0)},
+    )
+
+    response = TestClient(api_module.app).get("/pricing/test-model")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["resolved"] is True
+    assert data["model"] == "test-model"
+    assert data["source"] == "yaml"
+    assert data["input"] == 2.0
+    assert data["output"] == 4.0
+
+
+def test_single_model_pricing_provider_scope_and_multiplier(api_module, monkeypatch):
+    api_module.CONFIG.clear()
+    api_module.CONFIG.update(
+        {
+            "models": {
+                "test-model": {"cost": {"input": 1.0, "output": 2.0, "cacheRead": 0.1}},
+            },
+            "providers": {
+                "prov-a": {
+                    "base_url": "https://a.com",
+                    "price_multiplier": 2.0,
+                    "models": {
+                        "test-model": {
+                            "cost": {"input": 5.0, "output": 10.0, "cacheRead": 0.5}
+                        },
+                    },
+                },
+            },
+        }
+    )
+    monkeypatch.setattr("config.pricing.get_remote_pricing", lambda: {})
+
+    response = TestClient(api_module.app).get("/pricing/test-model?provider=prov-a")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["resolved"] is True
+    assert data["model"] == "test-model"
+    assert data["scope"] == "prov-a"
+    assert data["source"] == "yaml"
+    assert data["input"] == 5.0
+    assert data["multiplier"] == 2.0
+    assert data["effective_input"] == 10.0
+    assert data["effective_output"] == 20.0
+
+
+def test_single_model_pricing_cheapest_contains_match(api_module, monkeypatch):
+    api_module.CONFIG.clear()
+    api_module.CONFIG.update({"models": {}, "providers": {}})
+    monkeypatch.setattr(
+        "config.pricing.get_remote_pricing",
+        lambda: {
+            "openrouter/xiaomi/mimo-v2.5-pro": ModelCost(
+                input=1.0, output=3.0, cache_read=0.2
+            ),
+            "gateway/xiaomi/mimo-v2.5-pro": ModelCost(
+                input=0.5, output=1.0, cache_read=0.1
+            ),
+        },
+    )
+
+    response = TestClient(api_module.app).get("/pricing/mimo-v2.5-pro")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["resolved"] is True
+    assert data["model"] == "gateway/xiaomi/mimo-v2.5-pro"
+    assert data["input"] == 0.5
+
+
+def test_single_model_pricing_slashed_model_exact_yaml(api_module, monkeypatch):
+    api_module.CONFIG.clear()
+    api_module.CONFIG.update(
+        {
+            "models": {
+                "z-ai/glm-5.1-20260406": {
+                    "cost": {"input": 0.98, "output": 3.08, "cacheRead": 0.182}
+                },
+            },
+            "providers": {},
+        }
+    )
+    monkeypatch.setattr("config.pricing.get_remote_pricing", lambda: {})
+
+    response = TestClient(api_module.app).get("/pricing/z-ai/glm-5.1-20260406")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["resolved"] is True
+    assert data["model"] == "z-ai/glm-5.1-20260406"
+    assert data["source"] == "yaml"
+    assert data["input"] == 0.98
+
+
+def test_single_model_pricing_unresolved(api_module, monkeypatch):
+    api_module.CONFIG.clear()
+    api_module.CONFIG.update({"models": {}, "providers": {}})
+    monkeypatch.setattr("config.pricing.get_remote_pricing", lambda: {})
+
+    response = TestClient(api_module.app).get("/pricing/unknown-model")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["resolved"] is False
+    assert data["model"] == "unknown-model"
+    assert data["input"] == 0.0
+    assert data["output"] == 0.0
+
+
+def test_single_model_pricing_provider_contains_match(api_module, monkeypatch):
+    api_module.CONFIG.clear()
+    api_module.CONFIG.update(
+        {
+            "models": {},
+            "providers": {
+                "prov-a": {
+                    "base_url": "https://a.com",
+                    "models": {
+                        "gateway/mimo-v2.5-pro": {
+                            "cost": {"input": 2.0, "output": 4.0, "cacheRead": 0.2}
+                        },
+                    },
+                },
+            },
+        }
+    )
+    monkeypatch.setattr("config.pricing.get_remote_pricing", lambda: {})
+
+    response = TestClient(api_module.app).get("/pricing/mimo-v2.5-pro?provider=prov-a")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["resolved"] is True
+    assert data["model"] == "gateway/mimo-v2.5-pro"
+    assert data["scope"] == "prov-a"
+    assert data["source"] == "yaml"
+    assert data["input"] == 2.0
+
+
+def test_single_model_pricing_case_insensitive(api_module, monkeypatch):
+    api_module.CONFIG.clear()
+    api_module.CONFIG.update({"models": {}, "providers": {}})
+    monkeypatch.setattr(
+        "config.pricing.get_remote_pricing",
+        lambda: {
+            "openrouter/xiaomi/mimo-v2.5-pro": ModelCost(
+                input=1.0, output=3.0, cache_read=0.2
+            )
+        },
+    )
+
+    response = TestClient(api_module.app).get("/pricing/Mimo-V2.5-Pro")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["resolved"] is True
+    assert data["model"] == "openrouter/xiaomi/mimo-v2.5-pro"
+    assert data["input"] == 1.0
+
+
+def test_single_model_pricing_rejects_empty_model(api_module, monkeypatch):
+    api_module.CONFIG.clear()
+    api_module.CONFIG.update({"models": {}, "providers": {}})
+    monkeypatch.setattr("config.pricing.get_remote_pricing", lambda: {})
+
+    response = TestClient(api_module.app).get("/pricing/")
+
+    assert response.status_code == 422
 
 
 def test_patch_config_applies_patches_and_refreshes_runtime(
