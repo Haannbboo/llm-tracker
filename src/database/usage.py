@@ -6,6 +6,7 @@ Extracted from database/__init__.py during Phase 5 refactoring.
 from __future__ import annotations
 
 import calendar
+import logging
 from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any
@@ -25,6 +26,8 @@ from sqlalchemy.orm import Session
 from ..utils import micros_to_secs, secs_to_micros
 from .engine import get_engine
 from .models import BaseUrl, ToolCall, Usage, UsageDaily
+
+logger = logging.getLogger(__name__)
 
 
 def _iso_to_micros(value: str) -> int:
@@ -170,6 +173,19 @@ def merge_duplicate_usage(
             if value is not None and (is_otlp or getattr(existing, field) is None):
                 setattr(existing, field, value)
         session.commit()
+
+    logger.info(
+        "merged duplicate usage from %s into %s ts=%s model=%s prompt=%s "
+        "completion=%s cached=%s total=%s",
+        "otlp" if is_otlp else "proxy",
+        "otlp" if not is_otlp else "proxy",
+        ts,
+        model,
+        prompt_tokens,
+        completion_tokens,
+        cached_tokens,
+        total_tokens,
+    )
 
     if session_id_was_empty and existing.session_id:
         try:
