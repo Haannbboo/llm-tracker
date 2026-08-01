@@ -1,12 +1,16 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from decimal import Decimal
 
 from config.app import (
     MODEL_COSTS,
+    MODEL_SEGMENT_COSTS,
     PROVIDER_MAP,
     PROVIDER_MODEL_COSTS,
+    PROVIDER_MODEL_SEGMENT_COSTS,
     ModelCost,
+    build_segment_index,
     normalize_model_cost_key,
 )
 
@@ -20,12 +24,76 @@ def get_provider_price_multiplier(provider: str | None) -> Decimal:
     return Decimal(str(provider_config.price_multiplier))
 
 
-def resolve_model_cost(provider: str, model: str) -> ModelCost | None:
+@dataclass(frozen=True)
+class CostMatch:
+    cost: ModelCost
+    key: str
+    scope: str  # "provider" or "global"
+
+
+def resolve_cost_match(
+    provider: str | None,
+    model: str,
+    model_costs: dict[str, ModelCost] | None = None,
+    provider_model_costs: dict[str, dict[str, ModelCost]] | None = None,
+) -> CostMatch | None:
+    """Resolve a model to a cost, honoring config overrides before LiteLLM.
+
+    Priority: provider exact -> global exact -> provider containing
+    (cheapest) -> global containing (cheapest).
+    """
+    using_runtime_maps = model_costs is None
+    model_costs = MODEL_COSTS if model_costs is None else model_costs
+    provider_model_costs = (
+        PROVIDER_MODEL_COSTS if provider_model_costs is None else provider_model_costs
+    )
     normalized_model = normalize_model_cost_key(model)
-    provider_cost = PROVIDER_MODEL_COSTS.get(provider, {}).get(normalized_model)
+    provider_costs = (
+        provider_model_costs.get(provider, {}) if provider is not None else {}
+    )
+
+    provider_cost = provider_costs.get(normalized_model)
     if provider_cost is not None:
-        return provider_cost
-    return MODEL_COSTS.get(normalized_model)
+        return CostMatch(
+            cost=provider_cost,
+            key=normalized_model,
+            scope="provider",
+        )
+
+    global_cost = model_costs.get(normalized_model)
+    if global_cost is not None:
+        return CostMatch(cost=global_cost, key=normalized_model, scope="global")
+
+    if using_runtime_maps:
+        # Hot record path: use the prebuilt segment indexes to avoid a full
+        # scan of the LiteLLM pricing map on every lookup that misses an exact
+        # key.
+        provider_segments = (
+            PROVIDER_MODEL_SEGMENT_COSTS.get(provider, {})
+            if provider is not None
+            else {}
+        )
+        model_segments = MODEL_SEGMENT_COSTS
+    else:
+        provider_segments = build_segment_index(provider_costs)
+        model_segments = build_segment_index(model_costs)
+
+    provider_match = provider_segments.get(normalized_model)
+    if provider_match is not None:
+        key, cost = provider_match
+        return CostMatch(cost=cost, key=key, scope="provider")
+
+    global_match = model_segments.get(normalized_model)
+    if global_match is not None:
+        key, cost = global_match
+        return CostMatch(cost=cost, key=key, scope="global")
+
+    return None
+
+
+def resolve_model_cost(provider: str, model: str) -> ModelCost | None:
+    match = resolve_cost_match(provider, model)
+    return match.cost if match is not None else None
 
 
 def calculate_costs(

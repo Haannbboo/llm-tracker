@@ -10,6 +10,7 @@ from .models import (
     ProviderConfig,
     ResolvedCost,
     ResolvedCosts,
+    build_segment_index,
     expand_path,
     get_tracker_home,
     normalize_model_cost_key,
@@ -247,6 +248,11 @@ def refresh_runtime_config(path: str | None = None) -> dict[str, Any]:
 
     provider_map, model_map = build_maps(updated_config)
     model_costs, provider_model_costs = build_cost_maps(updated_config, remote_costs)
+    model_segment_costs = build_segment_index(model_costs)
+    provider_model_segment_costs = {
+        provider_name: build_segment_index(costs)
+        for provider_name, costs in provider_model_costs.items()
+    }
 
     with _config_lock:
         _replace_contents(CONFIG, updated_config)
@@ -254,6 +260,8 @@ def refresh_runtime_config(path: str | None = None) -> dict[str, Any]:
         _replace_contents(MODEL_MAP, model_map)
         _replace_contents(MODEL_COSTS, model_costs)
         _replace_contents(PROVIDER_MODEL_COSTS, provider_model_costs)
+        _replace_contents(MODEL_SEGMENT_COSTS, model_segment_costs)
+        _replace_contents(PROVIDER_MODEL_SEGMENT_COSTS, provider_model_segment_costs)
 
     return CONFIG
 
@@ -263,6 +271,8 @@ PROVIDER_MAP: dict[str, ProviderConfig] = {}
 MODEL_MAP: dict[str, ProviderConfig] = {}
 MODEL_COSTS: dict[str, ModelCost] = {}
 PROVIDER_MODEL_COSTS: dict[str, dict[str, ModelCost]] = {}
+MODEL_SEGMENT_COSTS: dict[str, tuple[str, ModelCost]] = {}
+PROVIDER_MODEL_SEGMENT_COSTS: dict[str, dict[str, tuple[str, ModelCost]]] = {}
 refresh_runtime_config(CONFIG_PATH)
 
 

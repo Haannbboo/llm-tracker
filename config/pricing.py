@@ -77,9 +77,9 @@ def _strip_version_suffix(name: str) -> str:
 
 
 def _is_chat_model(entry: dict[str, Any]) -> bool:
-    """Check if a model entry is a chat/text model we should track."""
+    """Check if a token-priced model entry we should track."""
     mode = entry.get("mode", "chat")
-    return mode in ("chat", "text", "reasoning")
+    return mode in ("chat", "text", "reasoning", "responses")
 
 
 def _parse_model_entry(
