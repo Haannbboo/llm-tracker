@@ -906,6 +906,15 @@ def _pricing_entry(resolved_cost, scope: str, multiplier: float) -> dict:
     }
 
 
+def _resolve_provider_multiplier(config_snapshot: dict, provider: str | None) -> float:
+    if provider is None:
+        return 1.0
+    provider_config = config_snapshot.get("providers", {}).get(provider, {})
+    if not isinstance(provider_config, dict):
+        return 1.0
+    return float(provider_config.get("price_multiplier", 1.0))
+
+
 @app.get("/pricing")
 async def get_pricing(provider: str | None = None):
     """Return all models with resolved pricing and source metadata."""
@@ -919,12 +928,7 @@ async def get_pricing(provider: str | None = None):
     result: dict[str, dict] = {}
 
     if provider is not None:
-        provider_config = config_snapshot.get("providers", {}).get(provider, {})
-        multiplier = (
-            float(provider_config.get("price_multiplier", 1.0))
-            if isinstance(provider_config, dict)
-            else 1.0
-        )
+        multiplier = _resolve_provider_multiplier(config_snapshot, provider)
 
         for key, resolved_cost in resolved.global_costs.items():
             result[key] = _pricing_entry(resolved_cost, "global", multiplier)
@@ -967,11 +971,7 @@ async def get_model_pricing(model: str, provider: str | None = None):
         for provider_name, costs in resolved.provider_costs.items()
     }
 
-    multiplier = 1.0
-    if provider is not None:
-        provider_config = config_snapshot.get("providers", {}).get(provider, {})
-        if isinstance(provider_config, dict):
-            multiplier = float(provider_config.get("price_multiplier", 1.0))
+    multiplier = _resolve_provider_multiplier(config_snapshot, provider)
 
     match = resolve_cost_match(provider, model, model_costs, provider_model_costs)
     if match is None:

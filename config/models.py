@@ -47,3 +47,32 @@ class ResolvedCosts:
 
 def normalize_model_cost_key(model_name: str) -> str:
     return model_name.lower()
+
+
+def cost_rank(cost: ModelCost) -> tuple[float, ...]:
+    """Ordering key for comparing model costs, cheapest first."""
+    return (
+        cost.input + cost.output + cost.cache_read + (cost.cache_write or 0.0),
+        cost.input,
+        cost.output,
+        cost.cache_read,
+        cost.cache_write or 0.0,
+    )
+
+
+def build_segment_index(
+    costs: dict[str, ModelCost],
+) -> dict[str, tuple[str, ModelCost]]:
+    """Index pricing keys by trailing path segment, cheapest per segment.
+
+    Enables O(1) containing-name resolution for vendor-prefixed keys like
+    'openrouter/xiaomi/mimo-v2.5-pro' without scanning the full map on every
+    lookup. On equal ranks the first key wins, matching min()'s tie-break.
+    """
+    index: dict[str, tuple[str, ModelCost]] = {}
+    for key, cost in costs.items():
+        segment = key.rsplit("/", maxsplit=1)[-1]
+        existing = index.get(segment)
+        if existing is None or cost_rank(cost) < cost_rank(existing[1]):
+            index[segment] = (key, cost)
+    return index
