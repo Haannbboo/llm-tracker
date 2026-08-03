@@ -1,7 +1,13 @@
 from __future__ import annotations
 
+import json
+import os
+import time
+import urllib.error
+
 from fastapi.testclient import TestClient
 
+import config.pricing as pricing_module
 from config.app import ModelCost, ModelTier
 from config.pricing import (
     _claude_3x_alias,
@@ -10,6 +16,7 @@ from config.pricing import (
     _parse_model_entry,
     _strip_provider_prefix,
     _strip_version_suffix,
+    fetch_remote_pricing,
 )
 
 # --- Key normalization ---
@@ -1494,3 +1501,148 @@ def test_parse_litellm_json_claude_3x_alias_with_date():
     assert "claude-3-7-sonnet" in costs
     # Claude 3.x alias
     assert "claude-sonnet-3-7" in costs
+
+
+# --- Cache TTL ---
+
+
+def test_fetch_remote_pricing_skips_network_when_cache_fresh(tmp_path, monkeypatch):
+    cache_path = tmp_path / "litellm_pricing.json"
+    cache_path.write_text(
+        json.dumps({"gpt-fresh": {"input_cost_per_token": 1e-06, "mode": "chat"}})
+    )
+    monkeypatch.setattr(pricing_module, "_cache_path", lambda: cache_path)
+    monkeypatch.setattr(pricing_module, "_remote_costs", None)
+
+    def _fail_if_called():
+        raise AssertionError("should not hit the network when cache is fresh")
+
+    monkeypatch.setattr(pricing_module, "_fetch_litellm_json", _fail_if_called)
+
+    costs = fetch_remote_pricing()
+
+    assert "gpt-fresh" in costs
+
+
+def test_fetch_remote_pricing_refetches_when_cache_stale(tmp_path, monkeypatch):
+    cache_path = tmp_path / "litellm_pricing.json"
+    cache_path.write_text(
+        json.dumps({"gpt-old": {"input_cost_per_token": 1e-06, "mode": "chat"}})
+    )
+    stale_mtime = time.time() - pricing_module.CACHE_TTL_SECONDS - 1
+    os.utime(cache_path, (stale_mtime, stale_mtime))
+
+    monkeypatch.setattr(pricing_module, "_cache_path", lambda: cache_path)
+    monkeypatch.setattr(pricing_module, "_remote_costs", None)
+    monkeypatch.setattr(
+        pricing_module,
+        "_fetch_litellm_json",
+        lambda: {"gpt-new": {"input_cost_per_token": 2e-06, "mode": "chat"}},
+    )
+
+    costs = fetch_remote_pricing()
+
+    assert "gpt-new" in costs
+    assert "gpt-old" not in costs
+    # Cache file on disk was refreshed with the newly fetched data.
+    assert "gpt-new" in json.loads(cache_path.read_text())
+
+
+def test_fetch_remote_pricing_refetches_when_fresh_cache_is_corrupt(
+    tmp_path, monkeypatch
+):
+    """A fresh mtime with unparseable content (truncated/corrupt write)
+    must not block a real fetch for a full CACHE_TTL_SECONDS."""
+    cache_path = tmp_path / "litellm_pricing.json"
+    cache_path.write_text("{not valid json")  # fresh mtime, but garbage content
+
+    monkeypatch.setattr(pricing_module, "_cache_path", lambda: cache_path)
+    monkeypatch.setattr(pricing_module, "_remote_costs", None)
+    monkeypatch.setattr(
+        pricing_module,
+        "_fetch_litellm_json",
+        lambda: {"gpt-recovered": {"input_cost_per_token": 1e-06, "mode": "chat"}},
+    )
+
+    costs = fetch_remote_pricing()
+
+    assert "gpt-recovered" in costs
+
+
+# --- IPv4-only fetch (scoped, not a global socket.getaddrinfo patch) ---
+
+
+def test_create_ipv4_connection_requests_af_inet_only(monkeypatch):
+    seen_family = {}
+
+    class _FakeSocket:
+        def __init__(self):
+            self.connected_to = None
+
+        def settimeout(self, _):
+            pass
+
+        def connect(self, sockaddr):
+            self.connected_to = sockaddr
+
+        def close(self):
+            pass
+
+    def _fake_getaddrinfo(host, port, family, socktype):
+        seen_family["family"] = family
+        return [(family, socktype, 0, "", (host, port))]
+
+    fake_sock = _FakeSocket()
+    monkeypatch.setattr(pricing_module.socket, "getaddrinfo", _fake_getaddrinfo)
+    monkeypatch.setattr(pricing_module.socket, "socket", lambda *a, **k: fake_sock)
+
+    result = pricing_module._create_ipv4_connection(("example.com", 443))
+
+    assert seen_family["family"] == pricing_module.socket.AF_INET
+    assert result is fake_sock
+    assert fake_sock.connected_to == ("example.com", 443)
+
+
+def test_create_ipv4_connection_raises_when_all_candidates_fail(monkeypatch):
+    class _FakeSocket:
+        def settimeout(self, _):
+            pass
+
+        def connect(self, sockaddr):
+            raise OSError("connection refused")
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(
+        pricing_module.socket,
+        "getaddrinfo",
+        lambda host, port, family, socktype: [(family, socktype, 0, "", (host, port))],
+    )
+    monkeypatch.setattr(pricing_module.socket, "socket", lambda *a, **k: _FakeSocket())
+
+    try:
+        pricing_module._create_ipv4_connection(("example.com", 443))
+        raise AssertionError("expected OSError")
+    except OSError as exc:
+        assert "connection refused" in str(exc)
+
+
+def test_fetch_litellm_json_does_not_mutate_global_getaddrinfo(monkeypatch):
+    """Regression guard for the original bug: this must not monkeypatch
+    socket.getaddrinfo globally, since the same process also resolves DNS
+    for concurrent, unrelated live proxy traffic."""
+    original_getaddrinfo = pricing_module.socket.getaddrinfo
+
+    class _RaisingOpener:
+        def open(self, *a, **k):
+            raise urllib.error.URLError("network unavailable in test")
+
+    monkeypatch.setattr(
+        pricing_module.urllib.request, "build_opener", lambda *a, **k: _RaisingOpener()
+    )
+
+    result = pricing_module._fetch_litellm_json()
+
+    assert result is None
+    assert pricing_module.socket.getaddrinfo is original_getaddrinfo

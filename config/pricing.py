@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import http.client
 import json
 import logging
 import re
+import socket
 import threading
+import time
 import urllib.request
 from pathlib import Path
 from typing import Any
@@ -18,6 +21,7 @@ LITELLM_URL = (
 )
 CACHE_FILENAME = "litellm_pricing.json"
 REQUEST_TIMEOUT = 10  # seconds
+CACHE_TTL_SECONDS = 24 * 60 * 60  # re-fetch from GitHub at most once a day
 
 log = logging.getLogger(__name__)
 
@@ -262,11 +266,74 @@ def _save_local_cache(data: dict[str, Any]) -> None:
         log.warning("Failed to write pricing cache: %s", path)
 
 
+def _cache_is_fresh() -> bool:
+    """Whether the local cache file is within CACHE_TTL_SECONDS of now."""
+    try:
+        age = time.time() - _cache_path().stat().st_mtime
+    except OSError:
+        return False
+    return age < CACHE_TTL_SECONDS
+
+
+def _create_ipv4_connection(address, timeout=REQUEST_TIMEOUT, source_address=None):
+    """Same as socket.create_connection, but only tries AF_INET candidates."""
+    host, port = address
+    err = None
+    for family, socktype, proto, _canonname, sockaddr in socket.getaddrinfo(
+        host, port, socket.AF_INET, socket.SOCK_STREAM
+    ):
+        sock = None
+        try:
+            sock = socket.socket(family, socktype, proto)
+            sock.settimeout(timeout)
+            if source_address:
+                sock.bind(source_address)
+            sock.connect(sockaddr)
+            return sock
+        except OSError as exc:
+            err = exc
+            if sock is not None:
+                sock.close()
+    if err is not None:
+        raise err
+    raise OSError("getaddrinfo returned no IPv4 candidates")
+
+
+class _IPv4OnlyHTTPSConnection(http.client.HTTPSConnection):
+    """HTTPSConnection that resolves/connects over IPv4 only.
+
+    `_create_connection` is read by `HTTPConnection.connect()` and is an
+    instance attribute (stdlib sets it in `__init__` specifically so it can
+    be swapped per-instance), so overriding it here only affects this one
+    connection -- unlike patching `socket.getaddrinfo` globally.
+    """
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._create_connection = _create_ipv4_connection
+
+
+class _IPv4OnlyHTTPSHandler(urllib.request.HTTPSHandler):
+    """urllib opener handler that issues HTTPS requests via
+    _IPv4OnlyHTTPSConnection instead of the default http.client.HTTPSConnection.
+    """
+
+    def https_open(self, req):
+        return self.do_open(_IPv4OnlyHTTPSConnection, req)
+
+
 def _fetch_litellm_json() -> dict[str, Any] | None:
     """Fetch the LiteLLM pricing JSON from GitHub. Returns None on failure."""
+    # ponytail: raw.githubusercontent.com's IPv6 candidates are unreachable on
+    # some networks, and the default resolver burns REQUEST_TIMEOUT per
+    # candidate before falling back to IPv4. Force IPv4 via a dedicated
+    # connection class instead of monkeypatching socket.getaddrinfo globally
+    # -- this process also serves live proxy traffic concurrently, and a
+    # global patch would force those unrelated connections to IPv4 too.
+    opener = urllib.request.build_opener(_IPv4OnlyHTTPSHandler)
     try:
         req = urllib.request.Request(LITELLM_URL, headers={"User-Agent": "llm-tracker"})
-        with urllib.request.urlopen(req, timeout=REQUEST_TIMEOUT) as resp:
+        with opener.open(req, timeout=REQUEST_TIMEOUT) as resp:
             return json.loads(resp.read().decode("utf-8"))
     except (urllib.error.URLError, OSError, json.JSONDecodeError, TimeoutError):
         log.warning("Failed to fetch LiteLLM pricing from %s", LITELLM_URL)
@@ -274,7 +341,8 @@ def _fetch_litellm_json() -> dict[str, Any] | None:
 
 
 def fetch_remote_pricing() -> dict[str, ModelCost]:
-    """Fetch fresh pricing from LiteLLM and update local cache.
+    """Load pricing, hitting GitHub only if the local cache is older than
+    CACHE_TTL_SECONDS.
 
     Returns the merged cost map. Falls back to stale local cache on failure.
     Thread-safe.
@@ -282,6 +350,19 @@ def fetch_remote_pricing() -> dict[str, ModelCost]:
     global _remote_costs
 
     with _remote_lock:
+        if _cache_is_fresh():
+            cached = _load_local_cache()
+            # A fresh mtime with no parseable data means a truncated/corrupt
+            # write, not "we already have today's pricing" -- don't let that
+            # block a real fetch for a full CACHE_TTL_SECONDS.
+            if cached:
+                _remote_costs = cached
+                log.info(
+                    "Loaded %d model prices from local cache (fresh)",
+                    len(_remote_costs),
+                )
+                return dict(_remote_costs)
+
         # Try fetching fresh data
         raw = _fetch_litellm_json()
         if raw is not None:
