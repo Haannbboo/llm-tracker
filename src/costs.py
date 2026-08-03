@@ -10,6 +10,7 @@ from config.app import (
     PROVIDER_MODEL_COSTS,
     PROVIDER_MODEL_SEGMENT_COSTS,
     ModelCost,
+    ModelTier,
     build_segment_index,
     normalize_model_cost_key,
 )
@@ -96,6 +97,22 @@ def resolve_model_cost(provider: str, model: str) -> ModelCost | None:
     return match.cost if match is not None else None
 
 
+def _select_tier(tiers: tuple[ModelTier, ...], tokens: int) -> ModelTier:
+    """Pick the pricing tier whose [min_tokens, max_tokens) range holds `tokens`.
+
+    Falls back to the last tier when tokens exceed every range, and to the
+    first tier when tokens are below every range.
+    """
+    chosen = tiers[0]
+    for tier in tiers:
+        if tokens < tier.min_tokens:
+            break
+        chosen = tier
+        if tier.max_tokens is None or tokens < tier.max_tokens:
+            break
+    return chosen
+
+
 def calculate_costs(
     *,
     prompt_tokens: int | None,
@@ -118,9 +135,19 @@ def calculate_costs(
     cache_created = int(cache_creation_tokens or 0)
     uncached = max(prompt - cached, 0)
 
-    input_cost = Decimal(uncached) * Decimal(str(cost.input)) / Decimal(1_000_000)
+    # Tiered pricing (litellm/dashscope): the tier is chosen by context
+    # length — the total input token count.
+    tier = None
+    if cost.tiers:
+        tier = _select_tier(cost.tiers, uncached + cached + cache_created)
+
+    input_price = tier.input if tier is not None else cost.input
+    cache_read_price = tier.cache_read if tier is not None else cost.cache_read
+    output_price = tier.output if tier is not None else cost.output
+
+    input_cost = Decimal(uncached) * Decimal(str(input_price)) / Decimal(1_000_000)
     cached_input_cost = (
-        Decimal(cached) * Decimal(str(cost.cache_read)) / Decimal(1_000_000)
+        Decimal(cached) * Decimal(str(cache_read_price)) / Decimal(1_000_000)
     )
     # Cache-write tokens (Anthropic's cache_creation_input_tokens) have no
     # dedicated cost column, so they're folded into the input-cost bucket.
@@ -129,7 +156,7 @@ def calculate_costs(
         * Decimal(str(cost.cache_write or 0.0))
         / Decimal(1_000_000)
     )
-    output_cost = Decimal(completion) * Decimal(str(cost.output)) / Decimal(1_000_000)
+    output_cost = Decimal(completion) * Decimal(str(output_price)) / Decimal(1_000_000)
     multiplier = get_provider_price_multiplier(provider)
 
     total_input_cost = input_cost + cached_input_cost + cache_write_cost

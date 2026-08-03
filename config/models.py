@@ -27,11 +27,26 @@ class ProviderConfig:
 
 
 @dataclass(frozen=True)
+class ModelTier:
+    """Pricing tier applied when token counts fall within [min_tokens, max_tokens).
+
+    Bounds are in tokens (litellm `range`). Prices are per-million tokens.
+    """
+
+    min_tokens: int
+    max_tokens: int | None
+    input: float
+    output: float
+    cache_read: float
+
+
+@dataclass(frozen=True)
 class ModelCost:
     input: float
     output: float
     cache_read: float
     cache_write: float | None = None
+    tiers: tuple[ModelTier, ...] = ()
 
 
 @dataclass(frozen=True)

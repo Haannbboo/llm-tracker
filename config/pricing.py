@@ -10,7 +10,7 @@ import urllib.request
 from pathlib import Path
 from typing import Any
 
-from .models import ModelCost, get_tracker_home, normalize_model_cost_key
+from .models import ModelCost, ModelTier, get_tracker_home, normalize_model_cost_key
 
 LITELLM_URL = (
     "https://raw.githubusercontent.com/BerriAI/litellm"
@@ -82,6 +82,52 @@ def _is_chat_model(entry: dict[str, Any]) -> bool:
     return mode in ("chat", "text", "reasoning", "responses")
 
 
+def _parse_tiered_pricing(entry: dict[str, Any]) -> tuple[ModelTier, ...] | None:
+    """Parse litellm `tiered_pricing` into per-million ModelTier entries."""
+    raw_tiers = entry.get("tiered_pricing")
+    if not isinstance(raw_tiers, list) or not raw_tiers:
+        return None
+
+    tiers: list[ModelTier] = []
+    for raw in raw_tiers:
+        if not isinstance(raw, dict):
+            continue
+        try:
+            rng = raw.get("range")
+            if not isinstance(rng, list) or not rng:
+                continue
+            min_tokens = int(float(rng[0]))
+            max_tokens = (
+                int(float(rng[1])) if len(rng) > 1 and rng[1] is not None else None
+            )
+            # Missing per-tier prices fall back to the entry's top-level values.
+            tier_input = raw.get("input_cost_per_token")
+            tier_output = raw.get("output_cost_per_token")
+            tier_cache = raw.get("cache_read_input_token_cost")
+            if tier_input is None:
+                tier_input = entry.get("input_cost_per_token")
+            if tier_output is None:
+                tier_output = entry.get("output_cost_per_token")
+            if tier_cache is None:
+                tier_cache = entry.get("cache_read_input_token_cost")
+            if tier_input is None and tier_output is None:
+                continue
+            tiers.append(
+                ModelTier(
+                    min_tokens=min_tokens,
+                    max_tokens=max_tokens,
+                    input=round(float(tier_input or 0) * 1_000_000, 6),
+                    output=round(float(tier_output or 0) * 1_000_000, 6),
+                    cache_read=round(float(tier_cache or 0) * 1_000_000, 6),
+                )
+            )
+        except (TypeError, ValueError):
+            # Malformed tier (bad range or non-numeric price): skip it rather
+            # than dropping the whole pricing file at config load time.
+            continue
+    return tuple(tiers) or None
+
+
 def _parse_model_entry(
     model_key: str, entry: dict[str, Any]
 ) -> tuple[str, ModelCost] | None:
@@ -92,10 +138,22 @@ def _parse_model_entry(
     if not _is_chat_model(entry):
         return None
 
+    tiers = _parse_tiered_pricing(entry)
+
     input_cost = entry.get("input_cost_per_token")
     output_cost = entry.get("output_cost_per_token")
     cache_read = entry.get("cache_read_input_token_cost")
     cache_write = entry.get("cache_creation_input_token_cost")
+
+    # Some models only have tiered pricing; use the first tier as the flat price.
+    if input_cost is None and output_cost is None:
+        if tiers is None:
+            return None
+        first = tiers[0]
+        input_cost = first.input / 1_000_000
+        output_cost = first.output / 1_000_000
+        cache_read = first.cache_read / 1_000_000
+        cache_write = None
 
     # Skip models with no token-based pricing
     if input_cost is None and output_cost is None:
@@ -114,6 +172,7 @@ def _parse_model_entry(
         output=output_per_million,
         cache_read=cache_read_per_million,
         cache_write=cache_write_per_million,
+        tiers=tuple(tiers) if tiers else (),
     )
 
     # Normalize key: strip provider prefix, lowercase

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from fastapi.testclient import TestClient
 
-from config.app import ModelCost
+from config.app import ModelCost, ModelTier
 from config.pricing import (
     _claude_3x_alias,
     _is_chat_model,
@@ -86,6 +86,138 @@ def test_parse_model_cost_without_cache_write(config_module):
 
     assert cost is not None
     assert cost.cache_write is None
+
+
+def test_parse_model_cost_with_tiers(config_module):
+    model_config = {
+        "cost": {
+            "tiers": [
+                {"range": [0, 256000], "input": 0.4, "output": 1.6, "cacheRead": 0.08},
+                {"range": [256000, 1000000], "input": 1.2, "output": 4.8},
+            ]
+        }
+    }
+
+    cost = config_module._parse_model_cost(model_config)
+
+    assert cost is not None
+    assert len(cost.tiers) == 2
+    first, second = cost.tiers
+    assert first.min_tokens == 0
+    assert first.max_tokens == 256000
+    assert first.input == 0.4
+    assert first.output == 1.6
+    assert first.cache_read == 0.08
+    assert second.input == 1.2
+    assert second.cache_read == 0.08  # falls back to first-tier flat price
+    # Flat prices default to the first tier when not specified
+    assert cost.input == 0.4
+    assert cost.output == 1.6
+
+
+def test_parse_model_cost_with_tiers_inherits_flat_from_yaml(config_module):
+    model_config = {
+        "cost": {
+            "input": 3.0,
+            "output": 15.0,
+            "cacheRead": 0.3,
+            "tiers": [
+                {"range": [0, 100000], "input": 1.0, "output": 5.0},
+                {"range": [100000, None], "input": 2.0, "output": 10.0},
+            ],
+        }
+    }
+
+    cost = config_module._parse_model_cost(model_config)
+
+    assert cost is not None
+    assert cost.input == 3.0
+    assert cost.output == 15.0
+    assert cost.tiers[0].cache_read == 0.3
+    assert cost.tiers[1].max_tokens is None
+
+
+def test_parse_model_cost_without_tiers_inherits_base_tiers(config_module):
+    base = config_module.ModelCost(
+        input=0.4,
+        output=1.6,
+        cache_read=0.08,
+        tiers=(
+            config_module.ModelTier(
+                min_tokens=0, max_tokens=256000, input=0.4, output=1.6, cache_read=0.08
+            ),
+        ),
+    )
+    # No flat prices and no tiers key: keep the base's tiered pricing.
+    model_config = {"cost": {"cacheWrite": 3.0}}
+
+    cost = config_module._parse_model_cost(model_config, base)
+
+    assert cost is not None
+    assert cost.tiers == base.tiers
+    assert cost.cache_write == 3.0
+    assert cost.input == 0.4
+
+
+def test_parse_model_cost_flat_prices_clear_inherited_tiers(config_module):
+    base = config_module.ModelCost(
+        input=0.4,
+        output=1.6,
+        cache_read=0.08,
+        tiers=(
+            config_module.ModelTier(
+                min_tokens=0, max_tokens=256000, input=0.4, output=1.6, cache_read=0.08
+            ),
+        ),
+    )
+    # Explicit flat prices are an override: tiers must not silently win.
+    model_config = {"cost": {"input": 3.0, "output": 15.0}}
+
+    cost = config_module._parse_model_cost(model_config, base)
+
+    assert cost is not None
+    assert cost.tiers == ()
+    assert cost.input == 3.0
+    assert cost.output == 15.0
+
+
+def test_parse_model_cost_empty_tiers_disables_tiers(config_module):
+    base = config_module.ModelCost(
+        input=0.4,
+        output=1.6,
+        cache_read=0.08,
+        tiers=(
+            config_module.ModelTier(
+                min_tokens=0, max_tokens=256000, input=0.4, output=1.6, cache_read=0.08
+            ),
+        ),
+    )
+    model_config = {"cost": {"tiers": []}}
+
+    cost = config_module._parse_model_cost(model_config, base)
+
+    assert cost is not None
+    assert cost.tiers == ()
+    assert cost.input == 0.4
+
+
+def test_parse_model_cost_skips_malformed_tiers(config_module):
+    model_config = {
+        "cost": {
+            "tiers": [
+                {"range": [None, 1000], "input": 1.0, "output": 2.0},
+                {"range": ["bad", "worse"], "input": 1.0, "output": 2.0},
+                {"range": [0, 256000], "input": "not-a-number", "output": 2.0},
+                {"range": [256000, None], "input": 1.2, "output": 4.8},
+            ]
+        }
+    }
+
+    cost = config_module._parse_model_cost(model_config)
+
+    assert cost is not None
+    assert len(cost.tiers) == 1
+    assert cost.tiers[0].min_tokens == 256000
 
 
 def test_apply_patch_set_creates_nested_dicts_with_literal_keys(config_module):
@@ -239,6 +371,106 @@ def test_parse_model_entry_skips_non_chat():
 def test_parse_model_entry_skips_no_pricing():
     entry = {"mode": "chat"}
     assert _parse_model_entry("some-model", entry) is None
+
+
+def test_parse_model_entry_with_tiered_pricing():
+    entry = {
+        "mode": "chat",
+        "tiered_pricing": [
+            {
+                "cache_read_input_token_cost": 8e-08,
+                "input_cost_per_token": 4e-07,
+                "output_cost_per_token": 1.6e-06,
+                "range": [0, 256000.0],
+            },
+            {
+                "cache_read_input_token_cost": 2.4e-07,
+                "input_cost_per_token": 1.2e-06,
+                "output_cost_per_token": 4.8e-06,
+                "range": [256000.0, 1000000.0],
+            },
+        ],
+    }
+
+    result = _parse_model_entry("dashscope/qwen3.7-plus", entry)
+
+    assert result is not None
+    key, cost = result
+    assert key == "dashscope/qwen3.7-plus"
+    # Flat fields default to the first tier (per-million)
+    assert cost.input == 0.4
+    assert cost.output == 1.6
+    assert cost.cache_read == 0.08
+    assert len(cost.tiers) == 2
+    first, second = cost.tiers
+    assert first.min_tokens == 0
+    assert first.max_tokens == 256000
+    assert first.input == 0.4
+    assert first.output == 1.6
+    assert first.cache_read == 0.08
+    assert second.min_tokens == 256000
+    assert second.max_tokens == 1000000
+    assert second.input == 1.2
+    assert second.output == 4.8
+    assert second.cache_read == 0.24
+
+
+def test_parse_model_entry_with_empty_tiered_pricing_still_skipped():
+    entry = {"mode": "chat", "tiered_pricing": []}
+    assert _parse_model_entry("some-model", entry) is None
+
+
+def test_parse_model_entry_tier_falls_back_to_top_level_prices():
+    entry = {
+        "mode": "chat",
+        "input_cost_per_token": 4e-07,
+        "output_cost_per_token": 1.6e-06,
+        "cache_read_input_token_cost": 8e-08,
+        "tiered_pricing": [
+            {
+                "input_cost_per_token": 1.2e-06,
+                "output_cost_per_token": 4.8e-06,
+                "range": [256000.0, 1000000.0],
+            }
+        ],
+    }
+
+    result = _parse_model_entry("dashscope/some-model", entry)
+
+    assert result is not None
+    _, cost = result
+    assert len(cost.tiers) == 1
+    tier = cost.tiers[0]
+    assert tier.input == 1.2
+    assert tier.output == 4.8
+    assert tier.cache_read == 0.08  # falls back to the entry's top-level value
+
+
+def test_parse_model_entry_skips_malformed_tiers():
+    entry = {
+        "mode": "chat",
+        "tiered_pricing": [
+            {"input_cost_per_token": 4e-07, "range": [None, 1000]},
+            {
+                "input_cost_per_token": "bad",
+                "output_cost_per_token": 1.6e-06,
+                "range": [0, 256000],
+            },
+            {
+                "input_cost_per_token": 1.2e-06,
+                "output_cost_per_token": 4.8e-06,
+                "range": [256000.0, 1000000.0],
+            },
+        ],
+    }
+
+    result = _parse_model_entry("dashscope/some-model", entry)
+
+    assert result is not None
+    _, cost = result
+    assert len(cost.tiers) == 1
+    assert cost.tiers[0].min_tokens == 256000
+    assert cost.input == 1.2  # flat defaults to the first valid tier
 
 
 # --- Full JSON parsing ---
@@ -822,6 +1054,73 @@ def test_single_model_pricing_contains_litellm_match(api_module, monkeypatch):
     assert data["output"] == 3.0
     assert data["cache_read"] == 0.2
     assert data["multiplier"] == 1.0
+    assert data["tiers"] == []
+
+
+def test_single_model_pricing_includes_tiers(api_module, monkeypatch):
+    api_module.CONFIG.clear()
+    api_module.CONFIG.update({"models": {}, "providers": {}})
+    monkeypatch.setattr(
+        "config.pricing.get_remote_pricing",
+        lambda: {
+            "dashscope/qwen3.7-plus": ModelCost(
+                input=0.4,
+                output=1.6,
+                cache_read=0.08,
+                tiers=(
+                    ModelTier(
+                        min_tokens=0,
+                        max_tokens=256000,
+                        input=0.4,
+                        output=1.6,
+                        cache_read=0.08,
+                    ),
+                    ModelTier(
+                        min_tokens=256000,
+                        max_tokens=1000000,
+                        input=1.2,
+                        output=4.8,
+                        cache_read=0.24,
+                    ),
+                ),
+            )
+        },
+    )
+
+    response = TestClient(api_module.app).get("/pricing/qwen3.7-plus")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["resolved"] is True
+    assert data["tiers"] == [
+        {
+            "min_tokens": 0,
+            "max_tokens": 256000,
+            "input": 0.4,
+            "output": 1.6,
+            "cache_read": 0.08,
+        },
+        {
+            "min_tokens": 256000,
+            "max_tokens": 1000000,
+            "input": 1.2,
+            "output": 4.8,
+            "cache_read": 0.24,
+        },
+    ]
+
+
+def test_single_model_pricing_unresolved_includes_empty_tiers(api_module, monkeypatch):
+    api_module.CONFIG.clear()
+    api_module.CONFIG.update({"models": {}, "providers": {}})
+    monkeypatch.setattr("config.pricing.get_remote_pricing", lambda: {})
+
+    response = TestClient(api_module.app).get("/pricing/no-such-model")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["resolved"] is False
+    assert data["tiers"] == []
 
 
 def test_single_model_pricing_yaml_override_beats_litellm(api_module, monkeypatch):
