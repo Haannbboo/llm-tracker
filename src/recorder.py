@@ -62,6 +62,7 @@ def record_usage(
         completion_tokens=completion_tokens,
         cached_tokens=cached_tokens,
         total_tokens=total_tokens,
+        cache_creation_tokens=cache_creation_tokens,
         ts=usage_ts,
         session_id=session_id,
         client_ip=client_ip,

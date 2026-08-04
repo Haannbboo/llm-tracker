@@ -116,6 +116,7 @@ def merge_duplicate_usage(
     completion_tokens: int | None,
     cached_tokens: int | None,
     total_tokens: int | None,
+    cache_creation_tokens: int | None,
     ts: int,
     session_id: str | None,
     client_ip: str | None,
@@ -157,11 +158,18 @@ def merge_duplicate_usage(
                     Usage.completion_tokens == completion_tokens,
                     Usage.cached_tokens == cached_tokens,
                     Usage.total_tokens == total_tokens,
+                    # Proxy normalizes a missing cache-write to 0 while the OTLP
+                    # extractors leave it NULL; coalesce so the two paths still
+                    # match on the same logical request.
+                    func.coalesce(Usage.cache_creation_tokens, 0)
+                    == func.coalesce(cache_creation_tokens, 0),
                     Usage.ts >= ts - DEDUP_WINDOW_MICROS,
                     Usage.ts <= ts + DEDUP_WINDOW_MICROS,
                 )
             )
             .order_by(func.abs(Usage.ts - ts))
+            # Row lock is PostgreSQL-only; the SQLite dialect ignores FOR UPDATE
+            # (SQLite serializes writes via its whole-file write lock instead).
             .with_for_update()
             .limit(1)
         )

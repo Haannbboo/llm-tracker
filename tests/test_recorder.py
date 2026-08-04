@@ -540,3 +540,45 @@ def test_record_usage_dedup_handles_none_token_fields(test_db):
     assert proxy_usage.id == otlp_usage.id
     rows = fetch_recent_usage(limit=10, db_path=test_db)
     assert len(rows) == 1
+
+
+def test_record_usage_merges_when_proxy_zero_vs_otlp_none_cache_creation(test_db):
+    """Proxy normalizes a missing cache-write to 0 while OTLP records NULL; the
+    dedup predicate coalesces both sides so the two paths still merge."""
+    otlp_usage = _record_otlp_usage(test_db)
+    assert otlp_usage is not None
+
+    proxy_usage = _record_proxy_usage(test_db, cache_creation_tokens=0)
+
+    assert proxy_usage is not None
+    assert proxy_usage.id == otlp_usage.id
+    rows = fetch_recent_usage(limit=10, db_path=test_db)
+    assert len(rows) == 1
+
+
+def test_record_usage_merges_when_proxy_zero_then_otlp_none_cache_creation(test_db):
+    """Same 0-vs-NULL asymmetry, proxy row landing first (the OpenCode ordering)."""
+    proxy_usage = _record_proxy_usage(test_db, cache_creation_tokens=0)
+    assert proxy_usage is not None
+
+    otlp_usage = _record_otlp_usage(test_db, ts=1779148800000000 + 4_000_000)
+
+    assert otlp_usage is not None
+    assert otlp_usage.id == proxy_usage.id
+    rows = fetch_recent_usage(limit=10, db_path=test_db)
+    assert len(rows) == 1
+
+
+def test_record_usage_does_not_merge_different_cache_creation(test_db):
+    """Coalescing must not collapse genuinely different cache-write amounts."""
+    otlp_usage = _record_otlp_usage(test_db, cache_creation_tokens=3, total_tokens=153)
+    assert otlp_usage is not None
+
+    proxy_usage = _record_proxy_usage(
+        test_db, cache_creation_tokens=5, total_tokens=153
+    )
+
+    assert proxy_usage is not None
+    assert proxy_usage.id != otlp_usage.id
+    rows = fetch_recent_usage(limit=10, db_path=test_db)
+    assert len(rows) == 2
