@@ -40,7 +40,10 @@ export function TrendChart({
 
   const hoveredData = hoveredIdx !== null ? filled[hoveredIdx] : null;
   const hCached = hoveredData ? value(hoveredData.cached_tokens) : 0;
-  const hInput = hoveredData ? Math.max(0, value(hoveredData.prompt_tokens) - hCached) : 0;
+  // Cache-write tokens are fresh input (billed differently from cache-read),
+  // so they're folded into the Input bucket rather than the Cached bucket --
+  // otherwise Input+Cached+Output would undercount total_tokens.
+  const hInput = hoveredData ? Math.max(0, value(hoveredData.prompt_tokens) - hCached) + value(hoveredData.cache_creation_tokens) : 0;
   const hOutput = hoveredData ? value(hoveredData.completion_tokens) : 0;
   const hThroughput = hoveredData ? value(hoveredData.avg_throughput) : 0;
   const hTotalInput = hoveredData ? value(hoveredData.prompt_tokens) + value(hoveredData.cache_creation_tokens) : 0;
@@ -259,7 +262,8 @@ export function TrendChart({
 
                   if (metric === 'tokens') {
                     const cached = value(d.cached_tokens);
-                    const input = Math.max(0, value(d.prompt_tokens) - cached);
+                    // Cache-write tokens fold into Input; see hInput above.
+                    const input = Math.max(0, value(d.prompt_tokens) - cached) + value(d.cache_creation_tokens);
                     const output = value(d.completion_tokens);
                     const total = input + cached + output;
                     if (total === 0) return null;

@@ -397,7 +397,10 @@ export function OverviewTab({
               </div>
             </div>
             <div className="stat-label" style={{ marginBottom: 0 }}>
-              {t('In:')} {formatCompact(totals.promptTokens)} / {t('Out:')} {formatCompact(totals.completionTokens)}
+              {/* cache_creation_tokens folds into "In" (fresh input, billed
+                  differently from cache-read) so In + Out reconciles with
+                  the Token Usage total above. */}
+              {t('In:')} {formatCompact(totals.promptTokens + totals.cacheCreationTokens)} / {t('Out:')} {formatCompact(totals.completionTokens)}
             </div>
             <div className="stat-label" style={{ fontSize: '11px', marginBottom: 0 }}>
               {t('Cached:')} {formatCompact(totals.cachedTokens)}

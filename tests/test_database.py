@@ -592,7 +592,6 @@ def test_migrate_database_adds_usage_columns(
             latency_ms INTEGER,
             ttft_ms INTEGER,
             tool_tokens INTEGER,
-            cache_creation_tokens INTEGER,
             status INTEGER
         )
         """
@@ -609,6 +608,8 @@ def test_migrate_database_adds_usage_columns(
     assert "base_url_id" in column_names
     assert "input_cost_usd" in column_names
     assert "output_cost_usd" in column_names
+    assert "cache_creation_tokens" in column_names
+    assert "usage.cache_creation_tokens" in changes
     assert "total_cost_usd" in column_names
     assert "client_source" in column_names
     assert "session_id" in column_names
@@ -4840,6 +4841,67 @@ def test_migration_backfills_session_cache_creation_tokens_without_touching_eval
     assert "sessions.cache_creation_tokens" not in applied_after_crash
     assert "sessions.cache_creation_tokens_backfill" in applied_after_crash
     assert_backfilled_and_evaluation_intact()
+
+
+def test_migration_adds_usage_cache_creation_tokens_before_session_backfill(
+    database_module, schema_migrations_module, isolated_home
+):
+    """A pre-existing DB from before cache_creation_tokens existed on `usage`
+    (not just `sessions`) must not crash the sessions backfill, which reads
+    usage.cache_creation_tokens."""
+    db_path = str(isolated_home / "usage.db")
+    database_module.init_db(db_path)
+    engine = database_module.get_engine(db_path)
+
+    database_module.log_usage(
+        database_module.Usage(
+            ts=TS_2026_05_09_10,
+            provider="anthropic",
+            model="claude-sonnet-4-6",
+            client_source="claude-code",
+            session_id="sess-legacy",
+            endpoint="/v1/messages",
+            prompt_tokens=100,
+            completion_tokens=50,
+            cached_tokens=20,
+            cache_creation_tokens=500,
+            total_tokens=650,
+            input_cost_usd=0.01,
+            output_cost_usd=0.02,
+            total_cost_usd=0.03,
+            status=200,
+        ),
+        db_path=db_path,
+    )
+
+    # Simulate a DB that predates cache_creation_tokens entirely: dropping the
+    # usage column loses the value recorded above, same as any legacy row
+    # that was never tracked -- the point is the migration must not crash on
+    # a `usage` table that genuinely lacks the column the backfill reads.
+    with engine.begin() as connection:
+        connection.execute(
+            database_module.text("ALTER TABLE usage DROP COLUMN cache_creation_tokens")
+        )
+        connection.execute(
+            database_module.text(
+                "ALTER TABLE sessions DROP COLUMN cache_creation_tokens"
+            )
+        )
+
+    applied = schema_migrations_module.migrate_database(db_path)
+
+    assert "usage.cache_creation_tokens" in applied
+    assert "sessions.cache_creation_tokens" in applied
+    assert "sessions.cache_creation_tokens_backfill" in applied
+    assert "cache_creation_tokens" in schema_migrations_module._table_column_names(
+        engine, "usage"
+    )
+
+    from sqlalchemy.orm import Session
+
+    with Session(engine) as session:
+        record = session.get(database_module.SessionRecord, "sess-legacy")
+        assert record.cache_creation_tokens == 0
 
 
 @pytest.mark.slow

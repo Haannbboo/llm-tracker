@@ -114,6 +114,7 @@ def _parse_tiered_cost(cost: dict[str, Any], flat: ModelCost) -> tuple[ModelTier
             tier_input = raw.get("input")
             tier_output = raw.get("output")
             tier_cache_read = raw.get("cacheRead")
+            tier_cache_write = raw.get("cacheWrite")
             tiers.append(
                 ModelTier(
                     min_tokens=min_tokens,
@@ -124,6 +125,11 @@ def _parse_tiered_cost(cost: dict[str, Any], flat: ModelCost) -> tuple[ModelTier
                         flat.cache_read
                         if tier_cache_read is None
                         else float(tier_cache_read)
+                    ),
+                    cache_write=(
+                        flat.cache_write
+                        if tier_cache_write is None
+                        else float(tier_cache_write)
                     ),
                 )
             )

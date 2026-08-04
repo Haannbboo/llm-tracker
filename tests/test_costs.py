@@ -526,6 +526,44 @@ def test_calculate_costs_flat_cache_write_with_tiers(costs_module, config_module
     }
 
 
+def test_calculate_costs_uses_per_tier_cache_write_price(costs_module, config_module):
+    cost = config_module.ModelCost(
+        input=0.4,
+        output=1.6,
+        cache_read=0.08,
+        cache_write=3.0,
+        tiers=(
+            config_module.ModelTier(
+                min_tokens=0,
+                max_tokens=256000,
+                input=0.4,
+                output=1.6,
+                cache_read=0.08,
+                cache_write=3.0,
+            ),
+            config_module.ModelTier(
+                min_tokens=256000,
+                max_tokens=1000000,
+                input=1.2,
+                output=4.8,
+                cache_read=0.24,
+                cache_write=7.5,
+            ),
+        ),
+    )
+    result = costs_module.calculate_costs(
+        prompt_tokens=300000,
+        completion_tokens=0,
+        cached_tokens=0,
+        cache_creation_tokens=100,
+        model_cost=cost,
+    )
+
+    # 300000 total input tokens is in the second tier: cache_write should use
+    # that tier's 7.5 rate, not the flat 3.0 rate.
+    assert result["input_cost_usd"] == Decimal("0.36075")
+
+
 def test_calculate_costs_tiered_pricing_applies_provider_multiplier(
     costs_module, config_module
 ):

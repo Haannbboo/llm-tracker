@@ -38,6 +38,7 @@ class ModelTier:
     input: float
     output: float
     cache_read: float
+    cache_write: float | None = None
 
 
 @dataclass(frozen=True)

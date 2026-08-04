@@ -556,6 +556,14 @@ def migrate_database(db_path: str | None = None) -> list[str]:
             postgresql_definition="TEXT",
         ):
             applied.append("usage.client_ip")
+        if _ensure_column(
+            engine,
+            "usage",
+            "cache_creation_tokens",
+            sqlite_definition="INTEGER",
+            postgresql_definition="INTEGER",
+        ):
+            applied.append("usage.cache_creation_tokens")
         if _ensure_index(
             engine,
             "usage",

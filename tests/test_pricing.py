@@ -144,6 +144,30 @@ def test_parse_model_cost_with_tiers_inherits_flat_from_yaml(config_module):
     assert cost.tiers[1].max_tokens is None
 
 
+def test_parse_model_cost_with_tiers_carries_per_tier_cache_write(config_module):
+    model_config = {
+        "cost": {
+            "cacheWrite": 3.0,
+            "tiers": [
+                {"range": [0, 256000], "input": 0.4, "output": 1.6},
+                {
+                    "range": [256000, None],
+                    "input": 1.2,
+                    "output": 4.8,
+                    "cacheWrite": 7.5,
+                },
+            ],
+        }
+    }
+
+    cost = config_module._parse_model_cost(model_config)
+
+    assert cost is not None
+    first, second = cost.tiers
+    assert first.cache_write == 3.0  # falls back to the flat cacheWrite
+    assert second.cache_write == 7.5  # explicit per-tier override wins
+
+
 def test_parse_model_cost_without_tiers_inherits_base_tiers(config_module):
     base = config_module.ModelCost(
         input=0.4,
@@ -451,6 +475,36 @@ def test_parse_model_entry_tier_falls_back_to_top_level_prices():
     assert tier.input == 1.2
     assert tier.output == 4.8
     assert tier.cache_read == 0.08  # falls back to the entry's top-level value
+
+
+def test_parse_model_entry_tier_carries_own_cache_write_price():
+    entry = {
+        "mode": "chat",
+        "cache_creation_input_token_cost": 3.75e-06,
+        "tiered_pricing": [
+            {
+                "input_cost_per_token": 4e-07,
+                "output_cost_per_token": 1.6e-06,
+                "range": [0, 256000.0],
+            },
+            {
+                "input_cost_per_token": 1.2e-06,
+                "output_cost_per_token": 4.8e-06,
+                "cache_creation_input_token_cost": 7.5e-06,
+                "range": [256000.0, 1000000.0],
+            },
+        ],
+    }
+
+    result = _parse_model_entry("anthropic/claude-long-context", entry)
+
+    assert result is not None
+    _, cost = result
+    first, second = cost.tiers
+    # No per-tier override: falls back to the entry's top-level cache_write.
+    assert first.cache_write == 3.75
+    # Explicit per-tier override wins over the entry's top-level value.
+    assert second.cache_write == 7.5
 
 
 def test_parse_model_entry_skips_malformed_tiers():

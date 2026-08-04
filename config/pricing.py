@@ -108,12 +108,15 @@ def _parse_tiered_pricing(entry: dict[str, Any]) -> tuple[ModelTier, ...] | None
             tier_input = raw.get("input_cost_per_token")
             tier_output = raw.get("output_cost_per_token")
             tier_cache = raw.get("cache_read_input_token_cost")
+            tier_cache_write = raw.get("cache_creation_input_token_cost")
             if tier_input is None:
                 tier_input = entry.get("input_cost_per_token")
             if tier_output is None:
                 tier_output = entry.get("output_cost_per_token")
             if tier_cache is None:
                 tier_cache = entry.get("cache_read_input_token_cost")
+            if tier_cache_write is None:
+                tier_cache_write = entry.get("cache_creation_input_token_cost")
             if tier_input is None and tier_output is None:
                 continue
             tiers.append(
@@ -123,6 +126,11 @@ def _parse_tiered_pricing(entry: dict[str, Any]) -> tuple[ModelTier, ...] | None
                     input=round(float(tier_input or 0) * 1_000_000, 6),
                     output=round(float(tier_output or 0) * 1_000_000, 6),
                     cache_read=round(float(tier_cache or 0) * 1_000_000, 6),
+                    cache_write=(
+                        round(float(tier_cache_write) * 1_000_000, 6)
+                        if tier_cache_write is not None
+                        else None
+                    ),
                 )
             )
         except (TypeError, ValueError):

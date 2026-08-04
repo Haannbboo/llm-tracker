@@ -144,6 +144,11 @@ def calculate_costs(
     input_price = tier.input if tier is not None else cost.input
     cache_read_price = tier.cache_read if tier is not None else cost.cache_read
     output_price = tier.output if tier is not None else cost.output
+    cache_write_price = (
+        tier.cache_write
+        if tier is not None and tier.cache_write is not None
+        else cost.cache_write
+    )
 
     input_cost = Decimal(uncached) * Decimal(str(input_price)) / Decimal(1_000_000)
     cached_input_cost = (
@@ -153,7 +158,7 @@ def calculate_costs(
     # dedicated cost column, so they're folded into the input-cost bucket.
     cache_write_cost = (
         Decimal(cache_created)
-        * Decimal(str(cost.cache_write or 0.0))
+        * Decimal(str(cache_write_price or 0.0))
         / Decimal(1_000_000)
     )
     output_cost = Decimal(completion) * Decimal(str(output_price)) / Decimal(1_000_000)
