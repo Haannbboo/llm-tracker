@@ -238,7 +238,7 @@ def test_extract_opencode_fields_basic(otlp_module):
     assert fields["reasoning_tokens"] == 20
     assert fields["cached_tokens"] == 30
     assert fields["cache_creation_tokens"] == 5
-    assert fields["total_tokens"] == 280
+    assert fields["total_tokens"] == 285  # prompt+completion+cache_creation
     assert fields["latency_ms"] == 1200
     assert fields["ttft_ms"] == 345
     assert fields["client_source"] == "opencode"
@@ -386,7 +386,7 @@ def test_extract_opencode_fields_derives_total_with_reasoning_when_missing(
 
     fields = otlp_module._extract_opencode_fields(record, attrs, "oc-sess-1")
 
-    assert fields["total_tokens"] == 250
+    assert fields["total_tokens"] == 255  # prompt+completion+cache_creation
     assert fields["prompt_length"] == 0
 
 

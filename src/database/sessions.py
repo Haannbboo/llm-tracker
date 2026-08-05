@@ -100,6 +100,9 @@ def _session_record_kwargs(
         "prompt_tokens": sum(usage.prompt_tokens or 0 for usage in usages),
         "completion_tokens": sum(usage.completion_tokens or 0 for usage in usages),
         "cached_tokens": sum(usage.cached_tokens or 0 for usage in usages),
+        "cache_creation_tokens": sum(
+            usage.cache_creation_tokens or 0 for usage in usages
+        ),
         "total_cost_usd": total_cost,
         "latency_sum_ms": latency_sum,
         "avg_latency_ms": latency_sum / request_count if request_count else None,
@@ -137,6 +140,7 @@ def upsert_session_from_usage(usage: Usage, db_path: str | None = None) -> None:
             existing.prompt_tokens += usage.prompt_tokens or 0
             existing.completion_tokens += usage.completion_tokens or 0
             existing.cached_tokens += usage.cached_tokens or 0
+            existing.cache_creation_tokens += usage.cache_creation_tokens or 0
             existing.total_tokens += usage.total_tokens or 0
             existing.total_cost_usd += total_cost
             existing.latency_sum_ms += latency
@@ -468,6 +472,7 @@ def _session_record_to_dict(rec: SessionRecord) -> dict[str, Any]:
         "prompt_tokens": rec.prompt_tokens,
         "completion_tokens": rec.completion_tokens,
         "cached_tokens": rec.cached_tokens,
+        "cache_creation_tokens": rec.cache_creation_tokens,
         "total_cost_usd": float(rec.total_cost_usd),
         "avg_latency_ms": round(float(rec.avg_latency_ms or 0), 1),
         "latency_sum_ms": float(rec.latency_sum_ms),

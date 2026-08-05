@@ -16,6 +16,7 @@ type DailyDimensionData = {
   total_tokens: number | null
   prompt_tokens: number | null
   cached_tokens: number | null
+  cache_creation_tokens: number | null
   total_cost_usd: number | null
   completion_tokens: number | null
   latency_sum_ms: number | null
@@ -29,6 +30,7 @@ type SourceSummaryRow = {
   total_tokens: number | null
   prompt_tokens: number | null
   cached_tokens: number | null
+  cache_creation_tokens: number | null
   completion_tokens: number | null
   latency_sum_ms: number | null
   avg_throughput: number | null
@@ -122,14 +124,15 @@ export function TopUsageChart({
 
   const items: BarItem[] = useMemo(() => {
     if (dimension === 'model') {
-      const map = new Map<string, { tokens: number; completion: number; prompt: number; cached: number; latency: number; cost: number; priceWeight: number; priceTokens: number; successful: number; total: number }>()
+      const map = new Map<string, { tokens: number; completion: number; prompt: number; cached: number; cacheCreation: number; latency: number; cost: number; priceWeight: number; priceTokens: number; successful: number; total: number }>()
       for (const s of summary) {
-        const existing = map.get(s.model) || { tokens: 0, completion: 0, prompt: 0, cached: 0, latency: 0, cost: 0, priceWeight: 0, priceTokens: 0, successful: 0, total: 0 }
+        const existing = map.get(s.model) || { tokens: 0, completion: 0, prompt: 0, cached: 0, cacheCreation: 0, latency: 0, cost: 0, priceWeight: 0, priceTokens: 0, successful: 0, total: 0 }
         const tokens = s.total_tokens ?? 0
         existing.tokens += tokens
         existing.completion += s.completion_tokens ?? 0
         existing.prompt += s.prompt_tokens ?? 0
         existing.cached += s.cached_tokens ?? 0
+        existing.cacheCreation += s.cache_creation_tokens ?? 0
         existing.latency += s.latency_sum_ms ?? 0
         existing.cost += s.total_cost_usd ?? 0
         existing.successful += s.successful_requests ?? 0
@@ -153,7 +156,7 @@ export function TopUsageChart({
           ? v.priceWeight / v.priceTokens
           : v.tokens > 0 ? (v.cost / v.tokens) * 1_000_000 : null,
         successRate: v.total > 0 ? (v.successful / v.total) * 100 : 100,
-        cacheHitRate: v.prompt > 0 ? (v.cached / v.prompt) * 100 : 0,
+        cacheHitRate: (v.prompt + v.cacheCreation) > 0 ? (v.cached / (v.prompt + v.cacheCreation)) * 100 : 0,
         color: getModelColor(model),
         badgeBg: getModelBadgeBackgroundColor(model, theme),
         badgeText: getModelTextColor(model, theme),
@@ -161,13 +164,14 @@ export function TopUsageChart({
     }
 
     if (dimension === 'provider') {
-      const map = new Map<string, { tokens: number; completion: number; prompt: number; cached: number; latency: number; cost: number; successful: number; total: number }>()
+      const map = new Map<string, { tokens: number; completion: number; prompt: number; cached: number; cacheCreation: number; latency: number; cost: number; successful: number; total: number }>()
       for (const s of summary) {
-        const existing = map.get(s.provider) || { tokens: 0, completion: 0, prompt: 0, cached: 0, latency: 0, cost: 0, successful: 0, total: 0 }
+        const existing = map.get(s.provider) || { tokens: 0, completion: 0, prompt: 0, cached: 0, cacheCreation: 0, latency: 0, cost: 0, successful: 0, total: 0 }
         existing.tokens += s.total_tokens ?? 0
         existing.completion += s.completion_tokens ?? 0
         existing.prompt += s.prompt_tokens ?? 0
         existing.cached += s.cached_tokens ?? 0
+        existing.cacheCreation += s.cache_creation_tokens ?? 0
         existing.latency += s.latency_sum_ms ?? 0
         existing.cost += s.total_cost_usd ?? 0
         existing.successful += s.successful_requests ?? 0
@@ -184,7 +188,7 @@ export function TopUsageChart({
         cost: v.cost,
         throughput: v.latency > 0 ? (v.completion * 1000) / v.latency : 0,
         successRate: v.total > 0 ? (v.successful / v.total) * 100 : 100,
-        cacheHitRate: v.prompt > 0 ? (v.cached / v.prompt) * 100 : 0,
+        cacheHitRate: (v.prompt + v.cacheCreation) > 0 ? (v.cached / (v.prompt + v.cacheCreation)) * 100 : 0,
         color: providerColors[provider.toLowerCase()] || PALETTE[i % PALETTE.length],
         badgeBg: getProviderBadgeBg(provider, theme),
         badgeText: getProviderBadgeText(provider, theme),
@@ -199,6 +203,7 @@ export function TopUsageChart({
       const total = (row.successful_requests ?? 0) + (row.failed_requests ?? 0)
       const prompt = row.prompt_tokens ?? 0
       const cached = row.cached_tokens ?? 0
+      const cacheCreation = row.cache_creation_tokens ?? 0
       return {
         name,
         icon: getSourceIcon(name),
@@ -210,7 +215,7 @@ export function TopUsageChart({
         throughput: row.avg_throughput ?? 0,
         pricePerMillion: tokens > 0 ? (cost / tokens) * 1_000_000 : null,
         successRate: total > 0 ? ((row.successful_requests ?? 0) / total) * 100 : 100,
-        cacheHitRate: prompt > 0 ? (cached / prompt) * 100 : 0,
+        cacheHitRate: (prompt + cacheCreation) > 0 ? (cached / (prompt + cacheCreation)) * 100 : 0,
         color: PALETTE[i % PALETTE.length],
         badgeBg: getSourceBadgeBg(name),
         badgeText: getSourceBadgeText(name),

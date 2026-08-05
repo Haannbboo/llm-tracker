@@ -189,7 +189,7 @@ export function fillGaps(data: DailyUsage[], granularity: 'hour' | 'day', period
   const effectiveTz = tz
   const zeroRow = (period: string): DailyUsage => ({
     period, requests: 0, prompt_tokens: 0, completion_tokens: 0,
-    cached_tokens: 0, total_tokens: 0, input_cost_usd: 0,
+    cached_tokens: 0, cache_creation_tokens: 0, total_tokens: 0, input_cost_usd: 0,
     output_cost_usd: 0, total_cost_usd: 0, avg_latency_ms: 0,
     latency_sum_ms: 0,
     avg_throughput: 0,
@@ -297,6 +297,7 @@ export function getModelIcon(model: string, theme: Theme = getTheme()) {
   if (m.startsWith('z-ai/') || m.includes('glm')) return <img src="/models/z-ai.svg" alt="" style={style} />
   if (m.includes('stepfun') || m.includes('step-')) return <img src="/models/stepfun-color.svg" alt="" style={style} />
   if (m.startsWith('nvidia/') || m.includes('nemotron')) return <img src="/models/nvidia.svg" alt="" style={style} />
+  if (m.includes('qwen')) return <img src="/models/qwen-color.svg" alt="" style={style} />
   if (m.startsWith('cohere/')) return <img src="/models/cohere.svg" alt="" style={style} />
   return null
 }
@@ -318,6 +319,7 @@ const PROVIDER_BADGES: Record<string, { color: string; bg: BadgeTheme; text: Bad
   'z-ai': { color: '#1F63EC', bg: { light: '#1F63EC26', dark: '#1F63EC40' }, text: { light: '#1F63EC', dark: '#7daaf5' } },
   stepfun: { color: '#01A9FF', bg: { light: '#01A9FF26', dark: '#01A9FF40' }, text: { light: '#006f9f', dark: '#7dd5fc' } },
   volce: { color: '#0095FD', bg: { light: '#0095FD26', dark: '#0095FD40' }, text: { light: '#0070c0', dark: '#66c2ff' } },
+  qwen: { color: '#6F69F7', bg: { light: '#6F69F726', dark: '#6F69F740' }, text: { light: '#6336E7', dark: '#a5a0fc' } },
 }
 
 function findProviderBadge(provider: string) {
@@ -361,6 +363,7 @@ export function getProviderIcon(provider: string, theme: Theme = getTheme()) {
   if (p.includes('volce')) return <img src="/models/volcengine.svg" alt="" style={style} />
   if (p.includes('nvidia')) return <img src="/models/nvidia.svg" alt="" style={style} />
   if (p.includes('cohere')) return <img src="/models/cohere.svg" alt="" style={style} />
+  if (p.includes('qwen')) return <img src="/models/qwen-color.svg" alt="" style={style} />
   return null
 }
 
@@ -489,12 +492,15 @@ export function buildSessionInsights(sessions: import('./types').SessionSummary[
   }
 
   if (cacheSaver) {
+    // cache_creation_tokens is disjoint from prompt_tokens (Anthropic semantics),
+    // so it must be added to the denominator for a true hit rate.
+    const cacheSaverTotalInput = cacheSaver.prompt_tokens + cacheSaver.cache_creation_tokens
     insights.push({
       key: 'cache-saver',
       title: 'Best Cache Saver',
       session: cacheSaver,
       value: formatCompact(cacheSaver.cached_tokens),
-      detail: `${cacheSaver.prompt_tokens > 0 ? Math.round((cacheSaver.cached_tokens / cacheSaver.prompt_tokens) * 100) : 0}% cache hit estimate`,
+      detail: `${cacheSaverTotalInput > 0 ? Math.round((cacheSaver.cached_tokens / cacheSaverTotalInput) * 100) : 0}% cache hit estimate`,
       tone: 'success',
     })
   }

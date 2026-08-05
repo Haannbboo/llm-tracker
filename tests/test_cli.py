@@ -431,6 +431,9 @@ def test_isolated_tracking_starts_proxy_when_proxy_env_enabled(
     assert [item[0] for item in started] == ["otlp", "proxy"]
     assert child_envs[0]["OPENAI_BASE_URL"] == "http://127.0.0.1:49154/v1"
     assert child_envs[0]["ANTHROPIC_BASE_URL"] == "http://127.0.0.1:49154"
+    assert child_envs[0]["OTEL_EXPORTER_OTLP_LOGS_ENDPOINT"] == (
+        "http://127.0.0.1:49153/v1/logs"
+    )
     assert "LLM_TRACKER_DB_URL" not in child_envs[0]
 
 

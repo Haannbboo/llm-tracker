@@ -894,6 +894,16 @@ def _pricing_entry(resolved_cost, scope: str, multiplier: float) -> dict:
         "output": cost.output,
         "cache_read": cost.cache_read,
         "cache_write": cost.cache_write,
+        "tiers": [
+            {
+                "min_tokens": tier.min_tokens,
+                "max_tokens": tier.max_tokens,
+                "input": tier.input,
+                "output": tier.output,
+                "cache_read": tier.cache_read,
+            }
+            for tier in cost.tiers
+        ],
         "source": resolved_cost.source,
         "scope": scope,
         "effective_input": cost.input * multiplier,
@@ -985,6 +995,7 @@ async def get_model_pricing(model: str, provider: str | None = None):
             "output": 0.0,
             "cache_read": 0.0,
             "cache_write": None,
+            "tiers": [],
             "effective_input": 0.0,
             "effective_output": 0.0,
             "effective_cache_read": 0.0,

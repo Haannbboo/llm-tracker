@@ -28,7 +28,7 @@ from config.app import (
 
 from .database import init_db
 from .recorder import record_tool_call, record_usage
-from .utils import extract_stream_usage, extract_usage
+from .utils import extract_usage, find_stream_usage
 
 REQUEST_TIMEOUT_SECONDS = 300
 PROXY_USER_AGENT_DIR = os.path.join(
@@ -134,7 +134,10 @@ def build_forward_headers(
         if k.lower() not in {"host", "content-length", "authorization"}
     }
     if provider and provider.api_key:
-        headers["authorization"] = f"Bearer {provider.api_key}"
+        if provider.auth_scheme == "x-api-key":
+            headers["x-api-key"] = provider.api_key
+        else:
+            headers["authorization"] = f"Bearer {provider.api_key}"
     return headers
 
 
@@ -342,7 +345,11 @@ async def _forward_stream_or_error(
         return JSONResponse(content=error_content, status_code=upstream.status_code)
 
     async def _relay():
-        usage_fields = extract_usage({})
+        # Anthropic streams usage across two events: message_start carries
+        # input/cache tokens, message_delta carries the final output token
+        # count. Merge raw usage dicts across events instead of overwriting,
+        # so the later event doesn't wipe out the earlier one's fields.
+        raw_usage: dict[str, Any] = {}
         ttft_ms: int | None = None
         buffer = ""
         tool_accumulator = StreamToolCallAccumulator()
@@ -362,14 +369,15 @@ async def _forward_stream_or_error(
                             continue
 
                         payload = json.loads(line[5:].strip())
-                        stream_usage = extract_stream_usage(payload)
+                        stream_usage = find_stream_usage(payload)
                         if stream_usage is not None:
-                            usage_fields = stream_usage
+                            raw_usage.update(stream_usage)
                         tool_accumulator.accumulate(payload)
                 except Exception:
                     continue
         finally:
             await client.aclose()
+            usage_fields = extract_usage(raw_usage)
             latency_ms = int((time.monotonic() - started_at) * 1000)
             usage = record_usage(
                 provider=provider.name,
@@ -381,6 +389,7 @@ async def _forward_stream_or_error(
                 prompt_length=prompt_length,
                 completion_tokens=usage_fields.get("completion_tokens"),
                 cached_tokens=usage_fields.get("cached_tokens"),
+                cache_creation_tokens=usage_fields.get("cache_creation_tokens"),
                 reasoning_tokens=usage_fields.get("reasoning_tokens"),
                 total_tokens=usage_fields.get("total_tokens"),
                 latency_ms=latency_ms,
@@ -456,6 +465,7 @@ async def forward(request: Request, path: str):
         prompt_length=prompt_length,
         completion_tokens=usage_fields.get("completion_tokens"),
         cached_tokens=usage_fields.get("cached_tokens"),
+        cache_creation_tokens=usage_fields.get("cache_creation_tokens"),
         reasoning_tokens=usage_fields.get("reasoning_tokens"),
         total_tokens=usage_fields.get("total_tokens"),
         latency_ms=latency_ms,

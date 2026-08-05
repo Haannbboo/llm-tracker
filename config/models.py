@@ -23,6 +23,22 @@ class ProviderConfig:
     base_url: str
     price_multiplier: float = 1.0
     api_key: str | None = field(default=None, repr=False)
+    auth_scheme: str = "bearer"  # "bearer" or "x-api-key" (Anthropic-native)
+
+
+@dataclass(frozen=True)
+class ModelTier:
+    """Pricing tier applied when token counts fall within [min_tokens, max_tokens).
+
+    Bounds are in tokens (litellm `range`). Prices are per-million tokens.
+    """
+
+    min_tokens: int
+    max_tokens: int | None
+    input: float
+    output: float
+    cache_read: float
+    cache_write: float | None = None
 
 
 @dataclass(frozen=True)
@@ -31,6 +47,7 @@ class ModelCost:
     output: float
     cache_read: float
     cache_write: float | None = None
+    tiers: tuple[ModelTier, ...] = ()
 
 
 @dataclass(frozen=True)

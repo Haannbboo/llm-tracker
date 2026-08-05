@@ -200,6 +200,9 @@ class SessionRecord(Base):
     cached_tokens: Mapped[int] = mapped_column(
         Integer, nullable=False, server_default=text("0")
     )
+    cache_creation_tokens: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default=text("0")
+    )
     total_cost_usd: Mapped[Decimal] = mapped_column(
         Numeric(18, 8), nullable=False, server_default=text("0")
     )

@@ -163,6 +163,7 @@ export function useDashboardData() {
     const completionTokens = data.reduce((sum, row) => sum + (row.completion_tokens || 0), 0)
     const reasoningTokens = data.reduce((sum, row) => sum + (row.reasoning_tokens || 0), 0)
     const cachedTokens = data.reduce((sum, row) => sum + (row.cached_tokens || 0), 0)
+    const cacheCreationTokens = data.reduce((sum, row) => sum + (row.cache_creation_tokens || 0), 0)
     const totalTokens = data.reduce((sum, row) => sum + (row.total_tokens || 0), 0)
     const totalCost = data.reduce((sum, row) => sum + (row.total_cost_usd || 0), 0)
     const latencyWeight = data.reduce((sum, row) => sum + (row.avg_latency_ms || 0) * (row.requests || 0), 0)
@@ -186,6 +187,7 @@ export function useDashboardData() {
       completionTokens,
       reasoningTokens,
       cachedTokens,
+      cacheCreationTokens,
       totalTokens,
       totalCost,
       avgLatency: requests === 0 ? 0 : latencyWeight / requests,

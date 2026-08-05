@@ -243,6 +243,18 @@ For Anthropic-compatible clients:
 export ANTHROPIC_BASE_URL=http://127.0.0.1:4000
 ```
 
+By default, if a provider sets `api_key`, the proxy injects it upstream as `Authorization: Bearer <key>`. For providers using Anthropic's native auth scheme (e.g. `api.anthropic.com`), set `auth_scheme: x-api-key` on that provider so the proxy sends `x-api-key: <key>` instead. The client must still send its own `anthropic-version` header (real Anthropic clients like Claude Code always do; the proxy passes it through unchanged and does not set a default):
+
+```yaml
+providers:
+  anthropic:
+    base_url: https://api.anthropic.com/v1
+    api_key: sk-ant-...
+    auth_scheme: x-api-key
+    models:
+      claude-sonnet-4-6: {}
+```
+
 Or let the wrapper set both for one child process:
 
 ```bash

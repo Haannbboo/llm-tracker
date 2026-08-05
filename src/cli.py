@@ -534,12 +534,18 @@ def run_with_isolated_tracking(
 
     try:
         try:
+            # Start the temp OTLP collector in every isolated run so the child's
+            # own OTLP telemetry (its global settings point at the main collector)
+            # is redirected into this run DB instead of leaking into the main DB.
+            # With proxy_env the proxy also records the same requests; the two
+            # paths converge on the run DB where record_usage dedups them.
             otlp_service = start_temp_service(
                 name="otlp",
                 module="src.otlp",
                 db_url=run_db_url,
             )
             services.append(otlp_service)
+            otlp_logs_endpoint = f"http://127.0.0.1:{otlp_service.port}/v1/logs"
 
             proxy_base_urls = None
             if options.proxy_env:
@@ -559,7 +565,6 @@ def run_with_isolated_tracking(
             )
             return 1
 
-        otlp_logs_endpoint = f"http://127.0.0.1:{otlp_service.port}/v1/logs"
         completed = subprocess.run(
             build_child_command(
                 command,

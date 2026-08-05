@@ -1,8 +1,14 @@
 from __future__ import annotations
 
+import json
+import os
+import time
+import urllib.error
+
 from fastapi.testclient import TestClient
 
-from config.app import ModelCost
+import config.pricing as pricing_module
+from config.app import ModelCost, ModelTier
 from config.pricing import (
     _claude_3x_alias,
     _is_chat_model,
@@ -10,6 +16,7 @@ from config.pricing import (
     _parse_model_entry,
     _strip_provider_prefix,
     _strip_version_suffix,
+    fetch_remote_pricing,
 )
 
 # --- Key normalization ---
@@ -86,6 +93,162 @@ def test_parse_model_cost_without_cache_write(config_module):
 
     assert cost is not None
     assert cost.cache_write is None
+
+
+def test_parse_model_cost_with_tiers(config_module):
+    model_config = {
+        "cost": {
+            "tiers": [
+                {"range": [0, 256000], "input": 0.4, "output": 1.6, "cacheRead": 0.08},
+                {"range": [256000, 1000000], "input": 1.2, "output": 4.8},
+            ]
+        }
+    }
+
+    cost = config_module._parse_model_cost(model_config)
+
+    assert cost is not None
+    assert len(cost.tiers) == 2
+    first, second = cost.tiers
+    assert first.min_tokens == 0
+    assert first.max_tokens == 256000
+    assert first.input == 0.4
+    assert first.output == 1.6
+    assert first.cache_read == 0.08
+    assert second.input == 1.2
+    assert second.cache_read == 0.08  # falls back to first-tier flat price
+    # Flat prices default to the first tier when not specified
+    assert cost.input == 0.4
+    assert cost.output == 1.6
+
+
+def test_parse_model_cost_with_tiers_inherits_flat_from_yaml(config_module):
+    model_config = {
+        "cost": {
+            "input": 3.0,
+            "output": 15.0,
+            "cacheRead": 0.3,
+            "tiers": [
+                {"range": [0, 100000], "input": 1.0, "output": 5.0},
+                {"range": [100000, None], "input": 2.0, "output": 10.0},
+            ],
+        }
+    }
+
+    cost = config_module._parse_model_cost(model_config)
+
+    assert cost is not None
+    assert cost.input == 3.0
+    assert cost.output == 15.0
+    assert cost.tiers[0].cache_read == 0.3
+    assert cost.tiers[1].max_tokens is None
+
+
+def test_parse_model_cost_with_tiers_carries_per_tier_cache_write(config_module):
+    model_config = {
+        "cost": {
+            "cacheWrite": 3.0,
+            "tiers": [
+                {"range": [0, 256000], "input": 0.4, "output": 1.6},
+                {
+                    "range": [256000, None],
+                    "input": 1.2,
+                    "output": 4.8,
+                    "cacheWrite": 7.5,
+                },
+            ],
+        }
+    }
+
+    cost = config_module._parse_model_cost(model_config)
+
+    assert cost is not None
+    first, second = cost.tiers
+    assert first.cache_write == 3.0  # falls back to the flat cacheWrite
+    assert second.cache_write == 7.5  # explicit per-tier override wins
+
+
+def test_parse_model_cost_without_tiers_inherits_base_tiers(config_module):
+    base = config_module.ModelCost(
+        input=0.4,
+        output=1.6,
+        cache_read=0.08,
+        tiers=(
+            config_module.ModelTier(
+                min_tokens=0, max_tokens=256000, input=0.4, output=1.6, cache_read=0.08
+            ),
+        ),
+    )
+    # No flat prices and no tiers key: keep the base's tiered pricing.
+    model_config = {"cost": {"cacheWrite": 3.0}}
+
+    cost = config_module._parse_model_cost(model_config, base)
+
+    assert cost is not None
+    assert cost.tiers == base.tiers
+    assert cost.cache_write == 3.0
+    assert cost.input == 0.4
+
+
+def test_parse_model_cost_flat_prices_clear_inherited_tiers(config_module):
+    base = config_module.ModelCost(
+        input=0.4,
+        output=1.6,
+        cache_read=0.08,
+        tiers=(
+            config_module.ModelTier(
+                min_tokens=0, max_tokens=256000, input=0.4, output=1.6, cache_read=0.08
+            ),
+        ),
+    )
+    # Explicit flat prices are an override: tiers must not silently win.
+    model_config = {"cost": {"input": 3.0, "output": 15.0}}
+
+    cost = config_module._parse_model_cost(model_config, base)
+
+    assert cost is not None
+    assert cost.tiers == ()
+    assert cost.input == 3.0
+    assert cost.output == 15.0
+
+
+def test_parse_model_cost_empty_tiers_disables_tiers(config_module):
+    base = config_module.ModelCost(
+        input=0.4,
+        output=1.6,
+        cache_read=0.08,
+        tiers=(
+            config_module.ModelTier(
+                min_tokens=0, max_tokens=256000, input=0.4, output=1.6, cache_read=0.08
+            ),
+        ),
+    )
+    model_config = {"cost": {"tiers": []}}
+
+    cost = config_module._parse_model_cost(model_config, base)
+
+    assert cost is not None
+    assert cost.tiers == ()
+    assert cost.input == 0.4
+
+
+def test_parse_model_cost_skips_malformed_tiers(config_module):
+    model_config = {
+        "cost": {
+            "tiers": [
+                {"range": [None, 1000], "input": 1.0, "output": 2.0},
+                {"range": ["bad", "worse"], "input": 1.0, "output": 2.0},
+                {"range": [0, 256000], "input": "not-a-number", "output": 2.0},
+                {"range": [256000, None], "input": 1.2, "output": 4.8},
+            ]
+        }
+    }
+
+    cost = config_module._parse_model_cost(model_config)
+
+    assert cost is not None
+    assert len(cost.tiers) == 1
+    assert cost.tiers[0].min_tokens == 256000
 
 
 def test_apply_patch_set_creates_nested_dicts_with_literal_keys(config_module):
@@ -239,6 +402,136 @@ def test_parse_model_entry_skips_non_chat():
 def test_parse_model_entry_skips_no_pricing():
     entry = {"mode": "chat"}
     assert _parse_model_entry("some-model", entry) is None
+
+
+def test_parse_model_entry_with_tiered_pricing():
+    entry = {
+        "mode": "chat",
+        "tiered_pricing": [
+            {
+                "cache_read_input_token_cost": 8e-08,
+                "input_cost_per_token": 4e-07,
+                "output_cost_per_token": 1.6e-06,
+                "range": [0, 256000.0],
+            },
+            {
+                "cache_read_input_token_cost": 2.4e-07,
+                "input_cost_per_token": 1.2e-06,
+                "output_cost_per_token": 4.8e-06,
+                "range": [256000.0, 1000000.0],
+            },
+        ],
+    }
+
+    result = _parse_model_entry("dashscope/qwen3.7-plus", entry)
+
+    assert result is not None
+    key, cost = result
+    assert key == "dashscope/qwen3.7-plus"
+    # Flat fields default to the first tier (per-million)
+    assert cost.input == 0.4
+    assert cost.output == 1.6
+    assert cost.cache_read == 0.08
+    assert len(cost.tiers) == 2
+    first, second = cost.tiers
+    assert first.min_tokens == 0
+    assert first.max_tokens == 256000
+    assert first.input == 0.4
+    assert first.output == 1.6
+    assert first.cache_read == 0.08
+    assert second.min_tokens == 256000
+    assert second.max_tokens == 1000000
+    assert second.input == 1.2
+    assert second.output == 4.8
+    assert second.cache_read == 0.24
+
+
+def test_parse_model_entry_with_empty_tiered_pricing_still_skipped():
+    entry = {"mode": "chat", "tiered_pricing": []}
+    assert _parse_model_entry("some-model", entry) is None
+
+
+def test_parse_model_entry_tier_falls_back_to_top_level_prices():
+    entry = {
+        "mode": "chat",
+        "input_cost_per_token": 4e-07,
+        "output_cost_per_token": 1.6e-06,
+        "cache_read_input_token_cost": 8e-08,
+        "tiered_pricing": [
+            {
+                "input_cost_per_token": 1.2e-06,
+                "output_cost_per_token": 4.8e-06,
+                "range": [256000.0, 1000000.0],
+            }
+        ],
+    }
+
+    result = _parse_model_entry("dashscope/some-model", entry)
+
+    assert result is not None
+    _, cost = result
+    assert len(cost.tiers) == 1
+    tier = cost.tiers[0]
+    assert tier.input == 1.2
+    assert tier.output == 4.8
+    assert tier.cache_read == 0.08  # falls back to the entry's top-level value
+
+
+def test_parse_model_entry_tier_carries_own_cache_write_price():
+    entry = {
+        "mode": "chat",
+        "cache_creation_input_token_cost": 3.75e-06,
+        "tiered_pricing": [
+            {
+                "input_cost_per_token": 4e-07,
+                "output_cost_per_token": 1.6e-06,
+                "range": [0, 256000.0],
+            },
+            {
+                "input_cost_per_token": 1.2e-06,
+                "output_cost_per_token": 4.8e-06,
+                "cache_creation_input_token_cost": 7.5e-06,
+                "range": [256000.0, 1000000.0],
+            },
+        ],
+    }
+
+    result = _parse_model_entry("anthropic/claude-long-context", entry)
+
+    assert result is not None
+    _, cost = result
+    first, second = cost.tiers
+    # No per-tier override: falls back to the entry's top-level cache_write.
+    assert first.cache_write == 3.75
+    # Explicit per-tier override wins over the entry's top-level value.
+    assert second.cache_write == 7.5
+
+
+def test_parse_model_entry_skips_malformed_tiers():
+    entry = {
+        "mode": "chat",
+        "tiered_pricing": [
+            {"input_cost_per_token": 4e-07, "range": [None, 1000]},
+            {
+                "input_cost_per_token": "bad",
+                "output_cost_per_token": 1.6e-06,
+                "range": [0, 256000],
+            },
+            {
+                "input_cost_per_token": 1.2e-06,
+                "output_cost_per_token": 4.8e-06,
+                "range": [256000.0, 1000000.0],
+            },
+        ],
+    }
+
+    result = _parse_model_entry("dashscope/some-model", entry)
+
+    assert result is not None
+    _, cost = result
+    assert len(cost.tiers) == 1
+    assert cost.tiers[0].min_tokens == 256000
+    assert cost.input == 1.2  # flat defaults to the first valid tier
 
 
 # --- Full JSON parsing ---
@@ -822,6 +1115,73 @@ def test_single_model_pricing_contains_litellm_match(api_module, monkeypatch):
     assert data["output"] == 3.0
     assert data["cache_read"] == 0.2
     assert data["multiplier"] == 1.0
+    assert data["tiers"] == []
+
+
+def test_single_model_pricing_includes_tiers(api_module, monkeypatch):
+    api_module.CONFIG.clear()
+    api_module.CONFIG.update({"models": {}, "providers": {}})
+    monkeypatch.setattr(
+        "config.pricing.get_remote_pricing",
+        lambda: {
+            "dashscope/qwen3.7-plus": ModelCost(
+                input=0.4,
+                output=1.6,
+                cache_read=0.08,
+                tiers=(
+                    ModelTier(
+                        min_tokens=0,
+                        max_tokens=256000,
+                        input=0.4,
+                        output=1.6,
+                        cache_read=0.08,
+                    ),
+                    ModelTier(
+                        min_tokens=256000,
+                        max_tokens=1000000,
+                        input=1.2,
+                        output=4.8,
+                        cache_read=0.24,
+                    ),
+                ),
+            )
+        },
+    )
+
+    response = TestClient(api_module.app).get("/pricing/qwen3.7-plus")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["resolved"] is True
+    assert data["tiers"] == [
+        {
+            "min_tokens": 0,
+            "max_tokens": 256000,
+            "input": 0.4,
+            "output": 1.6,
+            "cache_read": 0.08,
+        },
+        {
+            "min_tokens": 256000,
+            "max_tokens": 1000000,
+            "input": 1.2,
+            "output": 4.8,
+            "cache_read": 0.24,
+        },
+    ]
+
+
+def test_single_model_pricing_unresolved_includes_empty_tiers(api_module, monkeypatch):
+    api_module.CONFIG.clear()
+    api_module.CONFIG.update({"models": {}, "providers": {}})
+    monkeypatch.setattr("config.pricing.get_remote_pricing", lambda: {})
+
+    response = TestClient(api_module.app).get("/pricing/no-such-model")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["resolved"] is False
+    assert data["tiers"] == []
 
 
 def test_single_model_pricing_yaml_override_beats_litellm(api_module, monkeypatch):
@@ -1195,3 +1555,148 @@ def test_parse_litellm_json_claude_3x_alias_with_date():
     assert "claude-3-7-sonnet" in costs
     # Claude 3.x alias
     assert "claude-sonnet-3-7" in costs
+
+
+# --- Cache TTL ---
+
+
+def test_fetch_remote_pricing_skips_network_when_cache_fresh(tmp_path, monkeypatch):
+    cache_path = tmp_path / "litellm_pricing.json"
+    cache_path.write_text(
+        json.dumps({"gpt-fresh": {"input_cost_per_token": 1e-06, "mode": "chat"}})
+    )
+    monkeypatch.setattr(pricing_module, "_cache_path", lambda: cache_path)
+    monkeypatch.setattr(pricing_module, "_remote_costs", None)
+
+    def _fail_if_called():
+        raise AssertionError("should not hit the network when cache is fresh")
+
+    monkeypatch.setattr(pricing_module, "_fetch_litellm_json", _fail_if_called)
+
+    costs = fetch_remote_pricing()
+
+    assert "gpt-fresh" in costs
+
+
+def test_fetch_remote_pricing_refetches_when_cache_stale(tmp_path, monkeypatch):
+    cache_path = tmp_path / "litellm_pricing.json"
+    cache_path.write_text(
+        json.dumps({"gpt-old": {"input_cost_per_token": 1e-06, "mode": "chat"}})
+    )
+    stale_mtime = time.time() - pricing_module.CACHE_TTL_SECONDS - 1
+    os.utime(cache_path, (stale_mtime, stale_mtime))
+
+    monkeypatch.setattr(pricing_module, "_cache_path", lambda: cache_path)
+    monkeypatch.setattr(pricing_module, "_remote_costs", None)
+    monkeypatch.setattr(
+        pricing_module,
+        "_fetch_litellm_json",
+        lambda: {"gpt-new": {"input_cost_per_token": 2e-06, "mode": "chat"}},
+    )
+
+    costs = fetch_remote_pricing()
+
+    assert "gpt-new" in costs
+    assert "gpt-old" not in costs
+    # Cache file on disk was refreshed with the newly fetched data.
+    assert "gpt-new" in json.loads(cache_path.read_text())
+
+
+def test_fetch_remote_pricing_refetches_when_fresh_cache_is_corrupt(
+    tmp_path, monkeypatch
+):
+    """A fresh mtime with unparseable content (truncated/corrupt write)
+    must not block a real fetch for a full CACHE_TTL_SECONDS."""
+    cache_path = tmp_path / "litellm_pricing.json"
+    cache_path.write_text("{not valid json")  # fresh mtime, but garbage content
+
+    monkeypatch.setattr(pricing_module, "_cache_path", lambda: cache_path)
+    monkeypatch.setattr(pricing_module, "_remote_costs", None)
+    monkeypatch.setattr(
+        pricing_module,
+        "_fetch_litellm_json",
+        lambda: {"gpt-recovered": {"input_cost_per_token": 1e-06, "mode": "chat"}},
+    )
+
+    costs = fetch_remote_pricing()
+
+    assert "gpt-recovered" in costs
+
+
+# --- IPv4-only fetch (scoped, not a global socket.getaddrinfo patch) ---
+
+
+def test_create_ipv4_connection_requests_af_inet_only(monkeypatch):
+    seen_family = {}
+
+    class _FakeSocket:
+        def __init__(self):
+            self.connected_to = None
+
+        def settimeout(self, _):
+            pass
+
+        def connect(self, sockaddr):
+            self.connected_to = sockaddr
+
+        def close(self):
+            pass
+
+    def _fake_getaddrinfo(host, port, family, socktype):
+        seen_family["family"] = family
+        return [(family, socktype, 0, "", (host, port))]
+
+    fake_sock = _FakeSocket()
+    monkeypatch.setattr(pricing_module.socket, "getaddrinfo", _fake_getaddrinfo)
+    monkeypatch.setattr(pricing_module.socket, "socket", lambda *a, **k: fake_sock)
+
+    result = pricing_module._create_ipv4_connection(("example.com", 443))
+
+    assert seen_family["family"] == pricing_module.socket.AF_INET
+    assert result is fake_sock
+    assert fake_sock.connected_to == ("example.com", 443)
+
+
+def test_create_ipv4_connection_raises_when_all_candidates_fail(monkeypatch):
+    class _FakeSocket:
+        def settimeout(self, _):
+            pass
+
+        def connect(self, sockaddr):
+            raise OSError("connection refused")
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(
+        pricing_module.socket,
+        "getaddrinfo",
+        lambda host, port, family, socktype: [(family, socktype, 0, "", (host, port))],
+    )
+    monkeypatch.setattr(pricing_module.socket, "socket", lambda *a, **k: _FakeSocket())
+
+    try:
+        pricing_module._create_ipv4_connection(("example.com", 443))
+        raise AssertionError("expected OSError")
+    except OSError as exc:
+        assert "connection refused" in str(exc)
+
+
+def test_fetch_litellm_json_does_not_mutate_global_getaddrinfo(monkeypatch):
+    """Regression guard for the original bug: this must not monkeypatch
+    socket.getaddrinfo globally, since the same process also resolves DNS
+    for concurrent, unrelated live proxy traffic."""
+    original_getaddrinfo = pricing_module.socket.getaddrinfo
+
+    class _RaisingOpener:
+        def open(self, *a, **k):
+            raise urllib.error.URLError("network unavailable in test")
+
+    monkeypatch.setattr(
+        pricing_module.urllib.request, "build_opener", lambda *a, **k: _RaisingOpener()
+    )
+
+    result = pricing_module._fetch_litellm_json()
+
+    assert result is None
+    assert pricing_module.socket.getaddrinfo is original_getaddrinfo

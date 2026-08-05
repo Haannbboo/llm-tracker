@@ -6,6 +6,7 @@ Extracted from database/__init__.py during Phase 5 refactoring.
 from __future__ import annotations
 
 import calendar
+import logging
 from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any
@@ -25,6 +26,8 @@ from sqlalchemy.orm import Session
 from ..utils import micros_to_secs, secs_to_micros
 from .engine import get_engine
 from .models import BaseUrl, ToolCall, Usage, UsageDaily
+
+logger = logging.getLogger(__name__)
 
 
 def _iso_to_micros(value: str) -> int:
@@ -66,6 +69,145 @@ def _avg_effective_price_per_million_expr(
 
 
 # === Entity / Persistence Helpers ===
+
+# ponytail: proxy and OTLP share no request id and neither reliably lands
+# first (observed empirically: OpenCode's proxy write beat its OTLP write),
+# so dedup checks both directions and matches on token counts within this
+# window instead of an exact key. Widen the window, or add a real shared id,
+# if collisions or missed matches become a problem. This also can't close the
+# race where both writers' lookups run before either has committed its own
+# insert (they're separate processes in separate transactions) — if that
+# happens, both still insert. Accepted gap: fixing it needs a DB-level
+# uniqueness constraint on a real shared key, which doesn't exist yet.
+DEDUP_WINDOW_MICROS = 15_000_000
+
+# `provider` is not a reliable match field: OTLP's opencode/kilo parser
+# reports the agent's own configured provider alias (e.g. "llm-tracker
+# proxy" when opencode points at the local proxy), while the proxy reports
+# the real resolved upstream (e.g. "Volce") for the same request. So dedup
+# matches on client_source family + model + tokens only.
+#
+# Kilo is a fork that reuses OpenCode's config schema and OTLP field
+# extraction (both parsed by _extract_opencode_fields in otlp.py), but the
+# proxy's user-agent sniffing (parse_client_source in proxy.py) has no
+# separate Kilo case — if Kilo's outbound requests don't rebrand their UA,
+# the proxy would label them "opencode" while OTLP labels them "kilo".
+# Folding them into one family keeps dedup working either way.
+_CLIENT_SOURCE_FAMILIES: dict[str, str] = {
+    "claude": "claude",
+    "claude-code": "claude",
+    "codex": "codex",
+    "gemini": "gemini",
+    "gemini-cli": "gemini",
+    "opencode": "opencode",
+    "kilo": "opencode",
+}
+_CLIENT_SOURCES_BY_FAMILY: dict[str, list[str]] = {}
+for _label, _family in _CLIENT_SOURCE_FAMILIES.items():
+    _CLIENT_SOURCES_BY_FAMILY.setdefault(_family, []).append(_label)
+
+
+def merge_duplicate_usage(
+    *,
+    client_source: str | None,
+    is_otlp: bool,
+    model: str,
+    prompt_tokens: int | None,
+    completion_tokens: int | None,
+    cached_tokens: int | None,
+    total_tokens: int | None,
+    cache_creation_tokens: int | None,
+    ts: int,
+    session_id: str | None,
+    client_ip: str | None,
+    db_path: str | None = None,
+) -> Usage | None:
+    """Find a same-shaped usage row already recorded by the other collection path
+    and enrich it instead of inserting a duplicate.
+
+    `is_otlp` is whether the call currently being recorded is OTLP-sourced;
+    the lookup searches the opposite path (OTLP looks for a proxy row and
+    vice versa) so a request captured by both never double-counts.
+
+    Only `session_id` and `client_ip` are merged onto the existing row. OTLP
+    is treated as authoritative for session_id (it carries the agent's real
+    session, while the proxy never has one): an incoming OTLP call can
+    overwrite these fields, an incoming proxy call only fills them in if the
+    existing row doesn't already have them. Other fields (tokens, cost,
+    latency, status, provider, ...) are left untouched even on a match:
+    they're already folded into `usage_daily`/`sessions` running sums the
+    moment the existing row was inserted, so changing them here would desync
+    those aggregates without a matching correction.
+    """
+    family = _CLIENT_SOURCE_FAMILIES.get(client_source or "")
+    if family is None:
+        return None
+    other_path_sources = _CLIENT_SOURCES_BY_FAMILY[family]
+    endpoint_filter = Usage.endpoint != "otlp" if is_otlp else Usage.endpoint == "otlp"
+
+    engine = get_engine(db_path)
+    with Session(engine, expire_on_commit=False) as session:
+        existing = session.scalar(
+            select(Usage)
+            .where(
+                and_(
+                    endpoint_filter,
+                    Usage.client_source.in_(other_path_sources),
+                    Usage.model == model,
+                    Usage.prompt_tokens == prompt_tokens,
+                    Usage.completion_tokens == completion_tokens,
+                    Usage.cached_tokens == cached_tokens,
+                    Usage.total_tokens == total_tokens,
+                    # Proxy normalizes a missing cache-write to 0 while the OTLP
+                    # extractors leave it NULL; coalesce so the two paths still
+                    # match on the same logical request.
+                    func.coalesce(Usage.cache_creation_tokens, 0)
+                    == func.coalesce(cache_creation_tokens, 0),
+                    Usage.ts >= ts - DEDUP_WINDOW_MICROS,
+                    Usage.ts <= ts + DEDUP_WINDOW_MICROS,
+                )
+            )
+            .order_by(func.abs(Usage.ts - ts))
+            # Row lock is PostgreSQL-only; the SQLite dialect ignores FOR UPDATE
+            # (SQLite serializes writes via its whole-file write lock instead).
+            .with_for_update()
+            .limit(1)
+        )
+        if existing is None:
+            return None
+
+        session_id_was_empty = not existing.session_id
+        for field, value in (("session_id", session_id), ("client_ip", client_ip)):
+            if value is not None and (is_otlp or getattr(existing, field) is None):
+                setattr(existing, field, value)
+        session.commit()
+
+    logger.info(
+        "merged duplicate usage from %s into %s ts=%s model=%s prompt=%s "
+        "completion=%s cached=%s total=%s",
+        "otlp" if is_otlp else "proxy",
+        "otlp" if not is_otlp else "proxy",
+        ts,
+        model,
+        prompt_tokens,
+        completion_tokens,
+        cached_tokens,
+        total_tokens,
+    )
+
+    if session_id_was_empty and existing.session_id:
+        try:
+            from .sessions import upsert_session_from_usage
+
+            upsert_session_from_usage(existing, db_path=db_path)
+        except Exception:
+            import logging
+
+            logging.getLogger(__name__).warning(
+                "Failed to update session record for merged usage ts=%s", existing.ts
+            )
+
+    return existing
 
 
 def log_usage(usage: Usage, db_path: str | None = None) -> None:
@@ -356,9 +498,12 @@ def _finalize_usage_summary(
     if ttft_values:
         summary["avg_ttft_ms"] = sum(ttft_values) / len(ttft_values)
 
-    prompt_tokens = summary["prompt_tokens"]
+    # prompt_tokens already includes cached_tokens as a subset (see extract_usage
+    # in src/utils.py); cache_creation_tokens is a disjoint bucket on top of that,
+    # so it must be added to the denominator to get true cache efficiency.
+    total_input_tokens = summary["prompt_tokens"] + summary["cache_creation_tokens"]
     summary["cache_hit_rate"] = (
-        summary["cached_tokens"] / prompt_tokens if prompt_tokens else 0.0
+        summary["cached_tokens"] / total_input_tokens if total_input_tokens else 0.0
     )
 
     return summary
@@ -471,6 +616,7 @@ def _daily_usage_token_columns(*, include_reasoning: bool = True) -> tuple[Any, 
     columns.extend(
         [
             func.sum(UsageDaily.cached_tokens).label("cached_tokens"),
+            func.sum(UsageDaily.cache_creation_tokens).label("cache_creation_tokens"),
             func.sum(UsageDaily.total_tokens).label("total_tokens"),
         ]
     )
@@ -970,6 +1116,9 @@ def _summarize_usage_raw(
                 "reasoning_tokens"
             ),
             func.coalesce(func.sum(Usage.cached_tokens), 0).label("cached_tokens"),
+            func.coalesce(func.sum(Usage.cache_creation_tokens), 0).label(
+                "cache_creation_tokens"
+            ),
             func.coalesce(func.sum(Usage.total_tokens), 0).label("total_tokens"),
             func.avg(Usage.latency_ms).label("avg_latency_ms"),
             latency_sum.label("latency_sum_ms"),
@@ -1301,6 +1450,9 @@ def aggregate_usage_by_period(
                 / func.nullif(func.sum(Usage.latency_ms), 0)
             ).label("avg_throughput"),
             func.coalesce(func.sum(Usage.cached_tokens), 0).label("cached_tokens"),
+            func.coalesce(func.sum(Usage.cache_creation_tokens), 0).label(
+                "cache_creation_tokens"
+            ),
             func.coalesce(func.sum(Usage.total_tokens), 0).label("total_tokens"),
             func.coalesce(func.sum(Usage.input_cost_usd), 0).label("input_cost_usd"),
             func.coalesce(func.sum(Usage.output_cost_usd), 0).label("output_cost_usd"),
@@ -1333,6 +1485,7 @@ def aggregate_usage_by_period(
                     "completion_tokens": row.completion_tokens,
                     "avg_throughput": _normalize_value(row.avg_throughput),
                     "cached_tokens": row.cached_tokens,
+                    "cache_creation_tokens": row.cache_creation_tokens,
                     "total_tokens": row.total_tokens,
                     "input_cost_usd": _normalize_value(row.input_cost_usd),
                     "output_cost_usd": _normalize_value(row.output_cost_usd),
@@ -1414,6 +1567,7 @@ def aggregate_daily_by_dimension(
             func.sum(UsageDaily.request_count).label("requests"),
             func.sum(UsageDaily.prompt_tokens).label("prompt_tokens"),
             func.sum(UsageDaily.cached_tokens).label("cached_tokens"),
+            func.sum(UsageDaily.cache_creation_tokens).label("cache_creation_tokens"),
             func.sum(UsageDaily.total_tokens).label("total_tokens"),
             func.sum(UsageDaily.total_cost_usd).label("total_cost_usd"),
             func.sum(UsageDaily.completion_tokens).label("completion_tokens"),

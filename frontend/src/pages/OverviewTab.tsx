@@ -391,16 +391,21 @@ export function OverviewTab({
                 </div>
               </div>
               <div style={{ width: '100px' }}>
-                <Sparkline data={dailyUsage.map(d => value(d.prompt_tokens) > 0 ? (value(d.cached_tokens) / value(d.prompt_tokens)) * 100 : 0)} color="var(--color-green)" />
+                {/* cache_creation_tokens is disjoint from prompt_tokens (Anthropic semantics),
+                    so it's added to the denominator for a true hit rate. */}
+                <Sparkline data={dailyUsage.map(d => (value(d.prompt_tokens) + value(d.cache_creation_tokens)) > 0 ? (value(d.cached_tokens) / (value(d.prompt_tokens) + value(d.cache_creation_tokens))) * 100 : 0)} color="var(--color-green)" />
               </div>
             </div>
             <div className="stat-label" style={{ marginBottom: 0 }}>
-              {t('In:')} {formatCompact(totals.promptTokens)} / {t('Out:')} {formatCompact(totals.completionTokens)}
+              {/* cache_creation_tokens folds into "In" (fresh input, billed
+                  differently from cache-read) so In + Out reconciles with
+                  the Token Usage total above. */}
+              {t('In:')} {formatCompact(totals.promptTokens + totals.cacheCreationTokens)} / {t('Out:')} {formatCompact(totals.completionTokens)}
             </div>
             <div className="stat-label" style={{ fontSize: '11px', marginBottom: 0 }}>
               {t('Cached:')} {formatCompact(totals.cachedTokens)}
               <span style={{ marginLeft: '6px', color: 'var(--color-green)', fontWeight: 600 }}>
-                ({totals.totalTokens > 0 ? ((value(totals.cachedTokens) / totals.totalTokens) * 100).toFixed(1) : 0}% {t('Hit)')}
+                ({(totals.promptTokens + totals.cacheCreationTokens) > 0 ? ((value(totals.cachedTokens) / (totals.promptTokens + totals.cacheCreationTokens)) * 100).toFixed(1) : 0}% {t('Hit)')}
               </span>
             </div>
           </div>

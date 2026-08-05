@@ -422,7 +422,11 @@ def _extract_opencode_fields(
     else:
         completion_tokens = None
 
-    normalized_total = prompt_tokens + int(completion_tokens or 0)
+    # Include cache-creation so total matches the proxy's prompt+completion+
+    # cache_creation computation (the source's total_token_count includes it).
+    normalized_total = (
+        prompt_tokens + int(completion_tokens or 0) + int(cache_create or 0)
+    )
 
     # Pop buffered tool calls for this message.id
     message_id = _attr(attrs, "message.id")
