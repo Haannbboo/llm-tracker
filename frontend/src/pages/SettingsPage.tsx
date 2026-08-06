@@ -1,9 +1,10 @@
 import { useState } from 'react'
 import { useApp } from '../contexts/AppContext'
 import { useSettingsData } from '../hooks/useSettingsData'
+import { useDevices } from '../hooks/useDevices'
 import { CopyButton } from '../components/CopyButton'
 import { t } from '../i18n/index.ts'
-import { FIXED_PROVIDER_COLORS, getProviderColor, getModelIcon, getAgentDisplayName } from '../utils'
+import { FIXED_PROVIDER_COLORS, getProviderColor, getModelIcon, getAgentDisplayName, formatTime } from '../utils'
 import { TimezoneSelector } from '../components/TimezoneSelector'
 import type { PricingEntry } from '../types'
 import { useDashboardAgents } from '../hooks/useDashboardAgents'
@@ -13,15 +14,42 @@ type Props = {
   providerColors?: Record<string, string>
 }
 
+const DEVICE_KIND_LABELS: Record<string, string> = {
+  web: 'Browser',
+  cli: 'CLI',
+  ingest: 'Ingest',
+}
+
 export function SettingsPage({ providerColors }: Props) {
-  const [activeSection, setActiveSection] = useState<'tracker' | 'services' | 'connectivity'>('tracker')
+  const [activeSection, setActiveSection] = useState<'tracker' | 'services' | 'connectivity' | 'devices'>('tracker')
   const colors = providerColors ?? FIXED_PROVIDER_COLORS
   const {
     configParsed, configContent, setConfigContent,
-    configStatus, error,
+    configStatus, error, auth, showToast, signOut,
   } = useApp()
   const { localAgents, setupDiagnostics } = useDashboardAgents()
   const versionData = useVersion()
+  const authDevicesActive = activeSection === 'devices'
+  const { devices, refresh: refreshDevices } = useDevices(authDevicesActive && auth.enabled)
+  const [revokingDeviceId, setRevokingDeviceId] = useState<string | null>(null)
+
+  const handleRevokeDevice = async (deviceId: string) => {
+    if (revokingDeviceId !== null) return
+    setRevokingDeviceId(deviceId)
+    try {
+      const response = await fetch(`/auth/devices/${deviceId}/revoke`, { method: 'POST' })
+      if (response.ok) {
+        showToast(t('Device revoked'))
+        refreshDevices()
+      } else {
+        showToast(t('Failed to revoke device'))
+      }
+    } catch {
+      showToast(t('Failed to revoke device'))
+    } finally {
+      setRevokingDeviceId(null)
+    }
+  }
 
   const {
     selectedPricingProvider, setSelectedPricingProvider,
@@ -94,12 +122,13 @@ export function SettingsPage({ providerColors }: Props) {
             { id: 'tracker', label: t('LLM-Tracker Settings') },
             { id: 'services', label: t('Services') },
             { id: 'connectivity', label: t('Connectivity Test') },
+            ...(auth.enabled && auth.user ? [{ id: 'devices', label: t('Devices') }] : []),
           ].map((section) => (
             <button
               key={section.id}
               type="button"
               className={`tab-toggle-btn ${activeSection === section.id ? 'active' : ''}`}
-              onClick={() => setActiveSection(section.id as 'tracker' | 'services' | 'connectivity')}
+              onClick={() => setActiveSection(section.id as 'tracker' | 'services' | 'connectivity' | 'devices')}
             >
               {section.label}
             </button>
@@ -767,6 +796,86 @@ export function SettingsPage({ providerColors }: Props) {
             </div>
           </div>
         </div>
+        </div>
+      )}
+
+      {activeSection === 'devices' && (
+        <div className="panel">
+          <div className="panel-tabs" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <div className="tab active"><span>💻</span> {t('Devices')}</div>
+            {auth.user && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <span className="user-avatar">
+                  {(auth.user.name || auth.user.email).charAt(0).toUpperCase()}
+                </span>
+                <span className="user-email" title={auth.user.email}>
+                  {auth.user.name || auth.user.email}
+                </span>
+                <button className="btn-danger" onClick={() => void signOut()}>
+                  {t('Sign out')}
+                </button>
+              </div>
+            )}
+          </div>
+          <div className="panel-body" style={{ padding: '0' }}>
+            <div style={{ padding: '16px', borderBottom: '1px solid var(--border-color)', fontSize: '13px', color: 'var(--text-secondary)' }}>
+              {t('Sessions that hold a login token. Revoking a device signs it out immediately.')}
+            </div>
+            <table className="table">
+              <thead>
+                <tr>
+                  <th>{t('Device')}</th>
+                  <th>{t('Kind')}</th>
+                  <th>{t('Created')}</th>
+                  <th>{t('Last used')}</th>
+                  <th>{t('Status')}</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody>
+                {devices && devices.length > 0 ? devices.map((device) => (
+                  <tr key={device.id}>
+                    <td style={{ fontWeight: 700 }}>
+                      {device.device_name ?? '—'}
+                      {device.current && (
+                        <span className="badge badge-success" style={{ marginLeft: '8px' }}>
+                          {t('Current device')}
+                        </span>
+                      )}
+                    </td>
+                    <td style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
+                      {DEVICE_KIND_LABELS[device.kind] ?? device.kind}
+                    </td>
+                    <td style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>{formatTime(device.created_at)}</td>
+                    <td style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
+                      {device.last_used_at != null ? formatTime(device.last_used_at) : '—'}
+                    </td>
+                    <td>
+                      <span className={`badge ${device.current ? 'badge-success' : 'badge-neutral'}`}>
+                        {device.current ? t('Active') : t('Idle')}
+                      </span>
+                    </td>
+                    <td style={{ textAlign: 'right' }}>
+                      <button
+                        type="button"
+                        className="btn-danger"
+                        disabled={revokingDeviceId !== null}
+                        onClick={() => void handleRevokeDevice(device.id)}
+                      >
+                        {revokingDeviceId === device.id ? `${t('Revoke')}…` : t('Revoke')}
+                      </button>
+                    </td>
+                  </tr>
+                )) : (
+                  <tr>
+                    <td colSpan={6} style={{ textAlign: 'center', padding: '24px', color: 'var(--text-muted)' }}>
+                      {devices ? t('No devices found.') : t('Loading...')}
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
         </div>
       )}
     </div>

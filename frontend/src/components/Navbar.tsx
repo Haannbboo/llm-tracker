@@ -4,7 +4,7 @@ import { useApp } from '../contexts/AppContext'
 type View = 'dashboard' | 'logs' | 'settings'
 
 export function Navbar({ currentView, onNavigate }: { currentView: View; onNavigate: (v: View) => void }) {
-  const { theme, toggleThemeHandler, lang, setLang } = useApp()
+  const { theme, toggleThemeHandler, lang, setLang, auth } = useApp()
 
   return (
     <header className="top-navbar">
@@ -24,26 +24,39 @@ export function Navbar({ currentView, onNavigate }: { currentView: View; onNavig
         <button className={`nav-item ${currentView === 'logs' ? 'active' : ''}`} onClick={() => onNavigate('logs')}>
           📜 {t('Request Logs')}
         </button>
-        <button className={`nav-item ${currentView === 'settings' ? 'active' : ''}`} onClick={() => onNavigate('settings')}>
-          ⚙️ {t('Settings')}
+        <button className={`nav-item nav-item-settings ${currentView === 'settings' ? 'active' : ''}`} onClick={() => onNavigate('settings')}>
+          {auth.enabled && auth.user ? (
+            <>
+              <span className="user-avatar">
+                {(auth.user.name || auth.user.email).charAt(0).toUpperCase()}
+              </span>
+              <span className="user-email" title={auth.user.email}>
+                {auth.user.name || auth.user.email}
+              </span>
+            </>
+          ) : (
+            <>⚙️ {t('Settings')}</>
+          )}
         </button>
       </nav>
-      <button
-        className="nav-item"
-        style={{ marginLeft: 'auto', fontSize: '18px' }}
-        onClick={toggleThemeHandler}
-        title={theme === 'dark' ? t('Switch to light mode') : t('Switch to dark mode')}
-      >
-        {theme === 'dark' ? '☀️' : '🌙'}
-      </button>
-      <button
-        className="nav-item"
-        style={{ fontSize: '13px', fontWeight: 700, minWidth: '36px', textAlign: 'center' }}
-        onClick={() => setLang(lang === 'zh' ? 'en' : 'zh')}
-        title={lang === 'zh' ? '切换到中文' : 'Switch to English'}
-      >
-        {lang === 'zh' ? '中' : 'EN'}
-      </button>
+      <div className="navbar-actions">
+        <button
+          className="nav-item"
+          style={{ fontSize: '18px' }}
+          onClick={toggleThemeHandler}
+          title={theme === 'dark' ? t('Switch to light mode') : t('Switch to dark mode')}
+        >
+          {theme === 'dark' ? '☀️' : '🌙'}
+        </button>
+        <button
+          className="nav-item"
+          style={{ fontSize: '13px', fontWeight: 700, minWidth: '36px', textAlign: 'center' }}
+          onClick={() => setLang(lang === 'zh' ? 'en' : 'zh')}
+          title={lang === 'zh' ? '切换到中文' : 'Switch to English'}
+        >
+          {lang === 'zh' ? '中' : 'EN'}
+        </button>
+      </div>
     </header>
   )
 }

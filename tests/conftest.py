@@ -53,6 +53,7 @@ PROJECT_MODULES = [
     "config.app",
     "config.runtime_ports",
     "src.api",
+    "src.auth",
     "src.cli",
     "src.costs",
     "src.database",
