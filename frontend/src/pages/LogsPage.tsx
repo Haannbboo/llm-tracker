@@ -58,7 +58,7 @@ export function LogsPage({ initialSessionFilter }: Props) {
 
   // Logs data hook
   const {
-    usageRows, totalLogs, totalPages,
+    usageRows, setUsageRows, totalLogs, totalPages,
     limit, setLimit, page, setPage, jumpPage, setJumpPage, resetPage,
     logsLoading, expandedRow, setExpandedRow,
     colWidths, resizedColumns, handleResizeStart,
@@ -106,6 +106,33 @@ export function LogsPage({ initialSessionFilter }: Props) {
       cancelled = true
     }
   }, [expandedRow])
+
+  // Per-row cost recalculation
+  const [recalculatingId, setRecalculatingId] = useState<string | null>(null)
+  const handleRecalculateCost = async (usageId: string) => {
+    if (recalculatingId !== null) return
+    setRecalculatingId(usageId)
+    try {
+      const response = await fetch(`/usage/${usageId}/recalculate-cost`, { method: 'POST' })
+      const data = await response.json().catch(() => null)
+      if (!response.ok) {
+        showToast(data?.detail ? String(data.detail) : t('Failed to recalculate cost'))
+        return
+      }
+      if (data?.skipped) {
+        showToast(t('No current pricing match — cost left unchanged'))
+        return
+      }
+      showToast(t('Cost recalculated'))
+      // Patch just this row's cost fields in place — a full requestUsageRefresh()
+      // would refetch and re-render the whole table for a single-cell change.
+      setUsageRows(rows => rows.map(row => row.id === usageId ? { ...row, ...data.new_costs } : row))
+    } catch {
+      showToast(t('Failed to recalculate cost'))
+    } finally {
+      setRecalculatingId(null)
+    }
+  }
 
   useEffect(() => {
     const container = tableContainerRef.current
@@ -430,7 +457,27 @@ export function LogsPage({ initialSessionFilter }: Props) {
           <td style={{ padding: '8px' }}>
             {(() => {
               const total = value(row.total_cost_usd);
-              if (total === 0) return <div style={{ color: 'var(--color-green)', fontWeight: 500 }}>$0.00</div>;
+              const isRecalculating = recalculatingId === row.id;
+              const costValueClass = isRecalculating ? 'cost-recalculating' : '';
+              const handleCostClick = (e: React.MouseEvent) => {
+                e.stopPropagation();
+                void handleRecalculateCost(row.id);
+              };
+
+              if (total === 0) {
+                return (
+                  <button
+                    type="button"
+                    className={`cost-recalc-btn ${costValueClass}`}
+                    style={{ color: 'var(--color-green)', fontWeight: 500 }}
+                    onClick={handleCostClick}
+                    title={t('Click to recalculate')}
+                    aria-label={t('Click to recalculate')}
+                  >
+                    $0.00
+                  </button>
+                );
+              }
 
               const prompt = value(row.prompt_tokens);
               const cached = value(row.cached_tokens);
@@ -455,9 +502,16 @@ export function LogsPage({ initialSessionFilter }: Props) {
 
               return (
                 <div className="has-tooltip" style={{ borderBottom: 'none' }}>
-                  <div style={{ color: 'var(--color-green)', fontWeight: 500, cursor: 'pointer' }}>
+                  <button
+                    type="button"
+                    className={`cost-recalc-btn ${costValueClass}`}
+                    style={{ color: 'var(--color-green)', fontWeight: 500 }}
+                    onClick={handleCostClick}
+                    title={t('Click to recalculate')}
+                    aria-label={t('Click to recalculate')}
+                  >
                     {formatCost(total)}
-                  </div>
+                  </button>
                   <div className="tooltip-text" style={{ width: '200px', marginLeft: '-100px' }}>
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>

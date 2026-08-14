@@ -138,7 +138,7 @@ export function useLogsData(opts: {
   const totalPages = Math.ceil(totalLogs / limit)
 
   return {
-    usageRows, totalLogs, totalPages,
+    usageRows, setUsageRows, totalLogs, totalPages,
     limit, setLimit, page, setPage, jumpPage, setJumpPage, resetPage,
     logsLoading, expandedRow, setExpandedRow,
     colWidths, resizedColumns, handleResizeStart,

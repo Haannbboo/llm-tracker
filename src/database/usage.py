@@ -6,7 +6,9 @@ Extracted from database/__init__.py during Phase 5 refactoring.
 from __future__ import annotations
 
 import calendar
+import json
 import logging
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any
@@ -20,12 +22,14 @@ from sqlalchemy import (
     select,
     text,
     types,
+    update,
 )
 from sqlalchemy.orm import Session
 
+from ..costs import calculate_costs, resolve_cost_match
 from ..utils import micros_to_secs, secs_to_micros
 from .engine import get_engine
-from .models import BaseUrl, ToolCall, Usage, UsageDaily
+from .models import BaseUrl, SessionRecord, ToolCall, Usage, UsageDaily
 
 logger = logging.getLogger(__name__)
 
@@ -330,6 +334,135 @@ def upsert_daily_aggregate(usage: Usage, db_path: str | None = None) -> None:
                 )
             )
         session.commit()
+
+
+@dataclass(frozen=True)
+class CostRecalcResult:
+    skipped: bool
+    reason: str | None = None
+    old_costs: dict[str, Decimal] | None = None
+    new_costs: dict[str, Decimal] | None = None
+
+
+def recalculate_usage_cost(
+    usage_id: str,
+    *,
+    model_costs: dict[str, Any] | None = None,
+    provider_model_costs: dict[str, dict[str, Any]] | None = None,
+    db_path: str | None = None,
+) -> CostRecalcResult | None:
+    """Recompute one Usage row's cost against current pricing and keep its
+    usage_daily and sessions rollups in sync, all in one transaction. Returns
+    None if the row doesn't exist.
+
+    If the row's (provider, model) doesn't resolve against current pricing
+    (e.g. a deprecated/renamed model), the row is left untouched rather than
+    overwritten with a zeroed fallback cost — callers should surface
+    `result.skipped` to the user instead of treating it as success.
+    """
+    from .sessions import _add_usage_to_cost_maps, _load_cost_map, _primary_by_cost
+
+    engine = get_engine(db_path)
+    with Session(engine) as session:
+        usage = session.scalar(
+            select(Usage).where(Usage.id == usage_id).with_for_update()
+        )
+        if usage is None:
+            return None
+
+        match = resolve_cost_match(
+            usage.provider, usage.model, model_costs, provider_model_costs
+        )
+        if match is None:
+            return CostRecalcResult(
+                skipped=True, reason="no pricing match for provider/model"
+            )
+
+        old_costs = {
+            "input_cost_usd": Decimal(str(usage.input_cost_usd)),
+            "output_cost_usd": Decimal(str(usage.output_cost_usd)),
+            "total_cost_usd": Decimal(str(usage.total_cost_usd)),
+        }
+        new_costs = calculate_costs(
+            prompt_tokens=usage.prompt_tokens,
+            completion_tokens=usage.completion_tokens,
+            cached_tokens=usage.cached_tokens,
+            cache_creation_tokens=usage.cache_creation_tokens,
+            provider=usage.provider,
+            model_cost=match.cost,
+        )
+        deltas = {field: new_costs[field] - old_costs[field] for field in old_costs}
+
+        date = datetime.fromtimestamp(
+            micros_to_secs(usage.ts), tz=timezone.utc
+        ).strftime("%Y-%m-%d")
+        # Atomic `col = col + delta` UPDATE rather than a select-mutate-commit
+        # round trip: correct even under concurrent recalculations on SQLite,
+        # where with_for_update() below is a silent no-op (same caveat as
+        # merge_duplicate_usage's row lock, elsewhere in this module).
+        daily_result = session.execute(
+            update(UsageDaily)
+            .where(
+                and_(
+                    UsageDaily.date == date,
+                    UsageDaily.provider == usage.provider,
+                    UsageDaily.model == usage.model,
+                    UsageDaily.client_source == (usage.client_source or ""),
+                )
+            )
+            .values(
+                input_cost_usd=UsageDaily.input_cost_usd + deltas["input_cost_usd"],
+                output_cost_usd=UsageDaily.output_cost_usd + deltas["output_cost_usd"],
+                total_cost_usd=UsageDaily.total_cost_usd + deltas["total_cost_usd"],
+            )
+        )
+        if daily_result.rowcount == 0:  # type: ignore[attr-defined]
+            logger.warning(
+                "recalculate_usage_cost: no usage_daily row for date=%s "
+                "provider=%s model=%s client_source=%s, rollup left as-is",
+                date,
+                usage.provider,
+                usage.model,
+                usage.client_source or "",
+            )
+
+        # sessions.total_cost_usd/models_json/providers_json are a JSON blob
+        # that can only be read-modify-written (no SQL-level atomic increment
+        # for a JSON map), so this part keeps the same SQLite race caveat as
+        # above; harmless in practice since recalculation is a rare manual
+        # action, not a hot ingest path.
+        if usage.session_id and deltas["total_cost_usd"] != 0:
+            session_row = session.get(
+                SessionRecord, usage.session_id, with_for_update=True
+            )
+            if session_row is None:
+                logger.warning(
+                    "recalculate_usage_cost: no session row for session_id=%s, "
+                    "session cost rollup left as-is",
+                    usage.session_id,
+                )
+            else:
+                session_row.total_cost_usd += deltas["total_cost_usd"]
+                models_costs = _load_cost_map(session_row.models_json)
+                providers_costs = _load_cost_map(session_row.providers_json)
+                _add_usage_to_cost_maps(
+                    usage,
+                    total_cost=deltas["total_cost_usd"],
+                    models_costs=models_costs,
+                    providers_costs=providers_costs,
+                )
+                session_row.models_json = json.dumps(models_costs)
+                session_row.providers_json = json.dumps(providers_costs)
+                session_row.primary_model = _primary_by_cost(models_costs)
+                session_row.primary_provider = _primary_by_cost(providers_costs)
+                session_row.updated_at = datetime.now(timezone.utc).isoformat()
+
+        usage.input_cost_usd = new_costs["input_cost_usd"]
+        usage.output_cost_usd = new_costs["output_cost_usd"]
+        usage.total_cost_usd = new_costs["total_cost_usd"]
+        session.commit()
+
+        return CostRecalcResult(skipped=False, old_costs=old_costs, new_costs=new_costs)
 
 
 USAGE_COPY_FIELDS = (

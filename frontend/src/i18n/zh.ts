@@ -464,4 +464,8 @@ export const zh: Record<string, string> = {
   'Browser': '浏览器',
   'CLI': 'CLI',
   'Ingest': '接入',
+  'Click to recalculate': '点击重新计算',
+  'Cost recalculated': '费用已重新计算',
+  'Failed to recalculate cost': '重新计算费用失败',
+  'No current pricing match — cost left unchanged': '未找到当前定价匹配项，费用未变更',
 }
