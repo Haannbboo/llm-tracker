@@ -1,8 +1,9 @@
 import { useCallback } from 'react'
 import { BrowserRouter, Routes, Route, Navigate, useNavigate, useLocation } from 'react-router-dom'
 import './App.css'
-import { AppProvider } from './contexts/AppContext'
+import { AppProvider, useApp } from './contexts/AppContext'
 import { Navbar } from './components/Navbar'
+import { LoginGate } from './components/LoginGate'
 import { DashboardPage } from './pages/DashboardPage'
 import { LogsPage } from './pages/LogsPage'
 import { SettingsPage } from './pages/SettingsPage'
@@ -48,11 +49,30 @@ function AppLayout() {
   )
 }
 
+function Root() {
+  const { auth } = useApp()
+  if (auth.status === 'loading') {
+    return (
+      <div className="app">
+        <main className="main">
+          <div className="content-body" style={{ display: 'flex', justifyContent: 'center', paddingTop: '40vh' }}>
+            <span style={{ color: 'var(--text-muted)', fontSize: '14px' }}>{'Loading...'}</span>
+          </div>
+        </main>
+      </div>
+    )
+  }
+  if (auth.enabled && !auth.user) {
+    return <LoginGate />
+  }
+  return <AppLayout />
+}
+
 function App() {
   return (
     <BrowserRouter>
       <AppProvider>
-        <AppLayout />
+        <Root />
       </AppProvider>
     </BrowserRouter>
   )

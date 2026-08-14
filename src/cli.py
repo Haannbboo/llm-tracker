@@ -18,6 +18,7 @@ import httpx
 from config.app import CONFIG
 
 from . import evaluation as evaluation_module
+from .auth import mint_token
 from .database import (
     get_usage_high_watermark_ts,
     init_db,
@@ -276,7 +277,6 @@ def parse_token_args(command: list[str]) -> argparse.Namespace:
 
 def run_token_command(command: list[str]) -> int:
     token_args = parse_token_args(command)
-    from .database import init_db, mint_token
 
     init_db()
     try:

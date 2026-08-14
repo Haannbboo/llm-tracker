@@ -11,7 +11,9 @@ from typing import Literal
 import httpx
 import tomllib
 import yaml
-from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response
+from fastapi import FastAPI, HTTPException, Query, Request, Response
+from fastapi.responses import JSONResponse
+from fastapi.routing import APIRoute
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, model_validator
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -28,11 +30,12 @@ from config.app import (
 from config.server_config import load_server_config
 
 from ._version import get_version
+from .auth import _auth_enabled, _resolve_request_user
+from .auth import router as auth_router
 from .costs import resolve_cost_match
 from .database import (
     VALID_OUTCOMES,
     VALID_SOURCES,
-    User,
     aggregate_daily_by_dimension,
     aggregate_model_effectiveness,
     aggregate_usage_by_period,
@@ -52,7 +55,6 @@ from .database import (
     init_db,
     list_active_evaluation_jobs_with_progress,
     list_session_evaluation_jobs_with_progress,
-    resolve_token,
     summarize_session_tool_calls,
     summarize_sessions,
     summarize_tool_calls,
@@ -75,6 +77,33 @@ logger = logging.getLogger(__name__)
 EVALUATION_WORKER_SHUTDOWN_TIMEOUT_SECONDS = 5
 USAGE_QUERY_LIMIT_MAX = 1000
 LOCAL_CORS_ORIGIN_RE = re.compile(r"^https?://(localhost|127\.0\.0\.1)(:\d+)?$")
+
+AUTH_GATE_LOGIN_REQUIRED = {"detail": "login required"}
+
+# API path prefixes. Requests under these prefixes are never rewritten to the
+# SPA index, and they are the surface the auth gate classifies.
+_SPA_API_PREFIXES = (
+    "/auth/",
+    "/usage",
+    "/sessions",
+    "/model-effectiveness",
+    "/poll/",
+    "/evaluation-jobs",
+    "/config",
+    "/pricing",
+    "/local/",
+    "/test-connectivity",
+    "/version",
+)
+
+# Public when auth is enabled: Google OAuth endpoints, /auth/me (the frontend
+# probes it before login), and /version. Everything else API-shaped requires
+# a valid session once auth is enabled.
+AUTH_GATE_PUBLIC_PATHS = ("/auth/me", "/version")
+
+# FastAPI's interactive docs and schema are not in the public allowlist, so
+# they are gated like any other API surface when auth is enabled.
+AUTH_GATE_EXTRA_GATED_PATHS = ("/docs", "/redoc", "/openapi.json")
 
 
 class ConfigUpdate(BaseModel):
@@ -205,49 +234,37 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="llm-tracker-api", lifespan=lifespan)
+app.include_router(auth_router)
 
 
-def get_current_user(request: Request) -> User | None:
-    """Resolve the request's bearer token to a user.
-
-    Returns None when auth is disabled. When enabled, raises 401 for
-    missing/malformed/unknown/revoked tokens (one message for all cases —
-    callers must not learn which). DB errors propagate as 500: fail closed.
-    """
-    if not CONFIG.get("auth", {}).get("enabled"):
-        return None
-    header = request.headers.get("authorization") or ""
-    scheme, _, token = header.partition(" ")
-    token = token.strip()
-    if scheme.lower() != "bearer" or not token:
-        raise HTTPException(status_code=401, detail="invalid token")
-    resolved = resolve_token(token)
-    if resolved is None:
-        raise HTTPException(status_code=401, detail="invalid token")
-    user, auth_token = resolved
-    request.state.auth_token = auth_token
-    return user
+def _is_public_path(path: str) -> bool:
+    """Public when auth is enabled: Google OAuth, /auth/me, /version, SPA."""
+    if not any(path.startswith(prefix) for prefix in _SPA_API_PREFIXES):
+        return path not in AUTH_GATE_EXTRA_GATED_PATHS
+    if path.startswith("/auth/google/"):
+        return True
+    return path in AUTH_GATE_PUBLIC_PATHS
 
 
-@app.get("/auth/me")
-def auth_me(request: Request, user: User | None = Depends(get_current_user)):
-    if user is None:
-        return {"auth_enabled": False, "user": None}
-    auth_token = request.state.auth_token
-    return {
-        "auth_enabled": True,
-        "user": {
-            "id": user.id,
-            "email": user.email,
-            "name": user.name,
-            "created_at": user.created_at,
-        },
-        "token": (
-            {"kind": auth_token.kind, "device_name": auth_token.device_name}
-            if auth_token
-            else None
-        ),
-    }
+class AuthGateMiddleware(BaseHTTPMiddleware):
+    """Require a valid session (cookie or bearer) for all API routes when auth
+    is enabled, except the public allowlist. This gates "is anyone logged in";
+    it is not per-user data scoping."""
+
+    async def dispatch(self, request: Request, call_next):
+        if not _auth_enabled():
+            return await call_next(request)
+        if request.method == "OPTIONS":
+            # CORS preflights carry no credentials (browsers never attach
+            # them), so they can never authenticate. Let them through so the
+            # usage_read_cors middleware can answer them; OPTIONS never
+            # reaches route handlers with data.
+            return await call_next(request)
+        if _is_public_path(request.url.path):
+            return await call_next(request)
+        if _resolve_request_user(request) is None:
+            return JSONResponse(status_code=401, content=AUTH_GATE_LOGIN_REQUIRED)
+        return await call_next(request)
 
 
 def _is_usage_read_path(path: str) -> bool:
@@ -1342,26 +1359,13 @@ _frontend_dist = Path(__file__).resolve().parent.parent / "frontend" / "dist"
 if _frontend_dist.is_dir():
     _index_html = _frontend_dist / "index.html"
 
-    _SPA_API_PREFIXES = (
-        "/auth/",
-        "/usage",
-        "/sessions",
-        "/model-effectiveness",
-        "/poll/",
-        "/evaluation-jobs",
-        "/config",
-        "/pricing",
-        "/local/",
-        "/test-connectivity",
-        "/version",
-    )
-
     class SPACatchAllMiddleware(BaseHTTPMiddleware):
         """Rewrite non-API, non-file requests to /index.html for SPA routing."""
 
         async def dispatch(self, request: Request, call_next):
             path = request.url.path
             requested = path.lstrip("/")
+            serving_index = path == "/index.html"
             if (
                 request.method in ("GET", "HEAD")
                 and _index_html.is_file()
@@ -1370,12 +1374,52 @@ if _frontend_dist.is_dir():
                 and not (_frontend_dist / requested).is_file()
             ):
                 request.scope["path"] = "/index.html"
-            return await call_next(request)
+                serving_index = True
+            response = await call_next(request)
+            if serving_index:
+                # index.html references content-hashed asset filenames that
+                # change every build; it must always revalidate (cheap, via
+                # the ETag/Last-Modified StaticFiles already sets) so a stale
+                # cached copy never keeps pointing at a deleted JS/CSS bundle.
+                response.headers["Cache-Control"] = "no-cache"
+            return response
 
     app.add_middleware(SPACatchAllMiddleware)
     app.mount(
         "/", StaticFiles(directory=str(_frontend_dist), html=True), name="frontend"
     )
+
+# Registered last so the auth gate runs first (outermost): it must see the
+# original request path, before the SPA catch-all rewrites it.
+app.add_middleware(AuthGateMiddleware)
+
+
+def _assert_api_routes_classified() -> None:
+    """Fail loudly at import time if a route isn't covered by the auth-gate
+    classification (`_SPA_API_PREFIXES` / `AUTH_GATE_EXTRA_GATED_PATHS`).
+
+    `_is_public_path` treats anything that doesn't match `_SPA_API_PREFIXES`
+    as public by default (it's meant for static/SPA paths). A new API route
+    added without updating that list would silently fall into "public"
+    instead of "gated" — this turns that into an import-time crash instead
+    of a silent auth bypass.
+    """
+    unclassified = [
+        route.path
+        for route in app.routes
+        if isinstance(route, APIRoute)
+        and not any(route.path.startswith(prefix) for prefix in _SPA_API_PREFIXES)
+        and route.path not in AUTH_GATE_EXTRA_GATED_PATHS
+    ]
+    if unclassified:
+        raise RuntimeError(
+            "Routes not covered by _SPA_API_PREFIXES/AUTH_GATE_EXTRA_GATED_PATHS "
+            f"(would be served without an auth check when auth is enabled): "
+            f"{unclassified}"
+        )
+
+
+_assert_api_routes_classified()
 
 
 if __name__ == "__main__":

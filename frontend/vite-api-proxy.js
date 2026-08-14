@@ -7,6 +7,8 @@ export function shouldProxyApiRequest(requestUrl) {
     pathname.startsWith('/config/') ||
     pathname === '/pricing' ||
     pathname.startsWith('/pricing/') ||
+    pathname === '/auth' ||
+    pathname.startsWith('/auth/') ||
     pathname === '/usage' ||
     pathname.startsWith('/usage/') ||
     pathname === '/test-connectivity' ||
@@ -76,13 +78,22 @@ export function createApiProxyMiddleware({ env, trackerConfigPath } = {}) {
             req.method === 'GET' || req.method === 'HEAD'
               ? undefined
               : await readRequestBody(req),
+          // OAuth routes (/auth/google/login, /auth/google/callback) rely on
+          // 302 Location and Set-Cookie reaching the browser as-is. Default
+          // 'follow' redirect makes fetch() swallow those server-side.
+          redirect: 'manual',
         },
       )
 
       res.statusCode = response.status
       response.headers.forEach((value, key) => {
+        if (key.toLowerCase() === 'set-cookie') return
         res.setHeader(key, value)
       })
+      const setCookies = response.headers.getSetCookie?.() ?? []
+      if (setCookies.length > 0) {
+        res.setHeader('set-cookie', setCookies)
+      }
 
       const body = Buffer.from(await response.arrayBuffer())
       res.end(body)

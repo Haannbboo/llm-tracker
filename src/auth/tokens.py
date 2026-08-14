@@ -16,8 +16,8 @@ from sqlalchemy import update as sa_update
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
-from .engine import get_engine
-from .models import AuthToken, User
+from ..database.engine import get_engine
+from ..database.models import AuthToken, User
 
 TOKEN_KINDS = ("cli", "ingest", "web")
 
@@ -104,3 +104,55 @@ def resolve_token(
             "Failed to update last_used_at for token id=%s", auth_token.id
         )
     return user, auth_token
+
+
+def update_user_name(
+    user_id: str, name: str | None, db_path: str | None = None
+) -> None:
+    """Backfill a user's name from an OAuth profile, only while it is unset.
+
+    A name already set (first login happened) is never overwritten.
+    """
+    engine = get_engine(db_path)
+    with Session(engine, expire_on_commit=False) as session:
+        session.execute(
+            sa_update(User)
+            .where(User.id == user_id, User.name.is_(None))
+            .values(name=name)
+        )
+        session.commit()
+
+
+def revoke_token(token_id: str, user_id: str, db_path: str | None = None) -> bool:
+    """Revoke a token owned by this user. Returns False if absent/already revoked."""
+    engine = get_engine(db_path)
+    with Session(engine, expire_on_commit=False) as session:
+        result = session.execute(
+            sa_update(AuthToken)
+            .where(
+                AuthToken.id == token_id,
+                AuthToken.user_id == user_id,
+                AuthToken.revoked_at.is_(None),
+            )
+            .values(revoked_at=_now_micros())
+        )
+        changed = result.rowcount > 0  # type: ignore[attr-defined]
+        session.commit()
+    return changed
+
+
+def list_user_tokens(user_id: str, db_path: str | None = None) -> list[AuthToken]:
+    """Return the user's active (non-revoked) tokens, newest first."""
+    engine = get_engine(db_path)
+    with Session(engine, expire_on_commit=False) as session:
+        rows = (
+            session.execute(
+                select(AuthToken)
+                .where(AuthToken.user_id == user_id, AuthToken.revoked_at.is_(None))
+                .order_by(AuthToken.created_at.desc())
+            )
+            .scalars()
+            .all()
+        )
+        session.expunge_all()
+        return list(rows)

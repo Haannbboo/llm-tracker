@@ -5,7 +5,7 @@ from sqlalchemy import text
 
 
 def _mint(fresh_db, email="a@example.com", kind="cli", device_name=None):
-    from src.database.auth import mint_token
+    from src.auth.tokens import mint_token
 
     return mint_token(
         email, kind=kind, device_name=device_name, db_path=fresh_db.db_path
@@ -13,7 +13,7 @@ def _mint(fresh_db, email="a@example.com", kind="cli", device_name=None):
 
 
 def test_mint_and_resolve_roundtrip(fresh_db):
-    from src.database.auth import resolve_token
+    from src.auth.tokens import resolve_token
 
     token, user = _mint(fresh_db, device_name="laptop")
     assert token.startswith("llmt_cli_")
@@ -56,13 +56,13 @@ def test_plaintext_token_not_stored(fresh_db):
 
 
 def test_resolve_unknown_token(fresh_db):
-    from src.database.auth import resolve_token
+    from src.auth.tokens import resolve_token
 
     assert resolve_token("llmt_cli_deadbeef", db_path=fresh_db.db_path) is None
 
 
 def test_resolve_revoked_token(fresh_db):
-    from src.database.auth import resolve_token
+    from src.auth.tokens import resolve_token
 
     token, _ = _mint(fresh_db)
     engine = fresh_db.database_module.get_engine(fresh_db.db_path)
@@ -72,7 +72,7 @@ def test_resolve_revoked_token(fresh_db):
 
 
 def test_resolve_updates_last_used_at(fresh_db):
-    from src.database.auth import resolve_token
+    from src.auth.tokens import resolve_token
 
     token, _ = _mint(fresh_db)
     resolve_token(token, db_path=fresh_db.db_path)
@@ -185,13 +185,14 @@ def test_auth_me_enabled(api_module, fresh_db, monkeypatch):
 
 def test_auth_me_db_error_is_500_not_none(api_module, monkeypatch):
     import config.app
+    import src.auth.routes as auth_routes
 
     monkeypatch.setitem(config.app.CONFIG, "auth", {"enabled": True, "allowlist": []})
 
     def boom(token):
         raise RuntimeError("db unavailable")
 
-    monkeypatch.setattr(api_module, "resolve_token", boom)
+    monkeypatch.setattr(auth_routes, "resolve_token", boom)
     client = TestClient(api_module.app, raise_server_exceptions=False)
     response = client.get("/auth/me", headers={"Authorization": "Bearer llmt_cli_x"})
     assert response.status_code == 500

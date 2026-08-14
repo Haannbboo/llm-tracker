@@ -306,3 +306,29 @@ export type PricingEntry = {
 }
 
 export type PricingMap = Record<string, PricingEntry>
+
+export type AuthUser = {
+  id: string
+  email: string
+  name: string | null
+  created_at: number
+}
+
+export type AuthMeResponse = {
+  auth_enabled: boolean
+  user: AuthUser | null
+  token?: { kind: string; device_name: string | null } | null
+}
+
+export type DeviceRow = {
+  id: string
+  kind: string
+  device_name: string | null
+  created_at: number
+  last_used_at: number | null
+  current: boolean
+}
+
+export type DevicesResponse = {
+  devices: DeviceRow[]
+}
