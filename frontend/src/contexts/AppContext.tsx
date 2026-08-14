@@ -156,10 +156,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
           setAuth({ status: 'ready', enabled: true, user: null })
           return
         }
-        setAuth(current => ({ status: 'ready', enabled: current.enabled, user: null }))
+        // Any other failure (500, ...): fail closed rather than rendering
+        // the dashboard with an unresolved auth state. /auth/me only fails
+        // when auth is enabled (auth-disabled returns 200 with no DB access),
+        // so treat "can't tell" the same as "logged out."
+        setAuth({ status: 'ready', enabled: true, user: null })
       } catch (err) {
+        if (controller.signal.aborted) return
         console.error('Failed to resolve session:', err)
-        setAuth(current => ({ ...current, status: 'ready' }))
+        setAuth({ status: 'ready', enabled: true, user: null })
       }
     }
     void fetchAuth()

@@ -13,6 +13,7 @@ import tomllib
 import yaml
 from fastapi import FastAPI, HTTPException, Query, Request, Response
 from fastapi.responses import JSONResponse
+from fastapi.routing import APIRoute
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, model_validator
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -79,7 +80,8 @@ LOCAL_CORS_ORIGIN_RE = re.compile(r"^https?://(localhost|127\.0\.0\.1)(:\d+)?$")
 
 AUTH_GATE_LOGIN_REQUIRED = {"detail": "login required"}
 
-# Paths that are never API-routed: static frontend assets and the SPA index.
+# API path prefixes. Requests under these prefixes are never rewritten to the
+# SPA index, and they are the surface the auth gate classifies.
 _SPA_API_PREFIXES = (
     "/auth/",
     "/usage",
@@ -1390,6 +1392,34 @@ if _frontend_dist.is_dir():
 # Registered last so the auth gate runs first (outermost): it must see the
 # original request path, before the SPA catch-all rewrites it.
 app.add_middleware(AuthGateMiddleware)
+
+
+def _assert_api_routes_classified() -> None:
+    """Fail loudly at import time if a route isn't covered by the auth-gate
+    classification (`_SPA_API_PREFIXES` / `AUTH_GATE_EXTRA_GATED_PATHS`).
+
+    `_is_public_path` treats anything that doesn't match `_SPA_API_PREFIXES`
+    as public by default (it's meant for static/SPA paths). A new API route
+    added without updating that list would silently fall into "public"
+    instead of "gated" — this turns that into an import-time crash instead
+    of a silent auth bypass.
+    """
+    unclassified = [
+        route.path
+        for route in app.routes
+        if isinstance(route, APIRoute)
+        and not any(route.path.startswith(prefix) for prefix in _SPA_API_PREFIXES)
+        and route.path not in AUTH_GATE_EXTRA_GATED_PATHS
+    ]
+    if unclassified:
+        raise RuntimeError(
+            "Routes not covered by _SPA_API_PREFIXES/AUTH_GATE_EXTRA_GATED_PATHS "
+            f"(would be served without an auth check when auth is enabled): "
+            f"{unclassified}"
+        )
+
+
+_assert_api_routes_classified()
 
 
 if __name__ == "__main__":

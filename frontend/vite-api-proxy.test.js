@@ -28,6 +28,8 @@ test('shouldProxyApiRequest matches config, usage and session routes', () => {
   assert.equal(shouldProxyApiRequest('/auth/google/login'), true)
   assert.equal(shouldProxyApiRequest('/auth/google/callback?code=x&state=y'), true)
   assert.equal(shouldProxyApiRequest('/auth/devices'), true)
+  assert.equal(shouldProxyApiRequest('/auth/devices/abc-123/revoke'), true)
+  assert.equal(shouldProxyApiRequest('/auth/logout'), true)
   assert.equal(shouldProxyApiRequest('/version'), true)
   assert.equal(shouldProxyApiRequest('/assets/index.js'), false)
 })

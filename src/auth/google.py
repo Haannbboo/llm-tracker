@@ -27,6 +27,7 @@ logger = logging.getLogger(__name__)
 
 STATE_FILE_NAME = "oauth_state.json"
 STATE_TTL_SECONDS = 5 * 60
+MAX_PENDING_STATES = 512
 
 # Google endpoints are pinned (no discovery-document fetch at runtime); the
 # only outbound calls are the token exchange and the JWKS fetch.
@@ -143,6 +144,13 @@ def store_oauth_state(state: str, data: dict[str, Any]) -> None:
         try:
             states = _load_states_unlocked(handle)
             _prune_expired(states, time.time())
+            if len(states) >= MAX_PENDING_STATES:
+                # A burst of /auth/google/login calls (public whenever auth
+                # is enabled) shouldn't grow the file without bound inside
+                # the TTL window; drop the oldest pending states to make room.
+                oldest_first = sorted(states, key=lambda key: states[key]["exp"])
+                for key in oldest_first[: len(states) - MAX_PENDING_STATES + 1]:
+                    del states[key]
             states[state] = {"exp": time.time() + STATE_TTL_SECONDS, **data}
             handle.seek(0)
             handle.truncate()

@@ -21,6 +21,7 @@ from .tokens import (
 logger = logging.getLogger(__name__)
 
 SESSION_COOKIE_NAME = "llm_tracker_session"
+OAUTH_STATE_COOKIE_NAME = "llm_tracker_oauth_state"
 
 router = APIRouter()
 
@@ -98,7 +99,11 @@ def _frontend_redirect(
     """
     base = f"{origin}/" if origin else "/"
     location = f"{base}?auth_error={auth_error}" if auth_error else base
-    return RedirectResponse(location, status_code=302)
+    response = RedirectResponse(location, status_code=302)
+    # Single-use: every callback exit (success or failure) clears the state
+    # cookie set by auth_google_login.
+    response.delete_cookie(OAUTH_STATE_COOKIE_NAME)
+    return response
 
 
 _DEV_FRONTEND_HOSTS = ("localhost", "127.0.0.1")
@@ -169,7 +174,18 @@ async def auth_google_login(request: Request):
     auth_google.store_oauth_state(
         state, {"nonce": nonce, "redirect_uri": redirect_uri, "origin": origin}
     )
-    return RedirectResponse(url, status_code=302)
+    response = RedirectResponse(url, status_code=302)
+    # Ties the callback to this browser (see auth_google_callback) so a
+    # state/code pair captured by one browser can't be completed by another.
+    response.set_cookie(
+        OAUTH_STATE_COOKIE_NAME,
+        state,
+        httponly=True,
+        samesite="lax",
+        secure=_cookie_is_secure(),
+        max_age=auth_google.STATE_TTL_SECONDS,
+    )
+    return response
 
 
 @router.get("/auth/google/callback")
@@ -178,8 +194,21 @@ async def auth_google_callback(request: Request):
     if not _auth_enabled():
         raise HTTPException(status_code=404, detail="not found")
     state = request.query_params.get("state", "")
+    cookie_state = request.cookies.get(OAUTH_STATE_COOKIE_NAME)
     data = auth_google.pop_oauth_state(state)
-    if data is None:
+    # The state cookie ties this callback to the browser that started the
+    # login. Without it, an attacker who completes their own Google login and
+    # forwards the resulting callback URL to a victim could log the victim's
+    # browser into the attacker's account (OAuth login CSRF) — the stored
+    # state alone doesn't prove which browser is calling back.
+    if (
+        data is None
+        or not cookie_state
+        # compare_digest on str requires ASCII-only input (raises TypeError
+        # otherwise); encode first so a non-ASCII cookie/query value can't
+        # turn this pre-auth endpoint into an unhandled 500.
+        or not secrets.compare_digest(cookie_state.encode(), state.encode())
+    ):
         return _frontend_redirect(auth_error="invalid_state")
     origin = data.get("origin")
     if request.query_params.get("error") or not request.query_params.get("code"):

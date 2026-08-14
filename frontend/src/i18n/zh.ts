@@ -461,4 +461,7 @@ export const zh: Record<string, string> = {
   'No devices found.': '没有找到设备。',
   'Device revoked': '设备已撤销',
   'Failed to revoke device': '撤销设备失败',
+  'Browser': '浏览器',
+  'CLI': 'CLI',
+  'Ingest': '接入',
 }

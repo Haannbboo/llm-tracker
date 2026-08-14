@@ -844,7 +844,7 @@ export function SettingsPage({ providerColors }: Props) {
                       )}
                     </td>
                     <td style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
-                      {DEVICE_KIND_LABELS[device.kind] ?? device.kind}
+                      {t(DEVICE_KIND_LABELS[device.kind] ?? device.kind)}
                     </td>
                     <td style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>{formatTime(device.created_at)}</td>
                     <td style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>

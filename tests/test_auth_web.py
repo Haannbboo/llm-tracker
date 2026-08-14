@@ -143,6 +143,19 @@ def test_state_store_prunes_expired_on_insert(api_module, isolated_home):
     assert "b" in remaining
 
 
+def test_state_store_caps_pending_entries(api_module, isolated_home, monkeypatch):
+    auth_google = _routes_module().auth_google
+    monkeypatch.setattr(auth_google, "MAX_PENDING_STATES", 3)
+    for i in range(4):
+        auth_google.store_oauth_state(f"s{i}", {"nonce": "n", "redirect_uri": "u"})
+
+    state_path = Path(isolated_home) / ".llm-tracker" / "oauth_state.json"
+    stored = json.loads(state_path.read_text())
+    assert len(stored) == 3
+    assert "s0" not in stored  # oldest evicted to make room
+    assert "s3" in stored  # newest kept
+
+
 # ------------------------------------------------------------- auth.google.*
 
 
@@ -252,6 +265,55 @@ def test_google_callback_missing_state(api_module, monkeypatch, fresh_db):
     _mock_google_flow(api_module, monkeypatch)
     client = TestClient(api_module.app)
     callback = client.get("/auth/google/callback?code=the-code", follow_redirects=False)
+    assert callback.status_code == 302
+    assert callback.headers["location"] == "/?auth_error=invalid_state"
+
+
+def test_google_callback_rejects_mismatched_state_cookie(
+    api_module, monkeypatch, fresh_db
+):
+    """OAuth login CSRF: an attacker who completes their own login and
+    forwards the resulting callback URL to a victim must not be able to log
+    the victim's browser into the attacker's account. The victim's browser
+    never received the state cookie the attacker's browser got, so the
+    callback must reject it even though the state/code are otherwise valid."""
+    _enable_auth(monkeypatch)
+    _mock_google_flow(api_module, monkeypatch)
+    attacker = TestClient(api_module.app)
+    state = _start_login(api_module, monkeypatch, attacker)
+
+    victim = TestClient(api_module.app)  # no oauth-state cookie set
+    callback = victim.get(
+        f"/auth/google/callback?code=the-code&state={state}", follow_redirects=False
+    )
+    assert callback.status_code == 302
+    assert callback.headers["location"] == "/?auth_error=invalid_state"
+
+    engine = fresh_db.database_module.get_engine(fresh_db.db_path)
+    with engine.connect() as conn:
+        tokens = conn.execute(text("SELECT COUNT(*) FROM auth_tokens")).scalar_one()
+    assert tokens == 0
+
+
+def test_google_callback_rejects_non_ascii_state_cookie(
+    api_module, monkeypatch, fresh_db
+):
+    """A non-ASCII state cookie must redirect to invalid_state, not 500 —
+    secrets.compare_digest raises TypeError on non-ASCII str input, so the
+    comparison must happen on bytes. Headers are built as raw byte tuples
+    (bypassing httpx's own str-header ASCII validation) since real HTTP
+    clients aren't constrained to ASCII cookie values the way httpx's
+    high-level API is."""
+    _enable_auth(monkeypatch)
+    _mock_google_flow(api_module, monkeypatch)
+    client = TestClient(api_module.app)
+    state = _start_login(api_module, monkeypatch, client)
+
+    callback = client.get(
+        f"/auth/google/callback?code=the-code&state={state}",
+        follow_redirects=False,
+        headers=[(b"cookie", b"llm_tracker_oauth_state=" + bytes([0xE9, 0xE9]))],
+    )
     assert callback.status_code == 302
     assert callback.headers["location"] == "/?auth_error=invalid_state"
 
@@ -511,8 +573,10 @@ def test_gate_public_paths(api_module, monkeypatch, fresh_db):
     login = client.get("/auth/google/login", follow_redirects=False)
     assert login.status_code == 302
     assert login.headers["location"].startswith("https://accounts.google.com/")
-    # Static frontend assets and the SPA index stay public.
-    assert client.get("/").status_code == 200
+    # Static frontend assets and the SPA index stay public. Only assert this
+    # loosely — the StaticFiles mount is conditional on frontend/dist
+    # existing, so a backend-only test run shouldn't depend on it being built.
+    assert client.get("/").status_code != 401
 
 
 def test_gate_lets_cors_preflight_through(api_module, monkeypatch, fresh_db):
