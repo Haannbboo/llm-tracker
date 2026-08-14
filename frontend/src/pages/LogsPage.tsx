@@ -466,14 +466,16 @@ export function LogsPage({ initialSessionFilter }: Props) {
 
               if (total === 0) {
                 return (
-                  <div
-                    className={costValueClass}
-                    style={{ color: 'var(--color-green)', fontWeight: 500, cursor: 'pointer' }}
+                  <button
+                    type="button"
+                    className={`cost-recalc-btn ${costValueClass}`}
+                    style={{ color: 'var(--color-green)', fontWeight: 500 }}
                     onClick={handleCostClick}
                     title={t('Click to recalculate')}
+                    aria-label={t('Click to recalculate')}
                   >
                     $0.00
-                  </div>
+                  </button>
                 );
               }
 
@@ -500,14 +502,16 @@ export function LogsPage({ initialSessionFilter }: Props) {
 
               return (
                 <div className="has-tooltip" style={{ borderBottom: 'none' }}>
-                  <div
-                    className={costValueClass}
-                    style={{ color: 'var(--color-green)', fontWeight: 500, cursor: 'pointer' }}
+                  <button
+                    type="button"
+                    className={`cost-recalc-btn ${costValueClass}`}
+                    style={{ color: 'var(--color-green)', fontWeight: 500 }}
                     onClick={handleCostClick}
                     title={t('Click to recalculate')}
+                    aria-label={t('Click to recalculate')}
                   >
                     {formatCost(total)}
-                  </div>
+                  </button>
                   <div className="tooltip-text" style={{ width: '200px', marginLeft: '-100px' }}>
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
