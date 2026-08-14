@@ -55,6 +55,7 @@ from .database import (
     init_db,
     list_active_evaluation_jobs_with_progress,
     list_session_evaluation_jobs_with_progress,
+    recalculate_usage_cost,
     summarize_session_tool_calls,
     summarize_sessions,
     summarize_tool_calls,
@@ -942,6 +943,24 @@ def _resolve_provider_multiplier(config_snapshot: dict, provider: str | None) ->
     return float(provider_config.get("price_multiplier", 1.0))
 
 
+def _resolve_live_cost_maps():
+    """Live-resolved pricing (config overrides + freshest LiteLLM data), shared
+    by /pricing/{model} and /usage/{id}/recalculate-cost so both price a model
+    identically instead of drifting from independently maintained copies."""
+    from config.app import resolve_all_costs
+    from config.pricing import get_remote_pricing
+
+    with _config_lock:
+        config_snapshot = dict(CONFIG)
+    resolved = resolve_all_costs(config_snapshot, get_remote_pricing())
+    model_costs = {key: rc.cost for key, rc in resolved.global_costs.items()}
+    provider_model_costs = {
+        provider_name: {key: rc.cost for key, rc in costs.items()}
+        for provider_name, costs in resolved.provider_costs.items()
+    }
+    return config_snapshot, resolved, model_costs, provider_model_costs
+
+
 @app.get("/pricing")
 async def get_pricing(provider: str | None = None):
     """Return all models with resolved pricing and source metadata."""
@@ -982,22 +1001,12 @@ async def get_model_pricing(model: str, provider: str | None = None):
     Follows the same resolution used at record time: config overrides first,
     then LiteLLM, with a containing-name fallback when no exact match exists.
     """
-    from config.app import resolve_all_costs
-    from config.pricing import get_remote_pricing
-
     if not model:
         raise HTTPException(status_code=422, detail="model must not be empty")
 
-    with _config_lock:
-        config_snapshot = dict(CONFIG)
-
-    resolved = resolve_all_costs(config_snapshot, get_remote_pricing())
-    model_costs = {key: rc.cost for key, rc in resolved.global_costs.items()}
-    provider_model_costs = {
-        provider_name: {key: rc.cost for key, rc in costs.items()}
-        for provider_name, costs in resolved.provider_costs.items()
-    }
-
+    config_snapshot, resolved, model_costs, provider_model_costs = (
+        _resolve_live_cost_maps()
+    )
     multiplier = _resolve_provider_multiplier(config_snapshot, provider)
 
     match = resolve_cost_match(provider, model, model_costs, provider_model_costs)
@@ -1034,6 +1043,37 @@ async def get_model_pricing(model: str, provider: str | None = None):
         **_pricing_entry(
             ResolvedCost(cost=match.cost, source=source), scope, multiplier
         ),
+    }
+
+
+@app.post("/usage/{usage_id}/recalculate-cost")
+async def recalculate_usage_cost_route(usage_id: str):
+    """Recompute one usage row's cost against current pricing.
+
+    Uses the same live-resolved pricing snapshot as /pricing/{model} (config
+    overrides + freshest LiteLLM data), not the periodically-refreshed
+    record-time cache. Skips (leaves the row untouched) when the row's
+    provider/model no longer resolves against current pricing, rather than
+    overwriting with a zeroed fallback cost.
+    """
+    _config_snapshot, _resolved, model_costs, provider_model_costs = (
+        _resolve_live_cost_maps()
+    )
+
+    result = recalculate_usage_cost(
+        usage_id,
+        model_costs=model_costs,
+        provider_model_costs=provider_model_costs,
+    )
+    if result is None:
+        raise HTTPException(status_code=404, detail="usage row not found")
+    if result.skipped or result.old_costs is None or result.new_costs is None:
+        return {"skipped": True, "reason": result.reason}
+
+    return {
+        "skipped": False,
+        "old_costs": {k: float(v) for k, v in result.old_costs.items()},
+        "new_costs": {k: float(v) for k, v in result.new_costs.items()},
     }
 
 

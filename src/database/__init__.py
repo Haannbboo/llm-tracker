@@ -58,6 +58,7 @@ from .sessions import (
 )
 from .usage import (
     USAGE_COPY_FIELDS,
+    CostRecalcResult,
     aggregate_daily_by_dimension,
     aggregate_daily_by_period,
     aggregate_usage_by_period,
@@ -69,6 +70,7 @@ from .usage import (
     get_usage_high_watermark_ts,
     log_usage,
     merge_usage_database,
+    recalculate_usage_cost,
     summarize_tool_calls,
     summarize_usage_by_provider,
     summarize_usage_by_source,
@@ -88,6 +90,7 @@ __all__ = [
     "AuthToken",
     "Base",
     "BaseUrl",
+    "CostRecalcResult",
     "DB_URL_ENV_VAR",
     "EvaluationJob",
     "Session",
@@ -134,6 +137,7 @@ __all__ = [
     "mark_evaluation_job_running",
     "mark_evaluation_job_succeeded",
     "promote_evaluation_job_to_manual",
+    "recalculate_usage_cost",
     "update_queued_evaluation_job_evaluator",
     "merge_usage_database",
     "metadata",

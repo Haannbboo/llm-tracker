@@ -5292,3 +5292,229 @@ def test_usage_filters_tool_name_empty_string(fresh_db):
 
     rows = database_module.fetch_recent_usage(limit=10, tool_name="", db_path=db_path)
     assert len(rows) == 0  # no tool calls with empty name
+
+
+def test_recalculate_usage_cost_updates_row_and_daily_rollup(fresh_db):
+    """Recalculating a row must update its cost columns and delta-adjust (not
+    replace) the matching usage_daily rollup, since other rows share it."""
+    from decimal import Decimal
+
+    from config.app import ModelCost
+
+    database_module = fresh_db.database_module
+    db_path = fresh_db.db_path
+    database_module.init_db(db_path)
+
+    database_module.log_usage(
+        database_module.Usage(
+            ts=TS_2026_04_17_00,
+            # Distinct provider name (not "test-provider") so this test's cost
+            # math isn't sensitive to the shared config fixture's 1.25x
+            # price_multiplier for "test-provider" leaking in from other tests.
+            provider="recalc-provider",
+            model="recalc-model",
+            client_source="proxy-client",
+            session_id="session-recalc",
+            endpoint="/v1/responses",
+            prompt_tokens=1_000_000,
+            completion_tokens=1_000_000,
+            cached_tokens=0,
+            total_tokens=2_000_000,
+            status=200,
+            # Stale cost, as if recorded under an old/wrong price.
+            input_cost_usd=1.0,
+            output_cost_usd=1.0,
+            total_cost_usd=2.0,
+        ),
+        db_path=db_path,
+    )
+    # A second row sharing the same usage_daily bucket (same date/provider/
+    # model/client_source), to prove the rollup is delta-adjusted rather than
+    # clobbered by the single recalculated row.
+    database_module.log_usage(
+        database_module.Usage(
+            ts=TS_2026_04_17_01,
+            provider="recalc-provider",
+            model="recalc-model",
+            client_source="proxy-client",
+            session_id="session-other",
+            endpoint="/v1/responses",
+            prompt_tokens=100,
+            completion_tokens=100,
+            cached_tokens=0,
+            total_tokens=200,
+            status=200,
+            input_cost_usd=0.1,
+            output_cost_usd=0.1,
+            total_cost_usd=0.2,
+        ),
+        db_path=db_path,
+    )
+
+    usage_id = next(
+        r["id"]
+        for r in database_module.fetch_recent_usage(limit=10, db_path=db_path)
+        if r["session_id"] == "session-recalc"
+    )
+
+    new_cost = ModelCost(input=2.0, output=4.0, cache_read=0.0)
+    result = database_module.recalculate_usage_cost(
+        usage_id,
+        model_costs={"recalc-model": new_cost},
+        provider_model_costs={},
+        db_path=db_path,
+    )
+
+    assert result is not None
+    assert result.skipped is False
+    # 1,000,000 tokens * $2/1M input + 1,000,000 tokens * $4/1M output.
+    assert result.new_costs["input_cost_usd"] == Decimal("2")
+    assert result.new_costs["output_cost_usd"] == Decimal("4")
+    assert result.new_costs["total_cost_usd"] == Decimal("6")
+
+    row = next(
+        r
+        for r in database_module.fetch_recent_usage(limit=10, db_path=db_path)
+        if r["id"] == usage_id
+    )
+    assert float(row["total_cost_usd"]) == 6.0
+
+    daily = database_module.summarize_usage_daily(db_path=db_path)
+    bucket = next(d for d in daily if d["model"] == "recalc-model")
+    # Old combined total was 2.0 + 0.2 = 2.2; the recalculated row's total
+    # went 2.0 -> 6.0, so the bucket should read 6.0 + 0.2 = 6.2, not 6.0.
+    assert bucket["total_cost_usd"] == pytest.approx(6.2)
+
+
+def test_recalculate_usage_cost_adjusts_session_rollup(fresh_db):
+    """Recalculating a session-linked row must delta-adjust sessions.total_cost_usd
+    and its per-model cost map (and re-derive primary_model), not just usage_daily —
+    upsert_session_from_usage maintains this rollup at record time, so recalculation
+    must keep it in sync too instead of letting it silently go stale."""
+    import json
+    from decimal import Decimal
+
+    from config.app import ModelCost
+
+    database_module = fresh_db.database_module
+    db_path = fresh_db.db_path
+    database_module.init_db(db_path)
+
+    database_module.log_usage(
+        database_module.Usage(
+            ts=TS_2026_04_17_00,
+            provider="recalc-provider",
+            model="recalc-model-a",
+            client_source="proxy-client",
+            session_id="session-rollup",
+            endpoint="/v1/responses",
+            prompt_tokens=1_000_000,
+            completion_tokens=1_000_000,
+            cached_tokens=0,
+            total_tokens=2_000_000,
+            status=200,
+            input_cost_usd=1.0,
+            output_cost_usd=1.0,
+            total_cost_usd=2.0,
+        ),
+        db_path=db_path,
+    )
+    # A second, differently-priced model in the same session, so the primary
+    # model starts out as "recalc-model-b" (5.0 > 2.0) and should flip once
+    # "recalc-model-a" is recalculated past it.
+    database_module.log_usage(
+        database_module.Usage(
+            ts=TS_2026_04_17_01,
+            provider="recalc-provider",
+            model="recalc-model-b",
+            client_source="proxy-client",
+            session_id="session-rollup",
+            endpoint="/v1/responses",
+            prompt_tokens=100,
+            completion_tokens=100,
+            cached_tokens=0,
+            total_tokens=200,
+            status=200,
+            input_cost_usd=2.5,
+            output_cost_usd=2.5,
+            total_cost_usd=5.0,
+        ),
+        db_path=db_path,
+    )
+
+    usage_id = next(
+        r["id"]
+        for r in database_module.fetch_recent_usage(limit=10, db_path=db_path)
+        if r["model"] == "recalc-model-a"
+    )
+
+    new_cost = ModelCost(input=2.0, output=4.0, cache_read=0.0)
+    result = database_module.recalculate_usage_cost(
+        usage_id,
+        model_costs={"recalc-model-a": new_cost},
+        provider_model_costs={},
+        db_path=db_path,
+    )
+    assert result is not None
+    assert result.skipped is False
+    assert result.new_costs["total_cost_usd"] == Decimal("6")
+
+    with database_module.Session(database_module.get_engine(db_path)) as session:
+        session_row = session.get(database_module.SessionRecord, "session-rollup")
+
+    assert session_row is not None
+    # Old combined total was 2.0 + 5.0 = 7.0; row a's total went 2.0 -> 6.0
+    # (delta +4.0), so the session total should read 11.0, not just 6.0.
+    assert float(session_row.total_cost_usd) == pytest.approx(11.0)
+    models_costs = json.loads(session_row.models_json)
+    assert models_costs["recalc-model-a"] == pytest.approx(6.0)
+    assert models_costs["recalc-model-b"] == pytest.approx(5.0)
+    # 6.0 > 5.0 now, so the primary model must have flipped.
+    assert session_row.primary_model == "recalc-model-a"
+
+
+def test_recalculate_usage_cost_skips_when_no_pricing_match(fresh_db):
+    """A model with no resolvable pricing must be left untouched, not zeroed."""
+    database_module = fresh_db.database_module
+    db_path = fresh_db.db_path
+    database_module.init_db(db_path)
+
+    database_module.log_usage(
+        database_module.Usage(
+            ts=TS_2026_04_17_00,
+            provider="test-provider",
+            model="deprecated-model",
+            client_source="proxy-client",
+            session_id="session-skip",
+            endpoint="/v1/responses",
+            prompt_tokens=100,
+            completion_tokens=100,
+            total_tokens=200,
+            status=200,
+            input_cost_usd=0.5,
+            output_cost_usd=0.5,
+            total_cost_usd=1.0,
+        ),
+        db_path=db_path,
+    )
+    usage_id = database_module.fetch_recent_usage(limit=1, db_path=db_path)[0]["id"]
+
+    result = database_module.recalculate_usage_cost(
+        usage_id, model_costs={}, provider_model_costs={}, db_path=db_path
+    )
+
+    assert result is not None
+    assert result.skipped is True
+    row = database_module.fetch_recent_usage(limit=1, db_path=db_path)[0]
+    assert float(row["total_cost_usd"]) == 1.0
+
+
+def test_recalculate_usage_cost_returns_none_for_missing_row(fresh_db):
+    database_module = fresh_db.database_module
+    db_path = fresh_db.db_path
+    database_module.init_db(db_path)
+
+    assert (
+        database_module.recalculate_usage_cost("nonexistent-id", db_path=db_path)
+        is None
+    )

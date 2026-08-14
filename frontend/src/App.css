@@ -1671,6 +1671,19 @@
   }
 }
 
+.cost-recalculating {
+  animation: cost-pulse 0.7s ease-in-out infinite;
+}
+
+@keyframes cost-pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+
 .dashboard-refresh-surface {
   position: relative;
   display: flex;
