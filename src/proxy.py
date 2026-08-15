@@ -45,9 +45,11 @@ def parse_client_source(user_agent: str) -> str | None:
     if not normalized:
         return None
 
+    first_token = normalized.split()[0]
+    if first_token.split("/", 1)[0] in {"gemini", "gemini-cli"}:
+        return None
+
     # Prefer stable agent/provider markers anywhere in the UA over the leading token.
-    if "gemini" in normalized:
-        return "gemini"
     if "codex" in normalized:
         return "codex"
     if "claude" in normalized:
@@ -56,7 +58,6 @@ def parse_client_source(user_agent: str) -> str | None:
         return "opencode"
 
     # Fall back to the leading product/version token for unknown clients.
-    first_token = normalized.split()[0]
     if "/" in first_token:
         product = first_token.split("/", 1)[0]
         if product:

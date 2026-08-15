@@ -98,9 +98,6 @@ class TestParseProvider:
         _write_codex_config(isolated_home, None)
         assert provider_parser_module.parse_provider("codex") == "openai"
 
-    def test_gemini_fallback(self, provider_parser_module, isolated_home: Path):
-        assert provider_parser_module.parse_provider("gemini") == "google"
-
     def test_opencode_fallback(self, provider_parser_module, isolated_home: Path):
         _write_opencode_config(isolated_home, None)
         assert provider_parser_module.parse_provider("opencode") == "unknown"

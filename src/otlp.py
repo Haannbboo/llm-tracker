@@ -22,7 +22,7 @@ CODEX_SERVICE_NAMES = {"codex_cli_rs", "codex_exec"}
 KILO_SERVICE_NAMES = {"kilo"}
 RETIRED_SERVICE_NAMES = {"gemini-cli"}
 KNOWN_SERVICE_NAMES = (
-    {"claude-code", "opencode", "kilo"} | CODEX_SERVICE_NAMES | KILO_SERVICE_NAMES
+    {"claude-code", "opencode"} | CODEX_SERVICE_NAMES | KILO_SERVICE_NAMES
 )
 
 # State cache for merging Codex events: run/conversation key -> {duration_ms, ttft_ms, timestamp}

@@ -179,7 +179,6 @@ def parse_opencode_base_url(provider_id: str | None = None) -> str | None:
 PROVIDER_DEFAULTS: dict[str, str] = {
     "claude": "anthropic",
     "codex": "openai",
-    "gemini": "google",
     "opencode": "unknown",
 }
 

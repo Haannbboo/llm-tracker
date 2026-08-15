@@ -577,11 +577,9 @@ def has_local_session_transcript(
             )
         if agent == "claude":
             return session_id in local_index.claude_session_ids
-        if agent == "gemini":
-            return False
         if agent == "kilo":
             return session_id in local_index.kilo_session_ids
-        return session_id in local_index.opencode_session_ids
+        return agent == "opencode" and session_id in local_index.opencode_session_ids
 
     if agent == "codex":
         return _find_codex_session_path_by_name(session_id) is not None
