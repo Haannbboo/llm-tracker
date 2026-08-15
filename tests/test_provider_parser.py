@@ -31,15 +31,6 @@ def _write_codex_config(home: Path, base_url: str | None) -> None:
     config.write_text(f'base_url = "{base_url}"', encoding="utf-8")
 
 
-def _write_gemini_settings(home: Path, base_url: str | None) -> None:
-    settings = home / ".gemini" / "settings.json"
-    settings.parent.mkdir(parents=True, exist_ok=True)
-    if base_url is None:
-        settings.write_text("{}", encoding="utf-8")
-        return
-    settings.write_text(json.dumps({"base_url": base_url}), encoding="utf-8")
-
-
 def _write_opencode_config(home: Path, base_url: str | None) -> None:
     config = home / ".config" / "opencode" / "opencode.json"
     config.parent.mkdir(parents=True, exist_ok=True)
@@ -95,12 +86,6 @@ class TestParseProvider:
         _write_codex_config(isolated_home, "https://api.openai.com/v1")
         assert provider_parser_module.parse_provider("codex") == "OpenAI"
 
-    def test_gemini_provider(self, provider_parser_module, isolated_home: Path):
-        _write_gemini_settings(
-            isolated_home, "https://generativelanguage.googleapis.com"
-        )
-        assert provider_parser_module.parse_provider("gemini") == "Google"
-
     def test_opencode_provider(self, provider_parser_module, isolated_home: Path):
         _write_opencode_config(isolated_home, "https://api.anthropic.com")
         assert provider_parser_module.parse_provider("opencode") == "Anthropic"
@@ -112,10 +97,6 @@ class TestParseProvider:
     def test_codex_fallback(self, provider_parser_module, isolated_home: Path):
         _write_codex_config(isolated_home, None)
         assert provider_parser_module.parse_provider("codex") == "openai"
-
-    def test_gemini_fallback(self, provider_parser_module, isolated_home: Path):
-        _write_gemini_settings(isolated_home, None)
-        assert provider_parser_module.parse_provider("gemini") == "google"
 
     def test_opencode_fallback(self, provider_parser_module, isolated_home: Path):
         _write_opencode_config(isolated_home, None)

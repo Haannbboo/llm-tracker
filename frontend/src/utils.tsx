@@ -541,7 +541,6 @@ export function getAgentDisplayName(name: string) {
   const normalized = name.toLowerCase()
   if (normalized.includes('vectorengine') || normalized.includes('claude')) return 'Claude Code'
   if (normalized.includes('codesonline') || normalized.includes('codex')) return 'Codex'
-  if (normalized.includes('gemini')) return 'Gemini CLI'
   if (normalized.includes('opencode')) return 'OpenCode'
   if (normalized.includes('kilo')) return 'Kilo Code'
   return name
@@ -551,7 +550,6 @@ export function getSetupAgentKey(name: string) {
   const normalized = name.toLowerCase()
   if (normalized.includes('vectorengine') || normalized.includes('claude')) return 'claude'
   if (normalized.includes('codesonline') || normalized.includes('codex')) return 'codex'
-  if (normalized.includes('gemini')) return 'gemini'
   return normalized
 }
 

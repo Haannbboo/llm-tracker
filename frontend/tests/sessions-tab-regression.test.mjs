@@ -116,7 +116,7 @@ test('empty sessions renders a standalone first-session card instead of an empty
   assert.match(sessionsSection, /sessions\.length === 0 && !sessionsLoading/)
   assert.match(sessionsSection, /className="sessions-empty-state panel"/)
   assert.match(sessionsSection, /t\('No sessions yet\.'\)/)
-  assert.match(sessionsSection, /t\('Run llm-tracker codex, llm-tracker claude, or llm-tracker gemini to create your first tracked session\.'\)/)
+  assert.match(sessionsSection, /t\('Run llm-tracker codex or llm-tracker claude to create your first tracked session\.'\)/)
   assert.match(sessionsSection, /\(sessions\.length > 0 \|\| sessionsLoading\)/)
 })
 

@@ -59,7 +59,7 @@ Then re-run `start.sh` on your local machine to update agent OTLP endpoints, or 
 # Proxy (for OpenAI/Anthropic-compatible clients)
 export OPENAI_BASE_URL=http://your-nas.tailnet.ts.net:4000/v1
 
-# OTLP (for Claude Code, Codex, Gemini CLI)
+# OTLP (for Claude Code, Codex)
 export OTEL_EXPORTER_OTLP_LOGS_ENDPOINT=http://your-nas.tailnet.ts.net:4002/v1/logs
 ```
 

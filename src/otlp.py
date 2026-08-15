@@ -12,20 +12,17 @@ from .provider_parser import parse_provider_metadata
 from .recorder import record_tool_call, record_usage
 from .utils import secs_to_micros
 
-GEMINI_EVENT = "gemini_cli.api_response"
 CLAUDE_EVENT = "claude_code.api_request"
 CODEX_EVENT = "codex.sse_event"
 CODEX_API_REQUEST_EVENT = "codex.api_request"
 OPENCODE_EVENT = "opencode.message_completed"
 KILO_EVENT = "kilo.message_completed"
 CODEX_DEBUG_FILE = "/tmp/codex-otlp-debug.json"
-GEMINI_HOOK_DIR = os.path.join(os.environ.get("TMPDIR", "/tmp"), "llm-tracker-gemini")
 CODEX_SERVICE_NAMES = {"codex_cli_rs", "codex_exec"}
 KILO_SERVICE_NAMES = {"kilo"}
+RETIRED_SERVICE_NAMES = {"gemini-cli"}
 KNOWN_SERVICE_NAMES = (
-    {"claude-code", "gemini-cli", "opencode", "kilo"}
-    | CODEX_SERVICE_NAMES
-    | KILO_SERVICE_NAMES
+    {"claude-code", "opencode"} | CODEX_SERVICE_NAMES | KILO_SERVICE_NAMES
 )
 
 # State cache for merging Codex events: run/conversation key -> {duration_ms, ttft_ms, timestamp}
@@ -190,113 +187,7 @@ class PromptLengthTracker:
         return None
 
 
-PROMPT_LENGTH_TRACKER = PromptLengthTracker(
-    {"user_prompt", "codex.user_prompt", "gemini_cli.user_prompt"}
-)
-
-
-def _consume_hook_ttft(hook_dir: str, session_id: str) -> tuple[int | None, int | None]:
-    if not session_id:
-        return None, None
-
-    queue_path = os.path.join(hook_dir, f"queue-{session_id}.jsonl")
-    try:
-        with open(queue_path, encoding="utf-8") as f:
-            lines = f.readlines()
-    except OSError:
-        return None, None
-
-    if not lines:
-        return None, None
-
-    entry_line = lines[0]
-    remaining = lines[1:]
-    if remaining:
-        with open(queue_path, "w", encoding="utf-8") as f:
-            f.writelines(remaining)
-    else:
-        try:
-            os.unlink(queue_path)
-        except OSError:
-            pass
-
-    try:
-        entry = json.loads(entry_line)
-    except json.JSONDecodeError:
-        return None, None
-
-    ttft_ms = entry.get("ttft_ms")
-    latency_ms = entry.get("latency_ms")
-    return (
-        int(ttft_ms) if ttft_ms is not None else None,
-        int(latency_ms) if latency_ms is not None else None,
-    )
-
-
-def _extract_gemini_fields(
-    record: dict,
-    attrs: list,
-    session_id: str,
-    client_ip: str | None = None,
-) -> dict:
-    """Extract normalized usage fields from a Gemini OTLP record."""
-    time_ns = record.get("timeUnixNano", "0")
-    ts = int(time_ns) // 1000
-
-    input_tokens = _attr(attrs, "input_token_count")
-    visible_tokens = _attr(attrs, "output_token_count")
-    thoughts_tokens = _attr(attrs, "thoughts_token_count")
-    tool_tokens = _attr(attrs, "tool_token_count")
-
-    completion_total = (
-        int(visible_tokens or 0) + int(thoughts_tokens or 0) + int(tool_tokens or 0)
-    )
-    model = _attr(attrs, "model") or "gemini-unknown"
-    role = _attr(attrs, "role") or ""
-    sid = _attr(attrs, "session.id") or session_id
-    ttft_ms, hook_latency_ms = (
-        _consume_hook_ttft(GEMINI_HOOK_DIR, sid) if role == "main" else (None, None)
-    )
-    latency_ms = _attr(attrs, "duration_ms")
-    status = _attr(attrs, "status_code")
-    if status is None:
-        status = _attr(attrs, "http.status_code")
-    prompt_tokens = int(input_tokens) if input_tokens is not None else None
-    prompt_length = PROMPT_LENGTH_TRACKER.consume_for_usage_event(
-        "gemini-cli", attrs, sid
-    )
-    metadata = parse_provider_metadata("gemini")
-    cached_tokens = _attr(attrs, "cached_content_token_count")
-
-    return {
-        "ts": ts,
-        "provider": metadata.provider,
-        "model": model,
-        "client_source": "gemini-cli",
-        "session_id": sid,
-        "endpoint": "otlp",
-        "prompt_tokens": prompt_tokens,
-        "prompt_length": prompt_length,
-        "completion_tokens": completion_total,
-        "cached_tokens": cached_tokens,
-        "reasoning_tokens": thoughts_tokens,
-        "tool_tokens": tool_tokens,
-        "total_tokens": _attr(attrs, "total_token_count"),
-        "latency_ms": latency_ms if latency_ms is not None else hook_latency_ms,
-        "ttft_ms": ttft_ms,
-        "cache_creation_tokens": None,
-        "status": status,
-        "client_ip": client_ip,
-        "base_url": metadata.base_url,
-        "base_url_provider": metadata.provider,
-        "base_url_source": metadata.source,
-    }
-
-
-def _parse_gemini_record(
-    record: dict, attrs: list, session_id: str, client_ip: str | None = None
-) -> None:
-    record_usage(**_extract_gemini_fields(record, attrs, session_id, client_ip))
+PROMPT_LENGTH_TRACKER = PromptLengthTracker({"user_prompt", "codex.user_prompt"})
 
 
 def _extract_claude_fields(
@@ -416,7 +307,7 @@ def _extract_opencode_fields(
     cached_tokens = int(cached) if cached is not None else None
 
     # Include reasoning in completion_tokens so reasoning_tokens is a subset,
-    # matching the codex/gemini convention (OpenAI-style).
+    # matching the codex convention (OpenAI-style).
     if output_tokens is not None:
         completion_tokens = int(output_tokens) + int(reasoning or 0)
     else:
@@ -633,6 +524,9 @@ def _parse_log_record(
     resource_session_id: str,
     client_ip: str | None = None,
 ) -> None:
+    if service_name in RETIRED_SERVICE_NAMES:
+        return
+
     attrs = record.get("attributes", [])
     usage_session_id = _usage_session_id(
         service_name=service_name,
@@ -685,30 +579,25 @@ def _parse_log_record(
                 }
             )
 
-    if event_name == GEMINI_EVENT:
-        fields: dict | None = _extract_gemini_fields(
+    if (
+        event_name == CLAUDE_EVENT or event_name == "api_request"
+    ) and service_name == "claude-code":
+        fields: dict | None = _extract_claude_fields(
             record, attrs, usage_session_id or "", client_ip
         )
         if fields is not None:
-            record_usage(**fields)
-    elif (
-        event_name == CLAUDE_EVENT or event_name == "api_request"
-    ) and service_name == "claude-code":
-        fields = _extract_claude_fields(
-            record, attrs, usage_session_id or "", client_ip
-        )
-        tool_calls = fields.pop("_tool_info", [])
-        usage = record_usage(**fields)
-        if usage:
-            for tool_info in tool_calls:
-                record_tool_call(
-                    tool_use_id=tool_info["tool_use_id"],
-                    usage_id=usage.id,
-                    session_id=usage.session_id,
-                    tool_name=tool_info["tool_name"],
-                    client_source="claude-code",
-                    ts=tool_info["ts"],
-                )
+            tool_calls = fields.pop("_tool_info", [])
+            usage = record_usage(**fields)
+            if usage:
+                for tool_info in tool_calls:
+                    record_tool_call(
+                        tool_use_id=tool_info["tool_use_id"],
+                        usage_id=usage.id,
+                        session_id=usage.session_id,
+                        tool_name=tool_info["tool_name"],
+                        client_source="claude-code",
+                        ts=tool_info["ts"],
+                    )
     elif event_name == CODEX_EVENT and service_name in CODEX_SERVICE_NAMES:
         if _handle_codex_state_event(attrs):
             return
@@ -799,6 +688,8 @@ async def receive_logs(request: Request):
     for resource_log in body.get("resourceLogs", []):
         resource = resource_log.get("resource", {})
         service_name = _resource_attr(resource, "service.name") or ""
+        if service_name in RETIRED_SERVICE_NAMES:
+            continue
         session_id = _resource_attr(resource, "session.id") or ""
         # Dump first unrecognised resource block to discover service name
         if service_name not in KNOWN_SERVICE_NAMES and not os.path.exists(

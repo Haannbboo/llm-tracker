@@ -98,13 +98,13 @@ def test_script_fails_when_detected_agent_not_ready():
             elif "/local/agents" in url:
                 mock.json.return_value = {
                     "claude": {"found": True},
-                    "gemini": {"found": False},
+                    "codex": {"found": False},
                 }
             elif "/local/setup-health" in url:
                 mock.json.return_value = {
                     "agents": {
                         "claude": {"status": "missing_config"},
-                        "gemini": {"status": "missing_config"},
+                        "codex": {"status": "missing_config"},
                     }
                 }
             return mock
@@ -135,13 +135,13 @@ def test_script_passes_when_detected_agents_ready():
             elif "/local/agents" in url:
                 mock.json.return_value = {
                     "claude": {"found": True},
-                    "gemini": {"found": False},
+                    "codex": {"found": False},
                 }
             elif "/local/setup-health" in url:
                 mock.json.return_value = {
                     "agents": {
                         "claude": {"status": "ready"},
-                        "gemini": {"status": "missing_config"},
+                        "codex": {"status": "missing_config"},
                     }
                 }
             return mock

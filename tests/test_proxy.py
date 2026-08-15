@@ -294,6 +294,11 @@ def test_parse_client_source_uses_leading_product_token(
     assert proxy_module.parse_client_source(user_agent) == expected
 
 
+@pytest.mark.parametrize("user_agent", ["gemini-cli/1.0", "gemini/1.0"])
+def test_parse_client_source_ignores_retired_gemini_cli(proxy_module, user_agent):
+    assert proxy_module.parse_client_source(user_agent) is None
+
+
 def test_record_proxy_user_agent_writes_client_source(
     proxy_module, tmp_path, monkeypatch
 ):

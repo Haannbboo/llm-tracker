@@ -642,7 +642,7 @@ export function SessionsTab({
           <div className="sessions-empty-state panel">
             <div className="sessions-empty-title">{t('No sessions yet.')}</div>
             <div className="sessions-empty-copy">
-              {t('Run llm-tracker codex, llm-tracker claude, or llm-tracker gemini to create your first tracked session.')}
+              {t('Run llm-tracker codex or llm-tracker claude to create your first tracked session.')}
             </div>
           </div>
         )}

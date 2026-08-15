@@ -1157,13 +1157,13 @@ async def detect_local_agents():
 
     # Kilo's install script adds ~/.kilo/bin to PATH via ~/.zshrc, but
     # the supervisor service runs without sourcing .zshrc so it lacks this
-    # directory. Other agents (claude, codex, gemini, opencode) are found via
+    # directory. Other agents (claude, codex, opencode) are found via
     # ~/superset/bin which IS on the supervisor PATH, so only Kilo needs
     # a fallback path check.
     kilo_fallback = str(Path.home() / ".kilo" / "bin" / "kilo")
 
     agents = {}
-    for name in ("claude", "codex", "gemini", "opencode", "kilo"):
+    for name in ("claude", "codex", "opencode", "kilo"):
         path = shutil.which(name)
         if path is None and name == "kilo":
             path = kilo_fallback if Path(kilo_fallback).exists() else None
@@ -1255,17 +1255,6 @@ async def get_local_setup_health():
     )
     codex_configured = not codex_disabled and isinstance(codex_endpoint, str)
 
-    gemini_settings = _read_json_file(home / ".gemini" / "settings.json")
-    gemini_telemetry = (
-        gemini_settings.get("telemetry")
-        if isinstance(gemini_settings.get("telemetry"), dict)
-        else {}
-    )
-    gemini_endpoint = gemini_telemetry.get("otlpEndpoint")
-    gemini_configured = gemini_telemetry.get("enabled") is True and isinstance(
-        gemini_endpoint, str
-    )
-
     opencode_config_path = home / ".config" / "opencode" / "opencode.json"
     opencode_config = _read_json_file(opencode_config_path)
     opencode_plugins = opencode_config.get("plugin", [])
@@ -1353,11 +1342,6 @@ async def get_local_setup_health():
             codex_configured,
             codex_endpoint if isinstance(codex_endpoint, str) else None,
             expected["otlp_logs_endpoint"],
-        ),
-        "gemini": _agent_health(
-            gemini_configured,
-            gemini_endpoint if isinstance(gemini_endpoint, str) else None,
-            expected["otlp_endpoint"],
         ),
         "opencode": _agent_health(
             opencode_plugin_registered,

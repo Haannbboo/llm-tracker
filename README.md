@@ -4,7 +4,7 @@
 
 **Local-first observability for command-line LLM agents.**
 
-`llm-tracker` shows what your coding agents are doing: requests, token usage, cost estimates, latency, TTFT, models, sources, and session IDs across **Claude Code**, **Codex**, **Gemini CLI**, **OpenCode**, **Kilo Code**, and OpenAI/Anthropic-compatible traffic.
+`llm-tracker` shows what your coding agents are doing: requests, token usage, cost estimates, latency, TTFT, models, sources, and session IDs across **Claude Code**, **Codex**, **OpenCode**, **Kilo Code**, and OpenAI/Anthropic-compatible traffic.
 
 It is built for people who run multiple LLM agents locally and want one place to answer:
 
@@ -17,7 +17,7 @@ The default setup is local: config in `~/.llm-tracker/config.yaml`, usage data i
 
 ## What it does
 
-- **Tracks popular coding agents**: Claude Code, Codex, Gemini CLI, OpenCode, and Kilo Code through local OTLP telemetry.
+- **Tracks popular coding agents**: Claude Code, Codex, OpenCode, and Kilo Code through local OTLP telemetry.
 - **Tracks OpenAI/Anthropic-compatible clients**: route clients through the optional local proxy.
 - **Shows a dashboard**: usage, cost, latency, models, sources, request logs, setup health, and first-event onboarding.
 - **Prints command summaries**: run an agent through `llm-tracker` and get usage for that run.
@@ -29,7 +29,7 @@ The default setup is local: config in `~/.llm-tracker/config.yaml`, usage data i
 `llm-tracker` collects usage in two complementary ways:
 
 ```text
-Claude Code / Codex / Gemini CLI / OpenCode / Kilo Code
+Claude Code / Codex / OpenCode / Kilo Code
         │
         │ OTLP telemetry
         ▼
@@ -56,7 +56,7 @@ Agent telemetry is best for agent-specific fields such as sessions and tool/reas
 - macOS or Linux shell environment
 - Python 3.13, or `uv` so the installer can create it
 - Node.js 18+ if you want the dashboard built and served
-- Optional: `claude`, `codex`, `gemini`, `opencode`, or `kilo` installed locally
+- Optional: `claude`, `codex`, `opencode`, or `kilo` installed locally
 
 ### 1. Bootstrap everything
 
@@ -99,7 +99,6 @@ After bootstrap, run one of the commands shown by the dashboard, or use one of t
 ```bash
 llm-tracker codex exec "hello"
 llm-tracker claude
-llm-tracker gemini -p "hello"
 ```
 
 Repo-local fallback, useful before the symlink is on your `PATH`:
@@ -107,7 +106,6 @@ Repo-local fallback, useful before the symlink is on your `PATH`:
 ```bash
 llm-tracker codex exec "hello"
 llm-tracker claude
-llm-tracker gemini -p "hello"
 ```
 
 The empty dashboard automatically checks for your first event. No fake demo data, no manual seeding.
@@ -124,11 +122,9 @@ The wrapper runs a child command, captures usage while it runs, then prints a su
 # Interactive agents
 llm-tracker codex
 llm-tracker claude
-llm-tracker gemini
 
 # One-shot commands
 llm-tracker codex exec "say hello in one sentence"
-llm-tracker gemini -p "say hello in one sentence"
 
 # Installed CLI
 llm-tracker codex exec "say hello in one sentence"
@@ -142,7 +138,7 @@ llm-tracker --usage-only -- codex exec "say hello in one sentence"
 llm-tracker --wait-ms 5000 -- codex exec "say hello in one sentence"
 llm-tracker --summary-dest file --summary-file /tmp/llm-summary.json -- claude
 llm-tracker --proxy-env -- some-openai-compatible-cli
-llm-tracker --no-summary -- gemini -p "say hello"
+llm-tracker --no-summary -- codex exec "say hello"
 ```
 
 See [docs/cli-reference.md](docs/cli-reference.md) for all flags, tracking modes, exit codes, service commands, API endpoints, and environment variables.
@@ -271,18 +267,18 @@ For streamed responses, the proxy records TTFT as time until the first upstream 
 
 ## Tracking coverage
 
-| Metric | Gemini CLI | Claude Code | Codex | OpenCode / Kilo Code | Direct proxy |
-| --- | --- | --- | --- | --- | --- |
-| Input tokens | OTLP | OTLP | OTLP | Plugin OTLP | Response usage |
-| Output tokens | OTLP | OTLP | OTLP | Plugin OTLP | Response usage |
-| Cached tokens read | OTLP | OTLP | OTLP | Plugin OTLP | Response usage |
-| Cached tokens write | Not available | OTLP | Not available | Plugin OTLP | Not available |
-| Reasoning tokens | OTLP | Not available | OTLP | Plugin OTLP | Response usage |
-| Tool tokens | OTLP | Not available | OTLP | Not available | Not available |
-| Prompt length | OTLP | OTLP | OTLP | Plugin OTLP | Not available |
-| Latency | Hook/OTLP | OTLP | OTLP | Plugin OTLP | Proxy timing |
-| TTFT | Hook | Not available | OTLP | Plugin OTLP | Streaming only |
-| Session ID | OTLP | OTLP | OTLP | Plugin OTLP | Not available |
+| Metric | Claude Code | Codex | OpenCode / Kilo Code | Direct proxy |
+| --- | --- | --- | --- | --- |
+| Input tokens | OTLP | OTLP | Plugin OTLP | Response usage |
+| Output tokens | OTLP | OTLP | Plugin OTLP | Response usage |
+| Cached tokens read | OTLP | OTLP | Plugin OTLP | Response usage |
+| Cached tokens write | OTLP | Not available | Plugin OTLP | Not available |
+| Reasoning tokens | Not available | OTLP | Plugin OTLP | Response usage |
+| Tool tokens | Not available | OTLP | Not available | Not available |
+| Prompt length | OTLP | OTLP | Plugin OTLP | Not available |
+| Latency | OTLP | OTLP | Plugin OTLP | Proxy timing |
+| TTFT | Not available | OTLP | Plugin OTLP | Streaming only |
+| Session ID | OTLP | OTLP | Plugin OTLP | Not available |
 
 TTFT is an operational signal, not a billing-grade metric. Each agent exposes different timing data.
 
@@ -356,7 +352,7 @@ Issues and PRs are welcome. Good contributions usually include:
 - frontend tests under `frontend/tests/` when changing dashboard behavior
 - updated docs when commands, setup, or behavior changes
 
-Please keep examples consistent: plain agent invocations should use `llm-tracker codex`, `llm-tracker claude`, or `llm-tracker gemini`; reserve `--` for cases where `llm-tracker` flags are present.
+Please keep examples consistent: plain agent invocations should use `llm-tracker codex` or `llm-tracker claude`; reserve `--` for cases where `llm-tracker` flags are present.
 
 ## License
 

@@ -67,7 +67,6 @@ export function SettingsPage({ providerColors }: Props) {
     const normalized = name.toLowerCase()
     if (normalized.includes('vectorengine') || normalized.includes('claude')) return 'claude'
     if (normalized.includes('codesonline') || normalized.includes('codex')) return 'codex'
-    if (normalized.includes('gemini')) return 'gemini'
     return normalized
   }
 

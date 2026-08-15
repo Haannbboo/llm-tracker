@@ -144,15 +144,6 @@ def parse_codex_base_url() -> str | None:
     return _extract_url(config, "base_url", "url", "api_base_url")
 
 
-def parse_gemini_base_url() -> str | None:
-    """Parse Gemini CLI base URL from ~/.gemini/settings.json."""
-    settings_path = Path.home() / ".gemini" / "settings.json"
-    config = _load_json(settings_path)
-    if not config:
-        return None
-    return _extract_url(config, "base_url", "url", "api_base_url")
-
-
 def parse_opencode_base_url(provider_id: str | None = None) -> str | None:
     """Parse OpenCode base URL from ~/.config/opencode/opencode.json."""
     config_path = Path.home() / ".config" / "opencode" / "opencode.json"
@@ -188,7 +179,6 @@ def parse_opencode_base_url(provider_id: str | None = None) -> str | None:
 PROVIDER_DEFAULTS: dict[str, str] = {
     "claude": "anthropic",
     "codex": "openai",
-    "gemini": "google",
     "opencode": "unknown",
 }
 
@@ -203,9 +193,6 @@ def parse_provider_metadata(
     elif agent == "codex":
         base_url = parse_codex_base_url()
         source = "codex_config"
-    elif agent == "gemini":
-        base_url = parse_gemini_base_url()
-        source = "gemini_settings"
     elif agent == "opencode":
         base_url = parse_opencode_base_url(provider_id)
         source = "opencode_config"

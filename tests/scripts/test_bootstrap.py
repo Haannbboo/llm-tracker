@@ -154,7 +154,6 @@ def _setup_health(
     otlp_port: int,
     claude: dict,
     codex: dict,
-    gemini: dict,
     opencode: dict | None = None,
     kilo: dict | None = None,
 ) -> dict:
@@ -174,22 +173,19 @@ def _setup_health(
             "otlp_logs_endpoint": expected_logs_endpoint,
         },
         "summary": {
-            "total_agents": 5,
+            "total_agents": 4,
             "configured_agents": sum(
-                1
-                for agent in (claude, codex, gemini, opencode, kilo)
-                if agent["configured"]
+                1 for agent in (claude, codex, opencode, kilo) if agent["configured"]
             ),
             "matching_agents": sum(
                 1
-                for agent in (claude, codex, gemini, opencode, kilo)
+                for agent in (claude, codex, opencode, kilo)
                 if agent["endpoint_matches"]
             ),
         },
         "agents": {
             "claude": claude,
             "codex": codex,
-            "gemini": gemini,
             "opencode": opencode,
             "kilo": kilo,
         },
@@ -209,10 +205,6 @@ def test_bootstrap_succeeds_when_install_start_and_post_checks_pass(tmp_path):
         codex=_agent_health(
             status="missing_config",
             expected_endpoint=f"http://localhost:{ports[2]}/v1/logs",
-        ),
-        gemini=_agent_health(
-            status="missing_config",
-            expected_endpoint=f"http://localhost:{ports[2]}",
         ),
     )
     fake_repo = _make_fake_bootstrap_repo(tmp_path, home, ports=ports)
@@ -244,11 +236,6 @@ def test_bootstrap_reports_local_setup_health_ready_and_skipped_agents(tmp_path)
             status="missing_config",
             expected_endpoint=f"http://localhost:{ports[2]}/v1/logs",
         ),
-        gemini=_agent_health(
-            status="ready",
-            expected_endpoint=f"http://localhost:{ports[2]}",
-            configured_endpoint=f"http://localhost:{ports[2]}",
-        ),
         kilo=_agent_health(
             status="ready",
             expected_endpoint=f"http://localhost:{ports[2]}/v1/logs",
@@ -260,7 +247,6 @@ def test_bootstrap_reports_local_setup_health_ready_and_skipped_agents(tmp_path)
         tmp_path, open_ports=set(ports), setup_health=setup_health
     )
 
-    _add_fake_agent(bin_dir, "gemini")
     _add_fake_agent(bin_dir, "kilo")
 
     result = _run_bootstrap(fake_repo, home, bin_dir)
@@ -270,10 +256,9 @@ def test_bootstrap_reports_local_setup_health_ready_and_skipped_agents(tmp_path)
     assert "Verifying agent tracking" in output
     assert "Claude: skipped" in output
     assert "Codex: skipped" in output
-    assert "Gemini: ready" in output
     assert "OpenCode: skipped" in output
     assert "Kilo: ready" in output
-    assert "Agents: 2 ready, 3 skipped, 0 failed" in output
+    assert "Agents: 1 ready, 3 skipped, 0 failed" in output
 
 
 def test_bootstrap_fails_when_detected_agent_setup_health_is_not_ready(tmp_path):
@@ -310,11 +295,6 @@ def test_bootstrap_fails_when_detected_agent_setup_health_is_not_ready(tmp_path)
             expected_endpoint=f"http://localhost:{ports[2]}/v1/logs",
             configured_endpoint=secret_endpoint,
         ),
-        gemini=_agent_health(
-            status="ready",
-            expected_endpoint=f"http://localhost:{ports[2]}",
-            configured_endpoint=f"http://localhost:{ports[2]}",
-        ),
     )
     fake_repo = _make_fake_bootstrap_repo(tmp_path, home, ports=ports)
     bin_dir = _make_fake_curl(
@@ -322,7 +302,6 @@ def test_bootstrap_fails_when_detected_agent_setup_health_is_not_ready(tmp_path)
     )
     _add_fake_agent(bin_dir, "claude")
     _add_fake_agent(bin_dir, "codex")
-    _add_fake_agent(bin_dir, "gemini")
 
     result = _run_bootstrap(fake_repo, home, bin_dir)
 
@@ -331,52 +310,10 @@ def test_bootstrap_fails_when_detected_agent_setup_health_is_not_ready(tmp_path)
     assert "Verifying agent tracking" in output
     assert "Claude: OTLP not configured" in output
     assert "Codex: endpoint mismatch" in output
-    assert "Gemini: ready" in output
     assert "OpenCode: skipped" in output
     assert "Kilo: skipped" in output
-    assert "Agents: 1 ready, 2 skipped, 2 failed" in output
+    assert "Agents: 0 ready, 2 skipped, 2 failed" in output
     assert secret_endpoint not in output
-
-
-def test_bootstrap_skips_gemini_when_settings_file_exists_but_cli_is_missing(tmp_path):
-    home = tmp_path / "home"
-    home.mkdir()
-    gemini_settings = home / ".gemini" / "settings.json"
-    gemini_settings.parent.mkdir(parents=True)
-    gemini_settings.write_text('{"mcpServers": {}}\n', encoding="utf-8")
-
-    ports = (4500, 4501, 4502)
-    setup_health = _setup_health(
-        otlp_port=ports[2],
-        claude=_agent_health(
-            status="missing_config",
-            expected_endpoint=f"http://localhost:{ports[2]}/v1/logs",
-        ),
-        codex=_agent_health(
-            status="missing_config",
-            expected_endpoint=f"http://localhost:{ports[2]}/v1/logs",
-        ),
-        gemini=_agent_health(
-            status="ready",
-            expected_endpoint=f"http://localhost:{ports[2]}",
-            configured_endpoint=f"http://localhost:{ports[2]}",
-        ),
-    )
-    fake_repo = _make_fake_bootstrap_repo(tmp_path, home, ports=ports)
-    bin_dir = _make_fake_curl(
-        tmp_path, open_ports=set(ports), setup_health=setup_health
-    )
-
-    result = _run_bootstrap(fake_repo, home, bin_dir)
-
-    output = result.stdout + result.stderr
-    assert result.returncode == 0, output
-    assert "Claude: skipped" in output
-    assert "Codex: skipped" in output
-    assert "Gemini: skipped" in output
-    assert "OpenCode: skipped" in output
-    assert "Kilo: skipped" in output
-    assert "Agents: 0 ready, 5 skipped, 0 failed" in output
 
 
 @pytest.mark.slow
@@ -414,10 +351,10 @@ def test_bootstrap_skips_undetected_agent_even_when_setup_health_is_ready(tmp_pa
             status="missing_config",
             expected_endpoint=f"http://localhost:{ports[2]}/v1/logs",
         ),
-        gemini=_agent_health(
+        kilo=_agent_health(
             status="ready",
-            expected_endpoint=f"http://localhost:{ports[2]}",
-            configured_endpoint=f"http://localhost:{ports[2]}",
+            expected_endpoint=f"http://localhost:{ports[2]}/v1/logs",
+            configured_endpoint=f"http://localhost:{ports[2]}/v1/logs",
         ),
     )
     fake_repo = _make_fake_bootstrap_repo(tmp_path, home, ports=ports)
@@ -429,8 +366,7 @@ def test_bootstrap_skips_undetected_agent_even_when_setup_health_is_ready(tmp_pa
 
     output = result.stdout + result.stderr
     assert result.returncode == 0, output
-    assert "Gemini: skipped" in output
-    assert "Gemini: ready" not in output
-    assert "OpenCode: skipped" in output
     assert "Kilo: skipped" in output
-    assert "Agents: 0 ready, 5 skipped, 0 failed" in output
+    assert "Kilo: ready" not in output
+    assert "OpenCode: skipped" in output
+    assert "Agents: 0 ready, 4 skipped, 0 failed" in output

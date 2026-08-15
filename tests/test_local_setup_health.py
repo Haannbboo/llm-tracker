@@ -7,10 +7,8 @@ def test_local_setup_health_reports_agent_otlp_config_status(api_module, isolate
     home = isolated_home
     claude_dir = home / ".claude"
     codex_dir = home / ".codex"
-    gemini_dir = home / ".gemini"
     claude_dir.mkdir()
     codex_dir.mkdir()
-    gemini_dir.mkdir()
 
     claude_dir.joinpath("settings.json").write_text(
         """{
@@ -34,18 +32,6 @@ api_key = "super-secret"
 """,
         encoding="utf-8",
     )
-    gemini_dir.joinpath("settings.json").write_text(
-        """{
-          "telemetry": {
-            "enabled": true,
-            "target": "local",
-            "otlpEndpoint": "http://localhost:4002",
-            "otlpProtocol": "http",
-            "token": "super-secret"
-          }
-        }""",
-        encoding="utf-8",
-    )
 
     response = TestClient(api_module.app).get("/local/setup-health")
 
@@ -54,9 +40,9 @@ api_key = "super-secret"
     assert data["expected"]["otlp_logs_endpoint"] == "http://localhost:4002/v1/logs"
     assert data["expected"]["otlp_endpoint"] == "http://localhost:4002"
     assert data["summary"] == {
-        "total_agents": 5,
-        "configured_agents": 3,
-        "matching_agents": 2,
+        "total_agents": 4,
+        "configured_agents": 2,
+        "matching_agents": 1,
     }
 
     agents = data["agents"]
@@ -66,13 +52,11 @@ api_key = "super-secret"
     assert agents["codex"]["configured"] is True
     assert agents["codex"]["endpoint_matches"] is False
     assert agents["codex"]["configured_endpoint"] == "http://localhost:9999/v1/logs"
-    assert agents["gemini"]["configured"] is True
-    assert agents["gemini"]["endpoint_matches"] is True
-    assert agents["gemini"]["configured_endpoint"] == "http://localhost:4002"
     assert agents["kilo"]["status"] == "missing_config"
     assert agents["kilo"]["configured"] is False
     assert agents["kilo"]["configured_endpoint"] is None
     assert agents["kilo"]["endpoint_matches"] is False
+    assert "gemini" not in agents
 
     assert "super-secret" not in response.text
     assert "api_key" not in response.text.lower()
@@ -213,7 +197,7 @@ def test_local_setup_health_handles_missing_agent_configs(api_module):
     assert response.status_code == 200
     data = response.json()
     assert data["summary"] == {
-        "total_agents": 5,
+        "total_agents": 4,
         "configured_agents": 0,
         "matching_agents": 0,
     }

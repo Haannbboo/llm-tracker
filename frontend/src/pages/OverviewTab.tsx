@@ -130,7 +130,6 @@ export function OverviewTab({
               {[
                 { cmd: 'llm-tracker claude', source: 'Claude Code' },
                 { cmd: 'llm-tracker codex exec "hello"', source: 'Codex' },
-                { cmd: 'llm-tracker gemini -p "hello"', source: 'Gemini CLI' },
               ].map(({ cmd, source }) => (
                 <div key={cmd} style={{
                   display: 'flex',
