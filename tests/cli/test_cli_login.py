@@ -1,13 +1,11 @@
 """CLI-side tests for PR 3 login (docs/design/specs/pr3-cli-login-flow.md).
 
-The loopback listener and handler run for real; the server is a fake httpx
-(interface-compatible: .get for pre-flight, .post for the exchange).
+The server is a fake httpx (interface-compatible: .get for pre-flight, .post
+for the exchange); stdin is fed via monkeypatched builtins.input.
 """
 
 import json
 import stat
-import threading
-import urllib.request
 from types import SimpleNamespace
 
 import httpx
@@ -28,9 +26,20 @@ EXCHANGE_PAYLOAD = {
 class FakeHttpx:
     """Replaces cli_module.httpx for login tests."""
 
-    def __init__(self, *, exchange_status=200, exchange_payload=None, get_error=None):
+    def __init__(
+        self,
+        *,
+        exchange_status=200,
+        exchange_payload=None,
+        get_error=None,
+    ):
         self.calls = []
-        self.exchange_status = exchange_status
+        self.post_index = 0
+        self.exchange_statuses = (
+            list(exchange_status)
+            if isinstance(exchange_status, (list, tuple))
+            else [exchange_status]
+        )
         self.exchange_payload = exchange_payload or EXCHANGE_PAYLOAD
         self.get_error = get_error
 
@@ -42,77 +51,67 @@ class FakeHttpx:
 
     def post(self, url, json=None, **kwargs):
         self.calls.append(("POST", url, json))
-        return SimpleNamespace(
-            status_code=self.exchange_status,
-            json=lambda: self.exchange_payload,
-        )
+        status = self.exchange_statuses[
+            min(self.post_index, len(self.exchange_statuses) - 1)
+        ]
+        self.post_index += 1
+        return SimpleNamespace(status_code=status, json=lambda: self.exchange_payload)
 
 
-def _fixed_port(cli_module, monkeypatch) -> int:
-    port = cli_module.find_free_loopback_port()
-    monkeypatch.setattr(cli_module, "find_free_loopback_port", lambda: port)
-    return port
-
-
-def _run_login(cli_module, monkeypatch, *extra_args):
-    fake = FakeHttpx()
+def _run_login(
+    cli_module,
+    monkeypatch,
+    *,
+    inputs,
+    no_browser=True,
+    ssh_env=False,
+    exchange_status=200,
+    extra_args=(),
+):
+    fake = FakeHttpx(exchange_status=exchange_status)
     monkeypatch.setattr(cli_module, "httpx", fake)
     monkeypatch.delenv("LLMTRACKER_SERVER", raising=False)
+    for key in ("SSH_CONNECTION", "SSH_TTY"):
+        monkeypatch.delenv(key, raising=False)
+    if ssh_env:
+        monkeypatch.setenv("SSH_CONNECTION", "10.0.0.1 1234 10.0.0.2 22")
     monkeypatch.setattr(cli_module.shutil, "which", lambda name: None)
-    port = _fixed_port(cli_module, monkeypatch)
-    monkeypatch.setattr(
-        cli_module.webbrowser,
-        "open",
-        lambda url: (_ for _ in ()).throw(
-            AssertionError("browser should not open with --no-browser")
-        ),
+    opened = []
+    monkeypatch.setattr(cli_module.webbrowser, "open", lambda url: opened.append(url))
+
+    responses = list(inputs)
+
+    def fake_input(prompt=""):
+        if not responses:
+            raise EOFError
+        return responses.pop(0)
+
+    monkeypatch.setattr("builtins.input", fake_input)
+
+    args = ["login", "--server", "https://srv.example", *extra_args]
+    if no_browser:
+        args.append("--no-browser")
+    return cli_module.run_login_command(args), fake, opened
+
+
+def test_login_writes_credentials_0600(cli_module, isolated_home, monkeypatch, capsys):
+    code, fake, opened = _run_login(
+        cli_module, monkeypatch, inputs=["the-one-time-code"]
     )
-
-    result = {}
-
-    def run():
-        result["code"] = cli_module.run_login_command(
-            [
-                "login",
-                "--server",
-                "https://srv.example",
-                "--no-browser",
-                "--timeout",
-                "20",
-                *extra_args,
-            ]
-        )
-
-    thread = threading.Thread(target=run)
-    thread.start()
-    # Deliver the one-time code to the real loopback listener.
-    for _ in range(200):
-        try:
-            with urllib.request.urlopen(
-                f"http://127.0.0.1:{port}/?code=the-one-time-code", timeout=1
-            ) as response:
-                assert response.status == 200
-            break
-        except OSError:
-            import time
-
-            time.sleep(0.05)
-    else:
-        pytest.fail("loopback listener never came up")
-    thread.join(timeout=10)
-    return result.get("code"), fake, port
-
-
-def test_login_writes_credentials_0600(cli_module, isolated_home, monkeypatch):
-    code, fake, _ = _run_login(cli_module, monkeypatch)
     assert code == 0
+    assert opened == []
 
-    # Pre-flight hit /version; exchange hit /auth/cli/exchange with the code.
+    # The login URL is always printed.
+    captured = capsys.readouterr()
+    assert "https://srv.example/auth/cli/start" in captured.out
+
+    # Pre-flight hit /version; exchange hit /auth/cli/exchange with the
+    # normalized code (uppercase, hyphens and whitespace stripped).
     assert ("GET", "https://srv.example/version") in fake.calls
     exchange_calls = [c for c in fake.calls if c[0] == "POST"]
     assert len(exchange_calls) == 1
     assert exchange_calls[0][1] == "https://srv.example/auth/cli/exchange"
-    assert exchange_calls[0][2]["code"] == "the-one-time-code"
+    assert exchange_calls[0][2]["code"] == "THEONETIMECODE"
 
     path = cli_module.credentials_path()
     data = json.loads(path.read_text(encoding="utf-8"))
@@ -124,20 +123,64 @@ def test_login_writes_credentials_0600(cli_module, isolated_home, monkeypatch):
     mode = stat.S_IMODE(path.stat().st_mode)
     assert mode == 0o600
 
+    # Tokens are never printed to the terminal.
+    assert "llmt_cli" not in captured.out
+    assert "llmt_cli" not in captured.err
+    assert "llmt_ingest" not in captured.out
+    assert "llmt_ingest" not in captured.err
 
-def test_login_timeout_writes_no_credentials(cli_module, isolated_home, monkeypatch):
-    fake = FakeHttpx()
-    monkeypatch.setattr(cli_module, "httpx", fake)
-    monkeypatch.delenv("LLMTRACKER_SERVER", raising=False)
-    _fixed_port(cli_module, monkeypatch)
 
-    code = cli_module.run_login_command(
-        ["login", "--server", "https://srv.example", "--no-browser", "--timeout", "1"]
+def test_login_retries_on_400_then_succeeds(
+    cli_module, isolated_home, monkeypatch, capsys
+):
+    code, fake, _ = _run_login(
+        cli_module,
+        monkeypatch,
+        inputs=["bad-code", "good-code"],
+        exchange_status=[400, 200],
+    )
+    assert code == 0
+    posts = [c for c in fake.calls if c[0] == "POST"]
+    assert [p[2]["code"] for p in posts] == ["BADCODE", "GOODCODE"]
+    assert "paste it again" in capsys.readouterr().err
+
+
+def test_login_three_failures_exit_1_no_credentials(
+    cli_module, isolated_home, monkeypatch
+):
+    code, fake, _ = _run_login(
+        cli_module,
+        monkeypatch,
+        inputs=["bad1", "bad2", "bad3"],
+        exchange_status=400,
     )
     assert code == 1
     assert not cli_module.credentials_path().exists()
-    # No exchange attempt was made.
+    assert len([c for c in fake.calls if c[0] == "POST"]) == 3
+
+
+def test_login_empty_input_exit_1_no_credentials(
+    cli_module, isolated_home, monkeypatch
+):
+    code, fake, _ = _run_login(cli_module, monkeypatch, inputs=["  "])
+    assert code == 1
+    assert not cli_module.credentials_path().exists()
     assert [c for c in fake.calls if c[0] == "POST"] == []
+
+
+def test_login_ssh_skips_browser_but_prints_url(
+    cli_module, isolated_home, monkeypatch, capsys
+):
+    code, _, opened = _run_login(
+        cli_module,
+        monkeypatch,
+        inputs=["the-code"],
+        no_browser=False,
+        ssh_env=True,
+    )
+    assert code == 0
+    assert opened == []  # no webbrowser.open over SSH
+    assert "https://srv.example/auth/cli/start" in capsys.readouterr().out
 
 
 def test_login_unreachable_server_fails_clean(cli_module, isolated_home, monkeypatch):
@@ -249,6 +292,18 @@ def test_watermark_401_message_reaches_stderr(
     assert "llm-tracker login" in capsys.readouterr().err
 
 
+def test_poll_summary_surfaces_api_error(cli_module, isolated_home, capsys):
+    client = SimpleNamespace(
+        get_run_summary=lambda **kwargs: (_ for _ in ()).throw(
+            cli_module.ApiError("session rejected — run llm-tracker login")
+        )
+    )
+    options = cli_module.RunOptions(wait_ms=0)
+    result = cli_module.poll_summary(client, after_ts=0, options=options)
+    assert result is None
+    assert "llm-tracker login" in capsys.readouterr().err
+
+
 # ------------------------------------------------------------------ wiring
 
 
@@ -267,7 +322,6 @@ def test_wire_agents_for_hosted_invokes_scripts(cli_module, isolated_home, monke
 
     wired = cli_module.wire_agents_for_hosted(
         logs_endpoint="https://api.example.com:4005/v1/logs",
-        base_endpoint="https://api.example.com:4005",
     )
     assert wired == ["codex", "claude"]
     assert len(calls) == 2
@@ -284,6 +338,4 @@ def test_wire_agents_for_hosted_invokes_scripts(cli_module, isolated_home, monke
 
 def test_wire_agents_no_endpoint_noop(cli_module, isolated_home, monkeypatch):
     monkeypatch.setattr(cli_module.shutil, "which", lambda name: "/usr/bin/" + name)
-    assert (
-        cli_module.wire_agents_for_hosted(logs_endpoint=None, base_endpoint=None) == []
-    )
+    assert cli_module.wire_agents_for_hosted(logs_endpoint=None) == []

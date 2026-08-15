@@ -11,15 +11,13 @@ import socket
 import subprocess
 import sys
 import tempfile
-import threading
 import time
 import webbrowser
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from typing import Any
-from urllib.parse import parse_qs, urlencode, urlparse
+from urllib.parse import urlencode
 
 import httpx
 
@@ -332,7 +330,7 @@ def save_credentials(data: dict[str, Any]) -> None:
     """Write credentials.json atomically, 0600 from the moment it exists."""
     path = credentials_path()
     path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_name(path.name + ".tmp")
+    tmp = path.with_name(f"{path.name}.{secrets.token_hex(4)}.tmp")
     fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     with os.fdopen(fd, "w", encoding="utf-8") as handle:
         json.dump(data, handle, indent=2)
@@ -359,10 +357,7 @@ def parse_login_args(command: list[str]) -> argparse.Namespace:
         "--no-browser",
         dest="no_browser",
         action="store_true",
-        help="print the login URL instead of opening a browser",
-    )
-    parser.add_argument(
-        "--timeout", type=int, default=300, help="seconds to wait for browser login"
+        help="don't attempt to open a browser (the login URL is always printed)",
     )
     return parser.parse_args(command[1:])
 
@@ -380,35 +375,9 @@ def _pkce_pair() -> tuple[str, str]:
     return verifier, challenge
 
 
-class _LoopbackLoginHandler(BaseHTTPRequestHandler):
-    """One-shot handler: capture ?code= from the server's redirect."""
-
-    code_value: str | None = None
-    received: threading.Event = threading.Event()
-
-    def do_GET(self) -> None:  # noqa: N802 - http.server API
-        query = parse_qs(urlparse(self.path).query)
-        code = query.get("code", [None])[0]
-        if urlparse(self.path).path == "/" and code:
-            # Class attribute, not instance: the exchange reads
-            # _LoopbackLoginHandler.code_value after the server shut down.
-            _LoopbackLoginHandler.code_value = code
-            self.received.set()
-            body = (
-                b"<html><body><p>llm-tracker login complete. "
-                b"You can close this tab.</p></body></html>"
-            )
-            self.send_response(200)
-            self.send_header("Content-Type", "text/html; charset=utf-8")
-            self.send_header("Content-Length", str(len(body)))
-            self.end_headers()
-            self.wfile.write(body)
-        else:
-            self.send_response(404)
-            self.end_headers()
-
-    def log_message(self, *args: Any) -> None:
-        pass
+def _normalize_cli_code(raw: str) -> str:
+    """Uppercase, strip whitespace and hyphens (what a human may retype)."""
+    return "".join(raw.split()).upper().replace("-", "")
 
 
 def run_login_command(command: list[str]) -> int:
@@ -434,63 +403,54 @@ def run_login_command(command: list[str]) -> int:
         return 1
 
     verifier, challenge = _pkce_pair()
-    port = find_free_loopback_port()
     device_name = _sanitize_device_name(
         args.device_name or socket.gethostname() or "cli-device"
     )
     login_url = f"{server}/auth/cli/start?" + urlencode(
-        {
-            "redirect_port": port,
-            "code_challenge": challenge,
-            "device_name": device_name,
-        }
+        {"code_challenge": challenge, "device_name": device_name}
     )
 
-    # Reset one-shot state (single login per process, but stay correct if
-    # that ever changes).
-    _LoopbackLoginHandler.code_value = None
-    _LoopbackLoginHandler.received = threading.Event()
-    try:
-        httpd = HTTPServer(("127.0.0.1", port), _LoopbackLoginHandler)
-    except OSError as exc:
-        print(
-            f"llm-tracker login could not bind 127.0.0.1:{port}: {exc}",
-            file=sys.stderr,
-        )
-        return 1
-    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    print(f"Open this URL in your browser to continue login:\n  {login_url}")
+    over_ssh = bool(os.environ.get("SSH_CONNECTION") or os.environ.get("SSH_TTY"))
+    if not args.no_browser and not over_ssh:
+        webbrowser.open(login_url)
 
-    try:
-        if args.no_browser or not webbrowser.open(login_url):
-            print(f"Open this URL to continue login:\n  {login_url}")
-        print(f"Waiting for login (device: {device_name})...", file=sys.stderr)
-        if not _LoopbackLoginHandler.received.wait(timeout=max(args.timeout, 1)):
-            print("login timed out; no credentials written", file=sys.stderr)
+    response: httpx.Response | None = None
+    for attempt in range(3):
+        try:
+            raw = input("Paste the code shown in your browser: ")
+        except EOFError:
+            print("no code entered; no credentials written", file=sys.stderr)
             return 1
-    finally:
-        httpd.shutdown()
-        httpd.server_close()
-
-    try:
-        response = httpx.post(
-            f"{server}/auth/cli/exchange",
-            json={"code": _LoopbackLoginHandler.code_value, "code_verifier": verifier},
-            timeout=10,
-        )
-    except Exception as exc:
-        print(f"login exchange failed: {exc}", file=sys.stderr)
-        return 1
-    if response.status_code != 200:
+        if not raw.strip():
+            print("no code entered; no credentials written", file=sys.stderr)
+            return 1
+        try:
+            response = httpx.post(
+                f"{server}/auth/cli/exchange",
+                json={"code": _normalize_cli_code(raw), "code_verifier": verifier},
+                timeout=10,
+            )
+        except Exception as exc:
+            print(f"login exchange failed: {exc}", file=sys.stderr)
+            return 1
+        if response.status_code == 200:
+            break
         detail = ""
         try:
             detail = str(response.json().get("detail", ""))
         except Exception:
             pass
+        if response.status_code == 400 and attempt < 2:
+            print("invalid or expired code — paste it again", file=sys.stderr)
+            continue
         print(
             f"login failed: HTTP {response.status_code}"
             f"{f' ({detail})' if detail else ''}",
             file=sys.stderr,
         )
+        return 1
+    if response is None:
         return 1
     payload = response.json()
     user = payload.get("user") or {}
@@ -512,7 +472,6 @@ def run_login_command(command: list[str]) -> int:
 
     wired = wire_agents_for_hosted(
         logs_endpoint=(payload.get("otlp") or {}).get("logs_endpoint"),
-        base_endpoint=(payload.get("otlp") or {}).get("endpoint"),
     )
     if wired:
         print("Wired agents: " + ", ".join(wired))
@@ -521,11 +480,9 @@ def run_login_command(command: list[str]) -> int:
     return 0
 
 
-def wire_agents_for_hosted(
-    *, logs_endpoint: str | None, base_endpoint: str | None
-) -> list[str]:
+def wire_agents_for_hosted(*, logs_endpoint: str | None) -> list[str]:
     """Point detected agents' telemetry at the hosted server (idempotent)."""
-    if not logs_endpoint or not base_endpoint:
+    if not logs_endpoint:
         return []
     scripts_dir = project_root() / "scripts"
     home = Path.home()
@@ -945,7 +902,8 @@ def poll_summary(
     while True:
         try:
             summary = client.get_run_summary(after_ts=after_ts)
-        except ApiError:
+        except ApiError as exc:
+            print(f"llm-tracker API error: {exc}", file=sys.stderr)
             return latest_summary
 
         latest_summary = summary
@@ -958,7 +916,8 @@ def poll_summary(
 
     try:
         until_ts = client.get_high_watermark()
-    except ApiError:
+    except ApiError as exc:
+        print(f"llm-tracker API error: {exc}", file=sys.stderr)
         return latest_summary
 
     try:
@@ -966,7 +925,8 @@ def poll_summary(
             after_ts=after_ts,
             until_ts=until_ts,
         )
-    except ApiError:
+    except ApiError as exc:
+        print(f"llm-tracker API error: {exc}", file=sys.stderr)
         return None
 
 

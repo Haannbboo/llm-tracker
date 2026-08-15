@@ -7,6 +7,7 @@ test_auth_web.py; the one-time code + PKCE exchange run for real.
 import base64
 import hashlib
 import json
+import re
 import secrets
 import time
 from pathlib import Path
@@ -77,9 +78,9 @@ def _pkce_pair():
     return verifier, challenge
 
 
-def _start_params(port=53639, device="myhost"):
+def _start_params(device="myhost"):
     _, challenge = _pkce_pair()
-    return {"redirect_port": port, "code_challenge": challenge, "device_name": device}
+    return {"code_challenge": challenge, "device_name": device}
 
 
 def _web_login(api_module, monkeypatch, client, email="a@example.com"):
@@ -101,9 +102,10 @@ def _exchange(client, code, verifier):
     )
 
 
-def _code_from_redirect(location: str) -> str:
-    assert location.startswith("http://127.0.0.1:53639/?code=")
-    return parse_qs(urlparse(location).query)["code"][0]
+def _code_from_page(text: str) -> str:
+    match = re.search(r'id="cli-code"[^>]*>([^<]+)<', text)
+    assert match, "code page did not contain the cli-code element"
+    return match.group(1)
 
 
 def _token_rows(fresh_db):
@@ -139,7 +141,6 @@ def test_session_shortcut_confirm_and_exchange(api_module, monkeypatch, fresh_db
     _web_login(api_module, monkeypatch, client)
     verifier, challenge = _pkce_pair()
     params = {
-        "redirect_port": 53639,
         "code_challenge": challenge,
         "device_name": "<evil>host",
     }
@@ -150,12 +151,20 @@ def test_session_shortcut_confirm_and_exchange(api_module, monkeypatch, fresh_db
     # Attacker-influenced device name is escaped in the reflected page.
     assert "&lt;evil&gt;host" in page.text
     assert "a@example.com" in page.text
-    # The approve form posts back with the flow parameters.
-    assert 'method="post"' in page.text and "/auth/cli/start?" in page.text
+    assert "Only approve logins you started" in page.text
+    # The approve form posts back with the flow parameters as hidden inputs.
+    assert 'method="post"' in page.text and 'name="code_challenge"' in page.text
+    assert 'name="device_name"' in page.text
 
-    approved = client.post("/auth/cli/start", params=params, follow_redirects=False)
-    assert approved.status_code == 302
-    code = _code_from_redirect(approved.headers["location"])
+    approved = client.post("/auth/cli/start", params=params)
+    assert approved.status_code == 200
+    assert "text/html" in approved.headers["content-type"]
+    # The code is delivered in the response body, never in a URL.
+    assert "location" not in approved.headers
+    code = _code_from_page(approved.text)
+    assert re.fullmatch(
+        r"[BCDFGHJKLMNPQRSTVWXZ]{4}(-[BCDFGHJKLMNPQRSTVWXZ]{4}){2}", code
+    )
 
     exchanged = _exchange(client, code, verifier)
     assert exchanged.status_code == 200
@@ -189,7 +198,7 @@ def test_post_without_session_is_401(api_module, monkeypatch, fresh_db):
 # ------------------------------------------------------------ Google path
 
 
-def test_google_path_redirects_to_loopback_without_web_session(
+def test_google_path_renders_code_page_without_web_session(
     api_module, monkeypatch, fresh_db
 ):
     _enable_auth(monkeypatch)
@@ -197,7 +206,6 @@ def test_google_path_redirects_to_loopback_without_web_session(
     client = TestClient(api_module.app)
     verifier, challenge = _pkce_pair()
     params = {
-        "redirect_port": 53639,
         "code_challenge": challenge,
         "device_name": "myhost",
     }
@@ -210,15 +218,29 @@ def test_google_path_redirects_to_loopback_without_web_session(
     callback = client.get(
         f"/auth/google/callback?code=the-code&state={state}", follow_redirects=False
     )
-    assert callback.status_code == 302
-    assert callback.headers["location"].startswith("http://127.0.0.1:53639/?code=")
+    assert callback.status_code == 200
+    assert "location" not in callback.headers
     # CLI flow mints no web session.
     assert callback.cookies.get(SESSION_COOKIE) is None
-    code = _code_from_redirect(callback.headers["location"])
+    code = _code_from_page(callback.text)
 
     exchanged = _exchange(client, code, verifier)
     assert exchanged.status_code == 200
     assert exchanged.json()["device_name"] == "myhost"
+
+
+def test_exchange_normalizes_code(api_module, monkeypatch, fresh_db):
+    _enable_auth(monkeypatch)
+    client = TestClient(api_module.app)
+    _web_login(api_module, monkeypatch, client)
+    verifier, challenge = _pkce_pair()
+    params = {"code_challenge": challenge, "device_name": "d"}
+    approved = client.post("/auth/cli/start", params=params)
+    code = _code_from_page(approved.text)
+
+    # Lowercased, hyphen-stripped, whitespace-padded input still exchanges.
+    mangled = " " + code.lower().replace("-", " ") + " "
+    assert _exchange(client, mangled, verifier).status_code == 200
 
 
 def test_exchange_replay_fails(api_module, monkeypatch, fresh_db):
@@ -226,9 +248,9 @@ def test_exchange_replay_fails(api_module, monkeypatch, fresh_db):
     client = TestClient(api_module.app)
     _web_login(api_module, monkeypatch, client)
     verifier, challenge = _pkce_pair()
-    params = {"redirect_port": 53639, "code_challenge": challenge, "device_name": "d"}
-    approved = client.post("/auth/cli/start", params=params, follow_redirects=False)
-    code = _code_from_redirect(approved.headers["location"])
+    params = {"code_challenge": challenge, "device_name": "d"}
+    approved = client.post("/auth/cli/start", params=params)
+    code = _code_from_page(approved.text)
 
     assert _exchange(client, code, verifier).status_code == 200
     replay = _exchange(client, code, verifier)
@@ -243,9 +265,9 @@ def test_exchange_wrong_verifier_fails_and_mints_nothing(
     client = TestClient(api_module.app)
     _web_login(api_module, monkeypatch, client)
     _, challenge = _pkce_pair()
-    params = {"redirect_port": 53639, "code_challenge": challenge, "device_name": "d"}
-    approved = client.post("/auth/cli/start", params=params, follow_redirects=False)
-    code = _code_from_redirect(approved.headers["location"])
+    params = {"code_challenge": challenge, "device_name": "d"}
+    approved = client.post("/auth/cli/start", params=params)
+    code = _code_from_page(approved.text)
 
     before = len(_token_rows(fresh_db))
     response = _exchange(client, code, secrets.token_urlsafe(48))
@@ -260,13 +282,13 @@ def test_exchange_expired_code_fails(api_module, monkeypatch, fresh_db, isolated
     client = TestClient(api_module.app)
     _web_login(api_module, monkeypatch, client)
     _, challenge = _pkce_pair()
-    params = {"redirect_port": 53639, "code_challenge": challenge, "device_name": "d"}
-    approved = client.post("/auth/cli/start", params=params, follow_redirects=False)
-    code = _code_from_redirect(approved.headers["location"])
+    params = {"code_challenge": challenge, "device_name": "d"}
+    approved = client.post("/auth/cli/start", params=params)
+    code = _code_from_page(approved.text)
 
     codes_path = Path(config.app.get_config_path()).parent / "cli_codes.json"
     stored = json.loads(codes_path.read_text())
-    stored[code]["exp"] = time.time() - 1
+    stored[code.replace("-", "")]["exp"] = time.time() - 1
     codes_path.write_text(json.dumps(stored))
 
     assert _exchange(client, code, "anything").status_code == 400
@@ -276,6 +298,18 @@ def test_exchange_unknown_code_fails(api_module, monkeypatch, fresh_db):
     _enable_auth(monkeypatch)
     client = TestClient(api_module.app)
     assert _exchange(client, "no-such-code", "v").status_code == 400
+
+
+def test_exchange_missing_fields_400(api_module, monkeypatch, fresh_db):
+    _enable_auth(monkeypatch)
+    client = TestClient(api_module.app)
+    assert client.post("/auth/cli/exchange", json={}).status_code == 400
+    assert (
+        client.post(
+            "/auth/cli/exchange", json={"code": "ABC", "code_verifier": ""}
+        ).status_code
+        == 400
+    )
 
 
 # -------------------------------------------------------- revoke-and-remint
@@ -293,12 +327,11 @@ def test_revoke_and_remint_same_device_only(api_module, monkeypatch, fresh_db):
 
     verifier, challenge = _pkce_pair()
     params = {
-        "redirect_port": 53639,
         "code_challenge": challenge,
         "device_name": "myhost",
     }
-    approved = client.post("/auth/cli/start", params=params, follow_redirects=False)
-    code = _code_from_redirect(approved.headers["location"])
+    approved = client.post("/auth/cli/start", params=params)
+    code = _code_from_page(approved.text)
     assert _exchange(client, code, verifier).status_code == 200
 
     rows = {
@@ -318,14 +351,8 @@ def test_start_validation_rejects_bad_params(api_module, monkeypatch, fresh_db):
     _enable_auth(monkeypatch)
     client = TestClient(api_module.app)
     _, challenge = _pkce_pair()
-    ok = {"redirect_port": 53639, "code_challenge": challenge, "device_name": "d"}
+    ok = {"code_challenge": challenge, "device_name": "d"}
 
-    bad_port = {**ok, "redirect_port": "70000"}
-    assert client.get("/auth/cli/start", params=bad_port).status_code == 422
-    assert (
-        client.get("/auth/cli/start", params={**ok, "redirect_port": "x"}).status_code
-        == 422
-    )
     short_challenge = {**ok, "code_challenge": "tooshort"}
     assert client.get("/auth/cli/start", params=short_challenge).status_code == 422
     missing = {k: v for k, v in ok.items() if k != "code_challenge"}

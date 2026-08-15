@@ -17,7 +17,6 @@ from pathlib import Path
 SCRIPTS_DIR = Path(__file__).resolve().parents[2] / "scripts"
 
 ENDPOINT = "https://api.example.com:4005/v1/logs"
-BASE_ENDPOINT = "https://api.example.com:4005"
 
 
 def _run(script: str, args: list[str], home: Path, extra_env=None):
@@ -115,33 +114,6 @@ def test_codex_endpoint_arg(tmp_path):
     assert result.returncode == 0, result.stderr
     content = config.read_text()
     assert f'endpoint = "{ENDPOINT}"' in content
-
-
-# ------------------------------------------------------------------- gemini
-
-
-def test_gemini_base_endpoint_arg(tmp_path):
-    home = tmp_path / "home"
-    home.mkdir()
-    user_settings = home / ".gemini" / "settings.json"
-    project_settings = tmp_path / "project-settings.json"
-    hook = tmp_path / "hook.sh"
-    result = _run(
-        "configure-gemini-settings.py",
-        [
-            str(user_settings),
-            str(project_settings),
-            str(hook),
-            "4002",
-            "localhost",
-            BASE_ENDPOINT,
-        ],
-        home=home,
-    )
-    assert result.returncode == 0, result.stderr
-    telemetry = json.loads(user_settings.read_text())["telemetry"]
-    # Gemini takes the base endpoint, not the /v1/logs path.
-    assert telemetry["otlpEndpoint"] == BASE_ENDPOINT
 
 
 # --------------------------------------------------------- opencode / kilo

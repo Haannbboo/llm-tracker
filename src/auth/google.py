@@ -30,9 +30,9 @@ STATE_TTL_SECONDS = 5 * 60
 MAX_PENDING_STATES = 512
 
 # One-time CLI login codes (PR 3): same flock-guarded JSON store shape as
-# the OAuth state store, shorter TTL.
+# the OAuth state store, longer TTL — the human paste-back path needs slack.
 CLI_CODE_FILE_NAME = "cli_codes.json"
-CLI_CODE_TTL_SECONDS = 60
+CLI_CODE_TTL_SECONDS = 300
 
 # Google endpoints are pinned (no discovery-document fetch at runtime); the
 # only outbound calls are the token exchange and the JWKS fetch.
