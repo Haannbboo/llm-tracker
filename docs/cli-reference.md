@@ -22,9 +22,6 @@ llm-tracker codex
 # Track Claude Code
 llm-tracker claude
 
-# Track Gemini CLI
-llm-tracker gemini
-
 # Track a single-shot Codex command
 llm-tracker codex exec "say hello in one sentence"
 
@@ -44,7 +41,7 @@ llm-tracker --proxy-env -- some-openai-compatible-cli
 llm-tracker --wait-ms 5000 -- codex exec "hello"
 
 # No summary at all
-llm-tracker --no-summary -- gemini -p "say hello"
+llm-tracker --no-summary -- codex exec "say hello"
 ```
 
 ## Flags
@@ -170,5 +167,3 @@ Query params for `/usage/daily`: `since`, `until`, `provider`, `model`, `granula
 | `scripts/check-service-ports.py` | Detect port conflicts before starting services. |
 | `scripts/configure-claude-settings.py` | Configure Claude Code OTLP telemetry. |
 | `scripts/configure-codex-settings.py` | Configure Codex OTLP telemetry. |
-| `scripts/configure-gemini-settings.py` | Configure Gemini CLI OTLP telemetry and hooks. |
-| `scripts/setup-gemini.sh` | Install Gemini CLI hook and configure telemetry. |

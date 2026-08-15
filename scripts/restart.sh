@@ -112,13 +112,6 @@ else
   info "Codex: not installed, skipped"
 fi
 
-if command -v gemini >/dev/null 2>&1; then
-  bash "${ROOT_DIR}/scripts/setup-gemini.sh" "${OTLP_PORT}" "${OTLP_HOST}"
-  pass "Gemini configured"
-else
-  info "Gemini: not installed, skipped"
-fi
-
 if command -v claude >/dev/null 2>&1; then
   "${PYTHON}" "${ROOT_DIR}/scripts/configure-claude-settings.py" "${HOME}/.claude/settings.json" "${OTLP_PORT}" "${OTLP_HOST}"
   pass "Claude configured"

@@ -4,7 +4,7 @@
 
 **面向命令行 LLM Agent 的本地优先可观测性工具。**
 
-`llm-tracker` 用来查看你的 coding agents 到底在干什么：请求记录、token 使用量、费用估算、延迟、TTFT、模型、来源和 session ID。支持 **Claude Code**、**Codex**、**Gemini CLI**，也支持 OpenAI/Anthropic 兼容流量。
+`llm-tracker` 用来查看你的 coding agents 到底在干什么：请求记录、token 使用量、费用估算、延迟、TTFT、模型、来源和 session ID。支持 **Claude Code**、**Codex**、**OpenCode**、**Kilo Code**，也支持 OpenAI/Anthropic 兼容流量。
 
 它适合那些本地同时跑多个 LLM Agent、又想在一个地方回答这些问题的人：
 
@@ -17,7 +17,7 @@
 
 ## 它能做什么
 
-- **追踪常见 coding agents**：通过本地 OTLP telemetry 追踪 Claude Code、Codex 和 Gemini CLI。
+- **追踪常见 coding agents**：通过本地 OTLP telemetry 追踪 Claude Code、Codex、OpenCode 和 Kilo Code。
 - **追踪 OpenAI/Anthropic 兼容客户端**：通过可选的本地 proxy 转发并记录请求。
 - **提供 Dashboard**：查看使用量、费用、延迟、模型、来源、请求日志、setup health 和 first-event onboarding。
 - **输出命令级摘要**：用 `llm-tracker` 跑 agent，结束后打印这次运行的使用量。
@@ -29,7 +29,7 @@
 `llm-tracker` 有两条互补的数据采集路径：
 
 ```text
-Claude Code / Codex / Gemini CLI
+Claude Code / Codex / OpenCode / Kilo Code
         │
         │ OTLP telemetry
         ▼
@@ -56,7 +56,7 @@ Agent telemetry 更适合拿到 session、tool/reasoning metadata 等 agent-spec
 - macOS 或 Linux shell 环境
 - Python 3.13，或者可用的 `uv` 让安装脚本创建环境
 - Node.js 18+，用于构建和提供 Dashboard
-- 可选：本地已安装 `claude`、`codex` 或 `gemini`
+- 可选：本地已安装 `claude`、`codex`、`opencode` 或 `kilo`
 
 ### 1. 一键 Bootstrap
 
@@ -99,7 +99,6 @@ Bootstrap 之后，运行 Dashboard 里展示的命令，或者直接用下面�
 ```bash
 llm-tracker codex exec "hello"
 llm-tracker claude
-llm-tracker gemini -p "hello"
 ```
 
 如果 symlink 还没进 `PATH`，可以用 repo-local fallback：
@@ -107,7 +106,6 @@ llm-tracker gemini -p "hello"
 ```bash
 llm-tracker codex exec "hello"
 llm-tracker claude
-llm-tracker gemini -p "hello"
 ```
 
 空 Dashboard 会自动检查第一条 event。没有假 demo 数据，也不用手动 seed。
@@ -120,11 +118,9 @@ Wrapper 会运行子命令，捕获运行期间的使用量，然后打印摘要
 # 交互式 agents
 llm-tracker codex
 llm-tracker claude
-llm-tracker gemini
 
 # 一次性命令
 llm-tracker codex exec "say hello in one sentence"
-llm-tracker gemini -p "say hello in one sentence"
 
 # 安装后的 CLI
 llm-tracker codex exec "say hello in one sentence"
@@ -138,7 +134,7 @@ llm-tracker --usage-only -- codex exec "say hello in one sentence"
 llm-tracker --wait-ms 5000 -- codex exec "say hello in one sentence"
 llm-tracker --summary-dest file --summary-file /tmp/llm-summary.json -- claude
 llm-tracker --proxy-env -- some-openai-compatible-cli
-llm-tracker --no-summary -- gemini -p "say hello"
+llm-tracker --no-summary -- codex exec "say hello"
 ```
 
 完整 CLI 参考见 [docs/cli-reference.md](docs/cli-reference.md)，包括所有 flags、tracking modes、退出码、服务命令、API endpoints 和环境变量。
@@ -255,18 +251,18 @@ llm-tracker --proxy-env -- some-openai-compatible-cli
 
 ## Tracking 覆盖范围
 
-| 指标 | Gemini CLI | Claude Code | Codex | Direct proxy |
+| 指标 | Claude Code | Codex | OpenCode / Kilo Code | Direct proxy |
 | --- | --- | --- | --- | --- |
-| Input tokens | OTLP | OTLP | OTLP | Response usage |
-| Output tokens | OTLP | OTLP | OTLP | Response usage |
-| Cached tokens read | OTLP | OTLP | OTLP | Response usage |
-| Cached tokens write | 不可用 | OTLP | 不可用 | 不可用 |
-| Reasoning tokens | OTLP | 不可用 | OTLP | Response usage |
-| Tool tokens | OTLP | 不可用 | OTLP | 不可用 |
-| Prompt length | OTLP | OTLP | OTLP | 不可用 |
-| Latency | Hook/OTLP | OTLP | OTLP | Proxy timing |
-| TTFT | Hook | 不可用 | OTLP | Streaming only |
-| Session ID | OTLP | OTLP | OTLP | 不可用 |
+| Input tokens | OTLP | OTLP | Plugin OTLP | Response usage |
+| Output tokens | OTLP | OTLP | Plugin OTLP | Response usage |
+| Cached tokens read | OTLP | OTLP | Plugin OTLP | Response usage |
+| Cached tokens write | OTLP | 不可用 | Plugin OTLP | 不可用 |
+| Reasoning tokens | 不可用 | OTLP | Plugin OTLP | Response usage |
+| Tool tokens | 不可用 | OTLP | 不可用 | 不可用 |
+| Prompt length | OTLP | OTLP | Plugin OTLP | 不可用 |
+| Latency | OTLP | OTLP | Plugin OTLP | Proxy timing |
+| TTFT | 不可用 | OTLP | Plugin OTLP | Streaming only |
+| Session ID | OTLP | OTLP | Plugin OTLP | 不可用 |
 
 TTFT 是运维参考指标，不是 billing-grade 指标。每个 Agent 暴露的 timing 数据不一样。
 
@@ -336,7 +332,7 @@ bash scripts/dev/smoke-bootstrap-container.sh
 - 改 Dashboard 行为时把 frontend tests 放到 `frontend/tests/`
 - 改命令、setup 或行为时同步更新 docs
 
-请保持示例一致：plain agent invocation 使用 `llm-tracker codex`、`llm-tracker claude` 或 `llm-tracker gemini`；只有传 `llm-tracker` 自己的 flags 时才保留 `--`。
+请保持示例一致：plain agent invocation 使用 `llm-tracker codex` 或 `llm-tracker claude`；只有传 `llm-tracker` 自己的 flags 时才保留 `--`。
 
 ## 开源协议
 

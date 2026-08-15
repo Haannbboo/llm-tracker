@@ -172,7 +172,6 @@ _verify_agent_setup_health() {
   local python
   local claude_detected=0
   local codex_detected=0
-  local gemini_detected=0
   local opencode_detected=0
   local kilo_detected=0
 
@@ -192,14 +191,12 @@ _verify_agent_setup_health() {
 
   command -v claude >/dev/null 2>&1 && claude_detected=1
   command -v codex >/dev/null 2>&1 && codex_detected=1
-  command -v gemini >/dev/null 2>&1 && gemini_detected=1
   command -v opencode >/dev/null 2>&1 && opencode_detected=1
   command -v kilo >/dev/null 2>&1 && kilo_detected=1
 
   if printf "%s" "${health_json}" \
       | LLM_TRACKER_CLAUDE_DETECTED="${claude_detected}" \
         LLM_TRACKER_CODEX_DETECTED="${codex_detected}" \
-        LLM_TRACKER_GEMINI_DETECTED="${gemini_detected}" \
         LLM_TRACKER_OPENCODE_DETECTED="${opencode_detected}" \
         LLM_TRACKER_KILO_DETECTED="${kilo_detected}" \
         LLM_TRACKER_GREEN="${_T_GREEN}" \
@@ -231,7 +228,6 @@ failed = 0
 for key, label in (
     ("claude", "Claude"),
     ("codex", "Codex"),
-    ("gemini", "Gemini"),
     ("opencode", "OpenCode"),
     ("kilo", "Kilo"),
 ):

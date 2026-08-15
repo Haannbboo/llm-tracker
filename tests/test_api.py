@@ -403,10 +403,10 @@ def test_usage_summary_endpoint_passes_client_source(api_module, monkeypatch):
     monkeypatch.setattr(api_module, "summarize_usage_daily", fake_summary)
 
     response = TestClient(api_module.app).get(
-        "/usage/summary", params={"client_source": "gemini-cli"}
+        "/usage/summary", params={"client_source": "opencode"}
     )
     assert response.status_code == 200
-    assert captured["client_source"] == "gemini-cli"
+    assert captured["client_source"] == "opencode"
 
 
 def test_usage_daily_endpoint_passes_params(api_module, monkeypatch):
@@ -887,14 +887,14 @@ def test_sessions_summary_endpoint_passes_filters(api_module, monkeypatch):
 
     response = TestClient(api_module.app).get(
         "/sessions/summary",
-        params={"client_source": "gemini-cli"},
+        params={"client_source": "opencode"},
     )
 
     assert response.status_code == 200
     data = response.json()
     assert data["session_count"] == 3
     assert data["total_tokens"] == 5000
-    assert captured["client_source"] == "gemini-cli"
+    assert captured["client_source"] == "opencode"
 
 
 def test_usage_endpoint_passes_session_id(api_module, monkeypatch):

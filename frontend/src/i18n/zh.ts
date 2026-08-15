@@ -132,7 +132,6 @@ export const zh: Record<string, string> = {
   // TTFT tooltip
   'TTFT / Latency': 'TTFT / 延迟',
   'Claude Code: No TTFT': 'Claude Code：无 TTFT',
-  'Gemini CLI: Time to first chunk': 'Gemini CLI：首块时间',
   'Codex: Actual TTFT': 'Codex：实际 TTFT',
   'Proxy: Time to first chunk': '代理：首块时间',
 
@@ -236,7 +235,7 @@ export const zh: Record<string, string> = {
   // Empty state / onboarding (P0-6)
   'Welcome to llm-tracker': '欢迎使用 llm-tracker',
   'Your local dashboard for AI coding agents': '你的本地 AI 编程代理仪表盘',
-  'Track Claude Code, Codex, Gemini, and OpenAI-compatible traffic in one place — usage, cost, latency.': '在一个地方追踪 Claude Code、Codex、Gemini 和 OpenAI 兼容流量 — 用量、费用、延迟。',
+  'Track Claude Code, Codex, and OpenAI-compatible traffic in one place — usage, cost, latency.': '在一个地方追踪 Claude Code、Codex 和 OpenAI 兼容流量 — 用量、费用、延迟。',
   'Get Started': '开始使用',
   'Detected Agents': '已检测到的Agent',
   'Telemetry Status': '遥测状态',
@@ -325,7 +324,7 @@ export const zh: Record<string, string> = {
   'request': '个请求',
   'failed': '失败',
   'No sessions yet.': '还没有会话。',
-  'Run llm-tracker codex, llm-tracker claude, or llm-tracker gemini to create your first tracked session.': '运行 llm-tracker codex、llm-tracker claude 或 llm-tracker gemini 来创建你的第一个追踪会话。',
+  'Run llm-tracker codex or llm-tracker claude to create your first tracked session.': '运行 llm-tracker codex 或 llm-tracker claude 来创建你的第一个追踪会话。',
   'No sessions found for the selected filters.': '未找到符合筛选条件的会话。',
   'sessions': '条会话',
   'Session Details': '会话详情',

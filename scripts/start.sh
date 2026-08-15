@@ -114,11 +114,6 @@ if command -v codex >/dev/null 2>&1; then
   pass "Codex configured"
 fi
 
-if command -v gemini >/dev/null 2>&1; then
-  bash "${ROOT_DIR}/scripts/setup-gemini.sh" "${OTLP_PORT}" "${OTLP_HOST}"
-  pass "Gemini configured"
-fi
-
 if command -v claude >/dev/null 2>&1; then
   CLAUDE_SETTINGS="${HOME}/.claude/settings.json"
   "${PYTHON}" "${ROOT_DIR}/scripts/configure-claude-settings.py" "${CLAUDE_SETTINGS}" "${OTLP_PORT}" "${OTLP_HOST}"

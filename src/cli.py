@@ -167,7 +167,6 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
             "                           mint an auth token (operator-only, runs on the server box)\n"
             "  codex ...                run Codex with tracking\n"
             "  claude ...               run Claude Code with tracking\n"
-            "  gemini ...               run Gemini CLI with tracking\n"
             "  <any-command> ...        run any command with tracking\n\n"
             "Use '--' only when passing llm-tracker flags before the child command."
         ),

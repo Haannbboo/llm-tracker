@@ -266,21 +266,17 @@ def test_start_and_restart_configure_agent_otlp_only_when_cli_is_installed():
 
     for script in (start_script, restart_script):
         assert "command -v codex >/dev/null 2>&1" in script
-        assert "command -v gemini >/dev/null 2>&1" in script
+        assert "command -v gemini" not in script
         assert "command -v claude >/dev/null 2>&1" in script
         assert 'if [[ -f "${CODEX_CONFIG}" ]]' not in script
         assert 'if [[ -d "${HOME}/.claude" ]]' not in script
-        assert (
-            'if command -v gemini >/dev/null 2>&1; then\n  bash "${ROOT_DIR}/scripts/setup-gemini.sh" "${OTLP_PORT}"'
-            in script
-        )
 
 
 @pytest.mark.slow
 def test_start_configures_only_installed_agent_clis_under_isolated_home(tmp_path):
     """Regression: start.sh must configure only installed agent CLIs under HOME.
 
-    This simulates a fresh user HOME with fake Codex/Claude on PATH but no Gemini,
+    This simulates a fresh user HOME with fake Codex/Claude on PATH,
     proving bootstrap/start won't pollute the real HOME or create configs for
     agents that are not installed.
     """
@@ -385,7 +381,6 @@ def test_start_configures_only_installed_agent_clis_under_isolated_home(tmp_path
 
     codex_config = home / ".codex" / "config.toml"
     claude_settings = home / ".claude" / "settings.json"
-    gemini_settings = home / ".gemini" / "settings.json"
     assert codex_config.is_file()
     assert 'endpoint = "http://localhost:4002/v1/logs"' in codex_config.read_text(
         encoding="utf-8"
@@ -394,15 +389,13 @@ def test_start_configures_only_installed_agent_clis_under_isolated_home(tmp_path
     assert "http://localhost:4002/v1/logs" in claude_settings.read_text(
         encoding="utf-8"
     )
-    assert not gemini_settings.exists()
+    assert not (home / ".gemini").exists()
 
     real_home = __import__("pathlib").Path(os.environ["HOME"]).resolve()
     created_agent_configs = [codex_config.resolve(), claude_settings.resolve()]
     for config_path in created_agent_configs:
         assert home.resolve() in config_path.parents
         assert real_home not in config_path.parents
-
-    assert not (home / ".gemini").exists()
 
 
 @pytest.mark.slow
@@ -442,7 +435,7 @@ def test_start_configures_agents_with_reassigned_otlp_port_after_auto_assign(tmp
 
     (home / ".codex").mkdir()
 
-    for agent in ("codex", "claude", "gemini"):
+    for agent in ("codex", "claude"):
         agent_path = fake_bin / agent
         agent_path.write_text("#!/usr/bin/env sh\nexit 0\n", encoding="utf-8")
         agent_path.chmod(0o755)
@@ -530,13 +523,11 @@ PY
     )
 
     claude_settings = home / ".claude" / "settings.json"
-    gemini_settings = home / ".gemini" / "settings.json"
     assert claude_settings.is_file()
     assert "http://localhost:49153/v1/logs" in claude_settings.read_text(
         encoding="utf-8"
     )
-    assert gemini_settings.is_file()
-    assert "http://localhost:49153" in gemini_settings.read_text(encoding="utf-8")
+    assert not (home / ".gemini").exists()
 
 
 def test_start_and_restart_check_port_conflicts_before_migrations():

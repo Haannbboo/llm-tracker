@@ -54,7 +54,7 @@ Before judging implementation details, build a standards checklist from `AGENTS.
 ### Provider adapters
 
 - Provider-specific behavior is isolated.
-- OpenAI/Anthropic/Gemini/OpenRouter/LiteLLM naming differences are handled intentionally.
+- OpenAI/Anthropic/Google/OpenRouter/LiteLLM naming differences are handled intentionally.
 - Streaming and non-streaming behavior are consistent where expected.
 - Tool-call handling covers partial chunks and malformed chunks.
 

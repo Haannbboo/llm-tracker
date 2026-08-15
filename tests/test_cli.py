@@ -1147,7 +1147,7 @@ def test_llm_tracker_help_lists_available_commands(tmp_path):
     )
     assert "codex ...                run Codex with tracking" in result.stdout
     assert "claude ...               run Claude Code with tracking" in result.stdout
-    assert "gemini ...               run Gemini CLI with tracking" in result.stdout
+    assert "gemini" not in result.stdout
 
 
 @pytest.mark.slow

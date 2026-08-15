@@ -551,7 +551,6 @@ export function getSetupAgentKey(name: string) {
   const normalized = name.toLowerCase()
   if (normalized.includes('vectorengine') || normalized.includes('claude')) return 'claude'
   if (normalized.includes('codesonline') || normalized.includes('codex')) return 'codex'
-  if (normalized.includes('gemini')) return 'gemini'
   return normalized
 }
 

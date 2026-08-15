@@ -132,7 +132,6 @@ class TranscriptLoadError(ValueError):
 class LocalSessionTranscriptIndex:
     codex_path_names: tuple[str, ...] = ()
     claude_session_ids: frozenset[str] = frozenset()
-    gemini_session_ids: frozenset[str] = frozenset()
     opencode_session_ids: frozenset[str] = frozenset()
     kilo_session_ids: frozenset[str] = frozenset()
 
@@ -330,88 +329,6 @@ def _load_claude_transcript(session_id: str, client_source: str) -> str:
         text = _extract_content(pending_content)
         if text:
             turns.append((pending_role, text))
-    return _format_transcript_turns(
-        client_source=client_source, session_id=session_id, turns=turns
-    )
-
-
-def _find_gemini_session_path(session_id: str) -> Path | None:
-    gemini_dir = Path.home() / ".gemini" / "tmp"
-    if not gemini_dir.exists():
-        return None
-
-    for path in gemini_dir.rglob("session-*.jsonl"):
-        try:
-            with path.open("r", encoding="utf-8") as handle:
-                first_line = handle.readline().strip()
-            if not first_line:
-                continue
-            payload = json.loads(first_line)
-        except (OSError, json.JSONDecodeError):
-            continue
-        if isinstance(payload, dict) and payload.get("sessionId") == session_id:
-            return path
-    return None
-
-
-def _extract_gemini_turn(record: dict[str, Any]) -> tuple[str, str] | None:
-    role = record.get("type") or record.get("role")
-    if role not in {"user", "assistant"}:
-        return None
-    text = _extract_content(
-        record.get("message")
-        or record.get("content")
-        or record.get("text")
-        or record.get("parts")
-    )
-    return (role, text) if text else None
-
-
-def _gemini_session_file_has_turn_text(path: Path) -> bool:
-    for record in _iter_jsonl(path):
-        if isinstance(record, dict) and _extract_gemini_turn(record) is not None:
-            return True
-    return False
-
-
-def _load_gemini_transcript(session_id: str, client_source: str) -> str:
-    gemini_dir = Path.home() / ".gemini" / "tmp"
-    if not gemini_dir.exists():
-        raise TranscriptLoadError(f"Gemini transcript not found: {session_id}")
-
-    turns: list[tuple[str, str]] = []
-    session_path = _find_gemini_session_path(session_id)
-    if session_path is not None:
-        for record in _iter_jsonl(session_path):
-            if not isinstance(record, dict):
-                continue
-            turn = _extract_gemini_turn(record)
-            if turn is not None:
-                turns.append(turn)
-        if turns:
-            return _format_transcript_turns(
-                client_source=client_source,
-                session_id=session_id,
-                turns=turns,
-            )
-
-    for log_path in gemini_dir.rglob("logs.json"):
-        try:
-            payload = json.loads(log_path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
-            continue
-        if not isinstance(payload, list):
-            continue
-        for item in payload:
-            if not isinstance(item, dict) or item.get("sessionId") != session_id:
-                continue
-            role = item.get("type")
-            if role not in {"user", "assistant"}:
-                continue
-            text = _extract_content(item.get("message"))
-            if text:
-                turns.append((role, text))
-
     return _format_transcript_turns(
         client_source=client_source, session_id=session_id, turns=turns
     )
@@ -634,29 +551,9 @@ def build_local_session_transcript_index() -> LocalSessionTranscriptIndex:
         else frozenset()
     )
 
-    gemini_session_ids: set[str] = set()
-    gemini_dir = Path.home() / ".gemini" / "tmp"
-    if gemini_dir.exists():
-        for path in gemini_dir.rglob("session-*.jsonl"):
-            try:
-                with path.open("r", encoding="utf-8") as handle:
-                    first_line = handle.readline().strip()
-                if not first_line:
-                    continue
-                payload = json.loads(first_line)
-            except (OSError, json.JSONDecodeError):
-                continue
-            if (
-                isinstance(payload, dict)
-                and isinstance(payload.get("sessionId"), str)
-                and _gemini_session_file_has_turn_text(path)
-            ):
-                gemini_session_ids.add(payload["sessionId"])
-
     return LocalSessionTranscriptIndex(
         codex_path_names=codex_path_names,
         claude_session_ids=claude_session_ids,
-        gemini_session_ids=frozenset(gemini_session_ids),
         opencode_session_ids=_list_opencode_session_ids_with_text(),
         kilo_session_ids=_list_kilo_session_ids_with_text(),
     )
@@ -681,7 +578,7 @@ def has_local_session_transcript(
         if agent == "claude":
             return session_id in local_index.claude_session_ids
         if agent == "gemini":
-            return session_id in local_index.gemini_session_ids
+            return False
         if agent == "kilo":
             return session_id in local_index.kilo_session_ids
         return session_id in local_index.opencode_session_ids
@@ -690,12 +587,11 @@ def has_local_session_transcript(
         return _find_codex_session_path_by_name(session_id) is not None
     if agent == "claude":
         return _find_claude_session_path(session_id) is not None
-    if agent == "gemini":
-        path = _find_gemini_session_path(session_id)
-        return path is not None and _gemini_session_file_has_turn_text(path)
     if agent == "kilo":
         return _kilo_session_has_turn_text(session_id)
-    return _opencode_session_has_turn_text(session_id)
+    if agent == "opencode":
+        return _opencode_session_has_turn_text(session_id)
+    return False
 
 
 def load_session_transcript(client_source: str | None, session_id: str) -> str:
@@ -704,11 +600,11 @@ def load_session_transcript(client_source: str | None, session_id: str) -> str:
         return _load_codex_transcript(session_id, client_source or agent)
     if agent == "claude":
         return _load_claude_transcript(session_id, client_source or agent)
-    if agent == "gemini":
-        return _load_gemini_transcript(session_id, client_source or agent)
     if agent == "kilo":
         return _load_kilo_transcript(session_id, client_source or agent)
-    return _load_opencode_transcript(session_id, client_source or agent)
+    if agent == "opencode":
+        return _load_opencode_transcript(session_id, client_source or agent)
+    raise TranscriptLoadError(f"No local transcript source for agent: {agent}")
 
 
 def _build_codex_evaluator_invocation(prompt: str) -> AgentInvocation:

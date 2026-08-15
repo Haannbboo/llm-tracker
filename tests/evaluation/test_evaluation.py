@@ -286,40 +286,6 @@ def test_load_claude_transcript_skips_tool_results(evaluation_module, isolated_h
     assert "secret" not in transcript
 
 
-def test_load_gemini_transcript_reads_logs_for_session(
-    evaluation_module, isolated_home
-):
-    gemini_dir = isolated_home / ".gemini" / "tmp" / "llm-tracker"
-    gemini_dir.mkdir(parents=True)
-    logs = [
-        {
-            "sessionId": "other-session",
-            "messageId": 0,
-            "type": "user",
-            "message": "Ignore me",
-        },
-        {
-            "sessionId": "sess-gemini",
-            "messageId": 0,
-            "type": "user",
-            "message": "Diagnose dashboard",
-        },
-        {
-            "sessionId": "sess-gemini",
-            "messageId": 1,
-            "type": "assistant",
-            "message": "Dashboard diagnosis complete",
-        },
-    ]
-    (gemini_dir / "logs.json").write_text(json.dumps(logs), encoding="utf-8")
-
-    transcript = evaluation_module.load_session_transcript("gemini-cli", "sess-gemini")
-
-    assert "USER:\nDiagnose dashboard" in transcript
-    assert "ASSISTANT:\nDashboard diagnosis complete" in transcript
-    assert "Ignore me" not in transcript
-
-
 def test_load_opencode_transcript_reads_sqlite_message_parts(
     evaluation_module, isolated_home, monkeypatch
 ):
@@ -347,25 +313,13 @@ def test_has_local_session_transcript_uses_path_or_metadata(
     claude_dir.mkdir(parents=True)
     (claude_dir / "sess-claude.jsonl").write_text("", encoding="utf-8")
 
-    gemini_dir = isolated_home / ".gemini" / "tmp" / "project" / "chats"
-    gemini_dir.mkdir(parents=True)
-    (gemini_dir / "session-2026-05-14T00-00-abcd.jsonl").write_text(
-        '{"sessionId":"sess-gemini","kind":"main"}\n'
-        '{"sessionId":"sess-gemini","type":"user","message":"Hello"}\n',
-        encoding="utf-8",
-    )
-    (gemini_dir / "session-2026-05-14T00-00-other.jsonl").write_text(
-        '{"sessionId":"other"}\n{"sessionId":"sess-hidden"}\n',
-        encoding="utf-8",
-    )
     _write_opencode_transcript(isolated_home)
 
     assert evaluation_module.has_local_session_transcript("codex", "sess-codex")
     assert evaluation_module.has_local_session_transcript("claude-code", "sess-claude")
-    assert evaluation_module.has_local_session_transcript("gemini-cli", "sess-gemini")
     assert evaluation_module.has_local_session_transcript("opencode", "sess-opencode")
     assert not evaluation_module.has_local_session_transcript(
-        "gemini-cli", "sess-hidden"
+        "gemini-cli", "sess-gemini"
     )
     assert not evaluation_module.has_local_session_transcript(
         "proxy-client", "sess-any"
@@ -385,6 +339,11 @@ def test_has_local_session_transcript_uses_index_for_opencode(evaluation_module)
     assert not evaluation_module.has_local_session_transcript(
         "opencode",
         "sess-missing",
+        local_index=index,
+    )
+    assert not evaluation_module.has_local_session_transcript(
+        "gemini-cli",
+        "sess-opencode",
         local_index=index,
     )
 
