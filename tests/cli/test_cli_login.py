@@ -256,7 +256,7 @@ def test_wire_agents_for_hosted_invokes_scripts(cli_module, isolated_home, monke
     calls = []
 
     def fake_which(name):
-        return f"/usr/bin/{name}" if name in ("codex", "claude", "gemini") else None
+        return f"/usr/bin/{name}" if name in ("codex", "claude") else None
 
     def fake_run(cmd, **kwargs):
         calls.append(cmd)
@@ -269,24 +269,17 @@ def test_wire_agents_for_hosted_invokes_scripts(cli_module, isolated_home, monke
         logs_endpoint="https://api.example.com:4005/v1/logs",
         base_endpoint="https://api.example.com:4005",
     )
-    assert wired == ["codex", "claude", "gemini"]
-    by_agent = {cmd[1].rsplit("/", 1)[-1]: cmd for cmd in calls}
-    assert len(calls) == 3
-    # Python scripts: [PREFIX... PORT HOST ENDPOINT] — the endpoint must
-    # land AFTER the port/host slot, not in it.
-    assert by_agent["configure-codex-settings.py"][-3:] == [
-        "0",
-        "localhost",
-        "https://api.example.com:4005/v1/logs",
-    ]
-    assert by_agent["configure-claude-settings.py"][-3:] == [
-        "0",
-        "localhost",
-        "https://api.example.com:4005/v1/logs",
-    ]
-    # Gemini reuses setup-gemini.sh, which takes the base endpoint directly.
-    assert by_agent["setup-gemini.sh"][0] == "bash"
-    assert by_agent["setup-gemini.sh"][2:] == ["https://api.example.com:4005"]
+    assert wired == ["codex", "claude"]
+    assert len(calls) == 2
+    # Trailing argv matches the scripts' documented [PREFIX... PORT HOST
+    # ENDPOINT] shape — the endpoint must land AFTER the port/host slot,
+    # not in it.
+    assert calls[0][-3:] == ["0", "localhost", "https://api.example.com:4005/v1/logs"]
+    assert calls[1][-3:] == ["0", "localhost", "https://api.example.com:4005/v1/logs"]
+    for cmd in calls:
+        assert cmd[1].endswith("configure-codex-settings.py") or cmd[1].endswith(
+            "configure-claude-settings.py"
+        )
 
 
 def test_wire_agents_no_endpoint_noop(cli_module, isolated_home, monkeypatch):

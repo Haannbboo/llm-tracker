@@ -529,7 +529,7 @@ def wire_agents_for_hosted(
         return []
     scripts_dir = project_root() / "scripts"
     home = Path.home()
-    jobs: list[tuple[str, str, list[str], str | None]] = []
+    jobs: list[tuple[str, str, list[str], str]] = []
     if shutil.which("codex"):
         jobs.append(
             (
@@ -548,15 +548,6 @@ def wire_agents_for_hosted(
                 logs_endpoint,
             )
         )
-    if shutil.which("gemini"):
-        jobs.append(
-            (
-                "gemini",
-                "setup-gemini.sh",
-                [base_endpoint],
-                None,
-            )
-        )
     if shutil.which("opencode"):
         jobs.append(
             (
@@ -573,21 +564,21 @@ def wire_agents_for_hosted(
 
     wired: list[str] = []
     for name, script, prefix_args, endpoint in jobs:
-        if script.endswith(".sh"):
-            argv = ["bash", str(scripts_dir / script), *prefix_args]
-        else:
+        result = subprocess.run(
             # Trailing shape matches the scripts' documented argv:
             # [PREFIX...] PORT HOST ENDPOINT — the endpoint overrides the
             # placeholder port/host.
-            argv = [
+            [
                 sys.executable,
                 str(scripts_dir / script),
                 *prefix_args,
                 "0",
                 "localhost",
-                endpoint or "",
-            ]
-        result = subprocess.run(argv, capture_output=True, text=True)
+                endpoint,
+            ],
+            capture_output=True,
+            text=True,
+        )
         if result.returncode == 0:
             wired.append(name)
         else:
