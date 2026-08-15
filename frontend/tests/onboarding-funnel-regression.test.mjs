@@ -42,7 +42,9 @@ describe('onboarding 3-step funnel', () => {
       'Step 1 should reference bootstrap as the primary onboarding action'
     );
     assert.ok(
-      !area.includes('llm-tracker claude') && !area.includes('llm-tracker codex'),
+      !area.includes('llm-tracker claude') &&
+      !area.includes('llm-tracker codex') &&
+      !area.includes('llm-tracker gemini'),
       'Step 1 should not include agent test command rows — that is Step 2'
     );
   });

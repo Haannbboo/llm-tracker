@@ -167,3 +167,5 @@ Query params for `/usage/daily`: `since`, `until`, `provider`, `model`, `granula
 | `scripts/check-service-ports.py` | Detect port conflicts before starting services. |
 | `scripts/configure-claude-settings.py` | Configure Claude Code OTLP telemetry. |
 | `scripts/configure-codex-settings.py` | Configure Codex OTLP telemetry. |
+| `scripts/configure-opencode-plugin.py` | Configure OpenCode plugin OTLP telemetry. |
+| `scripts/configure-kilo-plugin.py` | Configure Kilo Code plugin OTLP telemetry. |
