@@ -304,6 +304,46 @@ def test_poll_summary_surfaces_api_error(cli_module, isolated_home, capsys):
     assert "llm-tracker login" in capsys.readouterr().err
 
 
+def test_login_non_json_200_exits_clean(cli_module, isolated_home, monkeypatch):
+    class BadJsonHttpx(FakeHttpx):
+        def post(self, url, json=None, **kwargs):
+            self.calls.append(("POST", url, json))
+            return SimpleNamespace(
+                status_code=200,
+                json=lambda: (_ for _ in ()).throw(ValueError("not json")),
+            )
+
+    fake = BadJsonHttpx()
+    monkeypatch.setattr(cli_module, "httpx", fake)
+    monkeypatch.setattr(cli_module.shutil, "which", lambda name: None)
+    monkeypatch.setattr("builtins.input", lambda prompt="": "the-code")
+
+    code = cli_module.run_login_command(
+        ["login", "--server", "https://srv.example", "--no-browser"]
+    )
+    assert code == 1
+    assert not cli_module.credentials_path().exists()
+
+
+def test_login_warns_on_http_server(cli_module, isolated_home, monkeypatch, capsys):
+    code, _, _ = _run_login(
+        cli_module,
+        monkeypatch,
+        inputs=["the-code"],
+        extra_args=["--server", "http://srv.example"],
+    )
+    assert code == 0
+    assert "unencrypted" in capsys.readouterr().err
+
+
+def test_load_credentials_warns_on_corrupt_file(cli_module, isolated_home, capsys):
+    path = cli_module.credentials_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("{not json", encoding="utf-8")
+    assert cli_module.load_credentials() is None
+    assert "ignoring saved credentials" in capsys.readouterr().err
+
+
 # ------------------------------------------------------------------ wiring
 
 
@@ -339,3 +379,20 @@ def test_wire_agents_for_hosted_invokes_scripts(cli_module, isolated_home, monke
 def test_wire_agents_no_endpoint_noop(cli_module, isolated_home, monkeypatch):
     monkeypatch.setattr(cli_module.shutil, "which", lambda name: "/usr/bin/" + name)
     assert cli_module.wire_agents_for_hosted(logs_endpoint=None) == []
+
+
+def test_wire_agents_strips_otel_env_var(cli_module, isolated_home, monkeypatch):
+    envs = []
+
+    def fake_run(cmd, **kwargs):
+        envs.append(kwargs.get("env") or {})
+        return SimpleNamespace(returncode=0, stderr="")
+
+    monkeypatch.setattr(cli_module.shutil, "which", lambda name: "/usr/bin/" + name)
+    monkeypatch.setattr(cli_module.subprocess, "run", fake_run)
+    monkeypatch.setenv("OTEL_EXPORTER_OTLP_LOGS_ENDPOINT", "http://local:4005/v1/logs")
+
+    cli_module.wire_agents_for_hosted(logs_endpoint="https://api.example.com/v1/logs")
+    assert envs
+    assert all("OTEL_EXPORTER_OTLP_LOGS_ENDPOINT" not in env for env in envs)
+    assert all("PATH" in env for env in envs)

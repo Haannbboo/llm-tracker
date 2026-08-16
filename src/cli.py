@@ -319,11 +319,19 @@ def credentials_path() -> Path:
 
 
 def load_credentials() -> dict[str, Any] | None:
+    path = credentials_path()
     try:
-        data = json.loads(credentials_path().read_text(encoding="utf-8"))
+        data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
+        data = None
+    if not isinstance(data, dict):
+        if path.exists():
+            print(
+                f"warning: could not read {path}; ignoring saved credentials",
+                file=sys.stderr,
+            )
         return None
-    return data if isinstance(data, dict) else None
+    return data
 
 
 def save_credentials(data: dict[str, Any]) -> None:
@@ -395,6 +403,13 @@ def run_login_command(command: list[str]) -> int:
             file=sys.stderr,
         )
         return 2
+    if server.startswith("http://") and not server.startswith(
+        ("http://localhost", "http://127.0.0.1")
+    ):
+        print(
+            "warning: --server uses http://; login tokens will travel unencrypted",
+            file=sys.stderr,
+        )
 
     try:
         httpx.get(f"{server}/version", timeout=5).raise_for_status()
@@ -452,7 +467,11 @@ def run_login_command(command: list[str]) -> int:
         return 1
     if response is None:
         return 1
-    payload = response.json()
+    try:
+        payload = response.json()
+    except Exception:
+        print("login failed: server returned an invalid response", file=sys.stderr)
+        return 1
     user = payload.get("user") or {}
 
     save_credentials(
@@ -520,6 +539,12 @@ def wire_agents_for_hosted(*, logs_endpoint: str | None) -> list[str]:
         )
 
     wired: list[str] = []
+    # The configure scripts honor OTEL_EXPORTER_OTLP_LOGS_ENDPOINT over the
+    # endpoint argument; strip it so a pre-existing local OTLP env config
+    # can't silently override the hosted endpoint just logged in to.
+    env = {
+        k: v for k, v in os.environ.items() if k != "OTEL_EXPORTER_OTLP_LOGS_ENDPOINT"
+    }
     for name, script, prefix_args, endpoint in jobs:
         result = subprocess.run(
             # Trailing shape matches the scripts' documented argv:
@@ -535,6 +560,7 @@ def wire_agents_for_hosted(*, logs_endpoint: str | None) -> list[str]:
             ],
             capture_output=True,
             text=True,
+            env=env,
         )
         if result.returncode == 0:
             wired.append(name)
