@@ -6,7 +6,7 @@ import re
 import secrets
 from urllib.parse import urlparse
 
-from fastapi import APIRouter, Depends, HTTPException, Request, Response
+from fastapi import APIRouter, Depends, Form, HTTPException, Request, Response
 from fastapi.responses import HTMLResponse, RedirectResponse
 from pydantic import BaseModel, Field
 
@@ -30,6 +30,7 @@ logger = logging.getLogger(__name__)
 
 SESSION_COOKIE_NAME = "llm_tracker_session"
 OAUTH_STATE_COOKIE_NAME = "llm_tracker_oauth_state"
+_NO_STORE = {"Cache-Control": "no-store"}
 
 router = APIRouter()
 
@@ -246,7 +247,7 @@ async def auth_google_callback(request: Request):
         update_user_name(user.id, str(claims.get("name") or "").strip() or None)
         device = _sanitize_device_name(str(cli_flow.get("device_name") or ""))
         code = _mint_cli_code(user, device, str(cli_flow.get("code_challenge") or ""))
-        code_response = HTMLResponse(_code_page(code, device))
+        code_response = HTMLResponse(_code_page(code, device), headers=_NO_STORE)
         # Single-use: the state was popped above; clear the login-CSRF cookie
         # like the web path does.
         code_response.delete_cookie(OAUTH_STATE_COOKIE_NAME)
@@ -424,7 +425,9 @@ async def auth_cli_start(
     challenge, device = _validate_cli_start_params(code_challenge, device_name)
     resolved = _resolve_request_user(request)
     if resolved is not None:
-        return HTMLResponse(_confirm_page(resolved[0], device, challenge))
+        return HTMLResponse(
+            _confirm_page(resolved[0], device, challenge), headers=_NO_STORE
+        )
     if auth_google.google_credentials() is None:
         raise HTTPException(status_code=503, detail="google oauth not configured")
     state = secrets.token_urlsafe(24)
@@ -462,8 +465,8 @@ async def auth_cli_start(
 @router.post("/auth/cli/start")
 def auth_cli_start_approve(
     request: Request,
-    code_challenge: str | None = None,
-    device_name: str | None = None,
+    code_challenge: str | None = Form(default=None),
+    device_name: str | None = Form(default=None),
 ):
     """Approve the CLI login from the confirm page (requires a web session).
 
@@ -478,7 +481,7 @@ def auth_cli_start_approve(
     if resolved is None:
         raise HTTPException(status_code=401, detail="login required")
     code = _mint_cli_code(resolved[0], device, challenge)
-    return HTMLResponse(_code_page(code, device))
+    return HTMLResponse(_code_page(code, device), headers=_NO_STORE)
 
 
 @router.post("/auth/cli/exchange")

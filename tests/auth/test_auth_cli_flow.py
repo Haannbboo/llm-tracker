@@ -123,7 +123,7 @@ def test_cli_routes_404_when_auth_disabled(api_module):
     client = TestClient(api_module.app)
     params = _start_params()
     assert client.get("/auth/cli/start", params=params).status_code == 404
-    assert client.post("/auth/cli/start", params=params).status_code == 404
+    assert client.post("/auth/cli/start", data=params).status_code == 404
     assert (
         client.post(
             "/auth/cli/exchange", json={"code": "c", "code_verifier": "v"}
@@ -148,6 +148,7 @@ def test_session_shortcut_confirm_and_exchange(api_module, monkeypatch, fresh_db
     page = client.get("/auth/cli/start", params=params)
     assert page.status_code == 200
     assert "text/html" in page.headers["content-type"]
+    assert page.headers["cache-control"] == "no-store"
     # Attacker-influenced device name is escaped in the reflected page.
     assert "&lt;evil&gt;host" in page.text
     assert "a@example.com" in page.text
@@ -156,9 +157,11 @@ def test_session_shortcut_confirm_and_exchange(api_module, monkeypatch, fresh_db
     assert 'method="post"' in page.text and 'name="code_challenge"' in page.text
     assert 'name="device_name"' in page.text
 
-    approved = client.post("/auth/cli/start", params=params)
+    # A browser submits the hidden inputs as form-encoded body fields.
+    approved = client.post("/auth/cli/start", data=params)
     assert approved.status_code == 200
     assert "text/html" in approved.headers["content-type"]
+    assert approved.headers["cache-control"] == "no-store"
     # The code is delivered in the response body, never in a URL.
     assert "location" not in approved.headers
     code = _code_from_page(approved.text)
@@ -191,7 +194,7 @@ def test_session_shortcut_confirm_and_exchange(api_module, monkeypatch, fresh_db
 def test_post_without_session_is_401(api_module, monkeypatch, fresh_db):
     _enable_auth(monkeypatch)
     client = TestClient(api_module.app)
-    response = client.post("/auth/cli/start", params=_start_params())
+    response = client.post("/auth/cli/start", data=_start_params())
     assert response.status_code == 401
 
 
@@ -220,6 +223,7 @@ def test_google_path_renders_code_page_without_web_session(
     )
     assert callback.status_code == 200
     assert "location" not in callback.headers
+    assert callback.headers["cache-control"] == "no-store"
     # CLI flow mints no web session.
     assert callback.cookies.get(SESSION_COOKIE) is None
     code = _code_from_page(callback.text)
@@ -235,7 +239,7 @@ def test_exchange_normalizes_code(api_module, monkeypatch, fresh_db):
     _web_login(api_module, monkeypatch, client)
     verifier, challenge = _pkce_pair()
     params = {"code_challenge": challenge, "device_name": "d"}
-    approved = client.post("/auth/cli/start", params=params)
+    approved = client.post("/auth/cli/start", data=params)
     code = _code_from_page(approved.text)
 
     # Lowercased, hyphen-stripped, whitespace-padded input still exchanges.
@@ -249,7 +253,7 @@ def test_exchange_replay_fails(api_module, monkeypatch, fresh_db):
     _web_login(api_module, monkeypatch, client)
     verifier, challenge = _pkce_pair()
     params = {"code_challenge": challenge, "device_name": "d"}
-    approved = client.post("/auth/cli/start", params=params)
+    approved = client.post("/auth/cli/start", data=params)
     code = _code_from_page(approved.text)
 
     assert _exchange(client, code, verifier).status_code == 200
@@ -266,7 +270,7 @@ def test_exchange_wrong_verifier_fails_and_mints_nothing(
     _web_login(api_module, monkeypatch, client)
     _, challenge = _pkce_pair()
     params = {"code_challenge": challenge, "device_name": "d"}
-    approved = client.post("/auth/cli/start", params=params)
+    approved = client.post("/auth/cli/start", data=params)
     code = _code_from_page(approved.text)
 
     before = len(_token_rows(fresh_db))
@@ -283,7 +287,7 @@ def test_exchange_expired_code_fails(api_module, monkeypatch, fresh_db, isolated
     _web_login(api_module, monkeypatch, client)
     _, challenge = _pkce_pair()
     params = {"code_challenge": challenge, "device_name": "d"}
-    approved = client.post("/auth/cli/start", params=params)
+    approved = client.post("/auth/cli/start", data=params)
     code = _code_from_page(approved.text)
 
     codes_path = Path(config.app.get_config_path()).parent / "cli_codes.json"
@@ -330,7 +334,7 @@ def test_revoke_and_remint_same_device_only(api_module, monkeypatch, fresh_db):
         "code_challenge": challenge,
         "device_name": "myhost",
     }
-    approved = client.post("/auth/cli/start", params=params)
+    approved = client.post("/auth/cli/start", data=params)
     code = _code_from_page(approved.text)
     assert _exchange(client, code, verifier).status_code == 200
 
