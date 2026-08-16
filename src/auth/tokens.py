@@ -13,7 +13,7 @@ import time
 
 from sqlalchemy import select
 from sqlalchemy import update as sa_update
-from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from ..database.engine import get_engine
@@ -31,20 +31,37 @@ def hash_token(token: str) -> str:
 
 
 def get_or_create_user(email: str, db_path: str | None = None) -> User:
-    """Return the user with this email, creating the row if new."""
+    """Return the user with this email, creating the row if new.
+
+    Concurrent first logins can race the unique email index; the loser
+    retries the lookup in a fresh transaction (same pattern as
+    get_or_create_base_url).
+    """
     email = email.strip().lower()
     if not email:
         raise ValueError("email must not be empty")
     engine = get_engine(db_path)
-    with Session(engine, expire_on_commit=False) as session:
-        user = session.execute(
-            select(User).where(User.email == email)
-        ).scalar_one_or_none()
-        if user is None:
+    for attempt in range(2):
+        with Session(engine, expire_on_commit=False) as session:
+            user = session.execute(
+                select(User).where(User.email == email)
+            ).scalar_one_or_none()
+            if user is not None:
+                return user
             user = User(email=email, created_at=_now_micros())
             session.add(user)
-            session.commit()
-        return user
+            try:
+                session.commit()
+                return user
+            except IntegrityError:
+                # On PostgreSQL, the transaction is aborted after an
+                # IntegrityError; retry in a fresh transaction to observe
+                # the concurrently created row.
+                session.rollback()
+                if attempt == 0:
+                    continue
+                raise
+    raise RuntimeError(f"Failed to resolve user for {email}")
 
 
 def get_user_by_id(user_id: str, db_path: str | None = None) -> User | None:
