@@ -13,7 +13,7 @@ import time
 
 from sqlalchemy import select
 from sqlalchemy import update as sa_update
-from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from ..database.engine import get_engine
@@ -30,6 +30,50 @@ def hash_token(token: str) -> str:
     return hashlib.sha256(token.encode("utf-8")).hexdigest()
 
 
+def get_or_create_user(email: str, db_path: str | None = None) -> User:
+    """Return the user with this email, creating the row if new.
+
+    Concurrent first logins can race the unique email index; the loser
+    retries the lookup in a fresh transaction (same pattern as
+    get_or_create_base_url).
+    """
+    email = email.strip().lower()
+    if not email:
+        raise ValueError("email must not be empty")
+    engine = get_engine(db_path)
+    for attempt in range(2):
+        with Session(engine, expire_on_commit=False) as session:
+            user = session.execute(
+                select(User).where(User.email == email)
+            ).scalar_one_or_none()
+            if user is not None:
+                return user
+            user = User(email=email, created_at=_now_micros())
+            session.add(user)
+            try:
+                session.commit()
+                return user
+            except IntegrityError:
+                # On PostgreSQL, the transaction is aborted after an
+                # IntegrityError; retry in a fresh transaction to observe
+                # the concurrently created row.
+                session.rollback()
+                if attempt == 0:
+                    continue
+                raise
+    raise RuntimeError(f"Failed to resolve user for {email}")
+
+
+def get_user_by_id(user_id: str, db_path: str | None = None) -> User | None:
+    engine = get_engine(db_path)
+    with Session(engine, expire_on_commit=False) as session:
+        user = session.execute(
+            select(User).where(User.id == user_id)
+        ).scalar_one_or_none()
+        session.expunge_all()
+        return user
+
+
 def mint_token(
     email: str,
     kind: str = "cli",
@@ -44,19 +88,10 @@ def mint_token(
         raise ValueError(
             f"invalid token kind: {kind!r} (expected one of {TOKEN_KINDS})"
         )
-    email = email.strip().lower()
-    if not email:
-        raise ValueError("email must not be empty")
     token = f"llmt_{kind}_{secrets.token_hex(24)}"
+    user = get_or_create_user(email, db_path)
     engine = get_engine(db_path)
     with Session(engine, expire_on_commit=False) as session:
-        user = session.execute(
-            select(User).where(User.email == email)
-        ).scalar_one_or_none()
-        if user is None:
-            user = User(email=email, created_at=_now_micros())
-            session.add(user)
-            session.flush()
         session.add(
             AuthToken(
                 user_id=user.id,
@@ -156,3 +191,31 @@ def list_user_tokens(user_id: str, db_path: str | None = None) -> list[AuthToken
         )
         session.expunge_all()
         return list(rows)
+
+
+def revoke_device_tokens(
+    user_id: str,
+    device_name: str,
+    kinds: tuple[str, ...] = ("cli", "ingest"),
+    db_path: str | None = None,
+) -> int:
+    """Revoke the user's active tokens for one device (re-login cleanup).
+
+    `web` tokens are never device tokens; operator-minted rows with a NULL
+    device_name are untouched (SQL `=` never matches NULL).
+    """
+    engine = get_engine(db_path)
+    with Session(engine, expire_on_commit=False) as session:
+        result = session.execute(
+            sa_update(AuthToken)
+            .where(
+                AuthToken.user_id == user_id,
+                AuthToken.device_name == device_name,
+                AuthToken.kind.in_(kinds),
+                AuthToken.revoked_at.is_(None),
+            )
+            .values(revoked_at=_now_micros())
+        )
+        changed = result.rowcount  # type: ignore[attr-defined]
+        session.commit()
+    return int(changed)

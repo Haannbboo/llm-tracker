@@ -1,9 +1,14 @@
+import base64
+import hashlib
+import html
 import logging
+import re
 import secrets
 from urllib.parse import urlparse
 
-from fastapi import APIRouter, Depends, HTTPException, Request, Response
-from fastapi.responses import RedirectResponse
+from fastapi import APIRouter, Depends, Form, HTTPException, Request, Response
+from fastapi.responses import HTMLResponse, RedirectResponse
+from pydantic import BaseModel, Field
 
 from config.app import CONFIG
 from config.server_config import resolve_server_urls
@@ -11,9 +16,12 @@ from config.server_config import resolve_server_urls
 from ..database import AuthToken, User
 from . import google as auth_google
 from .tokens import (
+    get_or_create_user,
+    get_user_by_id,
     list_user_tokens,
     mint_token,
     resolve_token,
+    revoke_device_tokens,
     revoke_token,
     update_user_name,
 )
@@ -22,6 +30,7 @@ logger = logging.getLogger(__name__)
 
 SESSION_COOKIE_NAME = "llm_tracker_session"
 OAUTH_STATE_COOKIE_NAME = "llm_tracker_oauth_state"
+_NO_STORE = {"Cache-Control": "no-store"}
 
 router = APIRouter()
 
@@ -230,6 +239,19 @@ async def auth_google_callback(request: Request):
     if normalized_allowlist and email not in normalized_allowlist:
         # No user/token row is created for a rejected email.
         return _frontend_redirect(origin, auth_error="not_allowlisted")
+    cli_flow = data.get("cli")
+    if isinstance(cli_flow, dict):
+        # CLI paste-back flow: no web session is minted — the code page
+        # renders the one-time code and the CLI redeems it at exchange.
+        user = get_or_create_user(email)
+        update_user_name(user.id, str(claims.get("name") or "").strip() or None)
+        device = _sanitize_device_name(str(cli_flow.get("device_name") or ""))
+        code = _mint_cli_code(user, device, str(cli_flow.get("code_challenge") or ""))
+        code_response = HTMLResponse(_code_page(code, device), headers=_NO_STORE)
+        # Single-use: the state was popped above; clear the login-CSRF cookie
+        # like the web path does.
+        code_response.delete_cookie(OAUTH_STATE_COOKIE_NAME)
+        return code_response
     plaintext_token, user = mint_token(email, kind="web", device_name="browser")
     update_user_name(user.id, str(claims.get("name") or "").strip() or None)
     response = _frontend_redirect(origin)
@@ -290,3 +312,209 @@ def auth_devices_revoke(
     if not revoke_token(device_id, user.id):
         raise HTTPException(status_code=404, detail="not found")
     return Response(status_code=204)
+
+
+# ------------------------------------------------------- CLI login (PR 3)
+#
+# Paste-back flow: the browser renders a short human-typeable one-time code
+# and the user pastes it into the terminal — one flow for local, SSH, and
+# cross-device (phone-browser) logins. The code is PKCE S256-bound to the
+# CLI's code_challenge and redeemed at /auth/cli/exchange with the
+# verifier. A browser that already has a web session approves on a confirm
+# page instead of redoing Google.
+
+_CODE_CHALLENGE_RE = re.compile(r"[A-Za-z0-9\-_]{43,128}")
+_DEFAULT_DEVICE_NAME = "cli-device"
+# RFC 8628 §6.1 unambiguous alphabet; 3 groups of 4 (~52 bits).
+_CLI_CODE_ALPHABET = "BCDFGHJKLMNPQRSTVWXZ"
+
+
+class CliExchangeRequest(BaseModel):
+    # Capped: this is a public (auth-gated) endpoint taking unbounded strings.
+    code: str | None = Field(default=None, max_length=256)
+    code_verifier: str | None = Field(default=None, max_length=256)
+
+
+def _sanitize_device_name(raw: str | None) -> str:
+    cleaned = "".join(c for c in (raw or "").strip() if c.isprintable())
+    return cleaned[:64] or _DEFAULT_DEVICE_NAME
+
+
+def _normalize_cli_code(raw: str) -> str:
+    """Uppercase, strip whitespace and hyphens (what a human may retype)."""
+    return "".join(raw.split()).upper().replace("-", "")
+
+
+def _validate_cli_start_params(
+    code_challenge: str | None, device_name: str | None
+) -> tuple[str, str]:
+    if not code_challenge or not _CODE_CHALLENGE_RE.fullmatch(code_challenge):
+        raise HTTPException(status_code=422, detail="invalid code_challenge")
+    return code_challenge, _sanitize_device_name(device_name)
+
+
+def _mint_cli_code(user: User, device_name: str, code_challenge: str) -> str:
+    code = "-".join(
+        "".join(secrets.choice(_CLI_CODE_ALPHABET) for _ in range(4)) for _ in range(3)
+    )
+    # Storage key is the normalized form (what the exchange looks up).
+    auth_google.store_cli_code(
+        _normalize_cli_code(code),
+        {
+            "user_id": user.id,
+            "device_name": device_name,
+            "code_challenge": code_challenge,
+        },
+    )
+    return code
+
+
+def _confirm_page(user: User, device_name: str, code_challenge: str) -> str:
+    return f"""<!doctype html>
+<html><head><title>llm-tracker CLI login</title></head>
+<body style="font-family: system-ui, sans-serif; max-width: 32rem; margin: 4rem auto;">
+<h2>CLI login request</h2>
+<p>A CLI on device <b>{html.escape(device_name)}</b> is requesting access to
+llm-tracker as <b>{html.escape(user.email)}</b>.</p>
+<p><b>Only approve logins you started in a terminal you are looking at.</b></p>
+<form method="post" action="/auth/cli/start">
+<input type="hidden" name="code_challenge" value="{html.escape(code_challenge, quote=True)}">
+<input type="hidden" name="device_name" value="{html.escape(device_name, quote=True)}">
+<button type="submit">Approve</button>
+<a href="/" style="margin-left: 1rem;">Cancel</a>
+</form>
+</body></html>"""
+
+
+def _code_page(code: str, device_name: str) -> str:
+    return f"""<!doctype html>
+<html><head><title>llm-tracker CLI login</title></head>
+<body style="font-family: system-ui, sans-serif; max-width: 32rem; margin: 4rem auto;">
+<h2>CLI login code</h2>
+<p>Paste this code into your terminal
+(device <b>{html.escape(device_name)}</b>):</p>
+<code id="cli-code" style="font-size: 2rem; letter-spacing: 0.15em;">{html.escape(code)}</code>
+<p><button type="button" onclick="copyCode()">Copy</button></p>
+<p>If you did not start this login in a terminal, close this page.</p>
+<script>
+function copyCode() {{
+  var el = document.getElementById('cli-code');
+  var text = el.textContent;
+  if (navigator.clipboard) {{
+    navigator.clipboard.writeText(text);
+  }} else {{
+    var range = document.createRange();
+    range.selectNode(el);
+    getSelection().removeAllRanges();
+    getSelection().addRange(range);
+  }}
+}}
+</script>
+</body></html>"""
+
+
+@router.get("/auth/cli/start")
+async def auth_cli_start(
+    request: Request,
+    code_challenge: str | None = None,
+    device_name: str | None = None,
+):
+    """Start the CLI login: confirm page with a session, Google without."""
+    if not _auth_enabled():
+        raise HTTPException(status_code=404, detail="not found")
+    challenge, device = _validate_cli_start_params(code_challenge, device_name)
+    resolved = _resolve_request_user(request)
+    if resolved is not None:
+        return HTMLResponse(
+            _confirm_page(resolved[0], device, challenge), headers=_NO_STORE
+        )
+    if auth_google.google_credentials() is None:
+        raise HTTPException(status_code=503, detail="google oauth not configured")
+    state = secrets.token_urlsafe(24)
+    nonce = secrets.token_urlsafe(24)
+    redirect_uri = _google_redirect_uri()
+    try:
+        url = await auth_google.build_authorize_url(redirect_uri, state, nonce)
+    except auth_google.OAuthFlowError:
+        logger.exception("Failed to build Google authorize URL")
+        raise HTTPException(status_code=503, detail="google oauth not configured")
+    auth_google.store_oauth_state(
+        state,
+        {
+            "nonce": nonce,
+            "redirect_uri": redirect_uri,
+            "origin": None,
+            "cli": {
+                "code_challenge": challenge,
+                "device_name": device,
+            },
+        },
+    )
+    response = RedirectResponse(url, status_code=302)
+    response.set_cookie(
+        OAUTH_STATE_COOKIE_NAME,
+        state,
+        httponly=True,
+        samesite="lax",
+        secure=_cookie_is_secure(),
+        max_age=auth_google.STATE_TTL_SECONDS,
+    )
+    return response
+
+
+@router.post("/auth/cli/start")
+def auth_cli_start_approve(
+    request: Request,
+    code_challenge: str | None = Form(default=None),
+    device_name: str | None = Form(default=None),
+):
+    """Approve the CLI login from the confirm page (requires a web session).
+
+    The SameSite=Lax cookie is withheld on cross-site POSTs, so this is
+    unreachable from another site without the session cookie — no separate
+    CSRF token (same argument as POST /auth/logout).
+    """
+    if not _auth_enabled():
+        raise HTTPException(status_code=404, detail="not found")
+    challenge, device = _validate_cli_start_params(code_challenge, device_name)
+    resolved = _resolve_request_user(request)
+    if resolved is None:
+        raise HTTPException(status_code=401, detail="login required")
+    code = _mint_cli_code(resolved[0], device, challenge)
+    return HTMLResponse(_code_page(code, device), headers=_NO_STORE)
+
+
+@router.post("/auth/cli/exchange")
+def auth_cli_exchange(body: CliExchangeRequest):
+    """Redeem a one-time code with its PKCE verifier for device tokens."""
+    if not _auth_enabled():
+        raise HTTPException(status_code=404, detail="not found")
+    if not body.code or not body.code_verifier:
+        # One message for all failures — no oracle for which half was wrong.
+        raise HTTPException(status_code=400, detail="invalid code")
+    entry = auth_google.pop_cli_code(_normalize_cli_code(body.code))
+    if entry is None:
+        raise HTTPException(status_code=400, detail="invalid code")
+    challenge = str(entry.get("code_challenge") or "")
+    verifier_digest = hashlib.sha256(body.code_verifier.encode("utf-8")).digest()
+    derived = base64.urlsafe_b64encode(verifier_digest).rstrip(b"=").decode("ascii")
+    if not secrets.compare_digest(derived, challenge):
+        raise HTTPException(status_code=400, detail="invalid code")
+    user = get_user_by_id(str(entry.get("user_id") or ""))
+    if user is None:
+        raise HTTPException(status_code=400, detail="invalid code")
+    device_name = _sanitize_device_name(str(entry.get("device_name") or ""))
+    revoke_device_tokens(user.id, device_name)
+    cli_token, _ = mint_token(user.email, kind="cli", device_name=device_name)
+    ingest_token, _ = mint_token(user.email, kind="ingest", device_name=device_name)
+    urls = resolve_server_urls(CONFIG)
+    return {
+        "user": {"id": user.id, "email": user.email, "name": user.name},
+        "device_name": device_name,
+        "cli_token": cli_token,
+        "ingest_token": ingest_token,
+        "otlp": {
+            "endpoint": urls["otlp_url"],
+            "logs_endpoint": f"{urls['otlp_url']}/v1/logs",
+        },
+    }

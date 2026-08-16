@@ -208,6 +208,58 @@ def test_auth_me_enabled_no_users_is_401_not_500(api_module, fresh_db, monkeypat
     assert response.status_code == 401
 
 
+def test_get_or_create_user_retries_on_integrity_error(monkeypatch):
+    """The loser of a concurrent first-login race re-selects the winner's row."""
+    from sqlalchemy.exc import IntegrityError
+
+    from src.auth import tokens
+
+    class FakeUser:
+        id = 1
+        email = "a@example.com"
+
+    calls = {"selects": 0, "commits": 0}
+
+    class FakeSession:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc_info):
+            return False
+
+        def execute(self, *args, **kwargs):
+            calls["selects"] += 1
+            user = FakeUser() if calls["selects"] > 1 else None
+
+            class Result:
+                @staticmethod
+                def scalar_one_or_none():
+                    return user
+
+            return Result()
+
+        def add(self, *args):
+            pass
+
+        def commit(self):
+            calls["commits"] += 1
+            if calls["commits"] == 1:
+                raise IntegrityError("stmt", {}, Exception("unique violation"))
+
+        def rollback(self):
+            pass
+
+    monkeypatch.setattr(tokens, "Session", FakeSession)
+    monkeypatch.setattr(tokens, "get_engine", lambda db_path: object())
+
+    user = tokens.get_or_create_user("A@EXAMPLE.COM")
+    assert user.email == "a@example.com"
+    assert calls == {"selects": 2, "commits": 1}
+
+
 def test_token_create_cli(cli_module, capsys):
     exit_code = cli_module.main(
         ["token", "create", "--email", "cli@example.com", "--name", "laptop"]

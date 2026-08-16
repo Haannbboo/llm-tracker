@@ -29,17 +29,21 @@ def save_settings(path: Path, settings: dict[str, Any]) -> None:
     path.write_text(json.dumps(settings, indent=2) + "\n", encoding="utf-8")
 
 
-def resolve_otlp_logs_endpoint(otlp_port: str, host: str = "localhost") -> str:
+def resolve_otlp_logs_endpoint(
+    otlp_port: str, host: str = "localhost", endpoint: str | None = None
+) -> str:
     env_endpoint = os.environ.get("OTEL_EXPORTER_OTLP_LOGS_ENDPOINT")
     if env_endpoint:
         return env_endpoint
+    if endpoint and "://" in endpoint:
+        return endpoint
     return f"http://{host}:{otlp_port}/v1/logs"
 
 
 def main() -> int:
-    if len(sys.argv) not in (2, 3, 4):
+    if len(sys.argv) not in (2, 3, 4, 5):
         print(
-            "usage: configure-claude-settings.py SETTINGS_PATH [OTLP_PORT] [HOST]",
+            "usage: configure-claude-settings.py SETTINGS_PATH [OTLP_PORT] [HOST] [ENDPOINT]",
             file=sys.stderr,
         )
         return 1
@@ -47,6 +51,7 @@ def main() -> int:
     settings_path = Path(sys.argv[1]).expanduser()
     otlp_port = sys.argv[2] if len(sys.argv) >= 3 else "4002"
     host = sys.argv[3] if len(sys.argv) >= 4 else "localhost"
+    endpoint = sys.argv[4] if len(sys.argv) >= 5 else None
 
     settings = load_settings(settings_path)
     env = settings.setdefault("env", {})
@@ -55,7 +60,9 @@ def main() -> int:
         "CLAUDE_CODE_ENABLE_TELEMETRY": "1",
         "OTEL_LOGS_EXPORTER": "otlp",
         "OTEL_EXPORTER_OTLP_LOGS_PROTOCOL": "http/json",
-        "OTEL_EXPORTER_OTLP_LOGS_ENDPOINT": resolve_otlp_logs_endpoint(otlp_port, host),
+        "OTEL_EXPORTER_OTLP_LOGS_ENDPOINT": resolve_otlp_logs_endpoint(
+            otlp_port, host, endpoint
+        ),
     }
 
     changed = False

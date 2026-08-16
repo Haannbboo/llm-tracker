@@ -29,6 +29,11 @@ STATE_FILE_NAME = "oauth_state.json"
 STATE_TTL_SECONDS = 5 * 60
 MAX_PENDING_STATES = 512
 
+# One-time CLI login codes (PR 3): same flock-guarded JSON store shape as
+# the OAuth state store, longer TTL — the human paste-back path needs slack.
+CLI_CODE_FILE_NAME = "cli_codes.json"
+CLI_CODE_TTL_SECONDS = 300
+
 # Google endpoints are pinned (no discovery-document fetch at runtime); the
 # only outbound calls are the token exchange and the JWKS fetch.
 GOOGLE_AUTHORIZE_URL = "https://accounts.google.com/o/oauth2/v2/auth"
@@ -106,8 +111,8 @@ async def verify_id_token(token: dict[str, Any], nonce: str) -> dict[str, Any]:
     return dict(claims)
 
 
-def _state_path() -> Path:
-    return Path(get_tracker_home()) / STATE_FILE_NAME
+def _state_path(file_name: str = STATE_FILE_NAME) -> Path:
+    return Path(get_tracker_home()) / file_name
 
 
 def _load_states_unlocked(handle) -> dict[str, Any]:
@@ -137,21 +142,51 @@ def _prune_expired(states: dict[str, Any], now: float) -> None:
 
 def store_oauth_state(state: str, data: dict[str, Any]) -> None:
     """Persist a state with a TTL, pruning expired entries first."""
-    path = _state_path()
+    _store_entry(_state_path(), state, data, STATE_TTL_SECONDS, MAX_PENDING_STATES)
+
+
+def pop_oauth_state(state: str) -> dict[str, Any] | None:
+    """Consume a state single-use. Returns its data or None when missing/expired."""
+    return _pop_entry(_state_path(), state)
+
+
+def store_cli_code(code: str, data: dict[str, Any]) -> None:
+    """Persist a one-time CLI login code with its TTL."""
+    _store_entry(
+        _state_path(CLI_CODE_FILE_NAME),
+        code,
+        data,
+        CLI_CODE_TTL_SECONDS,
+        MAX_PENDING_STATES,
+    )
+
+
+def pop_cli_code(code: str) -> dict[str, Any] | None:
+    """Consume a CLI code single-use. Returns its data or None when missing/expired."""
+    return _pop_entry(_state_path(CLI_CODE_FILE_NAME), code)
+
+
+def _store_entry(
+    path: Path,
+    key: str,
+    data: dict[str, Any],
+    ttl_seconds: float,
+    max_pending: int,
+) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with open(path, "a+", encoding="utf-8") as handle:
         fcntl.flock(handle, fcntl.LOCK_EX)
         try:
             states = _load_states_unlocked(handle)
             _prune_expired(states, time.time())
-            if len(states) >= MAX_PENDING_STATES:
-                # A burst of /auth/google/login calls (public whenever auth
-                # is enabled) shouldn't grow the file without bound inside
-                # the TTL window; drop the oldest pending states to make room.
-                oldest_first = sorted(states, key=lambda key: states[key]["exp"])
-                for key in oldest_first[: len(states) - MAX_PENDING_STATES + 1]:
-                    del states[key]
-            states[state] = {"exp": time.time() + STATE_TTL_SECONDS, **data}
+            if len(states) >= max_pending:
+                # A burst of public mint endpoints shouldn't grow the file
+                # without bound inside the TTL window; drop the oldest
+                # pending entries to make room.
+                oldest_first = sorted(states, key=lambda k: states[k]["exp"])
+                for k in oldest_first[: len(states) - max_pending + 1]:
+                    del states[k]
+            states[key] = {"exp": time.time() + ttl_seconds, **data}
             handle.seek(0)
             handle.truncate()
             json.dump(states, handle)
@@ -160,11 +195,9 @@ def store_oauth_state(state: str, data: dict[str, Any]) -> None:
             fcntl.flock(handle, fcntl.LOCK_UN)
 
 
-def pop_oauth_state(state: str) -> dict[str, Any] | None:
-    """Consume a state single-use. Returns its data or None when missing/expired."""
-    if not state:
+def _pop_entry(path: Path, key: str) -> dict[str, Any] | None:
+    if not key:
         return None
-    path = _state_path()
     if not path.exists():
         return None
     with open(path, "a+", encoding="utf-8") as handle:
@@ -173,7 +206,7 @@ def pop_oauth_state(state: str) -> dict[str, Any] | None:
             states = _load_states_unlocked(handle)
             if not states:
                 return None
-            entry = states.pop(state, None)
+            entry = states.pop(key, None)
             _prune_expired(states, time.time())
             handle.seek(0)
             handle.truncate()

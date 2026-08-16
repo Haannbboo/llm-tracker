@@ -69,9 +69,9 @@ def select_config_path() -> Path:
 
 
 def main() -> int:
-    if len(sys.argv) < 2:
+    if len(sys.argv) not in (2, 3, 4, 5):
         print(
-            "usage: configure-opencode-plugin.py PROJECT_ROOT [OTLP_PORT] [HOST]",
+            "usage: configure-opencode-plugin.py PROJECT_ROOT [OTLP_PORT] [HOST] [ENDPOINT]",
             file=sys.stderr,
         )
         return 1
@@ -79,9 +79,13 @@ def main() -> int:
     project_root = Path(sys.argv[1]).expanduser().resolve()
     otlp_port = sys.argv[2] if len(sys.argv) >= 3 else "4005"
     host = sys.argv[3] if len(sys.argv) >= 4 else "localhost"
+    endpoint_arg = sys.argv[4] if len(sys.argv) >= 5 else None
     plugin_dir = project_root / "plugins" / "opencode"
     config_path = select_config_path()
-    endpoint = f"http://{host}:{otlp_port}/v1/logs"
+    if endpoint_arg and "://" in endpoint_arg:
+        endpoint = endpoint_arg
+    else:
+        endpoint = f"http://{host}:{otlp_port}/v1/logs"
 
     # Install dependencies
     node_modules = plugin_dir / "node_modules"

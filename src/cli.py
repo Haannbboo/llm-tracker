@@ -1,17 +1,23 @@
 from __future__ import annotations
 
 import argparse
+import base64
+import hashlib
 import json
 import os
+import secrets
 import shutil
 import socket
 import subprocess
 import sys
 import tempfile
 import time
+import webbrowser
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlencode, urlparse
 
 import httpx
 
@@ -53,8 +59,12 @@ class TempService:
 
 
 class UsageApiClient:
-    def __init__(self, base_url: str | None = None):
+    def __init__(self, base_url: str | None = None, token: str | None = None):
+        credentials = load_credentials() or {}
+        if base_url is None:
+            base_url = credentials.get("server_url") or None
         self.base_url = base_url or build_api_base_url()
+        self.token = token if token is not None else credentials.get("cli_token")
 
     def get_high_watermark(self) -> int:
         try:
@@ -92,14 +102,22 @@ class UsageApiClient:
         *,
         params: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
+        headers = {}
+        if self.token:
+            headers["Authorization"] = f"Bearer {self.token}"
         try:
             response = httpx.get(
                 f"{self.base_url.rstrip('/')}{path}",
                 params=params,
+                headers=headers,
                 timeout=5,
             )
             response.raise_for_status()
             return response.json()
+        except httpx.HTTPStatusError as exc:
+            if exc.response.status_code == 401:
+                raise ApiError("session rejected — run llm-tracker login") from exc
+            raise ApiError(str(exc)) from exc
         except Exception as exc:
             raise ApiError(str(exc)) from exc
 
@@ -163,6 +181,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
             "  status                   show service status\n"
             "  update [--check|--dry-run]  fetch, pull, bootstrap, and restart\n"
             "  summary <session_id>     show the saved LLM summary for a tracked session\n"
+            "  login [--server URL]     log in to a hosted server and wire agents\n"
             "  token create --email <email> [--kind cli|ingest|web] [--name <device>]\n"
             "                           mint an auth token (operator-only, runs on the server box)\n"
             "  codex ...                run Codex with tracking\n"
@@ -288,6 +307,275 @@ def run_token_command(command: list[str]) -> int:
     print(f"Minted {token_args.kind} token for {user.email} (shown once):")
     print(token)
     return 0
+
+
+# ------------------------------------------------------- hosted credentials
+
+
+def credentials_path() -> Path:
+    from config.models import get_tracker_home
+
+    return Path(get_tracker_home()) / "credentials.json"
+
+
+def load_credentials() -> dict[str, Any] | None:
+    path = credentials_path()
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        data = None
+    if not isinstance(data, dict):
+        if path.exists():
+            print(
+                f"warning: could not read {path}; ignoring saved credentials",
+                file=sys.stderr,
+            )
+        return None
+    return data
+
+
+def save_credentials(data: dict[str, Any]) -> None:
+    """Write credentials.json atomically, 0600 from the moment it exists."""
+    path = credentials_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(f"{path.name}.{secrets.token_hex(4)}.tmp")
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as handle:
+        json.dump(data, handle, indent=2)
+        handle.write("\n")
+    os.chmod(tmp, 0o600)  # in case a stale tmp pre-existed with wider mode
+    tmp.replace(path)
+
+
+# --------------------------------------------------------------- CLI login
+
+
+def parse_login_args(command: list[str]) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        prog="llm-tracker login",
+        description="Log in to a hosted llm-tracker server and wire agents.",
+    )
+    parser.add_argument(
+        "--server", help="server base URL (e.g. https://app.example.com)"
+    )
+    parser.add_argument(
+        "--device-name", dest="device_name", help="device label for tokens"
+    )
+    parser.add_argument(
+        "--no-browser",
+        dest="no_browser",
+        action="store_true",
+        help="don't attempt to open a browser (the login URL is always printed)",
+    )
+    return parser.parse_args(command[1:])
+
+
+def _sanitize_device_name(raw: str | None) -> str:
+    cleaned = "".join(c for c in (raw or "").strip() if c.isprintable())
+    return cleaned[:64] or "cli-device"
+
+
+def _pkce_pair() -> tuple[str, str]:
+    """Return (code_verifier, code_challenge) per RFC 7636 S256."""
+    verifier = secrets.token_urlsafe(48)
+    digest = hashlib.sha256(verifier.encode("ascii")).digest()
+    challenge = base64.urlsafe_b64encode(digest).rstrip(b"=").decode("ascii")
+    return verifier, challenge
+
+
+def _normalize_cli_code(raw: str) -> str:
+    """Uppercase, strip whitespace and hyphens (what a human may retype)."""
+    return "".join(raw.split()).upper().replace("-", "")
+
+
+def run_login_command(command: list[str]) -> int:
+    args = parse_login_args(command)
+    server = (
+        args.server
+        or os.environ.get("LLMTRACKER_SERVER")
+        or (load_credentials() or {}).get("server_url")
+        or ""
+    ).rstrip("/")
+    if not server:
+        print(
+            "no server configured: pass --server URL, set LLMTRACKER_SERVER, "
+            "or point LLM_TRACKER_HOME at an existing credentials.json",
+            file=sys.stderr,
+        )
+        return 2
+    parsed = urlparse(server)
+    if parsed.scheme == "http" and parsed.hostname not in ("localhost", "127.0.0.1"):
+        print(
+            "warning: --server uses http://; login tokens will travel unencrypted",
+            file=sys.stderr,
+        )
+
+    try:
+        httpx.get(f"{server}/version", timeout=5).raise_for_status()
+    except Exception as exc:
+        print(f"llm-tracker server unreachable at {server}: {exc}", file=sys.stderr)
+        return 1
+
+    verifier, challenge = _pkce_pair()
+    device_name = _sanitize_device_name(
+        args.device_name or socket.gethostname() or "cli-device"
+    )
+    login_url = f"{server}/auth/cli/start?" + urlencode(
+        {"code_challenge": challenge, "device_name": device_name}
+    )
+
+    print(f"Open this URL in your browser to continue login:\n  {login_url}")
+    over_ssh = bool(os.environ.get("SSH_CONNECTION") or os.environ.get("SSH_TTY"))
+    if not args.no_browser and not over_ssh:
+        webbrowser.open(login_url)
+
+    response: httpx.Response | None = None
+    for attempt in range(3):
+        try:
+            raw = input("Paste the code shown in your browser: ")
+        except EOFError:
+            print("no code entered; no credentials written", file=sys.stderr)
+            return 1
+        if not raw.strip():
+            print("no code entered; no credentials written", file=sys.stderr)
+            return 1
+        try:
+            response = httpx.post(
+                f"{server}/auth/cli/exchange",
+                json={"code": _normalize_cli_code(raw), "code_verifier": verifier},
+                timeout=10,
+            )
+        except Exception as exc:
+            print(f"login exchange failed: {exc}", file=sys.stderr)
+            return 1
+        if response.status_code == 200:
+            break
+        detail = ""
+        try:
+            detail = str(response.json().get("detail", ""))
+        except Exception:
+            pass
+        if response.status_code == 400 and attempt < 2:
+            print("invalid or expired code — paste it again", file=sys.stderr)
+            continue
+        print(
+            f"login failed: HTTP {response.status_code}"
+            f"{f' ({detail})' if detail else ''}",
+            file=sys.stderr,
+        )
+        return 1
+    if response is None:
+        return 1
+    try:
+        payload = response.json()
+    except Exception:
+        print("login failed: server returned an invalid response", file=sys.stderr)
+        return 1
+    user = payload.get("user") or {}
+
+    save_credentials(
+        {
+            "server_url": server,
+            "user_id": user.get("id"),
+            "email": user.get("email"),
+            "device_name": payload.get("device_name"),
+            "cli_token": payload.get("cli_token"),
+            "ingest_token": payload.get("ingest_token"),
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        }
+    )
+    print(f"Logged in as {user.get('email')} (device: {payload.get('device_name')})")
+    print(f"Credentials saved to {credentials_path()}")
+    print(f"Dashboard: {server}")
+
+    wired = wire_agents_for_hosted(
+        logs_endpoint=(payload.get("otlp") or {}).get("logs_endpoint"),
+    )
+    if wired:
+        print("Wired agents: " + ", ".join(wired))
+    else:
+        print("No tracked agents detected; nothing to wire.")
+    return 0
+
+
+def wire_agents_for_hosted(*, logs_endpoint: str | None) -> list[str]:
+    """Point detected agents' telemetry at the hosted server (idempotent)."""
+    if not logs_endpoint:
+        return []
+    scripts_dir = project_root() / "scripts"
+    home = Path.home()
+    jobs: list[tuple[str, str, list[str], str]] = []
+    if shutil.which("codex"):
+        jobs.append(
+            (
+                "codex",
+                "configure-codex-settings.py",
+                [str(home / ".codex" / "config.toml")],
+                logs_endpoint,
+            )
+        )
+    if shutil.which("claude"):
+        jobs.append(
+            (
+                "claude",
+                "configure-claude-settings.py",
+                [str(home / ".claude" / "settings.json")],
+                logs_endpoint,
+            )
+        )
+    if shutil.which("opencode"):
+        jobs.append(
+            (
+                "opencode",
+                "configure-opencode-plugin.py",
+                [str(project_root())],
+                logs_endpoint,
+            )
+        )
+    if shutil.which("kilo"):
+        jobs.append(
+            ("kilo", "configure-kilo-plugin.py", [str(project_root())], logs_endpoint)
+        )
+
+    wired: list[str] = []
+    # The configure scripts honor OTEL_EXPORTER_OTLP_LOGS_ENDPOINT over the
+    # endpoint argument; strip it so a pre-existing local OTLP env config
+    # can't silently override the hosted endpoint just logged in to.
+    env = {
+        k: v for k, v in os.environ.items() if k != "OTEL_EXPORTER_OTLP_LOGS_ENDPOINT"
+    }
+    for name, script, prefix_args, endpoint in jobs:
+        try:
+            result = subprocess.run(
+                # Trailing shape matches the scripts' documented argv:
+                # [PREFIX...] PORT HOST ENDPOINT — the endpoint overrides the
+                # placeholder port/host.
+                [
+                    sys.executable,
+                    str(scripts_dir / script),
+                    *prefix_args,
+                    "0",
+                    "localhost",
+                    endpoint,
+                ],
+                capture_output=True,
+                text=True,
+                env=env,
+                # Generous: a cold `npm install` inside the plugin scripts
+                # can take minutes. This only bounds a hang, not slow work.
+                timeout=300,
+            )
+        except subprocess.TimeoutExpired:
+            print(f"warning: wiring {name} timed out", file=sys.stderr)
+            continue
+        if result.returncode == 0:
+            wired.append(name)
+        else:
+            print(
+                f"warning: wiring {name} failed: {result.stderr.strip()}",
+                file=sys.stderr,
+            )
+    return wired
 
 
 def parse_session_summary_args(command: list[str]) -> argparse.Namespace:
@@ -469,9 +757,9 @@ def run_with_watermark_tracking(
 ) -> int:
     try:
         before_ts = client.get_high_watermark()
-    except ApiError:
+    except ApiError as exc:
         print(
-            "llm-tracker API unavailable before command start.",
+            f"llm-tracker API unavailable before command start: {exc}",
             file=sys.stderr,
         )
         before_ts = None
@@ -646,7 +934,8 @@ def poll_summary(
     while True:
         try:
             summary = client.get_run_summary(after_ts=after_ts)
-        except ApiError:
+        except ApiError as exc:
+            print(f"llm-tracker API error: {exc}", file=sys.stderr)
             return latest_summary
 
         latest_summary = summary
@@ -659,7 +948,8 @@ def poll_summary(
 
     try:
         until_ts = client.get_high_watermark()
-    except ApiError:
+    except ApiError as exc:
+        print(f"llm-tracker API error: {exc}", file=sys.stderr)
         return latest_summary
 
     try:
@@ -667,7 +957,8 @@ def poll_summary(
             after_ts=after_ts,
             until_ts=until_ts,
         )
-    except ApiError:
+    except ApiError as exc:
+        print(f"llm-tracker API error: {exc}", file=sys.stderr)
         return None
 
 
@@ -809,6 +1100,8 @@ def main(argv: list[str] | None = None) -> int:
         return run_update_command(args.command)
     if args.command[0] == "token":
         return run_token_command(args.command)
+    if args.command[0] == "login":
+        return run_login_command(args.command)
 
     options = options_from_args(args)
     if options.summary_dest == "file" and not options.summary_file:
@@ -819,9 +1112,13 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     try:
+        # Hosted credentials present → API (watermark) path with the bearer
+        # token; otherwise the isolated local-tracking path, as before.
+        client: UsageApiClient | None = UsageApiClient() if load_credentials() else None
         return run_with_tracking(
             command=args.command,
             options=options,
+            client=client,
         )
     except FileNotFoundError as exc:
         print(str(exc), file=sys.stderr)

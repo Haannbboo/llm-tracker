@@ -239,10 +239,13 @@ app.include_router(auth_router)
 
 
 def _is_public_path(path: str) -> bool:
-    """Public when auth is enabled: Google OAuth, /auth/me, /version, SPA."""
+    """Public when auth is enabled: Google OAuth, CLI login, /auth/me, /version, SPA."""
     if not any(path.startswith(prefix) for prefix in _SPA_API_PREFIXES):
         return path not in AUTH_GATE_EXTRA_GATED_PATHS
-    if path.startswith("/auth/google/"):
+    if path.startswith(("/auth/google/", "/auth/cli/")):
+        # CLI login endpoints are the credential-issuing surface: the
+        # one-time code + PKCE verifier (or the Google flow itself) are the
+        # credentials.
         return True
     return path in AUTH_GATE_PUBLIC_PATHS
 
