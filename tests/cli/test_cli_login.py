@@ -325,15 +325,27 @@ def test_login_non_json_200_exits_clean(cli_module, isolated_home, monkeypatch):
     assert not cli_module.credentials_path().exists()
 
 
-def test_login_warns_on_http_server(cli_module, isolated_home, monkeypatch, capsys):
+@pytest.mark.parametrize(
+    ("server", "should_warn"),
+    [
+        ("http://srv.example", True),
+        ("HTTP://srv.example", True),
+        ("http://localhost:4004", False),
+        ("http://127.0.0.1", False),
+        ("http://localhost.attacker.example", True),
+    ],
+)
+def test_login_http_warning(
+    cli_module, isolated_home, monkeypatch, capsys, server, should_warn
+):
     code, _, _ = _run_login(
         cli_module,
         monkeypatch,
         inputs=["the-code"],
-        extra_args=["--server", "http://srv.example"],
+        extra_args=["--server", server],
     )
     assert code == 0
-    assert "unencrypted" in capsys.readouterr().err
+    assert ("unencrypted" in capsys.readouterr().err) is should_warn
 
 
 def test_load_credentials_warns_on_corrupt_file(cli_module, isolated_home, capsys):
@@ -396,3 +408,19 @@ def test_wire_agents_strips_otel_env_var(cli_module, isolated_home, monkeypatch)
     assert envs
     assert all("OTEL_EXPORTER_OTLP_LOGS_ENDPOINT" not in env for env in envs)
     assert all("PATH" in env for env in envs)
+
+
+def test_wire_agents_timeout_warns_and_skips(
+    cli_module, isolated_home, monkeypatch, capsys
+):
+    def fake_run(cmd, **kwargs):
+        raise cli_module.subprocess.TimeoutExpired(cmd, kwargs.get("timeout"))
+
+    monkeypatch.setattr(cli_module.shutil, "which", lambda name: "/usr/bin/" + name)
+    monkeypatch.setattr(cli_module.subprocess, "run", fake_run)
+
+    wired = cli_module.wire_agents_for_hosted(
+        logs_endpoint="https://api.example.com/v1/logs"
+    )
+    assert wired == []
+    assert "timed out" in capsys.readouterr().err

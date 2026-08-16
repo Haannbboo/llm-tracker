@@ -17,7 +17,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlparse
 
 import httpx
 
@@ -403,9 +403,8 @@ def run_login_command(command: list[str]) -> int:
             file=sys.stderr,
         )
         return 2
-    if server.startswith("http://") and not server.startswith(
-        ("http://localhost", "http://127.0.0.1")
-    ):
+    parsed = urlparse(server)
+    if parsed.scheme == "http" and parsed.hostname not in ("localhost", "127.0.0.1"):
         print(
             "warning: --server uses http://; login tokens will travel unencrypted",
             file=sys.stderr,
@@ -546,22 +545,29 @@ def wire_agents_for_hosted(*, logs_endpoint: str | None) -> list[str]:
         k: v for k, v in os.environ.items() if k != "OTEL_EXPORTER_OTLP_LOGS_ENDPOINT"
     }
     for name, script, prefix_args, endpoint in jobs:
-        result = subprocess.run(
-            # Trailing shape matches the scripts' documented argv:
-            # [PREFIX...] PORT HOST ENDPOINT — the endpoint overrides the
-            # placeholder port/host.
-            [
-                sys.executable,
-                str(scripts_dir / script),
-                *prefix_args,
-                "0",
-                "localhost",
-                endpoint,
-            ],
-            capture_output=True,
-            text=True,
-            env=env,
-        )
+        try:
+            result = subprocess.run(
+                # Trailing shape matches the scripts' documented argv:
+                # [PREFIX...] PORT HOST ENDPOINT — the endpoint overrides the
+                # placeholder port/host.
+                [
+                    sys.executable,
+                    str(scripts_dir / script),
+                    *prefix_args,
+                    "0",
+                    "localhost",
+                    endpoint,
+                ],
+                capture_output=True,
+                text=True,
+                env=env,
+                # Generous: a cold `npm install` inside the plugin scripts
+                # can take minutes. This only bounds a hang, not slow work.
+                timeout=300,
+            )
+        except subprocess.TimeoutExpired:
+            print(f"warning: wiring {name} timed out", file=sys.stderr)
+            continue
         if result.returncode == 0:
             wired.append(name)
         else:

@@ -68,7 +68,7 @@ def select_config_path() -> Path:
 
 
 def main() -> int:
-    if len(sys.argv) < 2:
+    if len(sys.argv) not in (2, 3, 4, 5):
         print(
             "usage: configure-kilo-plugin.py PROJECT_ROOT [OTLP_PORT] [HOST] [ENDPOINT]",
             file=sys.stderr,

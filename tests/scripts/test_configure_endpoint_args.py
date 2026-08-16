@@ -147,3 +147,20 @@ def test_kilo_endpoint_arg(tmp_path):
     config = json.loads((home / ".config" / "kilo" / "opencode.json").read_text())
     endpoints = [entry[1]["endpoint"] for entry in config["plugin"]]
     assert endpoints == [ENDPOINT]
+
+
+def test_plugin_scripts_reject_extra_args(tmp_path):
+    home = tmp_path / "home"
+    home.mkdir()
+    for script, name in (
+        ("configure-opencode-plugin.py", "opencode"),
+        ("configure-kilo-plugin.py", "kilo"),
+    ):
+        project_root = _make_built_plugin_root(tmp_path, name)
+        result = _run(
+            script,
+            [str(project_root), "4005", "localhost", ENDPOINT, "extra"],
+            home=home,
+        )
+        assert result.returncode == 1
+        assert "usage" in result.stderr
