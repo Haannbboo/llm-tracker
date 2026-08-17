@@ -582,3 +582,86 @@ def test_record_usage_does_not_merge_different_cache_creation(test_db):
     assert proxy_usage.id != otlp_usage.id
     rows = fetch_recent_usage(limit=10, db_path=test_db)
     assert len(rows) == 2
+
+
+def test_record_usage_writes_null_user_id_on_all_tables(test_db):
+    """AC 9: a normal local record flow writes NULL user_id everywhere."""
+    from sqlalchemy.orm import Session as OrmSession
+
+    from src.database import create_session_evaluation_job, get_engine, select
+    from src.database.models import (
+        EvaluationJob,
+        SessionRecord,
+        ToolCall,
+        Usage,
+        UsageDaily,
+    )
+    from src.recorder import record_tool_call, record_usage
+
+    usage = record_usage(
+        ts=1779148800000000,
+        provider="openai",
+        model="gpt-4",
+        client_source="test",
+        session_id="sess-null-user",
+        endpoint="/v1/chat/completions",
+        prompt_tokens=100,
+        completion_tokens=50,
+        total_tokens=150,
+        status=200,
+        db_path=test_db,
+    )
+    assert usage is not None
+
+    record_tool_call(
+        tool_use_id="null_user_tool",
+        usage_id=usage.id,
+        session_id="sess-null-user",
+        tool_name="bash",
+        ts=usage.ts,
+        db_path=test_db,
+    )
+    create_session_evaluation_job(
+        session_id="sess-null-user", client_source="test", db_path=test_db
+    )
+
+    with OrmSession(get_engine(test_db)) as session:
+        assert session.scalar(select(Usage).where(Usage.id == usage.id)).user_id is None
+        assert session.scalar(select(UsageDaily)).user_id is None
+        assert session.scalar(select(SessionRecord)).user_id is None
+        assert session.scalar(select(ToolCall)).user_id is None
+        assert session.scalar(select(EvaluationJob)).user_id is None
+
+
+def test_record_usage_does_not_merge_across_user_ids(test_db):
+    """AC 7: dedup never crosses tenants — NULL vs real, and real vs real."""
+    otlp_usage = _record_otlp_usage(test_db)
+    assert otlp_usage is not None
+
+    proxy_usage = _record_proxy_usage(test_db, user_id="u1")
+    assert proxy_usage is not None
+    assert proxy_usage.id != otlp_usage.id
+    rows = fetch_recent_usage(limit=10, db_path=test_db)
+    assert len(rows) == 2
+
+    other_otlp = _record_otlp_usage(
+        test_db, ts=1779148800000000 + 100_000_000, user_id="u2"
+    )
+    other_proxy = _record_proxy_usage(
+        test_db, ts=1779148800000000 + 100_000_000, user_id="u3"
+    )
+    assert other_otlp is not None
+    assert other_proxy is not None
+    assert other_proxy.id != other_otlp.id
+    assert len(fetch_recent_usage(limit=10, db_path=test_db)) == 4
+
+    same_user_otlp = _record_otlp_usage(
+        test_db, ts=1779148800000000 + 200_000_000, user_id="u4"
+    )
+    same_user_proxy = _record_proxy_usage(
+        test_db, ts=1779148800000000 + 200_000_000, user_id="u4"
+    )
+    assert same_user_otlp is not None
+    assert same_user_proxy is not None
+    assert same_user_proxy.id == same_user_otlp.id
+    assert len(fetch_recent_usage(limit=10, db_path=test_db)) == 5

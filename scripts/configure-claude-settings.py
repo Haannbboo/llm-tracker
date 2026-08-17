@@ -78,7 +78,15 @@ def main() -> int:
         _info(f"Claude Code telemetry already up-to-date in {settings_path}")
 
     # Register tool-call hook (PreToolUse + PostToolUse).
-    hook_script = str(Path(__file__).resolve().parent / "claude-hook.sh")
+    hook_path = Path(__file__).resolve().parent / "claude-hook.sh"
+    parts = hook_path.parts
+    if ".claude" in parts:
+        wt_idx = parts.index(".claude") + 1
+        if wt_idx < len(parts) and parts[wt_idx] == "worktrees":
+            main_hook = Path(*parts[: wt_idx - 1]) / "scripts" / "claude-hook.sh"
+            if main_hook.exists():
+                hook_path = main_hook
+    hook_script = str(hook_path)
     hooks = settings.setdefault("hooks", {})
     hook_changed = False
     for event in ("PreToolUse", "PostToolUse"):

@@ -19,11 +19,11 @@ from sqlalchemy.orm import Session
 
 from .database import (
     VALID_OUTCOMES,
-    SessionRecord,
     create_session_evaluation_job,
     find_active_session_evaluation_job,
     get_engine,
     get_evaluation_job,
+    get_session_record,
     mark_evaluation_job_failed,
     mark_evaluation_job_running,
     mark_evaluation_job_succeeded,
@@ -885,7 +885,7 @@ def _session_has_manual_evaluation(
     db_path: str | None = None,
 ) -> bool:
     with Session(get_engine(db_path)) as session:
-        record = session.get(SessionRecord, session_id)
+        record = get_session_record(session, session_id)
         return bool(record is not None and record.source == "manual")
 
 
@@ -913,7 +913,7 @@ def summarize_session_with_llm(
 ) -> dict[str, Any]:
     """Evaluate and summarize a session synchronously using the central evaluator."""
     with Session(get_engine(db_path)) as session:
-        record = session.get(SessionRecord, session_id)
+        record = get_session_record(session, session_id)
         if not record:
             raise ValueError(f"Session not found: {session_id}")
         session.expunge(record)
@@ -1048,7 +1048,7 @@ def start_session_evaluation_job(
         raise ValueError(f"Unsupported evaluator agent: {evaluator_type}")
 
     with Session(get_engine(db_path)) as session:
-        record = session.get(SessionRecord, session_id)
+        record = get_session_record(session, session_id)
         if not record:
             raise ValueError(f"Session not found: {session_id}")
         if record.source == "manual":

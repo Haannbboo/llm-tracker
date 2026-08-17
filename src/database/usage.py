@@ -29,7 +29,7 @@ from sqlalchemy.orm import Session
 from ..costs import calculate_costs, resolve_cost_match
 from ..utils import micros_to_secs, secs_to_micros
 from .engine import get_engine
-from .models import BaseUrl, SessionRecord, ToolCall, Usage, UsageDaily
+from .models import BaseUrl, ToolCall, Usage, UsageDaily
 
 logger = logging.getLogger(__name__)
 
@@ -124,6 +124,7 @@ def merge_duplicate_usage(
     ts: int,
     session_id: str | None,
     client_ip: str | None,
+    user_id: str | None = None,
     db_path: str | None = None,
 ) -> Usage | None:
     """Find a same-shaped usage row already recorded by the other collection path
@@ -156,6 +157,7 @@ def merge_duplicate_usage(
             .where(
                 and_(
                     endpoint_filter,
+                    Usage.user_id == user_id,
                     Usage.client_source.in_(other_path_sources),
                     Usage.model == model,
                     Usage.prompt_tokens == prompt_tokens,
@@ -251,88 +253,101 @@ def upsert_daily_aggregate(usage: Usage, db_path: str | None = None) -> None:
     output_cost = Decimal(str(usage.output_cost_usd))
     total_cost = Decimal(str(usage.total_cost_usd))
 
-    engine = get_engine(db_path)
-    with Session(engine) as session:
-        existing = session.scalar(
-            select(UsageDaily).where(
-                and_(
-                    UsageDaily.date == date,
-                    UsageDaily.provider == usage.provider,
-                    UsageDaily.model == usage.model,
-                    UsageDaily.client_source == client_source,
-                )
-            )
-        )
-        if existing:
-            existing.request_count += 1
-            existing.prompt_tokens += usage.prompt_tokens or 0
-            existing.completion_tokens += usage.completion_tokens or 0
-            existing.reasoning_tokens += usage.reasoning_tokens or 0
-            existing.cached_tokens += usage.cached_tokens or 0
-            existing.total_tokens += usage.total_tokens or 0
-            existing.tool_tokens += usage.tool_tokens or 0
-            existing.cache_creation_tokens += usage.cache_creation_tokens or 0
-            existing.prompt_length += usage.prompt_length
-            existing.input_cost_usd += input_cost
-            existing.output_cost_usd += output_cost
-            existing.total_cost_usd += total_cost
-            existing.successful_requests += 1 if is_success else 0
-            existing.failed_requests += 0 if is_success else 1
-            existing.latency_sum_ms += latency
-
-            if not is_success:
-                status = usage.status
-                if status == 429:
-                    existing.status_429 += 1
-                elif status is not None and 400 <= status < 500:
-                    existing.status_4xx += 1
-                elif status is not None and status >= 500:
-                    existing.status_5xx += 1
-                else:
-                    existing.status_unknown += 1
+    status_429 = status_4xx = status_5xx = status_unknown = 0
+    if not is_success:
+        status = usage.status
+        if status == 429:
+            status_429 = 1
+        elif status is not None and 400 <= status < 500:
+            status_4xx = 1
+        elif status is not None and status >= 500:
+            status_5xx = 1
         else:
-            status_429 = 0
-            status_4xx = 0
-            status_5xx = 0
-            status_unknown = 0
-            if not is_success:
-                status = usage.status
-                if status == 429:
-                    status_429 = 1
-                elif status is not None and 400 <= status < 500:
-                    status_4xx = 1
-                elif status is not None and status >= 500:
-                    status_5xx = 1
-                else:
-                    status_unknown = 1
+            status_unknown = 1
 
-            session.add(
-                UsageDaily(
-                    date=date,
-                    provider=usage.provider,
-                    model=usage.model,
-                    client_source=client_source,
-                    request_count=1,
-                    prompt_tokens=usage.prompt_tokens or 0,
-                    completion_tokens=usage.completion_tokens or 0,
-                    reasoning_tokens=usage.reasoning_tokens or 0,
-                    cached_tokens=usage.cached_tokens or 0,
-                    total_tokens=usage.total_tokens or 0,
-                    tool_tokens=usage.tool_tokens or 0,
-                    cache_creation_tokens=usage.cache_creation_tokens or 0,
-                    prompt_length=usage.prompt_length,
-                    input_cost_usd=input_cost,
-                    output_cost_usd=output_cost,
-                    total_cost_usd=total_cost,
-                    successful_requests=1 if is_success else 0,
-                    failed_requests=0 if is_success else 1,
-                    latency_sum_ms=latency,
-                    status_429=status_429,
-                    status_4xx=status_4xx,
-                    status_5xx=status_5xx,
-                    status_unknown=status_unknown,
-                )
-            )
+    values = {
+        "date": date,
+        "provider": usage.provider,
+        "model": usage.model,
+        "client_source": client_source,
+        "user_id": usage.user_id,
+        "request_count": 1,
+        "prompt_tokens": usage.prompt_tokens or 0,
+        "completion_tokens": usage.completion_tokens or 0,
+        "reasoning_tokens": usage.reasoning_tokens or 0,
+        "cached_tokens": usage.cached_tokens or 0,
+        "total_tokens": usage.total_tokens or 0,
+        "tool_tokens": usage.tool_tokens or 0,
+        "cache_creation_tokens": usage.cache_creation_tokens or 0,
+        "prompt_length": usage.prompt_length,
+        "input_cost_usd": input_cost,
+        "output_cost_usd": output_cost,
+        "total_cost_usd": total_cost,
+        "successful_requests": 1 if is_success else 0,
+        "failed_requests": 0 if is_success else 1,
+        "latency_sum_ms": latency,
+        "status_429": status_429,
+        "status_4xx": status_4xx,
+        "status_5xx": status_5xx,
+        "status_unknown": status_unknown,
+    }
+
+    engine = get_engine(db_path)
+    from sqlalchemy.dialects.postgresql import insert as pg_insert
+    from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+
+    insert_fn = pg_insert if engine.dialect.name == "postgresql" else sqlite_insert
+
+    if usage.user_id is None:
+        index_elements = ["date", "provider", "model", "client_source"]
+        index_where = UsageDaily.user_id.is_(None)
+    else:
+        index_elements = ["date", "provider", "model", "client_source", "user_id"]
+        index_where = UsageDaily.user_id.isnot(None)
+
+    statement = insert_fn(UsageDaily).values(**values)
+    statement = statement.on_conflict_do_update(
+        index_elements=index_elements,
+        index_where=index_where,
+        set_={
+            "request_count": UsageDaily.request_count
+            + statement.excluded.request_count,
+            "prompt_tokens": UsageDaily.prompt_tokens
+            + statement.excluded.prompt_tokens,
+            "completion_tokens": UsageDaily.completion_tokens
+            + statement.excluded.completion_tokens,
+            "reasoning_tokens": UsageDaily.reasoning_tokens
+            + statement.excluded.reasoning_tokens,
+            "cached_tokens": UsageDaily.cached_tokens
+            + statement.excluded.cached_tokens,
+            "total_tokens": UsageDaily.total_tokens + statement.excluded.total_tokens,
+            "tool_tokens": UsageDaily.tool_tokens + statement.excluded.tool_tokens,
+            "cache_creation_tokens": UsageDaily.cache_creation_tokens
+            + statement.excluded.cache_creation_tokens,
+            "prompt_length": UsageDaily.prompt_length
+            + statement.excluded.prompt_length,
+            "input_cost_usd": UsageDaily.input_cost_usd
+            + statement.excluded.input_cost_usd,
+            "output_cost_usd": UsageDaily.output_cost_usd
+            + statement.excluded.output_cost_usd,
+            "total_cost_usd": UsageDaily.total_cost_usd
+            + statement.excluded.total_cost_usd,
+            "successful_requests": UsageDaily.successful_requests
+            + statement.excluded.successful_requests,
+            "failed_requests": UsageDaily.failed_requests
+            + statement.excluded.failed_requests,
+            "latency_sum_ms": UsageDaily.latency_sum_ms
+            + statement.excluded.latency_sum_ms,
+            "status_429": UsageDaily.status_429 + statement.excluded.status_429,
+            "status_4xx": UsageDaily.status_4xx + statement.excluded.status_4xx,
+            "status_5xx": UsageDaily.status_5xx + statement.excluded.status_5xx,
+            "status_unknown": UsageDaily.status_unknown
+            + statement.excluded.status_unknown,
+        },
+    )
+
+    with Session(engine) as session:
+        session.execute(statement)
         session.commit()
 
 
@@ -360,7 +375,12 @@ def recalculate_usage_cost(
     overwritten with a zeroed fallback cost — callers should surface
     `result.skipped` to the user instead of treating it as success.
     """
-    from .sessions import _add_usage_to_cost_maps, _load_cost_map, _primary_by_cost
+    from .sessions import (
+        _add_usage_to_cost_maps,
+        _load_cost_map,
+        _primary_by_cost,
+        get_session_record,
+    )
 
     engine = get_engine(db_path)
     with Session(engine) as session:
@@ -408,6 +428,7 @@ def recalculate_usage_cost(
                     UsageDaily.provider == usage.provider,
                     UsageDaily.model == usage.model,
                     UsageDaily.client_source == (usage.client_source or ""),
+                    func.coalesce(UsageDaily.user_id, "") == (usage.user_id or ""),
                 )
             )
             .values(
@@ -432,8 +453,11 @@ def recalculate_usage_cost(
         # above; harmless in practice since recalculation is a rare manual
         # action, not a hot ingest path.
         if usage.session_id and deltas["total_cost_usd"] != 0:
-            session_row = session.get(
-                SessionRecord, usage.session_id, with_for_update=True
+            session_row = get_session_record(
+                session,
+                usage.session_id,
+                user_id=usage.user_id,
+                with_for_update=True,
             )
             if session_row is None:
                 logger.warning(
@@ -467,6 +491,7 @@ def recalculate_usage_cost(
 
 USAGE_COPY_FIELDS = (
     "id",
+    "user_id",
     "ts",
     "provider",
     "model",
@@ -536,6 +561,7 @@ def merge_usage_database(
             target.merge(
                 ToolCall(
                     tool_use_id=tc.tool_use_id,
+                    user_id=tc.user_id,
                     usage_id=tc.usage_id,
                     session_id=tc.session_id,
                     tool_name=tc.tool_name,

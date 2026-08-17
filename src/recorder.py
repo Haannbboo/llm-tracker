@@ -21,6 +21,7 @@ def record_usage(
     ts: int | None = None,
     provider: str,
     model: str,
+    user_id: str | None = None,
     client_source: str | None = None,
     session_id: str | None = None,
     endpoint: str,
@@ -66,6 +67,7 @@ def record_usage(
         ts=usage_ts,
         session_id=session_id,
         client_ip=client_ip,
+        user_id=user_id,
         db_path=db_path,
     )
     if duplicate is not None:
@@ -90,6 +92,7 @@ def record_usage(
         ts=usage_ts,
         provider=provider,
         model=model,
+        user_id=user_id,
         client_source=client_source,
         session_id=session_id,
         endpoint=endpoint,
@@ -123,6 +126,7 @@ def record_tool_call(
     usage_id: str | None = None,
     session_id: str | None = None,
     tool_name: str,
+    user_id: str | None = None,
     client_source: str | None = None,
     ts: int,
     db_path: str | None = None,
@@ -136,6 +140,7 @@ def record_tool_call(
     engine = get_engine(db_path)
     tc = ToolCall(
         tool_use_id=tool_use_id,
+        user_id=user_id,
         usage_id=usage_id,
         session_id=session_id,
         tool_name=normalize_tool_name(tool_name),

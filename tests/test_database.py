@@ -5518,3 +5518,807 @@ def test_recalculate_usage_cost_returns_none_for_missing_row(fresh_db):
         database_module.recalculate_usage_cost("nonexistent-id", db_path=db_path)
         is None
     )
+
+
+# === PR 4 tenancy schema ===
+
+OLD_SHAPE_USAGE_DDL = """
+CREATE TABLE usage (
+    id TEXT PRIMARY KEY,
+    ts INTEGER NOT NULL,
+    provider TEXT NOT NULL,
+    model TEXT NOT NULL,
+    client_source TEXT,
+    session_id TEXT,
+    endpoint TEXT NOT NULL,
+    prompt_tokens INTEGER,
+    prompt_length INTEGER NOT NULL DEFAULT 0,
+    completion_tokens INTEGER,
+    reasoning_tokens INTEGER,
+    cached_tokens INTEGER,
+    total_tokens INTEGER,
+    latency_ms INTEGER,
+    ttft_ms INTEGER,
+    tool_tokens INTEGER,
+    cache_creation_tokens INTEGER,
+    input_cost_usd NUMERIC(18, 8) NOT NULL DEFAULT 0,
+    output_cost_usd NUMERIC(18, 8) NOT NULL DEFAULT 0,
+    total_cost_usd NUMERIC(18, 8) NOT NULL DEFAULT 0,
+    status INTEGER,
+    client_ip TEXT
+);
+"""
+
+OLD_SHAPE_USAGE_DAILY_DDL = """
+CREATE TABLE usage_daily (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    date TEXT NOT NULL,
+    provider TEXT NOT NULL,
+    model TEXT NOT NULL,
+    client_source TEXT NOT NULL DEFAULT '',
+    request_count INTEGER NOT NULL DEFAULT 0,
+    prompt_tokens INTEGER NOT NULL DEFAULT 0,
+    completion_tokens INTEGER NOT NULL DEFAULT 0,
+    reasoning_tokens INTEGER NOT NULL DEFAULT 0,
+    cached_tokens INTEGER NOT NULL DEFAULT 0,
+    total_tokens INTEGER NOT NULL DEFAULT 0,
+    tool_tokens INTEGER NOT NULL DEFAULT 0,
+    cache_creation_tokens INTEGER NOT NULL DEFAULT 0,
+    prompt_length INTEGER NOT NULL DEFAULT 0,
+    input_cost_usd NUMERIC(18, 8) NOT NULL DEFAULT 0,
+    output_cost_usd NUMERIC(18, 8) NOT NULL DEFAULT 0,
+    total_cost_usd NUMERIC(18, 8) NOT NULL DEFAULT 0,
+    successful_requests INTEGER NOT NULL DEFAULT 0,
+    failed_requests INTEGER NOT NULL DEFAULT 0,
+    status_429 INTEGER NOT NULL DEFAULT 0,
+    status_4xx INTEGER NOT NULL DEFAULT 0,
+    status_5xx INTEGER NOT NULL DEFAULT 0,
+    status_unknown INTEGER NOT NULL DEFAULT 0,
+    latency_sum_ms INTEGER NOT NULL DEFAULT 0,
+    UNIQUE(date, provider, model, client_source)
+);
+"""
+
+OLD_SHAPE_SESSIONS_DDL = """
+CREATE TABLE sessions (
+    session_id TEXT PRIMARY KEY,
+    client_source TEXT,
+    started INTEGER NOT NULL,
+    ended INTEGER NOT NULL,
+    request_count INTEGER NOT NULL DEFAULT 0,
+    successful_requests INTEGER NOT NULL DEFAULT 0,
+    failed_requests INTEGER NOT NULL DEFAULT 0,
+    total_tokens INTEGER NOT NULL DEFAULT 0,
+    prompt_tokens INTEGER NOT NULL DEFAULT 0,
+    completion_tokens INTEGER NOT NULL DEFAULT 0,
+    cached_tokens INTEGER NOT NULL DEFAULT 0,
+    cache_creation_tokens INTEGER NOT NULL DEFAULT 0,
+    total_cost_usd NUMERIC(18, 8) NOT NULL DEFAULT 0,
+    latency_sum_ms INTEGER NOT NULL DEFAULT 0,
+    avg_latency_ms NUMERIC(18, 4),
+    avg_ttft_ms NUMERIC(18, 4),
+    primary_provider TEXT,
+    primary_model TEXT,
+    providers_json TEXT,
+    models_json TEXT,
+    tool_calls_json TEXT DEFAULT '{}',
+    last_usage_id TEXT,
+    updated_at TEXT NOT NULL
+);
+"""
+
+OLD_SHAPE_EVALUATION_JOBS_DDL = """
+CREATE TABLE evaluation_jobs (
+    job_id TEXT PRIMARY KEY,
+    kind TEXT NOT NULL,
+    session_id TEXT NOT NULL,
+    client_source TEXT,
+    trigger TEXT NOT NULL DEFAULT 'manual',
+    evaluator_type TEXT NOT NULL DEFAULT 'codex',
+    status TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    started_at TEXT,
+    finished_at TEXT,
+    error TEXT
+);
+"""
+
+
+CREATE_ALL_ERA_USAGE_DAILY_DDL = OLD_SHAPE_USAGE_DAILY_DDL.replace(
+    ",\n    UNIQUE(date, provider, model, client_source)", ""
+)
+
+
+def _create_all_era_db(db_file) -> None:
+    """Build today's shape as created by Base.metadata.create_all (no
+    table-level UNIQUE on usage_daily) with duplicate daily rows."""
+    import sqlite3
+
+    connection = sqlite3.connect(db_file)
+    connection.executescript(
+        OLD_SHAPE_USAGE_DDL
+        + CREATE_ALL_ERA_USAGE_DAILY_DDL
+        + OLD_SHAPE_SESSIONS_DDL
+        + OLD_SHAPE_EVALUATION_JOBS_DDL
+    )
+    connection.execute(
+        """
+        INSERT INTO usage (id, ts, provider, model, client_source, session_id,
+            endpoint, prompt_tokens, completion_tokens, total_tokens,
+            latency_ms, status, input_cost_usd, output_cost_usd, total_cost_usd)
+        VALUES ('uuid-1', ?, 'anthropic', 'm1', 'claude-code', 'sess-1',
+            '/v1/messages', 10, 5, 15, 100, 200, 0.001, 0.002, 0.003)
+        """,
+        (TS_2026_04_17_10,),
+    )
+    connection.execute(
+        """
+        INSERT INTO usage_daily (date, provider, model, client_source,
+            request_count, prompt_tokens, completion_tokens, total_tokens,
+            input_cost_usd, total_cost_usd, latency_sum_ms)
+        VALUES ('2026-04-17', 'anthropic', 'm1', 'claude-code',
+            1, 10, 5, 15, 0.001, 0.003, 100)
+        """
+    )
+    connection.execute(
+        """
+        INSERT INTO usage_daily (date, provider, model, client_source,
+            request_count, prompt_tokens, completion_tokens, total_tokens,
+            input_cost_usd, total_cost_usd, latency_sum_ms)
+        VALUES ('2026-04-17', 'anthropic', 'm1', 'claude-code',
+            2, 20, 10, 30, 0.002, 0.006, 200)
+        """
+    )
+    connection.execute(
+        """
+        INSERT INTO usage_daily (date, provider, model, client_source,
+            request_count, prompt_tokens)
+        VALUES ('2026-04-18', 'anthropic', 'm1', 'claude-code', 7, 70)
+        """
+    )
+    connection.execute(
+        """
+        INSERT INTO sessions (session_id, started, ended, request_count, updated_at)
+        VALUES ('sess-1', ?, ?, 1, '2026-04-17T00:00:00+00:00')
+        """,
+        (TS_2026_04_17_10, TS_2026_04_17_10),
+    )
+    connection.execute(
+        """
+        INSERT INTO evaluation_jobs (job_id, kind, session_id, status, created_at)
+        VALUES ('job-1', 'session_evaluation', 'sess-1', 'queued',
+            '2026-04-17T00:00:00+00:00')
+        """
+    )
+    connection.commit()
+    connection.close()
+
+
+def _old_shape_db(db_file) -> None:
+    import sqlite3
+
+    connection = sqlite3.connect(db_file)
+    connection.executescript(
+        OLD_SHAPE_USAGE_DDL
+        + OLD_SHAPE_USAGE_DAILY_DDL
+        + OLD_SHAPE_SESSIONS_DDL
+        + OLD_SHAPE_EVALUATION_JOBS_DDL
+    )
+    connection.execute(
+        """
+        INSERT INTO usage (id, ts, provider, model, client_source, session_id,
+            endpoint, prompt_tokens, completion_tokens, total_tokens,
+            latency_ms, status, input_cost_usd, output_cost_usd, total_cost_usd)
+        VALUES ('uuid-1', ?, 'anthropic', 'm1', 'claude-code', 'sess-1',
+            '/v1/messages', 10, 5, 15, 100, 200, 0.001, 0.002, 0.003)
+        """,
+        (TS_2026_04_17_10,),
+    )
+    connection.execute(
+        """
+        INSERT INTO usage_daily (date, provider, model, client_source,
+            request_count, prompt_tokens)
+        VALUES ('2026-04-17', 'anthropic', 'm1', 'claude-code', 42, 4242)
+        """
+    )
+    connection.execute(
+        """
+        INSERT INTO sessions (session_id, started, ended, request_count, updated_at)
+        VALUES ('sess-1', ?, ?, 42, '2026-04-17T00:00:00+00:00')
+        """,
+        (TS_2026_04_17_10, TS_2026_04_17_10),
+    )
+    connection.execute(
+        """
+        INSERT INTO evaluation_jobs (job_id, kind, session_id, status, created_at)
+        VALUES ('job-1', 'session_evaluation', 'sess-1', 'queued',
+            '2026-04-17T00:00:00+00:00')
+        """
+    )
+    connection.commit()
+    connection.close()
+
+
+def test_migrate_database_adds_tenancy_schema_preserves_data(
+    database_module, schema_migrations_module, isolated_home
+):
+    """AC 1: old-shape DB migrates with data preserved, keys swapped, and a
+    second run is a no-op for the tenancy steps."""
+    import sqlite3
+
+    db_file = isolated_home / "usage.db"
+    _old_shape_db(db_file)
+
+    changes = schema_migrations_module.migrate_database(str(db_file))
+    assert "usage.user_id" in changes
+    assert "usage_daily.user_id" in changes
+    assert "sessions.user_id" in changes
+    assert "tool_calls.user_id" not in changes  # created fresh by init_db
+    assert "evaluation_jobs.user_id" in changes
+    assert "usage_daily.unique_swap" in changes
+
+    engine = database_module.get_engine(str(db_file))
+    with engine.connect() as conn:
+        usage_rows = list(
+            conn.execute(database_module.text("SELECT id, user_id FROM usage"))
+        )
+        assert usage_rows == [("uuid-1", None)]
+        daily_rows = list(
+            conn.execute(
+                database_module.text(
+                    "SELECT date, request_count, prompt_tokens, user_id FROM usage_daily"
+                )
+            )
+        )
+        assert daily_rows == [("2026-04-17", 42, 4242, None)]
+        sessions_rows = list(
+            conn.execute(
+                database_module.text(
+                    "SELECT session_id, request_count, user_id FROM sessions"
+                )
+            )
+        )
+        assert sessions_rows == [("sess-1", 42, None)]
+        jobs_rows = list(
+            conn.execute(
+                database_module.text("SELECT job_id, user_id FROM evaluation_jobs")
+            )
+        )
+        assert jobs_rows == [("job-1", None)]
+
+    connection = sqlite3.connect(db_file)
+    try:
+        # Old table-level UNIQUE is gone (no sqlite_autoindex on usage_daily)
+        autoindexes = [
+            row[1]
+            for row in connection.execute("PRAGMA index_list(usage_daily)").fetchall()
+            if row[1].startswith("sqlite_autoindex")
+        ]
+        assert autoindexes == []
+        # Both partial unique indexes exist
+        index_names = {
+            row[1] for row in connection.execute("PRAGMA index_list(usage_daily)")
+        }
+        assert "uq_usage_daily_local" in index_names
+        assert "uq_usage_daily_user" in index_names
+        # sessions PK is still the bare session_id
+        table_info = connection.execute("PRAGMA table_info(sessions)").fetchall()
+        pk_columns = [row[1] for row in table_info if row[5]]
+        assert pk_columns == ["session_id"]
+    finally:
+        connection.close()
+
+    tenancy_changes = {
+        change
+        for change in schema_migrations_module.migrate_database(str(db_file))
+        if "user_id" in change or change == "usage_daily.unique_swap"
+    }
+    assert tenancy_changes == set()
+
+
+def test_init_db_creates_tenancy_shapes(fresh_db):
+    """AC 2: init_db alone (no migrate_database) creates the new shapes."""
+    from sqlalchemy import inspect
+
+    database_module = fresh_db.database_module
+    db_path = fresh_db.db_path
+
+    engine = database_module.get_engine(db_path)
+    inspector = inspect(engine)
+    for table in ("usage", "usage_daily", "sessions", "tool_calls", "evaluation_jobs"):
+        assert "user_id" in {c["name"] for c in inspector.get_columns(table)}
+
+    daily_indexes = {i["name"]: i for i in inspector.get_indexes("usage_daily")}
+    assert daily_indexes["uq_usage_daily_local"]["unique"]
+    assert daily_indexes["uq_usage_daily_user"]["unique"]
+
+    for table, index_name in [
+        ("usage", "ix_usage_user_id"),
+        ("sessions", "ix_sessions_user_id"),
+        ("tool_calls", "ix_tool_calls_user_id"),
+    ]:
+        assert index_name in {i["name"] for i in inspector.get_indexes(table)}
+
+
+def test_upsert_daily_aggregate_separates_null_and_user_rows(fresh_db):
+    """AC 4: same (date, provider, model, client_source) with user_id None vs
+    'u1' produces two rows; increments land in the right row (both ON
+    CONFLICT branches)."""
+    database_module = fresh_db.database_module
+    db_path = fresh_db.db_path
+    database_module.init_db(db_path)
+
+    def make_usage(user_id):
+        return database_module.Usage(
+            ts=TS_2026_04_17_10,
+            provider="anthropic",
+            model="claude-sonnet-4-6",
+            client_source="claude-code",
+            user_id=user_id,
+            session_id="s1",
+            endpoint="/v1/messages",
+            prompt_tokens=100,
+            prompt_length=500,
+            completion_tokens=50,
+            total_tokens=150,
+            latency_ms=200,
+            status=200,
+            input_cost_usd=0.001,
+            output_cost_usd=0.002,
+            total_cost_usd=0.003,
+        )
+
+    database_module.upsert_daily_aggregate(make_usage(None), db_path=db_path)
+    database_module.upsert_daily_aggregate(make_usage(None), db_path=db_path)
+    database_module.upsert_daily_aggregate(make_usage("u1"), db_path=db_path)
+    database_module.upsert_daily_aggregate(make_usage("u1"), db_path=db_path)
+
+    with database_module.get_engine(db_path).connect() as conn:
+        rows = list(
+            conn.execute(
+                database_module.select(database_module.UsageDaily).order_by(
+                    database_module.UsageDaily.id
+                )
+            )
+        )
+    assert len(rows) == 2
+    by_user = {row.user_id: row for row in rows}
+    assert set(by_user) == {None, "u1"}
+    assert by_user[None].request_count == 2
+    assert by_user[None].prompt_tokens == 200
+    assert by_user["u1"].request_count == 2
+    assert by_user["u1"].prompt_tokens == 200
+
+
+def test_upsert_session_from_usage_stamps_null_user_id_and_scopes_tenant(fresh_db):
+    """AC 5: a usage row with user_id None creates a session row with NULL
+    user_id; users with distinct session_ids get distinct rows and the helper
+    returns only the (user_id, session_id) match.
+
+    The tenant guard (bare session_id PK): a second user writing the same
+    session_id fails cleanly with IntegrityError instead of polluting the
+    first user's row.
+    """
+    from sqlalchemy.exc import IntegrityError
+    from sqlalchemy.orm import Session as OrmSession
+
+    from src.database.sessions import get_session_record
+
+    database_module = fresh_db.database_module
+    db_path = fresh_db.db_path
+    database_module.init_db(db_path)
+
+    def make_usage(session_id, user_id, ts=TS_2026_04_17_10):
+        return database_module.Usage(
+            ts=ts,
+            provider="anthropic",
+            model="claude-sonnet-4-6",
+            client_source="claude-code",
+            user_id=user_id,
+            session_id=session_id,
+            endpoint="/v1/messages",
+            prompt_tokens=10,
+            completion_tokens=5,
+            total_tokens=15,
+            latency_ms=100,
+            status=200,
+            input_cost_usd=0.001,
+            output_cost_usd=0.002,
+            total_cost_usd=0.003,
+        )
+
+    database_module.upsert_session_from_usage(
+        make_usage("local-session", None), db_path=db_path
+    )
+    database_module.upsert_session_from_usage(
+        make_usage("tenant-session", "u1"), db_path=db_path
+    )
+    database_module.upsert_session_from_usage(
+        make_usage("tenant-session", "u1", ts=TS_2026_04_17_11), db_path=db_path
+    )
+
+    with database_module.get_engine(db_path).connect() as conn:
+        rows = list(
+            conn.execute(
+                database_module.text(
+                    "SELECT session_id, user_id, request_count FROM sessions "
+                    "ORDER BY session_id"
+                )
+            )
+        )
+    assert rows == [("local-session", None, 1), ("tenant-session", "u1", 2)]
+
+    engine = database_module.get_engine(db_path)
+    with OrmSession(engine) as session:
+        local_record = get_session_record(session, "local-session", user_id=None)
+        assert local_record is not None
+        assert local_record.user_id is None
+        assert local_record.request_count == 1
+        tenant_record = get_session_record(session, "tenant-session", user_id="u1")
+        assert tenant_record is not None
+        assert tenant_record.request_count == 2
+        assert get_session_record(session, "tenant-session", user_id=None) is None
+        assert get_session_record(session, "tenant-session", user_id="u3") is None
+        assert get_session_record(session, "local-session", user_id="u1") is None
+
+    # Cross-tenant session_id collision: clean IntegrityError, no pollution.
+    with pytest.raises(IntegrityError):
+        database_module.upsert_session_from_usage(
+            make_usage("local-session", "u1"), db_path=db_path
+        )
+    with database_module.get_engine(db_path).connect() as conn:
+        local_row = conn.execute(
+            database_module.text(
+                "SELECT user_id, request_count FROM sessions WHERE session_id = 'local-session'"
+            )
+        ).one()
+    assert local_row.user_id is None
+    assert local_row.request_count == 1
+
+
+def test_rebuild_sessions_from_usage_stamps_user_id(fresh_db):
+    """AC 8: rebuild stamps user_id from the usage rows and still recomputes
+    tool_calls_json from the tool_calls table."""
+    from src.recorder import record_tool_call
+
+    database_module = fresh_db.database_module
+    db_path = fresh_db.db_path
+    database_module.init_db(db_path)
+
+    usage = database_module.Usage(
+        ts=TS_2026_05_09_10,
+        provider="anthropic",
+        model="claude-sonnet-4-6",
+        client_source="claude-code",
+        user_id="u1",
+        session_id="sess-tools",
+        endpoint="/v1/messages",
+        prompt_tokens=100,
+        completion_tokens=50,
+        total_tokens=150,
+        latency_ms=200,
+        ttft_ms=100,
+        input_cost_usd=0.001,
+        output_cost_usd=0.002,
+        total_cost_usd=0.003,
+        status=200,
+    )
+    database_module.log_usage(usage, db_path=db_path)
+
+    record_tool_call(
+        tool_use_id="t1",
+        usage_id=usage.id,
+        session_id="sess-tools",
+        user_id="u1",
+        tool_name="bash",
+        ts=TS_2026_05_09_10,
+        db_path=db_path,
+    )
+
+    count = database_module.rebuild_sessions_from_usage(db_path=db_path)
+    assert count == 1
+
+    with database_module.get_engine(db_path).connect() as conn:
+        rows = list(
+            conn.execute(
+                database_module.text(
+                    "SELECT session_id, user_id, tool_calls_json FROM sessions"
+                )
+            )
+        )
+    assert len(rows) == 1
+    assert rows[0].session_id == "sess-tools"
+    assert rows[0].user_id == "u1"
+    assert rows[0].tool_calls_json == '{"bash": 1}'
+
+
+def test_migrate_database_merges_duplicate_usage_daily_rows(
+    database_module, schema_migrations_module, isolated_home
+):
+    """Duplicate (date, provider, model, client_source) rows (possible on
+    create_all-era DBs that never had the old UNIQUE) are merged by summing
+    before the partial indexes are created."""
+    db_file = isolated_home / "usage.db"
+    _create_all_era_db(db_file)
+
+    changes = schema_migrations_module.migrate_database(str(db_file))
+    assert "usage_daily.unique_swap" in changes
+
+    with database_module.get_engine(str(db_file)).connect() as conn:
+        rows = list(
+            conn.execute(
+                database_module.text(
+                    "SELECT date, request_count, prompt_tokens, completion_tokens, "
+                    "total_tokens, total_cost_usd, latency_sum_ms, user_id "
+                    "FROM usage_daily ORDER BY date"
+                )
+            )
+        )
+    assert rows == [
+        ("2026-04-17", 3, 30, 15, 45, pytest.approx(0.009), 300, None),
+        ("2026-04-18", 7, 70, 0, 0, 0, 0, None),
+    ]
+
+    import sqlite3
+
+    connection = sqlite3.connect(db_file)
+    try:
+        index_names = {
+            row[1] for row in connection.execute("PRAGMA index_list(usage_daily)")
+        }
+        assert "uq_usage_daily_local" in index_names
+        assert "uq_usage_daily_user" in index_names
+    finally:
+        connection.close()
+
+    tenancy_changes = {
+        change
+        for change in schema_migrations_module.migrate_database(str(db_file))
+        if "user_id" in change or change == "usage_daily.unique_swap"
+    }
+    assert tenancy_changes == set()
+
+
+def test_migrate_database_converges_after_crashed_usage_daily_recreate(
+    database_module, schema_migrations_module, isolated_home
+):
+    """A crashed recreate leaves usage_daily_new behind; the next run must
+    drop it and converge (data preserved, indexes created)."""
+    import sqlite3
+
+    db_file = isolated_home / "usage.db"
+    _old_shape_db(db_file)
+
+    connection = sqlite3.connect(db_file)
+    connection.execute("CREATE TABLE usage_daily_new AS SELECT * FROM usage_daily")
+    connection.commit()
+    connection.close()
+
+    changes = schema_migrations_module.migrate_database(str(db_file))
+    assert "usage_daily.unique_swap" in changes
+
+    connection = sqlite3.connect(db_file)
+    try:
+        tables = {
+            row[0]
+            for row in connection.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'table'"
+            )
+        }
+        assert "usage_daily_new" not in tables
+        index_names = {
+            row[1] for row in connection.execute("PRAGMA index_list(usage_daily)")
+        }
+        assert "uq_usage_daily_local" in index_names
+        assert "uq_usage_daily_user" in index_names
+        rows = list(
+            connection.execute(
+                "SELECT date, request_count, prompt_tokens FROM usage_daily"
+            )
+        )
+        assert rows == [("2026-04-17", 42, 4242)]
+    finally:
+        connection.close()
+
+    tenancy_changes = {
+        change
+        for change in schema_migrations_module.migrate_database(str(db_file))
+        if "user_id" in change or change == "usage_daily.unique_swap"
+    }
+    assert tenancy_changes == set()
+
+
+def test_upsert_daily_aggregate_accumulates_after_migration_recreate(
+    database_module, schema_migrations_module, isolated_home
+):
+    """The write path works against the recreated table: the ON CONFLICT
+    upsert accumulates onto migrated rows and new rows still get ids."""
+    db_file = isolated_home / "usage.db"
+    _old_shape_db(db_file)
+    schema_migrations_module.migrate_database(str(db_file))
+
+    def make_usage(model, ts=TS_2026_04_17_10):
+        return database_module.Usage(
+            ts=ts,
+            provider="anthropic",
+            model=model,
+            client_source="claude-code",
+            session_id="sess-1",
+            endpoint="/v1/messages",
+            prompt_tokens=10,
+            prompt_length=500,
+            completion_tokens=5,
+            total_tokens=15,
+            latency_ms=50,
+            status=200,
+            input_cost_usd=0.001,
+            output_cost_usd=0.002,
+            total_cost_usd=0.003,
+        )
+
+    database_module.upsert_daily_aggregate(make_usage("m1"), db_path=str(db_file))
+
+    with database_module.get_engine(str(db_file)).connect() as conn:
+        rows = list(
+            conn.execute(
+                database_module.text(
+                    "SELECT model, request_count, prompt_tokens, latency_sum_ms "
+                    "FROM usage_daily ORDER BY model"
+                )
+            )
+        )
+    assert rows == [("m1", 43, 4252, 50)]
+
+    database_module.upsert_daily_aggregate(make_usage("m2"), db_path=str(db_file))
+
+    with database_module.get_engine(str(db_file)).connect() as conn:
+        rows = list(
+            conn.execute(
+                database_module.text(
+                    "SELECT id, model, request_count FROM usage_daily ORDER BY model"
+                )
+            )
+        )
+    assert len(rows) == 2
+    by_model = {row.model: row for row in rows}
+    assert by_model["m1"].request_count == 43
+    assert by_model["m2"].request_count == 1
+    assert by_model["m2"].id is not None
+    assert by_model["m2"].id > by_model["m1"].id
+
+
+def test_recalculate_usage_cost_targets_user_slice(fresh_db):
+    """The daily delta UPDATE lands only in the row matching the usage row's
+    user_id when both a NULL-slice and a real-user-slice row exist."""
+    from config.app import ModelCost
+
+    database_module = fresh_db.database_module
+    db_path = fresh_db.db_path
+    database_module.init_db(db_path)
+
+    database_module.log_usage(
+        database_module.Usage(
+            ts=TS_2026_04_17_00,
+            provider="recalc-provider",
+            model="recalc-model",
+            client_source="proxy-client",
+            session_id="session-recalc-local",
+            endpoint="/v1/responses",
+            prompt_tokens=1_000_000,
+            completion_tokens=1_000_000,
+            cached_tokens=0,
+            total_tokens=2_000_000,
+            status=200,
+            input_cost_usd=0.1,
+            output_cost_usd=0.1,
+            total_cost_usd=0.2,
+        ),
+        db_path=db_path,
+    )
+    database_module.log_usage(
+        database_module.Usage(
+            ts=TS_2026_04_17_00,
+            provider="recalc-provider",
+            model="recalc-model",
+            client_source="proxy-client",
+            user_id="u1",
+            endpoint="/v1/responses",
+            prompt_tokens=1_000_000,
+            completion_tokens=1_000_000,
+            cached_tokens=0,
+            total_tokens=2_000_000,
+            status=200,
+            input_cost_usd=1.0,
+            output_cost_usd=1.0,
+            total_cost_usd=2.0,
+        ),
+        db_path=db_path,
+    )
+
+    usage_id = next(
+        r["id"]
+        for r in database_module.fetch_recent_usage(limit=10, db_path=db_path)
+        if r["session_id"] == "session-recalc-local"
+    )
+
+    new_cost = ModelCost(input=2.0, output=4.0, cache_read=0.0)
+    result = database_module.recalculate_usage_cost(
+        usage_id,
+        model_costs={"recalc-model": new_cost},
+        provider_model_costs={},
+        db_path=db_path,
+    )
+    assert result is not None
+    assert result.skipped is False
+
+    with database_module.get_engine(db_path).connect() as conn:
+        rows = list(
+            conn.execute(
+                database_module.text(
+                    "SELECT user_id, total_cost_usd FROM usage_daily ORDER BY user_id"
+                )
+            )
+        )
+    assert len(rows) == 2
+    by_user = {row.user_id: row for row in rows}
+    # NULL slice: 0.2 -> 6.0; the u1 slice is untouched.
+    assert float(by_user[None].total_cost_usd) == pytest.approx(6.0)
+    assert float(by_user["u1"].total_cost_usd) == pytest.approx(2.0)
+
+
+def test_merge_usage_database_copies_user_id(database_module, isolated_home):
+    from sqlalchemy.orm import Session as OrmSession
+
+    from src.database.models import ToolCall
+    from src.recorder import record_tool_call
+
+    run_db = str(isolated_home / "run.db")
+    main_db = str(isolated_home / "main.db")
+    database_module.init_db(run_db)
+    database_module.init_db(main_db)
+
+    usage_obj = database_module.Usage(
+        ts=TS_2026_05_03_18,
+        provider="test-provider",
+        model="test-model",
+        client_source="codex",
+        session_id="session-run-1",
+        user_id="u1",
+        endpoint="otlp",
+        prompt_tokens=10,
+        completion_tokens=5,
+        total_tokens=15,
+        latency_ms=100,
+        status=200,
+    )
+    database_module.log_usage(usage_obj, db_path=run_db)
+    record_tool_call(
+        tool_use_id="tool-run-1",
+        usage_id=usage_obj.id,
+        session_id="session-run-1",
+        user_id="u1",
+        tool_name="bash",
+        client_source="codex",
+        ts=TS_2026_05_03_18,
+        db_path=run_db,
+    )
+
+    inserted = database_module.merge_usage_database(
+        source_db_path=run_db,
+        target_db_path=main_db,
+    )
+    assert inserted == 1
+
+    with OrmSession(database_module.get_engine(main_db)) as session:
+        usage_row = session.scalar(
+            database_module.select(database_module.Usage).where(
+                database_module.Usage.session_id == "session-run-1"
+            )
+        )
+        assert usage_row is not None
+        assert usage_row.user_id == "u1"
+        tool_row = session.scalar(
+            database_module.select(ToolCall).where(ToolCall.tool_use_id == "tool-run-1")
+        )
+        assert tool_row is not None
+        assert tool_row.user_id == "u1"
