@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 
 from .engine import get_engine
 from .models import EvaluationJob, SessionRecord
+from .sessions import get_session_record
 
 SESSION_EVALUATION_JOB_KIND = "session_evaluation"
 ACTIVE_EVALUATION_JOB_STATUSES = {"queued", "running"}
@@ -403,7 +404,7 @@ def list_session_evaluation_jobs_with_progress(
     progress = _active_progress_map(db_path=db_path)
     engine = get_engine(db_path)
     with Session(engine) as session:
-        rec = session.get(SessionRecord, session_id)
+        rec = get_session_record(session, session_id)
         outcome = rec.outcome if rec else None
         jobs = (
             session.execute(

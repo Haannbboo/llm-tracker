@@ -6,6 +6,7 @@ import sys
 from collections.abc import Callable, Generator
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
+from typing import Any
 
 import pytest
 
@@ -246,3 +247,46 @@ def fresh_db(_session_db: str, monkeypatch: pytest.MonkeyPatch):
         database_module=db,
         schema_migrations_module=sm,
     )
+
+
+# Postgres test harness (docs/quick/postgres-testing.md): local-only, gated on
+# LLM_TRACKER_TEST_PG_URL. Every PG test skips when the env var is unset; CI
+# never sets it.
+
+PG_URL_ENV_VAR = "LLM_TRACKER_TEST_PG_URL"
+
+
+def _pg_test_url() -> str | None:
+    return os.environ.get(PG_URL_ENV_VAR)
+
+
+@pytest.fixture(scope="session")
+def pg_engine() -> Generator[Any, None, None]:
+    """Session-scoped engine for the scratch Postgres database."""
+    url = _pg_test_url()
+    if not url:
+        pytest.skip(f"{PG_URL_ENV_VAR} not set")
+    from sqlalchemy import create_engine
+
+    engine = create_engine(url, future=True, pool_pre_ping=True)
+    yield engine
+    engine.dispose()
+
+
+@pytest.fixture
+def pg_clean(pg_engine: Any) -> Generator[Any, None, None]:
+    """Function-scoped: drop all tables so each test starts from empty."""
+    import src.database.models as models
+
+    models.Base.metadata.drop_all(pg_engine)
+    yield pg_engine
+
+
+@pytest.fixture
+def pg_db(pg_clean: Any) -> Generator[str, None, None]:
+    """Function-scoped scratch Postgres with the fresh-schema migration applied."""
+    import src.schema_migrations as sm
+
+    url = os.environ[PG_URL_ENV_VAR]
+    sm.migrate_database(url)
+    yield url

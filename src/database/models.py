@@ -68,6 +68,9 @@ class Usage(Base):
     id: Mapped[str] = mapped_column(
         String, primary_key=True, default=lambda: str(uuid4())
     )
+    user_id: Mapped[str | None] = mapped_column(
+        String, ForeignKey("users.id"), nullable=True, index=True
+    )
     ts: Mapped[int] = mapped_column(BigInteger, nullable=False, index=True)
     provider: Mapped[str] = mapped_column(String, nullable=False)
     model: Mapped[str] = mapped_column(String, nullable=False)
@@ -107,6 +110,9 @@ class UsageDaily(Base):
     __tablename__ = "usage_daily"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[str | None] = mapped_column(
+        String, ForeignKey("users.id"), nullable=True
+    )
     date: Mapped[str] = mapped_column(String, nullable=False)
     provider: Mapped[str] = mapped_column(String, nullable=False)
     model: Mapped[str] = mapped_column(String, nullable=False)
@@ -172,10 +178,35 @@ class UsageDaily(Base):
     )
 
 
+Index(
+    "uq_usage_daily_local",
+    UsageDaily.date,
+    UsageDaily.provider,
+    UsageDaily.model,
+    UsageDaily.client_source,
+    unique=True,
+    sqlite_where=UsageDaily.user_id.is_(None),
+    postgresql_where=UsageDaily.user_id.is_(None),
+)
+
+Index(
+    "uq_usage_daily_user",
+    UsageDaily.date,
+    UsageDaily.provider,
+    UsageDaily.model,
+    UsageDaily.client_source,
+    UsageDaily.user_id,
+    unique=True,
+    sqlite_where=UsageDaily.user_id.isnot(None),
+    postgresql_where=UsageDaily.user_id.isnot(None),
+)
+
+
 class SessionRecord(Base):
     __tablename__ = "sessions"
 
     session_id: Mapped[str] = mapped_column(String, primary_key=True)
+    user_id: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
     client_source: Mapped[str | None] = mapped_column(String, nullable=True)
     started: Mapped[int] = mapped_column(BigInteger, nullable=False)
     ended: Mapped[int] = mapped_column(BigInteger, nullable=False)
@@ -241,6 +272,9 @@ class EvaluationJob(Base):
     __tablename__ = "evaluation_jobs"
 
     job_id: Mapped[str] = mapped_column(String, primary_key=True)
+    user_id: Mapped[str | None] = mapped_column(
+        String, ForeignKey("users.id"), nullable=True
+    )
     kind: Mapped[str] = mapped_column(String, nullable=False)
     session_id: Mapped[str] = mapped_column(String, nullable=False)
     client_source: Mapped[str | None] = mapped_column(String, nullable=True)
@@ -271,6 +305,9 @@ class ToolCall(Base):
     __tablename__ = "tool_calls"
 
     tool_use_id: Mapped[str] = mapped_column(String, primary_key=True)
+    user_id: Mapped[str | None] = mapped_column(
+        String, ForeignKey("users.id"), nullable=True, index=True
+    )
     usage_id: Mapped[str | None] = mapped_column(
         String, ForeignKey("usage.id"), nullable=True, index=True
     )

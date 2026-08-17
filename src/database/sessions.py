@@ -29,6 +29,29 @@ from .models import (
 _SINGLE_REQUEST_SOURCES = frozenset({"opencode", "kilo"})
 
 
+def get_session_record(
+    db_session: Session,
+    session_id: str,
+    user_id: str | None = None,
+    *,
+    with_for_update: bool = False,
+) -> SessionRecord | None:
+    """Return the session row matching (session_id, user_id).
+
+    A None user_id matches rows with a NULL user_id (SQLAlchemy renders
+    ``IS NULL``), so local and tenant lookups never cross.
+    """
+    query = select(SessionRecord).where(
+        and_(
+            SessionRecord.session_id == session_id,
+            SessionRecord.user_id == user_id,
+        )
+    )
+    if with_for_update:
+        query = query.with_for_update()
+    return db_session.scalar(query)
+
+
 def _successful_usage_count(usages: list[Usage]) -> int:
     return sum(1 for usage in usages if usage.status is None or usage.status < 400)
 
@@ -90,6 +113,7 @@ def _session_record_kwargs(
 
     return {
         "session_id": session_id,
+        "user_id": usages[0].user_id,
         "client_source": usages[0].client_source,
         "started": usages[0].ts,
         "ended": usages[-1].ts,
@@ -129,7 +153,7 @@ def upsert_session_from_usage(usage: Usage, db_path: str | None = None) -> None:
 
     engine = get_engine(db_path)
     with Session(engine) as session:
-        existing = session.get(SessionRecord, usage.session_id)
+        existing = get_session_record(session, usage.session_id, user_id=usage.user_id)
         if existing:
             if usage.ts < existing.started:
                 existing.started = usage.ts
@@ -210,7 +234,9 @@ def upsert_session_from_tool_call(
 
     engine = get_engine(db_path)
     with Session(engine) as session:
-        existing = session.get(SessionRecord, tool_call.session_id)
+        existing = get_session_record(
+            session, tool_call.session_id, user_id=tool_call.user_id
+        )
         if not existing:
             return
 
@@ -227,7 +253,7 @@ def summarize_session_tool_calls(
     """Return [{tool_name, count}] for a session, or None if it doesn't exist."""
     engine = get_engine(db_path)
     with Session(engine) as session:
-        rec = session.get(SessionRecord, session_id)
+        rec = get_session_record(session, session_id)
         if not rec:
             return None
         tools = _load_tool_calls_json(rec.tool_calls_json)
@@ -311,7 +337,7 @@ def upsert_session_evaluation(
     now = datetime.now(timezone.utc).isoformat()
     engine = get_engine(db_path)
     with Session(engine) as session:
-        record = session.get(SessionRecord, session_id)
+        record = get_session_record(session, session_id)
         if not record:
             raise ValueError(f"Session not found: {session_id}")
         if skip_if_manual and record.source == "manual":
@@ -335,7 +361,7 @@ def get_session_evaluation(
     """Return evaluation dict for a session, or None if not found or not evaluated."""
     engine = get_engine(db_path)
     with Session(engine) as session:
-        rec = session.get(SessionRecord, session_id)
+        rec = get_session_record(session, session_id)
         if not rec or rec.outcome is None:
             return None
         return {
@@ -357,7 +383,7 @@ def delete_session_evaluation(session_id: str, db_path: str | None = None) -> bo
     """Clear evaluation columns on a session. Returns True if session found."""
     engine = get_engine(db_path)
     with Session(engine) as session:
-        rec = session.get(SessionRecord, session_id)
+        rec = get_session_record(session, session_id)
         if not rec:
             return False
         rec.outcome = None

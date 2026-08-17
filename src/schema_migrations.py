@@ -428,6 +428,173 @@ def _sqlite_recreate_with_int_ts(connection, table_name: str, column_name: str) 
     connection.execute(text(f"ALTER TABLE {new_table} RENAME TO {table_name}"))
 
 
+_USAGE_DAILY_MERGE_GROUP_COLUMNS = (
+    "date",
+    "provider",
+    "model",
+    "client_source",
+    "user_id",
+)
+
+_USAGE_DAILY_SUM_COLUMNS = (
+    "request_count",
+    "prompt_tokens",
+    "completion_tokens",
+    "reasoning_tokens",
+    "cached_tokens",
+    "total_tokens",
+    "tool_tokens",
+    "cache_creation_tokens",
+    "prompt_length",
+    "input_cost_usd",
+    "output_cost_usd",
+    "total_cost_usd",
+    "successful_requests",
+    "failed_requests",
+    "latency_sum_ms",
+    "status_429",
+    "status_4xx",
+    "status_5xx",
+    "status_unknown",
+)
+
+
+def _sqlite_recreate_usage_daily(connection) -> None:
+    """Recreate usage_daily, merging duplicate rows by summing the numeric
+    columns and grouping on the aggregation key.
+
+    Duplicate rows are possible on DBs whose table came from create_all
+    (which never carried the old UNIQUE) combined with the pre-atomic racy
+    upsert. The recreate drops table-level constraints (the legacy UNIQUE)
+    and starts with DROP TABLE IF EXISTS so a crashed previous attempt
+    converges on retry. Caveats: the PK is re-emitted bare (pragma carries
+    no AUTOINCREMENT flag) — ids still auto-generate via rowid aliasing,
+    only reuse semantics differ; and SQLite FKs are not carried over
+    (decorative in this codebase).
+    """
+    connection.execute(text("DROP TABLE IF EXISTS usage_daily_new"))
+    result = connection.execute(text("PRAGMA table_info(usage_daily)"))
+    columns = result.fetchall()
+
+    new_col_defs = []
+    select_parts = []
+    for col in columns:
+        col_name = col[1]
+        col_type = col[2]
+        not_null = col[3]
+        default_val = col[4]
+        default_clause = f" DEFAULT {default_val}" if default_val is not None else ""
+        new_col_defs.append(
+            f"{col_name} {col_type}{' NOT NULL' if not_null else ''}{default_clause}"
+        )
+        if col_name == "id":
+            select_parts.append(f"MIN({col_name})")
+        elif col_name in _USAGE_DAILY_MERGE_GROUP_COLUMNS:
+            select_parts.append(col_name)
+        else:
+            select_parts.append(f"SUM({col_name})")
+
+    pk_cols = [c[1] for c in columns if c[5]]
+    if pk_cols:
+        new_col_defs_clean = []
+        for d in new_col_defs:
+            col_name = d.split()[0]
+            if col_name in pk_cols:
+                new_col_defs_clean.append(d.replace(" PRIMARY KEY", ""))
+            else:
+                new_col_defs_clean.append(d)
+        new_col_defs_clean.append(f"PRIMARY KEY ({', '.join(pk_cols)})")
+        new_col_defs = new_col_defs_clean
+
+    new_table = "usage_daily_new"
+    cols_sql = ", ".join(new_col_defs)
+    select_sql = ", ".join(select_parts)
+
+    connection.execute(text(f"CREATE TABLE {new_table} ({cols_sql})"))
+    connection.execute(
+        text(
+            f"INSERT INTO {new_table} SELECT {select_sql} FROM usage_daily "
+            f"GROUP BY {', '.join(_USAGE_DAILY_MERGE_GROUP_COLUMNS)}"
+        )
+    )
+    connection.execute(text("DROP TABLE usage_daily"))
+    connection.execute(text(f"ALTER TABLE {new_table} RENAME TO usage_daily"))
+
+
+def _postgres_merge_usage_daily_duplicates(connection) -> None:
+    """Merge duplicate usage_daily rows (create_all-era Postgres tables never
+    carried the old UNIQUE) by summing the numeric columns into the lowest-id
+    row of each group and deleting the rest."""
+    set_clause = ", ".join(f"{col} = s.{col}" for col in _USAGE_DAILY_SUM_COLUMNS)
+    sum_select = ", ".join(f"SUM({col}) AS {col}" for col in _USAGE_DAILY_SUM_COLUMNS)
+    connection.execute(
+        text(
+            f"""
+            UPDATE usage_daily AS t
+            SET {set_clause}
+            FROM (
+                SELECT MIN(id) AS id, {sum_select}
+                FROM usage_daily
+                GROUP BY date, provider, model, client_source, user_id
+            ) AS s
+            WHERE t.id = s.id
+            """
+        )
+    )
+    connection.execute(
+        text(
+            """
+            DELETE FROM usage_daily AS a
+            USING usage_daily AS b
+            WHERE a.date = b.date
+              AND a.provider = b.provider
+              AND a.model = b.model
+              AND a.client_source = b.client_source
+              AND a.user_id IS NOT DISTINCT FROM b.user_id
+              AND a.id > b.id
+            """
+        )
+    )
+
+
+def _migrate_usage_daily_tenancy(engine: Engine) -> bool:
+    """Drop usage_daily's table-level UNIQUE, merge legacy duplicate rows,
+    and add the two partial unique indexes (NULL-user slice and real-user
+    slice). Returns True if applied, False if already migrated."""
+    if "uq_usage_daily_user" in _index_names(engine, "usage_daily"):
+        return False
+
+    with engine.begin() as connection:
+        if engine.dialect.name == "postgresql":
+            constraint_names = (
+                connection.execute(
+                    text(
+                        "SELECT constraint_name FROM information_schema.table_constraints "
+                        "WHERE table_name = 'usage_daily' AND constraint_type = 'UNIQUE'"
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            for constraint_name in constraint_names:
+                connection.execute(
+                    text(f"ALTER TABLE usage_daily DROP CONSTRAINT {constraint_name}")
+                )
+            _postgres_merge_usage_daily_duplicates(connection)
+        else:
+            _sqlite_recreate_usage_daily(connection)
+
+        for index_sql in [
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_usage_daily_local ON usage_daily "
+            "(date, provider, model, client_source) WHERE user_id IS NULL",
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_usage_daily_user ON usage_daily "
+            "(date, provider, model, client_source, user_id) WHERE user_id IS NOT NULL",
+        ]:
+            connection.execute(text(index_sql))
+
+    return True
+
+
 def migrate_database(db_path: str | None = None) -> list[str]:
     engine = get_engine(db_path)
     applied: list[str] = []
@@ -955,5 +1122,51 @@ def migrate_database(db_path: str | None = None) -> list[str]:
             postgresql_definition="TEXT DEFAULT '{}'",
         ):
             applied.append("sessions.tool_calls_json")
+
+    # PR 4 tenancy schema: nullable user_id columns, usage_daily unique swap,
+    # and the user_id indexes. Columns come before the indexes that reference
+    # them. evaluation_jobs gets the column only — its active-uniqueness index
+    # stays (kind, session_id).
+    tenancy_column_definitions = [
+        ("usage", "TEXT REFERENCES users(id)"),
+        ("usage_daily", "TEXT REFERENCES users(id)"),
+        ("sessions", "TEXT"),
+        ("tool_calls", "TEXT REFERENCES users(id)"),
+        ("evaluation_jobs", "TEXT REFERENCES users(id)"),
+    ]
+    for table_name, definition in tenancy_column_definitions:
+        if _table_exists(engine, table_name) and _ensure_column(
+            engine,
+            table_name,
+            "user_id",
+            sqlite_definition=definition,
+            postgresql_definition=definition,
+        ):
+            applied.append(f"{table_name}.user_id")
+
+    if _table_exists(engine, "usage_daily") and _migrate_usage_daily_tenancy(engine):
+        applied.append("usage_daily.unique_swap")
+
+    for table_name, index_name, index_sql in [
+        (
+            "usage",
+            "ix_usage_user_id",
+            "CREATE INDEX IF NOT EXISTS ix_usage_user_id ON usage (user_id)",
+        ),
+        (
+            "sessions",
+            "ix_sessions_user_id",
+            "CREATE INDEX IF NOT EXISTS ix_sessions_user_id ON sessions (user_id)",
+        ),
+        (
+            "tool_calls",
+            "ix_tool_calls_user_id",
+            "CREATE INDEX IF NOT EXISTS ix_tool_calls_user_id ON tool_calls (user_id)",
+        ),
+    ]:
+        if _table_exists(engine, table_name) and _ensure_index(
+            engine, table_name, index_name, index_sql
+        ):
+            applied.append(f"{table_name}.{index_name}")
 
     return applied
