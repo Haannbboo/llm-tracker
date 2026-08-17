@@ -22,14 +22,14 @@ Stop if:
 
 ## 2. Standards review gate
 
-This is a lightweight pre-flight gate, not a replacement for the independent review in `.agents/commands/review.md`. The independent review should already be complete before this workflow pushes/opens a PR.
+This is a lightweight pre-flight gate, not a replacement for the independent review in `.agents/commands/review/SKILL.md`. The independent review should already be complete before this workflow pushes/opens a PR.
 
 Before writing the PR body, compare the diff against:
 
 - `AGENTS.md`
 - `.agents/commands/llm-tracker.md`
 - `.agents/commands/pre-pr.md`
-- `.agents/commands/review.md`
+- `.agents/commands/review/SKILL.md`
 
 If the diff violates repo rules, stop and either fix the issue or list it honestly under `Known Limitations` if the user explicitly chooses to proceed.
 

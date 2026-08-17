@@ -68,9 +68,9 @@ def select_config_path() -> Path:
 
 
 def main() -> int:
-    if len(sys.argv) not in (2, 3, 4, 5):
+    if len(sys.argv) not in (2, 3, 4, 5, 6):
         print(
-            "usage: configure-kilo-plugin.py PROJECT_ROOT [OTLP_PORT] [HOST] [ENDPOINT]",
+            "usage: configure-kilo-plugin.py PROJECT_ROOT [OTLP_PORT] [HOST] [ENDPOINT] [TOKEN]",
             file=sys.stderr,
         )
         return 1
@@ -79,6 +79,7 @@ def main() -> int:
     otlp_port = sys.argv[2] if len(sys.argv) >= 3 else "4005"
     host = sys.argv[3] if len(sys.argv) >= 4 else "localhost"
     endpoint_arg = sys.argv[4] if len(sys.argv) >= 5 else None
+    token = sys.argv[5] if len(sys.argv) >= 6 else None
     plugin_dir = project_root / "plugins" / "kilo"
     config_path = select_config_path()
     if endpoint_arg and "://" in endpoint_arg:
@@ -115,7 +116,10 @@ def main() -> int:
         plugins = []
 
     plugin_path = str(plugin_dir / "dist" / "index.js")
-    plugin_entry = [plugin_path, {"endpoint": endpoint}]
+    plugin_options: dict[str, Any] = {"endpoint": endpoint}
+    if token:
+        plugin_options["token"] = token
+    plugin_entry = [plugin_path, plugin_options]
 
     already_registered = False
     for i, entry in enumerate(plugins):
@@ -125,11 +129,15 @@ def main() -> int:
             break
         if isinstance(entry, list) and len(entry) >= 1 and entry[0] == plugin_path:
             if len(entry) < 2:
-                entry.append({"endpoint": endpoint})
+                entry.append(plugin_options)
             elif isinstance(entry[1], dict):
                 entry[1]["endpoint"] = endpoint
+                if token:
+                    entry[1]["token"] = token
+                else:
+                    entry[1].pop("token", None)
             else:
-                entry[1] = {"endpoint": endpoint}
+                entry[1] = plugin_options
             already_registered = True
             break
 

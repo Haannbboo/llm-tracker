@@ -41,9 +41,9 @@ def resolve_otlp_logs_endpoint(
 
 
 def main() -> int:
-    if len(sys.argv) not in (2, 3, 4, 5):
+    if len(sys.argv) not in (2, 3, 4, 5, 6):
         print(
-            "usage: configure-claude-settings.py SETTINGS_PATH [OTLP_PORT] [HOST] [ENDPOINT]",
+            "usage: configure-claude-settings.py SETTINGS_PATH [OTLP_PORT] [HOST] [ENDPOINT] [TOKEN]",
             file=sys.stderr,
         )
         return 1
@@ -52,6 +52,7 @@ def main() -> int:
     otlp_port = sys.argv[2] if len(sys.argv) >= 3 else "4002"
     host = sys.argv[3] if len(sys.argv) >= 4 else "localhost"
     endpoint = sys.argv[4] if len(sys.argv) >= 5 else None
+    token = sys.argv[5] if len(sys.argv) >= 6 else None
 
     settings = load_settings(settings_path)
     env = settings.setdefault("env", {})
@@ -64,6 +65,8 @@ def main() -> int:
             otlp_port, host, endpoint
         ),
     }
+    if token:
+        desired_env["OTEL_EXPORTER_OTLP_HEADERS"] = f"x-llm-tracker-token={token}"
 
     changed = False
     for k, v in desired_env.items():

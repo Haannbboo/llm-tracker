@@ -33,7 +33,7 @@ This repo adds only the final landing gate:
 
 Workflow details: `.agents/commands/feature-pr.md`.
 Verification workflow: `.agents/commands/verify.md`.
-Independent review: `.agents/commands/review.md`.
+Independent review: `.agents/commands/review/SKILL.md`.
 Open PR workflow: `.agents/commands/open-pr.md`.
 Pre-PR checklist: `.agents/commands/pre-pr.md`.
 Project rules: `.agents/commands/llm-tracker.md`.

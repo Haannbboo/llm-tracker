@@ -490,6 +490,7 @@ def run_login_command(command: list[str]) -> int:
 
     wired = wire_agents_for_hosted(
         logs_endpoint=(payload.get("otlp") or {}).get("logs_endpoint"),
+        token=payload.get("ingest_token"),
     )
     if wired:
         print("Wired agents: " + ", ".join(wired))
@@ -498,7 +499,9 @@ def run_login_command(command: list[str]) -> int:
     return 0
 
 
-def wire_agents_for_hosted(*, logs_endpoint: str | None) -> list[str]:
+def wire_agents_for_hosted(
+    *, logs_endpoint: str | None, token: str | None = None
+) -> list[str]:
     """Point detected agents' telemetry at the hosted server (idempotent)."""
     if not logs_endpoint:
         return []
@@ -545,19 +548,19 @@ def wire_agents_for_hosted(*, logs_endpoint: str | None) -> list[str]:
         k: v for k, v in os.environ.items() if k != "OTEL_EXPORTER_OTLP_LOGS_ENDPOINT"
     }
     for name, script, prefix_args, endpoint in jobs:
+        cmd = [
+            sys.executable,
+            str(scripts_dir / script),
+            *prefix_args,
+            "0",
+            "localhost",
+            endpoint,
+        ]
+        if token:
+            cmd.append(token)
         try:
             result = subprocess.run(
-                # Trailing shape matches the scripts' documented argv:
-                # [PREFIX...] PORT HOST ENDPOINT — the endpoint overrides the
-                # placeholder port/host.
-                [
-                    sys.executable,
-                    str(scripts_dir / script),
-                    *prefix_args,
-                    "0",
-                    "localhost",
-                    endpoint,
-                ],
+                cmd,
                 capture_output=True,
                 text=True,
                 env=env,

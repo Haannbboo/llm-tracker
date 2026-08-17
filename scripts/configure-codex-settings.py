@@ -92,9 +92,9 @@ def update_existing_otel_config(content: str, endpoint: str) -> str:
 
 
 def main():
-    if len(sys.argv) not in (2, 3, 4, 5):
+    if len(sys.argv) not in (2, 3, 4, 5, 6):
         print(
-            "usage: configure-codex-settings.py CONFIG_PATH [OTLP_PORT] [HOST] [ENDPOINT]",
+            "usage: configure-codex-settings.py CONFIG_PATH [OTLP_PORT] [HOST] [ENDPOINT] [TOKEN]",
             file=sys.stderr,
         )
         return 1

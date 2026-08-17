@@ -139,13 +139,14 @@ export async function emitOtlp(
   payload: Record<string, any>,
   endpoint: string,
   timeoutMs = 10_000,
+  headers?: Record<string, string>,
 ): Promise<boolean> {
   const controller = new AbortController()
   const timeoutId = setTimeout(() => controller.abort(), timeoutMs)
   try {
     const response = await fetch(endpoint, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...headers },
       body: JSON.stringify(payload),
       signal: controller.signal,
     })

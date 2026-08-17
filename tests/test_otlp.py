@@ -734,3 +734,272 @@ def test_receive_logs_evicts_stale_tool_buffer_entries(otlp_module):
     assert response.status_code == 200
     assert "stale" not in otlp_module._claude_tool_buffer
     assert "fresh" in otlp_module._claude_tool_buffer
+
+
+# === Auth tests ===
+
+
+def _minimal_otlp_body(
+    service_name="claude-code", event_name="claude_code.api_request"
+):
+    return {
+        "resourceLogs": [
+            {
+                "resource": {
+                    "attributes": [
+                        {"key": "service.name", "value": {"stringValue": service_name}},
+                    ]
+                },
+                "scopeLogs": [
+                    {
+                        "logRecords": [
+                            {
+                                "attributes": _attrs(
+                                    {
+                                        "event.name": event_name,
+                                        "input_tokens": 10,
+                                        "output_tokens": 5,
+                                        "model": "test-model",
+                                        "status_code": 200,
+                                    }
+                                ),
+                                "timeUnixNano": "1800000000000000000",
+                            }
+                        ]
+                    }
+                ],
+            }
+        ]
+    }
+
+
+def test_auth_disabled_no_token_records_usage(otlp_module, monkeypatch):
+    """auth.enabled=false: POST /v1/logs with no token header records usage."""
+    captured = []
+    monkeypatch.setattr(
+        otlp_module,
+        "record_usage",
+        lambda **fields: (
+            captured.append(fields) or type("U", (), {"id": "u1", "session_id": "s1"})()
+        ),
+    )
+    monkeypatch.setitem(otlp_module.CONFIG.get("auth", {}), "enabled", False)
+
+    client = TestClient(otlp_module.app)
+    response = client.post("/v1/logs", json=_minimal_otlp_body())
+
+    assert response.status_code == 200
+    assert len(captured) == 1
+
+
+def test_auth_enabled_valid_ingest_token_records_user_id(
+    otlp_module, monkeypatch, fresh_db
+):
+    """auth.enabled=true, valid ingest token: recorded usage carries user_id."""
+    from src.auth.tokens import mint_token
+
+    monkeypatch.setitem(otlp_module.CONFIG.get("auth", {}), "enabled", True)
+    monkeypatch.setitem(otlp_module.CONFIG.get("otlp", {}), "max_body_bytes", 2_000_000)
+    monkeypatch.setitem(
+        otlp_module.CONFIG.get("otlp", {}), "rate_limit_per_minute", 300
+    )
+
+    token, user = mint_token("test@example.com", kind="ingest")
+
+    captured = []
+
+    def capture_usage(**fields):
+        captured.append(fields)
+        return type("U", (), {"id": "u1", "session_id": "s1"})()
+
+    monkeypatch.setattr(otlp_module, "record_usage", capture_usage)
+
+    client = TestClient(otlp_module.app)
+    response = client.post(
+        "/v1/logs",
+        json=_minimal_otlp_body(),
+        headers={"x-llm-tracker-token": token},
+    )
+
+    assert response.status_code == 200
+    assert len(captured) == 1
+    assert captured[0]["user_id"] == user.id
+
+
+def test_auth_enabled_missing_header_returns_401(otlp_module, monkeypatch):
+    """auth.enabled=true, missing header → 401, no row recorded."""
+    monkeypatch.setitem(otlp_module.CONFIG.get("auth", {}), "enabled", True)
+
+    captured = []
+    monkeypatch.setattr(
+        otlp_module, "record_usage", lambda **fields: captured.append(fields)
+    )
+
+    client = TestClient(otlp_module.app)
+    response = client.post("/v1/logs", json=_minimal_otlp_body())
+
+    assert response.status_code == 401
+    assert response.json()["detail"] == "invalid token"
+    assert len(captured) == 0
+
+
+def test_auth_enabled_wrong_kind_token_returns_401(otlp_module, monkeypatch, fresh_db):
+    """auth.enabled=true, valid cli token → 401 (kind mismatch)."""
+    from src.auth.tokens import mint_token
+
+    monkeypatch.setitem(otlp_module.CONFIG.get("auth", {}), "enabled", True)
+
+    token, _ = mint_token("test@example.com", kind="cli")
+
+    captured = []
+    monkeypatch.setattr(
+        otlp_module, "record_usage", lambda **fields: captured.append(fields)
+    )
+
+    client = TestClient(otlp_module.app)
+    response = client.post(
+        "/v1/logs",
+        json=_minimal_otlp_body(),
+        headers={"x-llm-tracker-token": token},
+    )
+
+    assert response.status_code == 401
+    assert len(captured) == 0
+
+
+def test_auth_enabled_revoked_token_returns_401(otlp_module, monkeypatch, fresh_db):
+    """auth.enabled=true, revoked ingest token → 401."""
+    from src.auth.tokens import mint_token, revoke_token
+
+    monkeypatch.setitem(otlp_module.CONFIG.get("auth", {}), "enabled", True)
+
+    token, user = mint_token("test@example.com", kind="ingest")
+    # Get token_id from the database
+    from src.auth.tokens import resolve_token
+
+    _, auth_token = resolve_token(token)
+    revoke_token(auth_token.id, user.id)
+
+    captured = []
+    monkeypatch.setattr(
+        otlp_module, "record_usage", lambda **fields: captured.append(fields)
+    )
+
+    client = TestClient(otlp_module.app)
+    response = client.post(
+        "/v1/logs",
+        json=_minimal_otlp_body(),
+        headers={"x-llm-tracker-token": token},
+    )
+
+    assert response.status_code == 401
+    assert len(captured) == 0
+
+
+def test_body_too_large_returns_413(otlp_module, monkeypatch):
+    """Body larger than otlp.max_body_bytes → 413; record_usage is never called."""
+    monkeypatch.setitem(otlp_module.CONFIG.get("auth", {}), "enabled", False)
+    monkeypatch.setitem(otlp_module.CONFIG.get("otlp", {}), "max_body_bytes", 100)
+
+    captured = []
+    monkeypatch.setattr(
+        otlp_module, "record_usage", lambda **fields: captured.append(fields)
+    )
+
+    client = TestClient(otlp_module.app)
+    # Create a body larger than 100 bytes
+    large_body = _minimal_otlp_body()
+    large_body["resourceLogs"][0]["scopeLogs"][0]["logRecords"][0]["attributes"].append(
+        {"key": "padding", "value": {"stringValue": "x" * 200}}
+    )
+
+    response = client.post("/v1/logs", json=large_body)
+
+    assert response.status_code == 413
+    assert len(captured) == 0
+
+
+def test_body_too_large_streaming_cap_returns_413(otlp_module, monkeypatch):
+    """Streaming body cap enforces limit when Content-Length is missing or understated."""
+    monkeypatch.setitem(otlp_module.CONFIG.get("auth", {}), "enabled", False)
+    monkeypatch.setitem(otlp_module.CONFIG.get("otlp", {}), "max_body_bytes", 100)
+
+    captured = []
+    monkeypatch.setattr(
+        otlp_module, "record_usage", lambda **fields: captured.append(fields)
+    )
+
+    client = TestClient(otlp_module.app)
+    large_body = _minimal_otlp_body()
+    large_body["resourceLogs"][0]["scopeLogs"][0]["logRecords"][0]["attributes"].append(
+        {"key": "padding", "value": {"stringValue": "x" * 200}}
+    )
+    body_bytes = json.dumps(large_body).encode()
+
+    # Send with no Content-Length (chunked transfer)
+    response = client.post(
+        "/v1/logs",
+        content=body_bytes,
+        headers={"Content-Type": "application/json"},
+    )
+
+    assert response.status_code == 413
+    assert len(captured) == 0
+
+
+def test_rate_limit_exceeded_returns_429(otlp_module, monkeypatch, fresh_db):
+    """N+1th request within the window → 429; different token unaffected."""
+    from src.auth.tokens import mint_token
+
+    monkeypatch.setitem(otlp_module.CONFIG.get("auth", {}), "enabled", True)
+    monkeypatch.setitem(otlp_module.CONFIG.get("otlp", {}), "rate_limit_per_minute", 2)
+
+    token1, user1 = mint_token("user1@example.com", kind="ingest")
+    token2, user2 = mint_token("user2@example.com", kind="ingest")
+
+    captured = []
+
+    def capture_usage(**fields):
+        captured.append(fields)
+        return type("U", (), {"id": "u1", "session_id": "s1"})()
+
+    monkeypatch.setattr(otlp_module, "record_usage", capture_usage)
+
+    client = TestClient(otlp_module.app)
+
+    # First two requests from token1 should succeed
+    for _ in range(2):
+        response = client.post(
+            "/v1/logs",
+            json=_minimal_otlp_body(),
+            headers={"x-llm-tracker-token": token1},
+        )
+        assert response.status_code == 200
+
+    # Third request from token1 should be rate limited
+    response = client.post(
+        "/v1/logs",
+        json=_minimal_otlp_body(),
+        headers={"x-llm-tracker-token": token1},
+    )
+    assert response.status_code == 429
+
+    # token2 should still work
+    response = client.post(
+        "/v1/logs",
+        json=_minimal_otlp_body(),
+        headers={"x-llm-tracker-token": token2},
+    )
+    assert response.status_code == 200
+
+
+def test_health_routes_stay_unauthenticated(otlp_module, monkeypatch):
+    """/health, /v1/metrics, /v1/traces stay unauthenticated regardless of auth.enabled."""
+    monkeypatch.setitem(otlp_module.CONFIG.get("auth", {}), "enabled", True)
+
+    client = TestClient(otlp_module.app)
+
+    assert client.get("/health").status_code == 200
+    assert client.get("/").status_code == 200
+    assert client.post("/v1/metrics", json={}).status_code == 200
+    assert client.post("/v1/traces", json={}).status_code == 200

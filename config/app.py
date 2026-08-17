@@ -59,6 +59,10 @@ def load_config(path: str | None = None) -> dict[str, Any]:
         "LLMTRACKER_AUTH__GOOGLE_CLIENT_SECRET", ""
     )
 
+    otlp = config.setdefault("otlp", {})
+    otlp.setdefault("max_body_bytes", 2_000_000)  # 2 MB
+    otlp.setdefault("rate_limit_per_minute", 300)  # 5 req/s per token
+
     evaluation = config.setdefault("evaluation", {})
     evaluation.setdefault("auto_enabled", True)
     evaluation.setdefault("quiet_delay_seconds", 600)

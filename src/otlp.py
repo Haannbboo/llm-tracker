@@ -2,11 +2,16 @@ import json
 import os
 import time
 import uuid
+from collections import deque
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, HTTPException, Request
 
+from config.app import CONFIG
+
+from .auth import _auth_enabled, resolve_token
+from .auth.tokens import hash_token
 from .database import init_db
 from .provider_parser import parse_provider_metadata
 from .recorder import record_tool_call, record_usage
@@ -32,6 +37,52 @@ codex_state: dict = {}
 _claude_tool_buffer: dict[str, list[dict]] = {}
 _codex_tool_buffer: dict[str, list[dict]] = {}
 _opencode_tool_buffer: dict[str, list[dict]] = {}  # keyed by message.id
+
+# Rate limiting state: token_id -> deque of request timestamps
+_rate_limit_state: dict[str, deque] = {}
+
+
+def _resolve_ingest_user(request: Request) -> tuple[str | None, str | None]:
+    """Return (user_id, token_id) from x-llm-tracker-token, or (None, None) when auth is disabled.
+
+    Raises HTTPException(401) for missing/invalid/revoked/wrong-kind tokens.
+    """
+    if not _auth_enabled():
+        return None, None
+
+    token = request.headers.get("x-llm-tracker-token")
+    if not token:
+        raise HTTPException(status_code=401, detail="invalid token")
+
+    token_id = hash_token(token)
+    result = resolve_token(token)
+    if result is None:
+        raise HTTPException(status_code=401, detail="invalid token")
+
+    user, auth_token = result
+    if auth_token.kind != "ingest":
+        raise HTTPException(status_code=401, detail="invalid token")
+
+    return user.id, token_id
+
+
+def _check_rate_limit(token_id: str) -> None:
+    """Raise HTTPException(429) if token exceeds rate limit. No-op when auth is disabled."""
+    if not _auth_enabled():
+        return
+
+    max_per_minute = CONFIG.get("otlp", {}).get("rate_limit_per_minute", 300)
+    now = time.time()
+    window_start = now - 60
+
+    dq = _rate_limit_state.setdefault(token_id, deque())
+    while dq and dq[0] < window_start:
+        dq.popleft()
+
+    if len(dq) >= max_per_minute:
+        raise HTTPException(status_code=429, detail="rate limit exceeded")
+
+    dq.append(now)
 
 
 def _fallback_tool_use_id() -> str:
@@ -195,6 +246,7 @@ def _extract_claude_fields(
     attrs: list,
     session_id: str,
     client_ip: str | None = None,
+    user_id: str | None = None,
 ) -> dict:
     """Extract normalized usage fields from a Claude OTLP record."""
     time_ns = record.get("timeUnixNano", "0")
@@ -248,14 +300,21 @@ def _extract_claude_fields(
         "base_url": metadata.base_url,
         "base_url_provider": metadata.provider,
         "base_url_source": metadata.source,
+        "user_id": user_id,
         "_tool_info": tool_info,
     }
 
 
 def _parse_claude_record(
-    record: dict, attrs: list, session_id: str, client_ip: str | None = None
+    record: dict,
+    attrs: list,
+    session_id: str,
+    client_ip: str | None = None,
+    user_id: str | None = None,
 ) -> None:
-    fields = _extract_claude_fields(record, attrs, session_id, client_ip)
+    fields = _extract_claude_fields(
+        record, attrs, session_id, client_ip, user_id=user_id
+    )
     tool_calls = fields.pop("_tool_info", [])
     usage = record_usage(**fields)
     if usage:
@@ -276,6 +335,7 @@ def _extract_opencode_fields(
     session_id: str,
     client_source: str = "opencode",
     client_ip: str | None = None,
+    user_id: str | None = None,
 ) -> dict:
     """Extract normalized usage fields from an OpenCode or Kilo OTLP record."""
     time_ns = record.get("timeUnixNano", "0")
@@ -349,6 +409,7 @@ def _extract_opencode_fields(
         "base_url": metadata.base_url,
         "base_url_provider": metadata.provider,
         "base_url_source": metadata.source,
+        "user_id": user_id,
         "_tool_info": tool_info,
     }
 
@@ -359,9 +420,15 @@ def _parse_opencode_record(
     session_id: str,
     client_source: str = "opencode",
     client_ip: str | None = None,
+    user_id: str | None = None,
 ) -> None:
     fields = _extract_opencode_fields(
-        record, attrs, session_id, client_source=client_source, client_ip=client_ip
+        record,
+        attrs,
+        session_id,
+        client_source=client_source,
+        client_ip=client_ip,
+        user_id=user_id,
     )
     tool_calls = fields.pop("_tool_info", [])
     usage = record_usage(**fields)
@@ -416,6 +483,7 @@ def _extract_codex_fields(
     attrs: list,
     service_name: str,
     client_ip: str | None = None,
+    user_id: str | None = None,
 ) -> dict | None:
     """Extract normalized usage fields from a Codex OTLP response.completed record."""
     event_kind = _attr(attrs, "event.kind")
@@ -493,16 +561,23 @@ def _extract_codex_fields(
         "base_url": metadata.base_url,
         "base_url_provider": metadata.provider,
         "base_url_source": metadata.source,
+        "user_id": user_id,
         "_tool_info": tool_info,
     }
 
 
 def _parse_codex_record(
-    record: dict, attrs: list, service_name: str, client_ip: str | None = None
+    record: dict,
+    attrs: list,
+    service_name: str,
+    client_ip: str | None = None,
+    user_id: str | None = None,
 ) -> None:
     if _handle_codex_state_event(attrs):
         return
-    fields = _extract_codex_fields(record, attrs, service_name, client_ip)
+    fields = _extract_codex_fields(
+        record, attrs, service_name, client_ip, user_id=user_id
+    )
     if fields is not None:
         tool_calls = fields.pop("_tool_info", [])
         usage = record_usage(**fields)
@@ -523,6 +598,7 @@ def _parse_log_record(
     service_name: str,
     resource_session_id: str,
     client_ip: str | None = None,
+    user_id: str | None = None,
 ) -> None:
     if service_name in RETIRED_SERVICE_NAMES:
         return
@@ -583,7 +659,7 @@ def _parse_log_record(
         event_name == CLAUDE_EVENT or event_name == "api_request"
     ) and service_name == "claude-code":
         fields: dict | None = _extract_claude_fields(
-            record, attrs, usage_session_id or "", client_ip
+            record, attrs, usage_session_id or "", client_ip, user_id=user_id
         )
         if fields is not None:
             tool_calls = fields.pop("_tool_info", [])
@@ -601,7 +677,9 @@ def _parse_log_record(
     elif event_name == CODEX_EVENT and service_name in CODEX_SERVICE_NAMES:
         if _handle_codex_state_event(attrs):
             return
-        fields = _extract_codex_fields(record, attrs, service_name, client_ip)
+        fields = _extract_codex_fields(
+            record, attrs, service_name, client_ip, user_id=user_id
+        )
         if fields is not None:
             tool_calls = fields.pop("_tool_info", [])
             usage = record_usage(**fields)
@@ -619,7 +697,7 @@ def _parse_log_record(
         _handle_codex_state_event(attrs)
     elif event_name == OPENCODE_EVENT and service_name == "opencode":
         _parse_opencode_record(
-            record, attrs, usage_session_id or "", client_ip=client_ip
+            record, attrs, usage_session_id or "", client_ip=client_ip, user_id=user_id
         )
     elif event_name == KILO_EVENT and service_name in KILO_SERVICE_NAMES:
         _parse_opencode_record(
@@ -628,6 +706,7 @@ def _parse_log_record(
             usage_session_id or "",
             client_source="kilo",
             client_ip=client_ip,
+            user_id=user_id,
         )
     elif (
         service_name not in KNOWN_SERVICE_NAMES
@@ -660,6 +739,22 @@ async def health():
 
 @app.post("/v1/logs")
 async def receive_logs(request: Request):
+    # Auth + rate limit + body cap — all before any record is parsed.
+    user_id, token_id = _resolve_ingest_user(request)
+
+    if token_id is not None:
+        _check_rate_limit(token_id)
+
+    # Body-size cap
+    max_body = CONFIG.get("otlp", {}).get("max_body_bytes", 2_000_000)
+    content_length = request.headers.get("content-length")
+    try:
+        declared_length = int(content_length) if content_length else None
+    except ValueError:
+        declared_length = None
+    if declared_length is not None and declared_length > max_body:
+        raise HTTPException(status_code=413, detail="request body too large")
+
     # Evict stale codex_state entries (older than 10 minutes)
     now = time.time_ns() // 1000
     stale_keys = [
@@ -684,7 +779,14 @@ async def receive_logs(request: Request):
 
     client_ip = request.client.host if request.client else None
 
-    body = await request.json()
+    # Read body with hard cap (handles chunked/lying Content-Length)
+    body_bytes = b""
+    async for chunk in request.stream():
+        body_bytes += chunk
+        if len(body_bytes) > max_body:
+            raise HTTPException(status_code=413, detail="request body too large")
+    body = json.loads(body_bytes)
+
     for resource_log in body.get("resourceLogs", []):
         resource = resource_log.get("resource", {})
         service_name = _resource_attr(resource, "service.name") or ""
@@ -701,7 +803,9 @@ async def receive_logs(request: Request):
                 )
         for scope_log in resource_log.get("scopeLogs", []):
             for record in scope_log.get("logRecords", []):
-                _parse_log_record(record, service_name, session_id, client_ip)
+                _parse_log_record(
+                    record, service_name, session_id, client_ip, user_id=user_id
+                )
     return {}
 
 

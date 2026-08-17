@@ -64,7 +64,7 @@ If a check fails:
 
 ## 3. Independent review before commit
 
-Before commit, run `.agents/commands/review.md` using a fresh subagent (a separate Agent/delegation call or new Claude Code session, not the current implementation context).
+Before commit, run `.agents/commands/review/SKILL.md` using a fresh subagent (a separate Agent/delegation call or new Claude Code session, not the current implementation context).
 
 Review the branch against `main`:
 
