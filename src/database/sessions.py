@@ -248,12 +248,12 @@ def upsert_session_from_tool_call(
 
 
 def summarize_session_tool_calls(
-    session_id: str, db_path: str | None = None
+    session_id: str, user_id: str | None = None, db_path: str | None = None
 ) -> list[dict[str, Any]] | None:
     """Return [{tool_name, count}] for a session, or None if it doesn't exist."""
     engine = get_engine(db_path)
     with Session(engine) as session:
-        rec = get_session_record(session, session_id)
+        rec = get_session_record(session, session_id, user_id=user_id)
         if not rec:
             return None
         tools = _load_tool_calls_json(rec.tool_calls_json)
@@ -326,6 +326,7 @@ def upsert_session_evaluation(
     failure_reason: str | None = None,
     project: str | None = None,
     skip_if_manual: bool = False,
+    user_id: str | None = None,
     db_path: str | None = None,
 ) -> None:
     """Set evaluation on an existing session. Raises ValueError if session not found."""
@@ -337,7 +338,7 @@ def upsert_session_evaluation(
     now = datetime.now(timezone.utc).isoformat()
     engine = get_engine(db_path)
     with Session(engine) as session:
-        record = get_session_record(session, session_id)
+        record = get_session_record(session, session_id, user_id=user_id)
         if not record:
             raise ValueError(f"Session not found: {session_id}")
         if skip_if_manual and record.source == "manual":
@@ -356,12 +357,14 @@ def upsert_session_evaluation(
 
 
 def get_session_evaluation(
-    session_id: str, db_path: str | None = None
+    session_id: str,
+    user_id: str | None = None,
+    db_path: str | None = None,
 ) -> dict[str, Any] | None:
     """Return evaluation dict for a session, or None if not found or not evaluated."""
     engine = get_engine(db_path)
     with Session(engine) as session:
-        rec = get_session_record(session, session_id)
+        rec = get_session_record(session, session_id, user_id=user_id)
         if not rec or rec.outcome is None:
             return None
         return {
@@ -379,11 +382,13 @@ def get_session_evaluation(
         }
 
 
-def delete_session_evaluation(session_id: str, db_path: str | None = None) -> bool:
+def delete_session_evaluation(
+    session_id: str, user_id: str | None = None, db_path: str | None = None
+) -> bool:
     """Clear evaluation columns on a session. Returns True if session found."""
     engine = get_engine(db_path)
     with Session(engine) as session:
-        rec = get_session_record(session, session_id)
+        rec = get_session_record(session, session_id, user_id=user_id)
         if not rec:
             return False
         rec.outcome = None

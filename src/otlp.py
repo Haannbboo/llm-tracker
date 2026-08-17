@@ -1,10 +1,13 @@
+import asyncio
 import json
 import os
+import threading
 import time
 import uuid
-from collections import deque
+from collections import OrderedDict, deque
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
+from typing import NoReturn
 
 from fastapi import FastAPI, HTTPException, Request
 
@@ -40,6 +43,12 @@ _opencode_tool_buffer: dict[str, list[dict]] = {}  # keyed by message.id
 
 # Rate limiting state: token_id -> deque of request timestamps
 _rate_limit_state: dict[str, deque] = {}
+_last_rate_limit_cleanup = 0.0
+_rate_limit_lock = threading.Lock()
+_invalid_token_cache: OrderedDict[str, float] = OrderedDict()
+INVALID_TOKEN_CACHE_SIZE = 4096
+INVALID_TOKEN_CACHE_TTL_SECONDS = 60
+AUTH_LOOKUP_TIMEOUT_SECONDS = 10
 
 
 def _resolve_ingest_user(request: Request) -> tuple[str | None, str | None]:
@@ -52,37 +61,111 @@ def _resolve_ingest_user(request: Request) -> tuple[str | None, str | None]:
 
     token = request.headers.get("x-llm-tracker-token")
     if not token:
-        raise HTTPException(status_code=401, detail="invalid token")
+        _reject_invalid_token(request)
 
     token_id = hash_token(token)
+    if _invalid_token_is_cached(token_id):
+        _reject_invalid_token(request)
     result = resolve_token(token)
     if result is None:
-        raise HTTPException(status_code=401, detail="invalid token")
+        _remember_invalid_token(token_id)
+        _reject_invalid_token(request)
 
     user, auth_token = result
     if auth_token.kind != "ingest":
-        raise HTTPException(status_code=401, detail="invalid token")
+        _remember_invalid_token(token_id)
+        _reject_invalid_token(request)
 
     return user.id, token_id
 
 
+def _reject_invalid_token(request: Request) -> NoReturn:
+    client_ip = request.client.host if request.client else "unknown"
+    key = (
+        f"invalid:{client_ip}"
+        if request.headers.get("x-llm-tracker-token")
+        else f"missing:{client_ip}"
+    )
+    _check_rate_limit(key)
+    raise HTTPException(status_code=401, detail="invalid token")
+
+
+def _invalid_token_is_cached(token_id: str) -> bool:
+    now = time.time()
+    with _rate_limit_lock:
+        stale = [
+            key for key, expires_at in _invalid_token_cache.items() if expires_at <= now
+        ]
+        for key in stale:
+            del _invalid_token_cache[key]
+        expires_at = _invalid_token_cache.get(token_id)
+        if expires_at is None:
+            return False
+        _invalid_token_cache.move_to_end(token_id)
+        return expires_at > now
+
+
+def _remember_invalid_token(token_id: str) -> None:
+    with _rate_limit_lock:
+        _invalid_token_cache[token_id] = time.time() + INVALID_TOKEN_CACHE_TTL_SECONDS
+        _invalid_token_cache.move_to_end(token_id)
+        while len(_invalid_token_cache) > INVALID_TOKEN_CACHE_SIZE:
+            _invalid_token_cache.popitem(last=False)
+
+
 def _check_rate_limit(token_id: str) -> None:
     """Raise HTTPException(429) if token exceeds rate limit. No-op when auth is disabled."""
+    global _last_rate_limit_cleanup
+
     if not _auth_enabled():
         return
 
     max_per_minute = CONFIG.get("otlp", {}).get("rate_limit_per_minute", 300)
-    now = time.time()
-    window_start = now - 60
+    with _rate_limit_lock:
+        now = time.time()
+        window_start = now - 60
 
-    dq = _rate_limit_state.setdefault(token_id, deque())
-    while dq and dq[0] < window_start:
-        dq.popleft()
+        if now - _last_rate_limit_cleanup >= 60:
+            _last_rate_limit_cleanup = now
+            stale_keys = [
+                key
+                for key, timestamps in _rate_limit_state.items()
+                if not timestamps or timestamps[-1] < window_start
+            ]
+            for key in stale_keys:
+                del _rate_limit_state[key]
 
-    if len(dq) >= max_per_minute:
-        raise HTTPException(status_code=429, detail="rate limit exceeded")
+        dq = _rate_limit_state.get(token_id)
+        if dq is None:
+            dq = deque()
+            _rate_limit_state[token_id] = dq
+        while dq and dq[0] < window_start:
+            dq.popleft()
 
-    dq.append(now)
+        if len(dq) >= max_per_minute:
+            raise HTTPException(status_code=429, detail="rate limit exceeded")
+
+        dq.append(now)
+
+
+async def _resolve_ingest_user_async(request: Request):
+    try:
+        return await asyncio.wait_for(
+            asyncio.to_thread(_resolve_ingest_user, request),
+            timeout=AUTH_LOOKUP_TIMEOUT_SECONDS,
+        )
+    except asyncio.TimeoutError as exc:
+        raise HTTPException(
+            status_code=503, detail="authentication unavailable"
+        ) from exc
+
+
+def _scoped_id(identifier: str, user_id: str | None) -> str:
+    return f"{user_id}:{identifier}" if user_id else identifier
+
+
+def _scoped_tool_use_id(tool_use_id: str, user_id: str | None) -> str:
+    return _scoped_id(tool_use_id, user_id)
 
 
 def _fallback_tool_use_id() -> str:
@@ -159,6 +242,7 @@ class PromptLengthTracker:
         service_name: str,
         attrs: list,
         session_id: str,
+        user_id: str | None = None,
     ) -> None:
         """Store prompt_length from prompt-only events for later usage rows."""
         prompt_length = _attr(attrs, "prompt_length")
@@ -169,7 +253,7 @@ class PromptLengthTracker:
         if event_name not in self._prompt_events:
             return
 
-        key = self._key_for(service_name, attrs, session_id)
+        key = self._key_for(service_name, attrs, session_id, user_id)
         if key is None:
             return
 
@@ -182,13 +266,14 @@ class PromptLengthTracker:
         service_name: str,
         attrs: list,
         session_id: str,
+        user_id: str | None = None,
     ) -> int:
         """Return the prompt length for a usage row, preferring an inline value when present."""
         prompt_length = _attr(attrs, "prompt_length")
         if prompt_length is not None:
             return int(prompt_length)
 
-        key = self._key_for(service_name, attrs, session_id)
+        key = self._key_for(service_name, attrs, session_id, user_id)
         if key is None:
             return 0
 
@@ -221,19 +306,23 @@ class PromptLengthTracker:
         service_name: str,
         attrs: list,
         session_id: str,
+        user_id: str | None = None,
     ) -> str | None:
         """Build a stable correlation key from the strongest ID the client exposes."""
         prompt_id = _attr(attrs, "prompt.id") or _attr(attrs, "prompt_id")
         if prompt_id:
-            return f"{service_name}:prompt:{prompt_id}"
+            key = f"{service_name}:prompt:{prompt_id}"
+            return _scoped_id(key, user_id)
 
         conversation_id = _attr(attrs, "conversation.id")
         if conversation_id:
-            return f"{service_name}:conversation:{conversation_id}"
+            key = f"{service_name}:conversation:{conversation_id}"
+            return _scoped_id(key, user_id)
 
         attr_session_id = _attr(attrs, "session.id") or session_id
         if attr_session_id:
-            return f"{service_name}:session:{attr_session_id}"
+            key = f"{service_name}:session:{attr_session_id}"
+            return _scoped_id(key, user_id)
 
         return None
 
@@ -261,7 +350,7 @@ def _extract_claude_fields(
     # prompt_tokens = raw input + cache reads (what the model actually processed)
     prompt_tokens = (int(input_tokens or 0)) + (int(cache_read or 0))
     prompt_length = PROMPT_LENGTH_TRACKER.consume_for_usage_event(
-        "claude-code", attrs, session_id
+        "claude-code", attrs, session_id, user_id=user_id
     )
     metadata = parse_provider_metadata("claude")
     completion_tokens = int(output_tokens) if output_tokens is not None else None
@@ -273,8 +362,9 @@ def _extract_claude_fields(
     # Pop buffered tool calls for this prompt.id
     prompt_id = _attr(attrs, "prompt.id")
     tool_info: list[dict] = []
-    if prompt_id and prompt_id in _claude_tool_buffer:
-        tool_info = _claude_tool_buffer.pop(prompt_id)
+    prompt_key = _scoped_id(prompt_id, user_id) if prompt_id else None
+    if prompt_key and prompt_key in _claude_tool_buffer:
+        tool_info = _claude_tool_buffer.pop(prompt_key)
 
     return {
         "ts": ts,
@@ -320,10 +410,11 @@ def _parse_claude_record(
     if usage:
         for tool_info in tool_calls:
             record_tool_call(
-                tool_use_id=tool_info["tool_use_id"],
+                tool_use_id=_scoped_tool_use_id(tool_info["tool_use_id"], user_id),
                 usage_id=usage.id,
                 session_id=usage.session_id,
                 tool_name=tool_info["tool_name"],
+                user_id=user_id,
                 client_source="claude-code",
                 ts=tool_info["ts"],
             )
@@ -382,8 +473,9 @@ def _extract_opencode_fields(
     # Pop buffered tool calls for this message.id
     message_id = _attr(attrs, "message.id")
     tool_info: list[dict] = []
-    if message_id and message_id in _opencode_tool_buffer:
-        tool_info = _opencode_tool_buffer.pop(message_id)
+    message_key = _scoped_id(message_id, user_id) if message_id else None
+    if message_key and message_key in _opencode_tool_buffer:
+        tool_info = _opencode_tool_buffer.pop(message_key)
 
     return {
         "ts": ts,
@@ -435,16 +527,17 @@ def _parse_opencode_record(
     if usage:
         for tool_info in tool_calls:
             record_tool_call(
-                tool_use_id=tool_info["tool_use_id"],
+                tool_use_id=_scoped_tool_use_id(tool_info["tool_use_id"], user_id),
                 usage_id=usage.id,
                 session_id=usage.session_id,
                 tool_name=tool_info["tool_name"],
+                user_id=user_id,
                 client_source=client_source,
                 ts=tool_info["ts"],
             )
 
 
-def _handle_codex_state_event(attrs: list) -> bool:
+def _handle_codex_state_event(attrs: list, user_id: str | None = None) -> bool:
     """Handle Codex state-only events.
 
     Returns True when the event was consumed without producing a usage row.
@@ -456,6 +549,7 @@ def _handle_codex_state_event(attrs: list) -> bool:
     if event_kind == CODEX_API_REQUEST_EVENT or event_name == CODEX_API_REQUEST_EVENT:
         duration = _attr(attrs, "duration_ms")
         state_key = _state_key(conv_id)
+        state_key = _scoped_id(state_key, user_id) if state_key else None
         if state_key and duration is not None:
             if state_key not in codex_state:
                 codex_state[state_key] = {"ts": time.time_ns() // 1000}
@@ -465,6 +559,7 @@ def _handle_codex_state_event(attrs: list) -> bool:
     if event_kind == "response.created":
         duration = _attr(attrs, "duration_ms")
         state_key = _state_key(conv_id)
+        state_key = _scoped_id(state_key, user_id) if state_key else None
         if state_key and duration is not None:
             if state_key not in codex_state:
                 codex_state[state_key] = {"ts": time.time_ns() // 1000}
@@ -474,8 +569,10 @@ def _handle_codex_state_event(attrs: list) -> bool:
     return False
 
 
-def _parse_codex_api_request(record: dict, attrs: list) -> None:
-    _handle_codex_state_event(attrs)
+def _parse_codex_api_request(
+    record: dict, attrs: list, user_id: str | None = None
+) -> None:
+    _handle_codex_state_event(attrs, user_id=user_id)
 
 
 def _extract_codex_fields(
@@ -514,6 +611,7 @@ def _extract_codex_fields(
 
     # Try to get better latency and ttft from the state cache
     state_key = _state_key(conv_id)
+    state_key = _scoped_id(state_key, user_id) if state_key else None
     if state_key in codex_state:
         state = codex_state[state_key]
         if "duration_ms" in state:
@@ -526,7 +624,7 @@ def _extract_codex_fields(
     completion_tokens = int(output_tokens or 0)
     total_tokens = prompt_tokens + completion_tokens
     prompt_length = PROMPT_LENGTH_TRACKER.consume_for_usage_event(
-        service_name, attrs, ""
+        service_name, attrs, "", user_id=user_id
     )
     metadata = parse_provider_metadata("codex")
     model = _attr(attrs, "model") or "codex-unknown"
@@ -534,8 +632,9 @@ def _extract_codex_fields(
     # Pop buffered tool calls for this conversation.id
     conv_id = _attr(attrs, "conversation.id")
     tool_info: list[dict] = []
-    if conv_id and conv_id in _codex_tool_buffer:
-        tool_info = _codex_tool_buffer.pop(conv_id)
+    conversation_key = _scoped_id(conv_id, user_id) if conv_id else None
+    if conversation_key and conversation_key in _codex_tool_buffer:
+        tool_info = _codex_tool_buffer.pop(conversation_key)
 
     return {
         "ts": ts,
@@ -573,7 +672,7 @@ def _parse_codex_record(
     client_ip: str | None = None,
     user_id: str | None = None,
 ) -> None:
-    if _handle_codex_state_event(attrs):
+    if _handle_codex_state_event(attrs, user_id=user_id):
         return
     fields = _extract_codex_fields(
         record, attrs, service_name, client_ip, user_id=user_id
@@ -584,10 +683,11 @@ def _parse_codex_record(
         if usage:
             for tool_info in tool_calls:
                 record_tool_call(
-                    tool_use_id=tool_info["tool_use_id"],
+                    tool_use_id=_scoped_tool_use_id(tool_info["tool_use_id"], user_id),
                     usage_id=usage.id,
                     session_id=usage.session_id,
                     tool_name=tool_info["tool_name"],
+                    user_id=user_id,
                     client_source="codex",
                     ts=tool_info["ts"],
                 )
@@ -613,6 +713,7 @@ def _parse_log_record(
         service_name,
         attrs,
         usage_session_id or "",
+        user_id=user_id,
     )
     event_name = _attr(attrs, "event.name") or ""
 
@@ -620,7 +721,7 @@ def _parse_log_record(
     if event_name == "tool_decision" and service_name == "claude-code":
         prompt_id = _attr(attrs, "prompt.id")
         if prompt_id:
-            _claude_tool_buffer.setdefault(prompt_id, []).append(
+            _claude_tool_buffer.setdefault(_scoped_id(prompt_id, user_id), []).append(
                 {
                     "tool_name": _attr(attrs, "tool_name") or "",
                     "tool_use_id": _attr(attrs, "tool_use_id")
@@ -633,7 +734,7 @@ def _parse_log_record(
         tool_name = _attr(attrs, "tool_name") or ""
         # Skip the exec wrapper — only keep native tool names
         if conv_id and tool_name != "exec":
-            _codex_tool_buffer.setdefault(conv_id, []).append(
+            _codex_tool_buffer.setdefault(_scoped_id(conv_id, user_id), []).append(
                 {
                     "tool_name": tool_name,
                     "tool_use_id": _attr(attrs, "call_id") or _fallback_tool_use_id(),
@@ -647,7 +748,9 @@ def _parse_log_record(
         message_id = _attr(attrs, "message.id")
         tool_name = _attr(attrs, "tool_name") or ""
         if message_id and tool_name:
-            _opencode_tool_buffer.setdefault(message_id, []).append(
+            _opencode_tool_buffer.setdefault(
+                _scoped_id(message_id, user_id), []
+            ).append(
                 {
                     "tool_name": tool_name,
                     "tool_use_id": _attr(attrs, "call_id") or _fallback_tool_use_id(),
@@ -667,15 +770,18 @@ def _parse_log_record(
             if usage:
                 for tool_info in tool_calls:
                     record_tool_call(
-                        tool_use_id=tool_info["tool_use_id"],
+                        tool_use_id=_scoped_tool_use_id(
+                            tool_info["tool_use_id"], user_id
+                        ),
                         usage_id=usage.id,
                         session_id=usage.session_id,
                         tool_name=tool_info["tool_name"],
+                        user_id=user_id,
                         client_source="claude-code",
                         ts=tool_info["ts"],
                     )
     elif event_name == CODEX_EVENT and service_name in CODEX_SERVICE_NAMES:
-        if _handle_codex_state_event(attrs):
+        if _handle_codex_state_event(attrs, user_id=user_id):
             return
         fields = _extract_codex_fields(
             record, attrs, service_name, client_ip, user_id=user_id
@@ -686,15 +792,18 @@ def _parse_log_record(
             if usage:
                 for tool_info in tool_calls:
                     record_tool_call(
-                        tool_use_id=tool_info["tool_use_id"],
+                        tool_use_id=_scoped_tool_use_id(
+                            tool_info["tool_use_id"], user_id
+                        ),
                         usage_id=usage.id,
                         session_id=usage.session_id,
                         tool_name=tool_info["tool_name"],
+                        user_id=user_id,
                         client_source="codex",
                         ts=tool_info["ts"],
                     )
     elif event_name == CODEX_API_REQUEST_EVENT and service_name in CODEX_SERVICE_NAMES:
-        _handle_codex_state_event(attrs)
+        _handle_codex_state_event(attrs, user_id=user_id)
     elif event_name == OPENCODE_EVENT and service_name == "opencode":
         _parse_opencode_record(
             record, attrs, usage_session_id or "", client_ip=client_ip, user_id=user_id
@@ -740,7 +849,11 @@ async def health():
 @app.post("/v1/logs")
 async def receive_logs(request: Request):
     # Auth + rate limit + body cap — all before any record is parsed.
-    user_id, token_id = _resolve_ingest_user(request)
+    client_ip: str | None = request.client.host if request.client else None
+    if _auth_enabled():
+        user_id, token_id = await _resolve_ingest_user_async(request)
+    else:
+        user_id, token_id = None, None
 
     if token_id is not None:
         _check_rate_limit(token_id)
@@ -776,8 +889,6 @@ async def receive_logs(request: Request):
             del buf[k]
 
     PROMPT_LENGTH_TRACKER.evict_stale()
-
-    client_ip = request.client.host if request.client else None
 
     # Read body with hard cap (handles chunked/lying Content-Length)
     body_bytes = b""

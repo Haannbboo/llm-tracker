@@ -11,7 +11,7 @@ import logging
 import secrets
 import time
 
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy import update as sa_update
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
@@ -20,6 +20,7 @@ from ..database.engine import get_engine
 from ..database.models import AuthToken, User
 
 TOKEN_KINDS = ("cli", "ingest", "web")
+AUTH_STATEMENT_TIMEOUT_MILLISECONDS = 10_000
 
 
 def _now_micros() -> int:
@@ -28,6 +29,16 @@ def _now_micros() -> int:
 
 def hash_token(token: str) -> str:
     return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
+def _set_auth_statement_timeout(session: Session) -> None:
+    if session.get_bind().dialect.name == "postgresql":
+        session.execute(
+            text(
+                "SET LOCAL statement_timeout = "
+                f"'{AUTH_STATEMENT_TIMEOUT_MILLISECONDS}ms'"
+            )
+        )
 
 
 def get_or_create_user(email: str, db_path: str | None = None) -> User:
@@ -115,6 +126,7 @@ def resolve_token(
     """
     engine = get_engine(db_path)
     with Session(engine, expire_on_commit=False) as session:
+        _set_auth_statement_timeout(session)
         row = session.execute(
             select(AuthToken, User)
             .join(User, AuthToken.user_id == User.id)
@@ -128,6 +140,7 @@ def resolve_token(
         session.expunge_all()
     try:
         with Session(engine, expire_on_commit=False) as update_session:
+            _set_auth_statement_timeout(update_session)
             update_session.execute(
                 sa_update(AuthToken)
                 .where(AuthToken.id == auth_token.id)

@@ -131,6 +131,11 @@ class ConfigPatch(BaseModel):
         return data
 
 
+def _request_user_id(request: Request) -> str | None:
+    user = getattr(request.state, "user", None)
+    return getattr(user, "id", None)
+
+
 class ConfigPatchUpdate(BaseModel):
     patches: list[ConfigPatch]
 
@@ -630,7 +635,9 @@ async def sessions_daily_effectiveness(date: str):
 
 
 @app.put("/sessions/{session_id}/evaluation")
-async def put_session_evaluation(session_id: str, update: SessionEvaluationUpdate):
+async def put_session_evaluation(
+    request: Request, session_id: str, update: SessionEvaluationUpdate
+):
     if update.outcome not in VALID_OUTCOMES:
         raise HTTPException(
             status_code=400,
@@ -658,6 +665,7 @@ async def put_session_evaluation(session_id: str, update: SessionEvaluationUpdat
             evidence=update.evidence,
             failure_reason=update.failure_reason,
             project=update.project,
+            user_id=_request_user_id(request),
         )
     except ValueError as e:
         if "Session not found" in str(e):
@@ -667,14 +675,14 @@ async def put_session_evaluation(session_id: str, update: SessionEvaluationUpdat
 
 
 @app.get("/sessions/{session_id}/evaluation")
-async def get_evaluation(session_id: str):
-    evaluation = get_session_evaluation(session_id)
+async def get_evaluation(request: Request, session_id: str):
+    evaluation = get_session_evaluation(session_id, user_id=_request_user_id(request))
     return {"evaluation": evaluation}
 
 
 @app.delete("/sessions/{session_id}/evaluation")
-async def delete_evaluation(session_id: str):
-    deleted = delete_session_evaluation(session_id)
+async def delete_evaluation(request: Request, session_id: str):
+    deleted = delete_session_evaluation(session_id, user_id=_request_user_id(request))
     if not deleted:
         raise HTTPException(status_code=404, detail="Session not found")
     return {"status": "deleted"}
@@ -682,6 +690,7 @@ async def delete_evaluation(session_id: str):
 
 @app.post("/sessions/{session_id}/evaluate-with-llm", status_code=202)
 async def evaluate_session_with_llm(
+    http_request: Request,
     session_id: str,
     request: EvaluateSessionWithLlmRequest | None = None,
 ):
@@ -695,6 +704,7 @@ async def evaluate_session_with_llm(
             session_id,
             trigger="manual",
             evaluator_type=evaluator_type,
+            user_id=_request_user_id(http_request),
         )
     except ValueError as e:
         message = str(e)
@@ -713,20 +723,30 @@ async def evaluate_session_with_llm(
 
 
 @app.get("/poll/{job_id}")
-async def poll_job(job_id: str):
-    job = get_evaluation_job_progress(job_id)
+async def poll_job(request: Request, job_id: str):
+    user_id = _request_user_id(request)
+    job = (
+        get_evaluation_job_progress(job_id)
+        if user_id is None
+        else get_evaluation_job_progress(job_id, user_id=user_id)
+    )
     if job is None:
         raise HTTPException(status_code=404, detail="Job not found")
     return job
 
 
 @app.get("/evaluation-jobs/active")
-async def active_evaluation_jobs(session_ids: str | None = None):
+async def active_evaluation_jobs(request: Request, session_ids: str | None = None):
     parsed_session_ids = [
         item for item in (session_ids or "").split(",") if item
     ] or None
-    jobs = list_active_evaluation_jobs_with_progress(
-        session_ids=parsed_session_ids,
+    user_id = _request_user_id(request)
+    jobs = (
+        list_active_evaluation_jobs_with_progress(session_ids=parsed_session_ids)
+        if user_id is None
+        else list_active_evaluation_jobs_with_progress(
+            session_ids=parsed_session_ids, user_id=user_id
+        )
     )
     return {
         "jobs": {job["session_id"]: job for job in jobs},
@@ -735,16 +755,29 @@ async def active_evaluation_jobs(session_ids: str | None = None):
 
 
 @app.get("/sessions/{session_id}/evaluation-jobs")
-async def session_evaluation_jobs(session_id: str):
+async def session_evaluation_jobs(request: Request, session_id: str):
+    user_id = _request_user_id(request)
+    jobs = (
+        list_session_evaluation_jobs_with_progress(session_id)
+        if user_id is None
+        else list_session_evaluation_jobs_with_progress(session_id, user_id=user_id)
+    )
     return {
-        "jobs": list_session_evaluation_jobs_with_progress(session_id),
+        "jobs": jobs,
         **_evaluation_metadata_payload(),
     }
 
 
 @app.patch("/evaluation-jobs/{job_id}")
-async def update_evaluation_job(job_id: str, update: EvaluationJobUpdate):
-    current = get_evaluation_job_progress(job_id)
+async def update_evaluation_job(
+    request: Request, job_id: str, update: EvaluationJobUpdate
+):
+    user_id = _request_user_id(request)
+    current = (
+        get_evaluation_job_progress(job_id)
+        if user_id is None
+        else get_evaluation_job_progress(job_id, user_id=user_id)
+    )
     if current is None:
         raise HTTPException(status_code=404, detail="Job not found")
     if current["status"] != "queued":
@@ -758,32 +791,42 @@ async def update_evaluation_job(job_id: str, update: EvaluationJobUpdate):
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
-    updated = update_queued_evaluation_job_evaluator(
-        job_id,
-        evaluator_type=evaluator_type,
-    )
+    if user_id is None:
+        updated = update_queued_evaluation_job_evaluator(
+            job_id, evaluator_type=evaluator_type
+        )
+    else:
+        updated = update_queued_evaluation_job_evaluator(
+            job_id, evaluator_type=evaluator_type, user_id=user_id
+        )
     if updated is None:
         raise HTTPException(
             status_code=409,
             detail="Only queued evaluation jobs can change evaluator",
         )
-    refreshed = get_evaluation_job_progress(job_id)
+    refreshed = (
+        get_evaluation_job_progress(job_id)
+        if user_id is None
+        else get_evaluation_job_progress(job_id, user_id=user_id)
+    )
     return refreshed or updated
 
 
 @app.get("/usage/{usage_id}/tool-calls")
-async def get_usage_tool_calls(usage_id: str):
-    return fetch_tool_calls(usage_id=usage_id)
+async def get_usage_tool_calls(request: Request, usage_id: str):
+    return fetch_tool_calls(usage_id=usage_id, user_id=_request_user_id(request))
 
 
 @app.get("/sessions/{session_id}/tool-calls")
-async def get_session_tool_calls(session_id: str):
-    return fetch_tool_calls(session_id=session_id)
+async def get_session_tool_calls(request: Request, session_id: str):
+    return fetch_tool_calls(session_id=session_id, user_id=_request_user_id(request))
 
 
 @app.get("/sessions/{session_id}/tool-calls/summary")
-async def get_session_tool_calls_summary(session_id: str):
-    summary = summarize_session_tool_calls(session_id)
+async def get_session_tool_calls_summary(request: Request, session_id: str):
+    summary = summarize_session_tool_calls(
+        session_id, user_id=_request_user_id(request)
+    )
     if summary is None:
         raise HTTPException(status_code=404, detail="Session not found")
     return summary

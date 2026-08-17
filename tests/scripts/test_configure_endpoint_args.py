@@ -14,6 +14,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import tomllib
+
 SCRIPTS_DIR = Path(__file__).resolve().parents[2] / "scripts"
 
 ENDPOINT = "https://api.example.com:4005/v1/logs"
@@ -116,6 +118,23 @@ def test_codex_endpoint_arg(tmp_path):
     assert f'endpoint = "{ENDPOINT}"' in content
 
 
+def test_codex_token_arg_writes_otlp_header(tmp_path):
+    config = tmp_path / "config.toml"
+    result = _run(
+        "configure-codex-settings.py",
+        [str(config), "4002", "localhost", ENDPOINT, "ingest-secret"],
+        home=tmp_path,
+    )
+    assert result.returncode == 0, result.stderr
+    content = config.read_text()
+    assert 'headers = { "x-llm-tracker-token" = "ingest-secret" }' in content
+    parsed = tomllib.loads(content)
+    assert (
+        parsed["otel"]["exporter"]["otlp-http"]["headers"]["x-llm-tracker-token"]
+        == "ingest-secret"
+    )
+
+
 # --------------------------------------------------------- opencode / kilo
 
 
@@ -159,7 +178,14 @@ def test_plugin_scripts_reject_extra_args(tmp_path):
         project_root = _make_built_plugin_root(tmp_path, name)
         result = _run(
             script,
-            [str(project_root), "4005", "localhost", ENDPOINT, "extra"],
+            [
+                str(project_root),
+                "4005",
+                "localhost",
+                ENDPOINT,
+                "token",
+                "extra",
+            ],
             home=home,
         )
         assert result.returncode == 1

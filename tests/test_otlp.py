@@ -717,6 +717,26 @@ def test_claude_tool_decision_missing_tool_use_id_ids_are_unique(otlp_module):
     assert len(set(ids)) == 2
 
 
+def test_tool_buffers_are_scoped_by_authenticated_user(otlp_module):
+    for user_id in ("user-a", "user-b"):
+        record = {
+            "attributes": _attrs(
+                {
+                    "event.name": "tool_decision",
+                    "prompt.id": "shared-prompt",
+                    "tool_name": "Bash",
+                }
+            ),
+            "timeUnixNano": "1000000000",
+        }
+        otlp_module._parse_log_record(
+            record, "claude-code", "session-1", user_id=user_id
+        )
+
+    assert "user-a:shared-prompt" in otlp_module._claude_tool_buffer
+    assert "user-b:shared-prompt" in otlp_module._claude_tool_buffer
+
+
 def test_receive_logs_evicts_stale_tool_buffer_entries(otlp_module):
     """Tool-call buffer entries older than 10 minutes must be swept so an
     aborted turn doesn't leak the entry for the life of the process."""
@@ -826,6 +846,58 @@ def test_auth_enabled_valid_ingest_token_records_user_id(
     assert captured[0]["user_id"] == user.id
 
 
+def test_authenticated_otlp_tool_calls_keep_user_id(otlp_module, monkeypatch, fresh_db):
+    from src.auth.tokens import mint_token
+
+    monkeypatch.setitem(otlp_module.CONFIG.get("auth", {}), "enabled", True)
+    token, user = mint_token("test@example.com", kind="ingest")
+
+    captured_tools = []
+    monkeypatch.setattr(
+        otlp_module,
+        "record_usage",
+        lambda **fields: SimpleNamespace(id="u1", session_id="session-1"),
+    )
+    monkeypatch.setattr(
+        otlp_module, "record_tool_call", lambda **fields: captured_tools.append(fields)
+    )
+
+    body = _minimal_otlp_body()
+    records = body["resourceLogs"][0]["scopeLogs"][0]["logRecords"]
+    records[0]["attributes"] = _attrs(
+        {
+            "event.name": "tool_decision",
+            "prompt.id": "prompt-1",
+            "tool_name": "Bash",
+            "tool_use_id": "tool-1",
+            "session.id": "session-1",
+        }
+    )
+    records.append(
+        {
+            "attributes": _attrs(
+                {
+                    "event.name": "claude_code.api_request",
+                    "prompt.id": "prompt-1",
+                    "session.id": "session-1",
+                    "input_tokens": 10,
+                    "output_tokens": 5,
+                    "status_code": 200,
+                }
+            ),
+            "timeUnixNano": "1800000000000000000",
+        }
+    )
+
+    response = TestClient(otlp_module.app).post(
+        "/v1/logs", json=body, headers={"x-llm-tracker-token": token}
+    )
+
+    assert response.status_code == 200
+    assert captured_tools[0]["user_id"] == user.id
+    assert captured_tools[0]["tool_use_id"] == f"{user.id}:tool-1"
+
+
 def test_auth_enabled_missing_header_returns_401(otlp_module, monkeypatch):
     """auth.enabled=true, missing header → 401, no row recorded."""
     monkeypatch.setitem(otlp_module.CONFIG.get("auth", {}), "enabled", True)
@@ -841,6 +913,46 @@ def test_auth_enabled_missing_header_returns_401(otlp_module, monkeypatch):
     assert response.status_code == 401
     assert response.json()["detail"] == "invalid token"
     assert len(captured) == 0
+
+
+def test_auth_failures_are_rate_limited_by_client_before_lookup(
+    otlp_module, monkeypatch
+):
+    monkeypatch.setitem(otlp_module.CONFIG.get("auth", {}), "enabled", True)
+    monkeypatch.setitem(otlp_module.CONFIG.get("otlp", {}), "rate_limit_per_minute", 1)
+    otlp_module._rate_limit_state.clear()
+    otlp_module._invalid_token_cache.clear()
+
+    client = TestClient(otlp_module.app)
+
+    assert client.post("/v1/logs", json=_minimal_otlp_body()).status_code == 401
+    assert client.post("/v1/logs", json=_minimal_otlp_body()).status_code == 429
+
+
+def test_repeated_invalid_token_is_rate_limited_before_db_lookup(
+    otlp_module, monkeypatch
+):
+    monkeypatch.setitem(otlp_module.CONFIG.get("auth", {}), "enabled", True)
+    monkeypatch.setitem(otlp_module.CONFIG.get("otlp", {}), "rate_limit_per_minute", 1)
+    otlp_module._rate_limit_state.clear()
+    otlp_module._invalid_token_cache.clear()
+    lookups = []
+    monkeypatch.setattr(
+        otlp_module, "resolve_token", lambda token: lookups.append(token) or None
+    )
+
+    client = TestClient(otlp_module.app)
+    headers = {"x-llm-tracker-token": "llmt_ingest_invalid"}
+
+    assert (
+        client.post("/v1/logs", json=_minimal_otlp_body(), headers=headers).status_code
+        == 401
+    )
+    assert (
+        client.post("/v1/logs", json=_minimal_otlp_body(), headers=headers).status_code
+        == 429
+    )
+    assert len(lookups) == 1
 
 
 def test_auth_enabled_wrong_kind_token_returns_401(otlp_module, monkeypatch, fresh_db):

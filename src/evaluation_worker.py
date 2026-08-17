@@ -157,6 +157,7 @@ def select_auto_evaluation_candidates(
         candidates.append(
             {
                 "session_id": record.session_id,
+                "user_id": record.user_id,
                 "client_source": record.client_source,
                 "updated_at": record.updated_at,
             }
@@ -197,6 +198,7 @@ def enqueue_auto_evaluation_jobs(
             create_session_evaluation_job(
                 session_id=str(candidate["session_id"]),
                 client_source=candidate["client_source"],
+                user_id=candidate.get("user_id"),
                 trigger="auto",
                 evaluator_type=config.evaluator,
                 db_path=db_path,
@@ -238,7 +240,9 @@ def classify_local_evaluator_sessions(
             continue
         if not is_local_evaluator_session(record.client_source, record.session_id):
             continue
-        if mark_evaluator_session_no_op(record.session_id, db_path=db_path):
+        if mark_evaluator_session_no_op(
+            record.session_id, db_path=db_path, user_id=record.user_id
+        ):
             classified += 1
     classified += classify_transcriptless_evaluator_telemetry(
         limit=limit,
@@ -347,7 +351,9 @@ def classify_transcriptless_evaluator_telemetry(
             grace_seconds=grace_seconds,
         ):
             continue
-        if mark_evaluator_session_no_op(record.session_id, db_path=db_path):
+        if mark_evaluator_session_no_op(
+            record.session_id, db_path=db_path, user_id=record.user_id
+        ):
             classified += 1
     return classified
 

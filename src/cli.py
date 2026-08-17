@@ -547,6 +547,10 @@ def wire_agents_for_hosted(
     env = {
         k: v for k, v in os.environ.items() if k != "OTEL_EXPORTER_OTLP_LOGS_ENDPOINT"
     }
+    if token:
+        env["LLM_TRACKER_INGEST_TOKEN"] = token
+    else:
+        env.pop("LLM_TRACKER_INGEST_TOKEN", None)
     for name, script, prefix_args, endpoint in jobs:
         cmd = [
             sys.executable,
@@ -556,8 +560,6 @@ def wire_agents_for_hosted(
             "localhost",
             endpoint,
         ]
-        if token:
-            cmd.append(token)
         try:
             result = subprocess.run(
                 cmd,

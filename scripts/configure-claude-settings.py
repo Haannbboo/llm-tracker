@@ -24,9 +24,27 @@ def load_settings(path: Path) -> dict[str, Any]:
         return {}
 
 
+def load_ingest_token() -> str | None:
+    try:
+        credentials = json.loads(
+            (Path.home() / ".llm-tracker" / "credentials.json").read_text(
+                encoding="utf-8"
+            )
+        )
+    except (OSError, json.JSONDecodeError):
+        return None
+    token = credentials.get("ingest_token") if isinstance(credentials, dict) else None
+    return token if isinstance(token, str) and token else None
+
+
 def save_settings(path: Path, settings: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(settings, indent=2) + "\n", encoding="utf-8")
+    content = json.dumps(settings, indent=2) + "\n"
+    if path.exists():
+        path.chmod(0o600)
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as handle:
+        handle.write(content)
 
 
 def resolve_otlp_logs_endpoint(
@@ -52,7 +70,11 @@ def main() -> int:
     otlp_port = sys.argv[2] if len(sys.argv) >= 3 else "4002"
     host = sys.argv[3] if len(sys.argv) >= 4 else "localhost"
     endpoint = sys.argv[4] if len(sys.argv) >= 5 else None
-    token = sys.argv[5] if len(sys.argv) >= 6 else None
+    token = (
+        sys.argv[5]
+        if len(sys.argv) >= 6
+        else os.environ.get("LLM_TRACKER_INGEST_TOKEN") or load_ingest_token()
+    )
 
     settings = load_settings(settings_path)
     env = settings.setdefault("env", {})
@@ -73,6 +95,9 @@ def main() -> int:
         if env.get(k) != v:
             env[k] = v
             changed = True
+    if not token and "OTEL_EXPORTER_OTLP_HEADERS" in env:
+        del env["OTEL_EXPORTER_OTLP_HEADERS"]
+        changed = True
 
     if changed:
         save_settings(settings_path, settings)

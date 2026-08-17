@@ -71,13 +71,59 @@ def test_configure_kilo_plugin_updates_existing_entry(tmp_path):
         ),
         encoding="utf-8",
     )
-
     result = _run_configure(project_root, home, "4102")
 
     assert result.returncode == 0, result.stderr
     config = json.loads(config_path.read_text(encoding="utf-8"))
     assert config["plugin"] == [
         [plugin_path, {"endpoint": "http://localhost:4102/v1/logs"}]
+    ]
+
+
+def test_configure_kilo_plugin_preserves_token_and_removes_other_builds(tmp_path):
+    home = tmp_path / "home"
+    config_path = home / ".config" / "kilo" / "opencode.json"
+    config_path.parent.mkdir(parents=True)
+    project_root = _make_project_root(tmp_path)
+    plugin_path = str(project_root / "plugins" / "kilo" / "dist" / "index.js")
+    config_path.write_text(
+        json.dumps(
+            {
+                "plugin": [
+                    [
+                        "/old/worktree/plugins/kilo/dist/index.js",
+                        {"endpoint": "http://localhost:4102/v1/logs"},
+                    ],
+                    [
+                        plugin_path,
+                        {
+                            "endpoint": "http://localhost:4005/v1/logs",
+                            "token": "ingest-secret",
+                        },
+                    ],
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    credentials_path = home / ".llm-tracker" / "credentials.json"
+    credentials_path.parent.mkdir(parents=True)
+    credentials_path.write_text(
+        json.dumps({"ingest_token": "ingest-secret"}), encoding="utf-8"
+    )
+
+    result = _run_configure(project_root, home, "4102")
+
+    assert result.returncode == 0, result.stderr
+    config = json.loads(config_path.read_text(encoding="utf-8"))
+    assert config["plugin"] == [
+        [
+            plugin_path,
+            {
+                "endpoint": "http://localhost:4102/v1/logs",
+                "token": "ingest-secret",
+            },
+        ]
     ]
 
 
