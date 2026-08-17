@@ -1550,7 +1550,12 @@ def _period_expression(granularity: str, tz_offset: str) -> Any:
         ts_adjusted = (
             ts_cast + text(f"interval '{' '.join(parts)}'") if parts else ts_cast
         )
-        return func.to_char(ts_adjusted, pg_fmt)
+        # to_char() on a timestamptz implicitly converts to the session's
+        # TimeZone setting first; anchor to UTC so bucketing doesn't depend
+        # on the server/role's configured default timezone. self_group()
+        # parenthesizes ts_adjusted so AT TIME ZONE binds to the whole sum,
+        # not just the trailing interval.
+        return func.to_char(ts_adjusted.self_group().op("AT TIME ZONE")("UTC"), pg_fmt)
 
     if dialect == "mysql":
         fmt = "%Y-%m-%d %H:00" if granularity == "hour" else "%Y-%m-%d"

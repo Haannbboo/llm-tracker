@@ -203,11 +203,41 @@ _TRUNCATE_TABLES = [
 ]
 
 
-@pytest.fixture(scope="session")
-def _session_db(tmp_path_factory):
-    """Session-scoped DB with latest schema — shared across all fresh_db tests."""
+# Postgres test harness (docs/quick/postgres-testing.md): local-only, gated on
+# LLM_TRACKER_TEST_PG_URL. Every PG test skips when the env var is unset; CI
+# never sets it.
+
+PG_URL_ENV_VAR = "LLM_TRACKER_TEST_PG_URL"
+
+
+def _pg_test_url() -> str | None:
+    return os.environ.get(PG_URL_ENV_VAR)
+
+
+def _fresh_db_backends() -> list[str]:
+    return ["sqlite", "postgres"] if _pg_test_url() else ["sqlite"]
+
+
+@pytest.fixture(scope="session", params=_fresh_db_backends())
+def _session_db(request, tmp_path_factory):
+    """Session-scoped DB with latest schema — shared across all fresh_db tests.
+
+    Parametrized over backends: postgres only joins in when
+    LLM_TRACKER_TEST_PG_URL is set, doubling up every fresh_db-based test.
+    """
     import src.database as db
     import src.schema_migrations as sm
+
+    if request.param == "postgres":
+        import src.database.models as models
+
+        # Reuse pg_engine's skip-on-unset/unreachable guard instead of
+        # connecting directly.
+        engine = request.getfixturevalue("pg_engine")
+        url = _pg_test_url()
+        models.Base.metadata.drop_all(engine)
+        sm.migrate_database(url)
+        return url
 
     db_path = str(tmp_path_factory.mktemp("dbsession") / "usage.db")
     db.init_db(db_path)
@@ -230,7 +260,7 @@ def fresh_db(_session_db: str, monkeypatch: pytest.MonkeyPatch):
     import src.schema_migrations as sm
 
     db_path = _session_db
-    db_url = f"sqlite:///{db_path}"
+    db_url = db_path if "://" in db_path else f"sqlite:///{db_path}"
 
     # Patch CONFIG so functions called without db_path use the test DB
     monkeypatch.setitem(config.app.CONFIG["db"], "path", db_path)
@@ -249,17 +279,6 @@ def fresh_db(_session_db: str, monkeypatch: pytest.MonkeyPatch):
     )
 
 
-# Postgres test harness (docs/quick/postgres-testing.md): local-only, gated on
-# LLM_TRACKER_TEST_PG_URL. Every PG test skips when the env var is unset; CI
-# never sets it.
-
-PG_URL_ENV_VAR = "LLM_TRACKER_TEST_PG_URL"
-
-
-def _pg_test_url() -> str | None:
-    return os.environ.get(PG_URL_ENV_VAR)
-
-
 @pytest.fixture(scope="session")
 def pg_engine() -> Generator[Any, None, None]:
     """Session-scoped engine for the scratch Postgres database."""
@@ -267,8 +286,15 @@ def pg_engine() -> Generator[Any, None, None]:
     if not url:
         pytest.skip(f"{PG_URL_ENV_VAR} not set")
     from sqlalchemy import create_engine
+    from sqlalchemy.exc import OperationalError
 
     engine = create_engine(url, future=True, pool_pre_ping=True)
+    try:
+        with engine.connect():
+            pass
+    except OperationalError as exc:
+        engine.dispose()
+        pytest.skip(f"{PG_URL_ENV_VAR} set but unreachable: {exc}")
     yield engine
     engine.dispose()
 
