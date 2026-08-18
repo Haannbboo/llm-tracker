@@ -859,6 +859,7 @@ def _upsert_llm_evaluation(
     session_id: str,
     evaluation: dict[str, Any],
     db_path: str | None,
+    user_id: str | None = None,
     skip_if_manual: bool = False,
 ) -> None:
     from .database import upsert_session_evaluation
@@ -874,6 +875,7 @@ def _upsert_llm_evaluation(
         evidence=evaluation.get("evidence"),
         failure_reason=evaluation.get("failure_reason"),
         project=evaluation.get("project"),
+        user_id=user_id,
         skip_if_manual=skip_if_manual,
         db_path=db_path,
     )
@@ -883,9 +885,10 @@ def _session_has_manual_evaluation(
     session_id: str,
     *,
     db_path: str | None = None,
+    user_id: str | None = None,
 ) -> bool:
     with Session(get_engine(db_path)) as session:
-        record = get_session_record(session, session_id)
+        record = get_session_record(session, session_id, user_id=user_id)
         return bool(record is not None and record.source == "manual")
 
 
@@ -893,13 +896,15 @@ def mark_evaluator_session_no_op(
     session_id: str,
     *,
     db_path: str | None = None,
+    user_id: str | None = None,
 ) -> bool:
-    if _session_has_manual_evaluation(session_id, db_path=db_path):
+    if _session_has_manual_evaluation(session_id, db_path=db_path, user_id=user_id):
         return False
     _upsert_llm_evaluation(
         session_id=session_id,
         evaluation=_no_op_evaluator_session_evaluation(),
         db_path=db_path,
+        user_id=user_id,
     )
     return True
 
@@ -910,10 +915,11 @@ def summarize_session_with_llm(
     db_path: str | None = None,
     update: bool = True,
     evaluator: str = "codex",
+    user_id: str | None = None,
 ) -> dict[str, Any]:
     """Evaluate and summarize a session synchronously using the central evaluator."""
     with Session(get_engine(db_path)) as session:
-        record = get_session_record(session, session_id)
+        record = get_session_record(session, session_id, user_id=user_id)
         if not record:
             raise ValueError(f"Session not found: {session_id}")
         session.expunge(record)
@@ -928,6 +934,7 @@ def summarize_session_with_llm(
                 session_id=record.session_id,
                 evaluation=evaluation,
                 db_path=db_path,
+                user_id=user_id,
                 skip_if_manual=True,
             )
         return evaluation
@@ -941,6 +948,7 @@ def summarize_session_with_llm(
                 session_id=record.session_id,
                 evaluation=evaluation,
                 db_path=db_path,
+                user_id=user_id,
                 skip_if_manual=True,
             )
         return evaluation
@@ -954,6 +962,7 @@ def summarize_session_with_llm(
                 session_id=record.session_id,
                 evaluation=evaluation,
                 db_path=db_path,
+                user_id=user_id,
                 skip_if_manual=True,
             )
         return evaluation
@@ -965,6 +974,7 @@ def summarize_session_with_llm(
                 session_id=record.session_id,
                 evaluation=evaluation,
                 db_path=db_path,
+                user_id=user_id,
                 skip_if_manual=True,
             )
         return evaluation
@@ -993,6 +1003,7 @@ def summarize_session_with_llm(
             session_id=record.session_id,
             evaluation=evaluation,
             db_path=db_path,
+            user_id=user_id,
             skip_if_manual=True,
         )
     return evaluation
@@ -1021,7 +1032,9 @@ def execute_session_evaluation_job(
             raise ValueError(f"Evaluation job not found: {job_id}")
         evaluator_type = evaluator or job.get("evaluator_type") or "codex"
 
-        if _session_has_manual_evaluation(job["session_id"], db_path=db_path):
+        if _session_has_manual_evaluation(
+            job["session_id"], db_path=db_path, user_id=job.get("user_id")
+        ):
             mark_evaluation_job_succeeded(job_id, db_path=db_path)
             return
 
@@ -1030,6 +1043,7 @@ def execute_session_evaluation_job(
             db_path=db_path,
             update=True,
             evaluator=evaluator_type,
+            user_id=job.get("user_id"),
         )
         mark_evaluation_job_succeeded(job_id, db_path=db_path)
     except Exception as exc:
@@ -1041,6 +1055,7 @@ def start_session_evaluation_job(
     *,
     trigger: str = "manual",
     evaluator_type: str = "codex",
+    user_id: str | None = None,
     db_path: str | None = None,
 ) -> dict[str, Any]:
     evaluator_type = normalize_evaluator_type(evaluator_type)
@@ -1048,7 +1063,7 @@ def start_session_evaluation_job(
         raise ValueError(f"Unsupported evaluator agent: {evaluator_type}")
 
     with Session(get_engine(db_path)) as session:
-        record = get_session_record(session, session_id)
+        record = get_session_record(session, session_id, user_id=user_id)
         if not record:
             raise ValueError(f"Session not found: {session_id}")
         if record.source == "manual":
@@ -1059,6 +1074,7 @@ def start_session_evaluation_job(
 
     active = find_active_session_evaluation_job(
         session_id=session_id,
+        user_id=user_id,
         db_path=db_path,
     )
     if active is not None:
@@ -1083,6 +1099,7 @@ def start_session_evaluation_job(
     job = create_session_evaluation_job(
         session_id=session_id,
         client_source=client_source,
+        user_id=user_id,
         trigger=trigger,
         evaluator_type=evaluator_type,
         db_path=db_path,

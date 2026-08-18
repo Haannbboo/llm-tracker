@@ -37,6 +37,7 @@ def _job_to_dict(job: EvaluationJob) -> dict[str, Any]:
         "job_id": job.job_id,
         "kind": job.kind,
         "session_id": job.session_id,
+        "user_id": job.user_id,
         "client_source": job.client_source,
         "status": job.status,
         "trigger": job.trigger,
@@ -52,6 +53,7 @@ def create_session_evaluation_job(
     *,
     session_id: str,
     client_source: str | None,
+    user_id: str | None = None,
     trigger: str = "manual",
     evaluator_type: str = "codex",
     created_at: str | None = None,
@@ -64,6 +66,7 @@ def create_session_evaluation_job(
         job_id=str(uuid4()),
         kind=SESSION_EVALUATION_JOB_KIND,
         session_id=session_id,
+        user_id=user_id,
         client_source=client_source,
         trigger=trigger,
         evaluator_type=evaluator_type,
@@ -84,6 +87,7 @@ def create_session_evaluation_job(
                         and_(
                             EvaluationJob.kind == SESSION_EVALUATION_JOB_KIND,
                             EvaluationJob.session_id == session_id,
+                            EvaluationJob.user_id == user_id,
                             EvaluationJob.status.in_(ACTIVE_EVALUATION_JOB_STATUSES),
                         )
                     )
@@ -101,10 +105,14 @@ def create_session_evaluation_job(
 
 def get_evaluation_job(
     job_id: str,
+    user_id: str | None = None,
     db_path: str | None = None,
 ) -> dict[str, Any] | None:
     with Session(get_engine(db_path)) as session:
-        job = session.get(EvaluationJob, job_id)
+        query = select(EvaluationJob).where(EvaluationJob.job_id == job_id)
+        if user_id is not None:
+            query = query.where(EvaluationJob.user_id == user_id)
+        job = session.scalar(query)
         return _job_to_dict(job) if job else None
 
 
@@ -112,24 +120,22 @@ def promote_evaluation_job_to_manual(
     job_id: str,
     *,
     evaluator_type: str | None = None,
+    user_id: str | None = None,
     db_path: str | None = None,
 ) -> dict[str, Any] | None:
     values: dict[str, Any] = {"trigger": "manual"}
     if evaluator_type is not None:
         values["evaluator_type"] = evaluator_type
     with Session(get_engine(db_path)) as session:
-        session.execute(
-            update(EvaluationJob)
-            .where(
-                and_(
-                    EvaluationJob.job_id == job_id,
-                    EvaluationJob.kind == SESSION_EVALUATION_JOB_KIND,
-                    EvaluationJob.status == "queued",
-                    EvaluationJob.trigger == "auto",
-                )
-            )
-            .values(**values)
-        )
+        filters = [
+            EvaluationJob.job_id == job_id,
+            EvaluationJob.kind == SESSION_EVALUATION_JOB_KIND,
+            EvaluationJob.status == "queued",
+            EvaluationJob.trigger == "auto",
+        ]
+        if user_id is not None:
+            filters.append(EvaluationJob.user_id == user_id)
+        session.execute(update(EvaluationJob).where(and_(*filters)).values(**values))
         session.commit()
         job = session.get(EvaluationJob, job_id)
         return _job_to_dict(job) if job else None
@@ -139,18 +145,20 @@ def update_queued_evaluation_job_evaluator(
     job_id: str,
     *,
     evaluator_type: str,
+    user_id: str | None = None,
     db_path: str | None = None,
 ) -> dict[str, Any] | None:
     with Session(get_engine(db_path)) as session:
+        filters = [
+            EvaluationJob.job_id == job_id,
+            EvaluationJob.kind == SESSION_EVALUATION_JOB_KIND,
+            EvaluationJob.status == "queued",
+        ]
+        if user_id is not None:
+            filters.append(EvaluationJob.user_id == user_id)
         result = session.execute(
             update(EvaluationJob)
-            .where(
-                and_(
-                    EvaluationJob.job_id == job_id,
-                    EvaluationJob.kind == SESSION_EVALUATION_JOB_KIND,
-                    EvaluationJob.status == "queued",
-                )
-            )
+            .where(and_(*filters))
             .values(evaluator_type=evaluator_type)
         )
         session.commit()
@@ -298,6 +306,7 @@ def _fail_stale_evaluation_job(
 def list_active_evaluation_jobs(
     *,
     session_ids: list[str] | None = None,
+    user_id: str | None = None,
     db_path: str | None = None,
 ) -> list[dict[str, Any]]:
     with Session(get_engine(db_path)) as session:
@@ -309,6 +318,8 @@ def list_active_evaluation_jobs(
         )
         if session_ids:
             query = query.where(EvaluationJob.session_id.in_(session_ids))
+        if user_id is not None:
+            query = query.where(EvaluationJob.user_id == user_id)
         jobs = session.execute(query).scalars().all()
         return [_job_to_dict(job) for job in jobs]
 
@@ -316,10 +327,13 @@ def list_active_evaluation_jobs(
 def list_active_evaluation_jobs_with_progress(
     *,
     session_ids: list[str] | None = None,
+    user_id: str | None = None,
     db_path: str | None = None,
 ) -> list[dict[str, Any]]:
-    progress = _active_progress_map(db_path=db_path)
-    jobs = list_active_evaluation_jobs(session_ids=session_ids, db_path=db_path)
+    progress = _active_progress_map(user_id=user_id, db_path=db_path)
+    jobs = list_active_evaluation_jobs(
+        session_ids=session_ids, user_id=user_id, db_path=db_path
+    )
     return [
         {
             **job,
@@ -332,41 +346,42 @@ def list_active_evaluation_jobs_with_progress(
     ]
 
 
-def _active_progress_map(db_path: str | None = None) -> dict[str, dict[str, int]]:
+def _active_progress_map(
+    user_id: str | None = None, db_path: str | None = None
+) -> dict[str, dict[str, int]]:
     with Session(get_engine(db_path)) as session:
+        running_query = select(EvaluationJob).where(
+            and_(
+                EvaluationJob.kind == SESSION_EVALUATION_JOB_KIND,
+                EvaluationJob.status == "running",
+            )
+        )
+        if user_id is not None:
+            running_query = running_query.where(EvaluationJob.user_id == user_id)
         running = (
             session.execute(
-                select(EvaluationJob)
-                .where(
-                    and_(
-                        EvaluationJob.kind == SESSION_EVALUATION_JOB_KIND,
-                        EvaluationJob.status == "running",
-                    )
-                )
-                .order_by(
+                running_query.order_by(
                     EvaluationJob.started_at.asc(), EvaluationJob.created_at.asc()
                 )
             )
             .scalars()
             .all()
         )
-        queued = (
-            session.execute(
-                select(EvaluationJob)
-                .join(
-                    SessionRecord,
-                    SessionRecord.session_id == EvaluationJob.session_id,
+
+        queued_query = (
+            select(EvaluationJob)
+            .join(SessionRecord, SessionRecord.session_id == EvaluationJob.session_id)
+            .where(
+                and_(
+                    EvaluationJob.kind == SESSION_EVALUATION_JOB_KIND,
+                    EvaluationJob.status == "queued",
                 )
-                .where(
-                    and_(
-                        EvaluationJob.kind == SESSION_EVALUATION_JOB_KIND,
-                        EvaluationJob.status == "queued",
-                    )
-                )
-                .order_by(*_queued_job_order())
             )
-            .scalars()
-            .all()
+        )
+        if user_id is not None:
+            queued_query = queued_query.where(EvaluationJob.user_id == user_id)
+        queued = (
+            session.execute(queued_query.order_by(*_queued_job_order())).scalars().all()
         )
 
     progress: dict[str, dict[str, int]] = {}
@@ -384,12 +399,13 @@ def _active_progress_map(db_path: str | None = None) -> dict[str, dict[str, int]
 
 def get_evaluation_job_progress(
     job_id: str,
+    user_id: str | None = None,
     db_path: str | None = None,
 ) -> dict[str, Any] | None:
-    job = get_evaluation_job(job_id, db_path=db_path)
+    job = get_evaluation_job(job_id, user_id=user_id, db_path=db_path)
     if job is None:
         return None
-    progress = _active_progress_map(db_path=db_path).get(
+    progress = _active_progress_map(user_id=user_id, db_path=db_path).get(
         job_id,
         {"ahead_count": 0, "queue_position": None},
     )
@@ -399,12 +415,13 @@ def get_evaluation_job_progress(
 def list_session_evaluation_jobs_with_progress(
     session_id: str,
     *,
+    user_id: str | None = None,
     db_path: str | None = None,
 ) -> list[dict[str, Any]]:
-    progress = _active_progress_map(db_path=db_path)
+    progress = _active_progress_map(user_id=user_id, db_path=db_path)
     engine = get_engine(db_path)
     with Session(engine) as session:
-        rec = get_session_record(session, session_id)
+        rec = get_session_record(session, session_id, user_id=user_id)
         outcome = rec.outcome if rec else None
         jobs = (
             session.execute(
@@ -413,6 +430,7 @@ def list_session_evaluation_jobs_with_progress(
                     and_(
                         EvaluationJob.kind == SESSION_EVALUATION_JOB_KIND,
                         EvaluationJob.session_id == session_id,
+                        EvaluationJob.user_id == user_id,
                     )
                 )
                 .order_by(EvaluationJob.created_at.desc())
@@ -436,6 +454,7 @@ def list_session_evaluation_jobs_with_progress(
 def find_active_session_evaluation_job(
     *,
     session_id: str,
+    user_id: str | None = None,
     now: str | None = None,
     db_path: str | None = None,
 ) -> dict[str, Any] | None:
@@ -450,6 +469,7 @@ def find_active_session_evaluation_job(
                     and_(
                         EvaluationJob.kind == SESSION_EVALUATION_JOB_KIND,
                         EvaluationJob.session_id == session_id,
+                        EvaluationJob.user_id == user_id,
                         EvaluationJob.status.in_(ACTIVE_EVALUATION_JOB_STATUSES),
                     )
                 )

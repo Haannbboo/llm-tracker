@@ -64,16 +64,17 @@ If a check fails:
 
 ## 3. Independent review before commit
 
-Before commit, run `.agents/commands/review.md` using a fresh subagent (a separate Agent/delegation call or new Claude Code session, not the current implementation context).
+Before commit, run `.agents/commands/review/SKILL.md` in a fresh opposite-tool CLI process, not through a subagent or internal delegation call.
 
 Review the branch against `main`:
 
 ```bash
-git diff --stat main...HEAD
-git diff main...HEAD
+git diff --stat main
+git diff main
+git ls-files --others --exclude-standard
 ```
 
-The reviewer must be independent: separate context, no implementation history, and no assumptions beyond the diff and repo guidance.
+The reviewer must be independent: separate process, no implementation history, and no assumptions beyond the diff and repo guidance. Read and include the contents of intended untracked files because `git diff` does not show them.
 
 Fix all must-fix findings before committing.
 

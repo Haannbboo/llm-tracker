@@ -703,6 +703,14 @@ def test_get_db_url_explicit_url_wins_over_env_override(
     assert database_module.get_db_url(explicit) == explicit
 
 
+def test_postgres_connect_args_bound_database_waits(database_module):
+    from src.database.engine import _connect_args
+
+    assert _connect_args("postgresql+psycopg://db.example/usage") == {
+        "connect_timeout": 5,
+    }
+
+
 def test_merge_usage_database_copies_usage_and_base_url_metadata(
     database_module, isolated_home
 ):

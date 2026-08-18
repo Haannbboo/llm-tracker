@@ -143,6 +143,10 @@ def merge_duplicate_usage(
     they're already folded into `usage_daily`/`sessions` running sums the
     moment the existing row was inserted, so changing them here would desync
     those aggregates without a matching correction.
+
+    Authenticated OTLP rows intentionally do not merge with unscoped proxy
+    rows (`user_id` NULL); merging them would attribute another tenant's
+    traffic without a trustworthy identity.
     """
     family = _CLIENT_SOURCE_FAMILIES.get(client_source or "")
     if family is None:
@@ -977,11 +981,15 @@ def fetch_tool_calls(
     *,
     usage_id: str | None = None,
     session_id: str | None = None,
+    user_id: str | None = None,
     db_path: str | None = None,
 ) -> list[dict[str, Any]]:
     """Return tool calls for a single usage row or session, ordered by ts."""
     column = ToolCall.usage_id if usage_id is not None else ToolCall.session_id
     value = usage_id if usage_id is not None else session_id
+    filters = [column == value]
+    if user_id is not None:
+        filters.append(ToolCall.user_id == user_id)
     query = (
         select(
             ToolCall.tool_use_id,
@@ -991,7 +999,7 @@ def fetch_tool_calls(
             ToolCall.client_source,
             ToolCall.ts,
         )
-        .where(column == value)
+        .where(and_(*filters))
         .order_by(ToolCall.ts)
         .limit(TOOL_CALLS_QUERY_LIMIT)
     )

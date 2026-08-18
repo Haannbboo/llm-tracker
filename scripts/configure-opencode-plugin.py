@@ -10,6 +10,7 @@ so that llm-tracker's health endpoint can detect it.
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -32,9 +33,27 @@ def load_json(path: Path) -> dict[str, Any]:
         return {}
 
 
+def load_ingest_token() -> str | None:
+    try:
+        credentials = json.loads(
+            (Path.home() / ".llm-tracker" / "credentials.json").read_text(
+                encoding="utf-8"
+            )
+        )
+    except (OSError, UnicodeError, json.JSONDecodeError):
+        return None
+    token = credentials.get("ingest_token") if isinstance(credentials, dict) else None
+    return token if isinstance(token, str) and token else None
+
+
 def save_json(path: Path, data: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+    content = json.dumps(data, indent=2) + "\n"
+    if path.exists():
+        path.chmod(0o600)
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as handle:
+        handle.write(content)
 
 
 def warn_skip(message: str) -> int:
@@ -69,9 +88,9 @@ def select_config_path() -> Path:
 
 
 def main() -> int:
-    if len(sys.argv) not in (2, 3, 4, 5):
+    if len(sys.argv) not in (2, 3, 4, 5, 6):
         print(
-            "usage: configure-opencode-plugin.py PROJECT_ROOT [OTLP_PORT] [HOST] [ENDPOINT]",
+            "usage: configure-opencode-plugin.py PROJECT_ROOT [OTLP_PORT] [HOST] [ENDPOINT] [TOKEN]",
             file=sys.stderr,
         )
         return 1
@@ -80,6 +99,11 @@ def main() -> int:
     otlp_port = sys.argv[2] if len(sys.argv) >= 3 else "4005"
     host = sys.argv[3] if len(sys.argv) >= 4 else "localhost"
     endpoint_arg = sys.argv[4] if len(sys.argv) >= 5 else None
+    token = (
+        sys.argv[5]
+        if len(sys.argv) >= 6
+        else os.environ.get("LLM_TRACKER_INGEST_TOKEN") or load_ingest_token()
+    )
     plugin_dir = project_root / "plugins" / "opencode"
     config_path = select_config_path()
     if endpoint_arg and "://" in endpoint_arg:
@@ -116,7 +140,43 @@ def main() -> int:
         plugins = []
 
     plugin_path = str(plugin_dir / "dist" / "index.js")
-    plugin_entry = [plugin_path, {"endpoint": endpoint}]
+    plugin_options: dict[str, Any] = {"endpoint": endpoint}
+    if token:
+        plugin_options["token"] = token
+    plugin_entry = [plugin_path, plugin_options]
+
+    # OpenCode loads every configured plugin. Keep one tracker build so stale
+    # worktree entries cannot emit duplicate or unauthenticated telemetry.
+    filtered_plugins = []
+    current_plugin_kept = False
+    for entry in plugins:
+        entry_path = (
+            entry
+            if isinstance(entry, str)
+            else entry[0]
+            if isinstance(entry, list) and entry
+            else ""
+        )
+        if (
+            str(entry_path)
+            .replace("\\", "/")
+            .endswith("plugins/opencode/dist/index.js")
+        ):
+            entry_endpoint = (
+                entry[1].get("endpoint")
+                if isinstance(entry, list)
+                and len(entry) >= 2
+                and isinstance(entry[1], dict)
+                else None
+            )
+            if str(entry_path) == plugin_path:
+                if current_plugin_kept:
+                    continue
+                current_plugin_kept = True
+            elif entry_endpoint == endpoint:
+                continue
+        filtered_plugins.append(entry)
+    plugins = filtered_plugins
 
     already_registered = False
     for i, entry in enumerate(plugins):
@@ -126,11 +186,15 @@ def main() -> int:
             break
         if isinstance(entry, list) and len(entry) >= 1 and entry[0] == plugin_path:
             if len(entry) < 2:
-                entry.append({"endpoint": endpoint})
+                entry.append(plugin_options)
             elif isinstance(entry[1], dict):
                 entry[1]["endpoint"] = endpoint
+                if token:
+                    entry[1]["token"] = token
+                else:
+                    entry[1].pop("token", None)
             else:
-                entry[1] = {"endpoint": endpoint}
+                entry[1] = plugin_options
             already_registered = True
             break
 

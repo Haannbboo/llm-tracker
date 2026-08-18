@@ -37,6 +37,7 @@ async function handleMessageUpdated(
   processed: Set<string>,
   pending: Set<string>,
   promptState: ReturnType<typeof makePromptState>,
+  headers?: Record<string, string>,
 ): Promise<void> {
   if (info.role === "user") {
     promptState.rememberUserMessage(info.id)
@@ -96,7 +97,7 @@ async function handleMessageUpdated(
       clientSource,
     )
 
-    const emitted = await emitOtlp(payload, endpoint)
+    const emitted = await emitOtlp(payload, endpoint, 10_000, headers)
     if (!emitted) return
 
     processed.add(info.id)
@@ -120,6 +121,8 @@ export function createPlugin(clientSource: string) {
 
   return async (input: any, options?: Record<string, any>) => {
     const endpoint = getEndpoint(options) ?? DEFAULT_ENDPOINT
+    const token = typeof options?.token === "string" ? options.token : undefined
+    const headers = token ? { "x-llm-tracker-token": token } : undefined
 
     return {
       event: async ({ event }: { event: { type: string; properties?: Record<string, any> } }) => {
@@ -152,7 +155,7 @@ export function createPlugin(clientSource: string) {
               },
               clientSource,
             )
-            await emitOtlp(toolPayload, endpoint)
+            await emitOtlp(toolPayload, endpoint, 10_000, headers)
           }
           return
         }
@@ -162,7 +165,7 @@ export function createPlugin(clientSource: string) {
         const info = event.properties?.info
         if (!info) return
 
-        await handleMessageUpdated(input, endpoint, info, clientSource, processed, pending, promptState)
+        await handleMessageUpdated(input, endpoint, info, clientSource, processed, pending, promptState, headers)
       },
     }
   }

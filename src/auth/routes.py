@@ -60,6 +60,8 @@ def _resolve_request_user(
     if resolved is None:
         return None
     user, auth_token = resolved
+    if auth_token.kind == "ingest":
+        return None
     request.state.user = user
     request.state.auth_token = auth_token
     return user, auth_token

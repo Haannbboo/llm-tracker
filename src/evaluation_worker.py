@@ -101,6 +101,13 @@ def select_auto_evaluation_candidates(
 
     now_dt = _parse_iso(now) if now is not None else datetime.now(timezone.utc)
     quiet_cutoff = (now_dt - timedelta(seconds=quiet_delay_seconds)).isoformat()
+    same_user = or_(
+        EvaluationJob.user_id == SessionRecord.user_id,
+        and_(
+            EvaluationJob.user_id.is_(None),
+            SessionRecord.user_id.is_(None),
+        ),
+    )
     latest_failed_auto = (
         select(func.max(EvaluationJob.finished_at))
         .where(
@@ -109,6 +116,7 @@ def select_auto_evaluation_candidates(
                 EvaluationJob.trigger == "auto",
                 EvaluationJob.status == "failed",
                 EvaluationJob.session_id == SessionRecord.session_id,
+                same_user,
             )
         )
         .correlate(SessionRecord)
@@ -118,6 +126,7 @@ def select_auto_evaluation_candidates(
         and_(
             EvaluationJob.kind == SESSION_EVALUATION_JOB_KIND,
             EvaluationJob.session_id == SessionRecord.session_id,
+            same_user,
             EvaluationJob.status.in_(ACTIVE_EVALUATION_JOB_STATUSES),
         )
     )
@@ -157,6 +166,7 @@ def select_auto_evaluation_candidates(
         candidates.append(
             {
                 "session_id": record.session_id,
+                "user_id": record.user_id,
                 "client_source": record.client_source,
                 "updated_at": record.updated_at,
             }
@@ -197,6 +207,7 @@ def enqueue_auto_evaluation_jobs(
             create_session_evaluation_job(
                 session_id=str(candidate["session_id"]),
                 client_source=candidate["client_source"],
+                user_id=candidate.get("user_id"),
                 trigger="auto",
                 evaluator_type=config.evaluator,
                 db_path=db_path,
@@ -238,7 +249,9 @@ def classify_local_evaluator_sessions(
             continue
         if not is_local_evaluator_session(record.client_source, record.session_id):
             continue
-        if mark_evaluator_session_no_op(record.session_id, db_path=db_path):
+        if mark_evaluator_session_no_op(
+            record.session_id, db_path=db_path, user_id=record.user_id
+        ):
             classified += 1
     classified += classify_transcriptless_evaluator_telemetry(
         limit=limit,
@@ -262,6 +275,8 @@ def _record_overlaps_evaluation_job(
 
     grace = timedelta(seconds=grace_seconds)
     for job in jobs:
+        if job.user_id != record.user_id:
+            continue
         if job.session_id == record.session_id or job.started_at is None:
             continue
         try:
@@ -315,21 +330,32 @@ def classify_transcriptless_evaluator_telemetry(
             .scalars()
             .all()
         )
-        jobs = (
-            session.execute(
-                select(EvaluationJob)
-                .where(
-                    and_(
-                        EvaluationJob.kind == SESSION_EVALUATION_JOB_KIND,
-                        EvaluationJob.started_at.is_not(None),
-                    )
-                )
-                .order_by(EvaluationJob.started_at.desc())
-                .limit(max(limit * 5, 50))
+        # Keep each tenant's job window separate so busy tenants cannot crowd
+        # relevant jobs for quieter tenants out of the bounded result set.
+        job_limit = max(limit * 5, 50)
+        jobs: list[EvaluationJob] = []
+        for user_id in {record.user_id for record in records}:
+            user_filter = (
+                EvaluationJob.user_id.is_(None)
+                if user_id is None
+                else EvaluationJob.user_id == user_id
             )
-            .scalars()
-            .all()
-        )
+            jobs.extend(
+                session.execute(
+                    select(EvaluationJob)
+                    .where(
+                        and_(
+                            EvaluationJob.kind == SESSION_EVALUATION_JOB_KIND,
+                            EvaluationJob.started_at.is_not(None),
+                            user_filter,
+                        )
+                    )
+                    .order_by(EvaluationJob.started_at.desc())
+                    .limit(job_limit)
+                )
+                .scalars()
+                .all()
+            )
 
     if not records or not jobs:
         return 0
@@ -347,7 +373,9 @@ def classify_transcriptless_evaluator_telemetry(
             grace_seconds=grace_seconds,
         ):
             continue
-        if mark_evaluator_session_no_op(record.session_id, db_path=db_path):
+        if mark_evaluator_session_no_op(
+            record.session_id, db_path=db_path, user_id=record.user_id
+        ):
             classified += 1
     return classified
 

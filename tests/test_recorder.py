@@ -320,6 +320,70 @@ def test_record_tool_call_duplicate_id_is_noop(test_db):
     assert rows[0]["tool_names"] == "bash"
 
 
+def test_record_tool_call_scoped_redelivery_matches_legacy_id(test_db):
+    """Authenticated redelivery must find a pre-auth raw provider ID."""
+    from sqlalchemy import select
+    from sqlalchemy.orm import Session as OrmSession
+
+    from src.database import get_engine
+    from src.database.models import ToolCall
+    from src.recorder import record_tool_call
+
+    record_tool_call(
+        tool_use_id="call_abc",
+        session_id="session-1",
+        client_source="claude-code",
+        tool_name="bash",
+        ts=1,
+        db_path=test_db,
+    )
+    record_tool_call(
+        tool_use_id="user-1:call_abc",
+        user_id="user-1",
+        session_id="user-1:session-1",
+        client_source="claude-code",
+        tool_name="bash",
+        ts=2,
+        db_path=test_db,
+    )
+
+    with OrmSession(get_engine(test_db)) as session:
+        rows = session.scalars(select(ToolCall)).all()
+    assert [(row.tool_use_id, row.user_id) for row in rows] == [("call_abc", None)]
+
+
+def test_record_tool_call_scoped_collision_keeps_new_call(test_db):
+    """A raw ID collision from another session must not be deduplicated."""
+    from sqlalchemy import select
+    from sqlalchemy.orm import Session as OrmSession
+
+    from src.database import get_engine
+    from src.database.models import ToolCall
+    from src.recorder import record_tool_call
+
+    record_tool_call(
+        tool_use_id="call_abc",
+        session_id="legacy-session",
+        client_source="claude-code",
+        tool_name="bash",
+        ts=1,
+        db_path=test_db,
+    )
+    record_tool_call(
+        tool_use_id="user-1:call_abc",
+        user_id="user-1",
+        session_id="user-1:new-session",
+        client_source="claude-code",
+        tool_name="bash",
+        ts=2,
+        db_path=test_db,
+    )
+
+    with OrmSession(get_engine(test_db)) as session:
+        rows = session.scalars(select(ToolCall)).all()
+    assert {row.tool_use_id for row in rows} == {"call_abc", "user-1:call_abc"}
+
+
 def test_record_tool_call_integrity_error_is_noop(test_db, monkeypatch):
     """A concurrent redelivery that races past the pre-check must still no-op
     instead of letting IntegrityError propagate out of the OTLP handler."""

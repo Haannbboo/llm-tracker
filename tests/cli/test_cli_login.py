@@ -388,6 +388,31 @@ def test_wire_agents_for_hosted_invokes_scripts(cli_module, isolated_home, monke
         )
 
 
+def test_wire_agents_passes_ingest_token_via_environment(
+    cli_module, isolated_home, monkeypatch
+):
+    calls = []
+
+    monkeypatch.setattr(cli_module.shutil, "which", lambda name: "/usr/bin/" + name)
+
+    def fake_run(cmd, **kwargs):
+        calls.append((cmd, kwargs))
+        return SimpleNamespace(returncode=0, stderr="")
+
+    monkeypatch.setattr(cli_module.subprocess, "run", fake_run)
+
+    wired = cli_module.wire_agents_for_hosted(
+        logs_endpoint="https://api.example.com:4005/v1/logs",
+        token="ingest-secret",
+    )
+
+    assert wired == ["codex", "claude", "opencode", "kilo"]
+    assert calls
+    for cmd, kwargs in calls:
+        assert all("ingest-secret" not in str(arg) for arg in cmd)
+        assert kwargs["env"]["LLM_TRACKER_INGEST_TOKEN"] == "ingest-secret"
+
+
 def test_wire_agents_no_endpoint_noop(cli_module, isolated_home, monkeypatch):
     monkeypatch.setattr(cli_module.shutil, "which", lambda name: "/usr/bin/" + name)
     assert cli_module.wire_agents_for_hosted(logs_endpoint=None) == []

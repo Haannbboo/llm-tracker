@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import json
 import os
 import re
 import sys
@@ -10,6 +11,27 @@ _RESET = "\033[0m" if sys.stdout.isatty() else ""
 
 def _info(msg: str) -> None:
     print(f"  {_GRAY}{msg}{_RESET}")
+
+
+def _write_private(path: Path, content: str) -> None:
+    if path.exists():
+        path.chmod(0o600)
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as handle:
+        handle.write(content)
+
+
+def load_ingest_token() -> str | None:
+    try:
+        credentials = json.loads(
+            (Path.home() / ".llm-tracker" / "credentials.json").read_text(
+                encoding="utf-8"
+            )
+        )
+    except (OSError, UnicodeError, json.JSONDecodeError):
+        return None
+    token = credentials.get("ingest_token") if isinstance(credentials, dict) else None
+    return token if isinstance(token, str) and token else None
 
 
 def resolve_otlp_logs_endpoint(
@@ -24,7 +46,36 @@ def resolve_otlp_logs_endpoint(
     return f"http://{host}:{otlp_port}/v1/logs"
 
 
-def update_existing_otel_config(content: str, endpoint: str) -> str:
+def _headers_value(token: str) -> str:
+    return f'{{ "x-llm-tracker-token" = {json.dumps(token)} }}'
+
+
+def _set_section_headers(body: str, token: str | None) -> str:
+    if not token:
+        return re.sub(r"(?m)^headers\s*=.*\n?", "", body)
+    line = f"headers = {_headers_value(token)}"
+    if re.search(r"(?m)^headers\s*=", body):
+        return re.sub(r"(?m)^headers\s*=.*$", line, body, count=1)
+    return body.rstrip() + "\n" + line + "\n"
+
+
+def _set_inline_headers(line: str, token: str | None) -> str:
+    if not token:
+        return re.sub(r",\s*headers\s*=\s*\{[^{}]*\}", "", line, count=1)
+    headers = f"headers = {_headers_value(token)}"
+    if re.search(r"headers\s*=\s*\{[^{}]*\}", line):
+        return re.sub(r"headers\s*=\s*\{[^{}]*\}", headers, line, count=1)
+
+    match = re.search(r"(?P<prefix>.*?)(?P<body>otlp-http\s*=\s*\{[^{}]*)\}", line)
+    if not match:
+        return line
+    body = match.group("body").rstrip() + ", " + headers
+    return match.group("prefix") + body + line[match.end("body") :]
+
+
+def update_existing_otel_config(
+    content: str, endpoint: str, token: str | None = None
+) -> str:
     """Update Codex OTLP endpoint in inline or nested TOML config shapes."""
     # 1. Look for explicit [otel.exporter.otlp-http] block first
     # This is more specific and should be prioritized if it exists.
@@ -43,6 +94,7 @@ def update_existing_otel_config(content: str, endpoint: str) -> str:
             )
         else:
             updated_body = f'endpoint = "{endpoint}"\n' + body
+        updated_body = _set_section_headers(updated_body, token)
         return content[: section.start(2)] + updated_body + content[section.end(2) :]
 
     # 2. Look for a block starting with [otel]
@@ -60,6 +112,7 @@ def update_existing_otel_config(content: str, endpoint: str) -> str:
                     rf"\g<1>{endpoint}\g<2>",
                     exporter_line,
                 )
+                new_exporter_line = _set_inline_headers(new_exporter_line, token)
                 if new_exporter_line != exporter_line:
                     return content.replace(exporter_line, new_exporter_line)
                 return content
@@ -73,28 +126,34 @@ def update_existing_otel_config(content: str, endpoint: str) -> str:
                         rf', endpoint = "{endpoint}", protocol = "json" }} }}',
                         new_exporter_val,
                     )
-                    return content.replace(exporter_match.group(1), new_exporter_val)
+                    new_exporter_line = exporter_line.replace(
+                        exporter_match.group(1), new_exporter_val
+                    )
+                    new_exporter_line = _set_inline_headers(new_exporter_line, token)
+                    return content.replace(exporter_line, new_exporter_line)
 
         # If [otel] exists but no exporter found so far, check if we have any other [otel.exporter...] sections
         if not re.search(r"^\[otel\.exporter", content, re.M):
             # No existing exporter anywhere, add it safely inside the [otel] block
+            headers = f", headers = {_headers_value(token)}" if token else ""
             new_otel_block = (
                 otel_match.group(0).rstrip()
-                + f'\nexporter = {{ otlp-http = {{ endpoint = "{endpoint}", protocol = "json" }} }}\n'
+                + f'\nexporter = {{ otlp-http = {{ endpoint = "{endpoint}", protocol = "json"{headers} }} }}\n'
             )
             return content.replace(otel_match.group(0), new_otel_block)
 
     # 3. Nothing found, append new section
+    headers = f", headers = {_headers_value(token)}" if token else ""
     return (
         content.rstrip()
-        + f'\n\n[otel]\nenvironment = "dev"\nexporter = {{ otlp-http = {{ endpoint = "{endpoint}", protocol = "json" }} }}\n'
+        + f'\n\n[otel]\nenvironment = "dev"\nexporter = {{ otlp-http = {{ endpoint = "{endpoint}", protocol = "json"{headers} }} }}\n'
     )
 
 
 def main():
-    if len(sys.argv) not in (2, 3, 4, 5):
+    if len(sys.argv) not in (2, 3, 4, 5, 6):
         print(
-            "usage: configure-codex-settings.py CONFIG_PATH [OTLP_PORT] [HOST] [ENDPOINT]",
+            "usage: configure-codex-settings.py CONFIG_PATH [OTLP_PORT] [HOST] [ENDPOINT] [TOKEN]",
             file=sys.stderr,
         )
         return 1
@@ -103,6 +162,11 @@ def main():
     otlp_port = sys.argv[2] if len(sys.argv) >= 3 else "4002"
     host = sys.argv[3] if len(sys.argv) >= 4 else "localhost"
     endpoint = sys.argv[4] if len(sys.argv) >= 5 else None
+    token = (
+        sys.argv[5]
+        if len(sys.argv) >= 6
+        else os.environ.get("LLM_TRACKER_INGEST_TOKEN") or load_ingest_token()
+    )
 
     if not config_path.parent.exists():
         return 0
@@ -113,9 +177,9 @@ def main():
 
     endpoint = resolve_otlp_logs_endpoint(otlp_port, host, endpoint)
 
-    new_content = update_existing_otel_config(content, endpoint)
+    new_content = update_existing_otel_config(content, endpoint, token)
     if new_content != content:
-        config_path.write_text(new_content, encoding="utf-8")
+        _write_private(config_path, new_content)
         _info(f"Codex OTLP telemetry updated to {endpoint} in {config_path}")
     else:
         _info(f"Codex OTLP telemetry already up-to-date in {config_path}")

@@ -183,6 +183,19 @@ def test_auth_me_enabled(api_module, fresh_db, monkeypatch):
     assert revoked.json() == {"detail": "invalid token"}
 
 
+def test_ingest_token_cannot_authenticate_api(api_module, fresh_db, monkeypatch):
+    import config.app
+
+    monkeypatch.setitem(config.app.CONFIG, "auth", {"enabled": True, "allowlist": []})
+    token, _ = _mint(fresh_db, kind="ingest")
+
+    response = TestClient(api_module.app).get(
+        "/auth/me", headers={"Authorization": f"Bearer {token}"}
+    )
+
+    assert response.status_code == 401
+
+
 def test_auth_me_db_error_is_500_not_none(api_module, monkeypatch):
     import config.app
     import src.auth.routes as auth_routes

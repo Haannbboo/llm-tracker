@@ -14,6 +14,7 @@ from config.app import CONFIG
 from .models import Base
 
 DB_URL_ENV_VAR = "LLM_TRACKER_DB_URL"
+DB_CONNECT_TIMEOUT_SECONDS = 5
 
 _engine_cache: dict[str, Engine] = {}
 
@@ -35,6 +36,8 @@ def get_db_url(db_path: str | None = None) -> str:
 def _connect_args(db_url: str) -> dict[str, Any]:
     if db_url.startswith("sqlite:///"):
         return {"check_same_thread": False}
+    if db_url.startswith("postgresql"):
+        return {"connect_timeout": DB_CONNECT_TIMEOUT_SECONDS}
     return {}
 
 
