@@ -185,10 +185,9 @@ def test_auth_me_enabled(api_module, fresh_db, monkeypatch):
 
 def test_ingest_token_cannot_authenticate_api(api_module, fresh_db, monkeypatch):
     import config.app
-    from src.auth.tokens import mint_token
 
     monkeypatch.setitem(config.app.CONFIG, "auth", {"enabled": True, "allowlist": []})
-    token, _ = mint_token("a@example.com", kind="ingest")
+    token, _ = _mint(fresh_db, kind="ingest")
 
     response = TestClient(api_module.app).get(
         "/auth/me", headers={"Authorization": f"Bearer {token}"}

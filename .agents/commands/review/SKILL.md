@@ -19,11 +19,14 @@ Identify what to review from context (recent diffs, referenced plans, user messa
 ```bash
 git status --short
 git branch --show-current
-git diff --stat main...HEAD
-git diff main...HEAD
+git diff --stat main
+git diff main
+git ls-files --others --exclude-standard
 ```
 
 If not on a feature branch, say so. If the diff contains unrelated changes, flag them.
+
+`git diff main` includes committed branch changes plus staged and unstaged tracked changes. `git ls-files --others --exclude-standard` lists untracked paths; read and include the contents of every intended untracked file because Git diff omits them.
 
 Determine the **intent** — what the author is trying to achieve. This is critical: reviewers
 challenge whether the work *achieves the intent well*, not whether the intent is correct.
@@ -34,52 +37,76 @@ Assess change size:
 | Size | Threshold | Reviewers |
 |------|-----------|-----------|
 | Small | < 50 lines, 1-2 files | 1 (Skeptic) |
-| Medium | 50-200 lines, 3-5 files | 2 (Skeptic + Architect) |
+| Medium | 50-199 lines, 3-5 files | 2 (Skeptic + Architect) |
 | Large | 200+ lines or 5+ files | 3 (Skeptic + Architect + Minimalist) |
 
 Read `references/reviewer-lenses.md` for lens definitions.
 
 ## Step 3 — Detect Tool and Spawn Reviewers
 
-Create a temp directory for reviewer output:
+Create a temp directory for reviewer output and retain every background process handle:
 
 ```sh
 REVIEW_DIR=$(mktemp -d /tmp/adversarial-review.XXXXXX)
+REVIEW_TIMEOUT_SECONDS=300
+review_pids=()
 ```
+
+Run all reviewer spawn commands and the wait loop within one shell invocation. PIDs and arrays are shell-local; if the host tool cannot preserve shell state, use its native process handles or a single script that performs both steps.
 
 Determine which tool you are, then spawn reviewers on the opposite:
 
 **If you are opencode** — spawn claude code reviewers via `claude` CLI:
 
 ```sh
-claude -p "prompt" > "$REVIEW_DIR/skeptic.md" 2>/dev/null
+timeout "$REVIEW_TIMEOUT_SECONDS" claude -p "prompt" \
+  > "$REVIEW_DIR/skeptic.md" 2> "$REVIEW_DIR/skeptic.stderr" &
+review_pids+=("$!")
 ```
 
-Run with `run_in_background: true`.
+Start each reviewer this way and retain its PID. Use the corresponding `opencode` command when that is the opposite tool.
 
 **If you are claude code** — spawn opencode reviewers via `opencode` CLI:
 
 ```sh
-opencode -p "prompt" > "$REVIEW_DIR/skeptic.md" 2>/dev/null
+timeout "$REVIEW_TIMEOUT_SECONDS" opencode -p "prompt" \
+  > "$REVIEW_DIR/skeptic.md" 2> "$REVIEW_DIR/skeptic.stderr" &
+review_pids+=("$!")
 ```
 
-Run with `run_in_background: true`.
+Use the same timeout and PID handling for each reviewer.
 
 Name each output file after the lens: `skeptic.md`, `architect.md`, `minimalist.md`.
+
+Wait for every retained PID before reading any output:
+
+```sh
+review_status=()
+for pid in "${review_pids[@]}"; do
+  if wait "$pid"; then
+    status=0
+  else
+    status=$?
+  fi
+  review_status+=("$status")
+done
+```
+
+Record timeout exit status 124 and every other non-zero exit as an incomplete or failed reviewer; do not treat missing, empty, or partial output as a completed review.
 
 Build each reviewer's prompt using the template in `references/reviewer-prompt.md`.
 
 ## Step 4 — Verify and Synthesize Verdict
 
-Before reading reviewer output, log which CLI was used and confirm the output files exist:
+Before reading reviewer output, confirm that the wait loop completed, log which CLI was used, and confirm the output files exist:
 
 ```sh
 echo "reviewer_cli=opencode|claude"
 ls "$REVIEW_DIR"/*.md
 ```
 
-If any output file is missing or empty, note the failure in the verdict — do not silently skip
-a reviewer.
+If any reviewer timed out, exited non-zero, or produced missing or empty output, note the failure
+in the verdict — do not silently skip a reviewer.
 
 Read each reviewer's output file from `$REVIEW_DIR/`. Deduplicate overlapping findings.
 Produce a single verdict using the format in `references/verdict-format.md`.

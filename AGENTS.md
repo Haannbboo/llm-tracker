@@ -24,7 +24,7 @@ request → design/spec → approval → implementation → testing
 
 This repo adds only the final landing gate:
 
-1. Before commit, run an independent code review using a fresh subagent.
+1. Before commit, run an independent code review using a fresh opposite-tool CLI process.
 2. Fix must-fix review findings.
 3. Commit only after approval.
 4. Push the current branch only after approval.

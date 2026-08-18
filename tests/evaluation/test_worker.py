@@ -110,6 +110,50 @@ def test_select_auto_evaluation_candidates_filters_quiet_manual_active_and_local
     assert [candidate["session_id"] for candidate in candidates] == ["eligible"]
 
 
+def test_select_auto_evaluation_candidates_ignores_other_user_job(
+    evaluation_worker_module, database_module, isolated_home, monkeypatch
+):
+    db_path = str(isolated_home / "usage.db")
+    database_module.init_db(db_path)
+    with database_module.Session(database_module.get_engine(db_path)) as session:
+        session.add_all(
+            [
+                database_module.User(id="user-a", email="a@example.com", created_at=1),
+                database_module.User(id="user-b", email="b@example.com", created_at=1),
+            ]
+        )
+        session.commit()
+    _insert_session_record(database_module, db_path, "shared-session", user_id="user-b")
+    database_module.create_session_evaluation_job(
+        session_id="shared-session",
+        client_source="codex",
+        user_id="user-a",
+        trigger="auto",
+        db_path=db_path,
+    )
+    monkeypatch.setattr(
+        evaluation_worker_module,
+        "has_local_session_transcript",
+        lambda source, session_id, **kwargs: True,
+    )
+
+    candidates = evaluation_worker_module.select_auto_evaluation_candidates(
+        quiet_delay_seconds=600,
+        limit=10,
+        now="2026-05-14T11:00:01+00:00",
+        db_path=db_path,
+    )
+
+    assert candidates == [
+        {
+            "session_id": "shared-session",
+            "user_id": "user-b",
+            "client_source": "codex",
+            "updated_at": "2026-05-14T10:00:00+00:00",
+        }
+    ]
+
+
 def test_select_auto_evaluation_candidates_includes_opencode_with_local_transcript(
     evaluation_worker_module, database_module, isolated_home, monkeypatch
 ):
@@ -483,6 +527,57 @@ def test_classify_local_evaluator_sessions_marks_transcriptless_codex_job_teleme
     assert outside is None
     assert manual is not None
     assert manual["outcome"] == "solved"
+
+
+def test_classify_transcriptless_telemetry_ignores_other_user_job(
+    evaluation_worker_module, database_module, isolated_home
+):
+    db_path = str(isolated_home / "usage.db")
+    database_module.init_db(db_path)
+    with database_module.Session(database_module.get_engine(db_path)) as session:
+        session.add_all(
+            [
+                database_module.User(id="user-a", email="a@example.com", created_at=1),
+                database_module.User(id="user-b", email="b@example.com", created_at=1),
+            ]
+        )
+        session.commit()
+    _insert_session_record(
+        database_module,
+        db_path,
+        "user-b-telemetry",
+        user_id="user-b",
+        request_count=1,
+        started=1778752810000000,
+        ended=1778752810000000,
+    )
+    with database_module.Session(database_module.get_engine(db_path)) as session:
+        session.add(
+            database_module.EvaluationJob(
+                job_id="other-user-job",
+                user_id="user-a",
+                kind="session_evaluation",
+                session_id="user-a-evaluator",
+                client_source="codex",
+                trigger="auto",
+                status="succeeded",
+                created_at="2026-05-14T09:59:59+00:00",
+                started_at="2026-05-14T10:00:00+00:00",
+                finished_at="2026-05-14T10:00:20+00:00",
+            )
+        )
+        session.commit()
+
+    classified = evaluation_worker_module.classify_transcriptless_evaluator_telemetry(
+        limit=10,
+        db_path=db_path,
+    )
+
+    assert classified == 0
+    assert (
+        database_module.get_session_evaluation("user-b-telemetry", db_path=db_path)
+        is None
+    )
 
 
 def test_run_evaluation_worker_once_respects_max_concurrent_jobs(

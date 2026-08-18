@@ -1,4 +1,5 @@
 import asyncio
+import concurrent.futures
 import json
 import os
 import threading
@@ -46,9 +47,14 @@ _rate_limit_state: dict[str, deque] = {}
 _last_rate_limit_cleanup = 0.0
 _rate_limit_lock = threading.Lock()
 _invalid_token_cache: OrderedDict[str, float] = OrderedDict()
+# ponytail: bounded 4096-entry expiry scan; add an expiry index if profiling
+# shows lock contention.
 INVALID_TOKEN_CACHE_SIZE = 4096
 INVALID_TOKEN_CACHE_TTL_SECONDS = 60
 AUTH_LOOKUP_TIMEOUT_SECONDS = 10
+_auth_executor = concurrent.futures.ThreadPoolExecutor(
+    max_workers=4, thread_name_prefix="llm-tracker-auth"
+)
 
 
 def _resolve_ingest_user(request: Request) -> tuple[str | None, str | None]:
@@ -80,6 +86,7 @@ def _resolve_ingest_user(request: Request) -> tuple[str | None, str | None]:
 
 
 def _reject_invalid_token(request: Request) -> NoReturn:
+    # ponytail: no trusted-proxy config; never trust forwarded addresses here.
     client_ip = request.client.host if request.client else "unknown"
     key = (
         f"invalid:{client_ip}"
@@ -150,8 +157,9 @@ def _check_rate_limit(token_id: str) -> None:
 
 async def _resolve_ingest_user_async(request: Request):
     try:
+        loop = asyncio.get_running_loop()
         return await asyncio.wait_for(
-            asyncio.to_thread(_resolve_ingest_user, request),
+            loop.run_in_executor(_auth_executor, _resolve_ingest_user, request),
             timeout=AUTH_LOOKUP_TIMEOUT_SECONDS,
         )
     except asyncio.TimeoutError as exc:
@@ -891,9 +899,9 @@ async def receive_logs(request: Request):
     PROMPT_LENGTH_TRACKER.evict_stale()
 
     # Read body with hard cap (handles chunked/lying Content-Length)
-    body_bytes = b""
+    body_bytes = bytearray()
     async for chunk in request.stream():
-        body_bytes += chunk
+        body_bytes.extend(chunk)
         if len(body_bytes) > max_body:
             raise HTTPException(status_code=413, detail="request body too large")
     body = json.loads(body_bytes)

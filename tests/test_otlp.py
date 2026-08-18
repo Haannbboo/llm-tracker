@@ -824,7 +824,9 @@ def test_auth_enabled_valid_ingest_token_records_user_id(
         otlp_module.CONFIG.get("otlp", {}), "rate_limit_per_minute", 300
     )
 
-    token, user = mint_token("test@example.com", kind="ingest")
+    token, user = mint_token(
+        "test@example.com", kind="ingest", db_path=fresh_db.db_path
+    )
 
     captured = []
 
@@ -850,7 +852,9 @@ def test_authenticated_otlp_tool_calls_keep_user_id(otlp_module, monkeypatch, fr
     from src.auth.tokens import mint_token
 
     monkeypatch.setitem(otlp_module.CONFIG.get("auth", {}), "enabled", True)
-    token, user = mint_token("test@example.com", kind="ingest")
+    token, user = mint_token(
+        "test@example.com", kind="ingest", db_path=fresh_db.db_path
+    )
 
     captured_tools = []
     monkeypatch.setattr(
@@ -896,6 +900,21 @@ def test_authenticated_otlp_tool_calls_keep_user_id(otlp_module, monkeypatch, fr
     assert response.status_code == 200
     assert captured_tools[0]["user_id"] == user.id
     assert captured_tools[0]["tool_use_id"] == f"{user.id}:tool-1"
+
+
+def test_auth_lookup_timeout_returns_503(otlp_module, monkeypatch):
+    monkeypatch.setitem(otlp_module.CONFIG.get("auth", {}), "enabled", True)
+    monkeypatch.setattr(otlp_module, "AUTH_LOOKUP_TIMEOUT_SECONDS", 0.01)
+
+    def blocked_lookup(_request):
+        time.sleep(0.05)
+
+    monkeypatch.setattr(otlp_module, "_resolve_ingest_user", blocked_lookup)
+
+    response = TestClient(otlp_module.app).post("/v1/logs", json=_minimal_otlp_body())
+
+    assert response.status_code == 503
+    assert response.json() == {"detail": "authentication unavailable"}
 
 
 def test_auth_enabled_missing_header_returns_401(otlp_module, monkeypatch):
@@ -961,7 +980,7 @@ def test_auth_enabled_wrong_kind_token_returns_401(otlp_module, monkeypatch, fre
 
     monkeypatch.setitem(otlp_module.CONFIG.get("auth", {}), "enabled", True)
 
-    token, _ = mint_token("test@example.com", kind="cli")
+    token, _ = mint_token("test@example.com", kind="cli", db_path=fresh_db.db_path)
 
     captured = []
     monkeypatch.setattr(
@@ -985,12 +1004,14 @@ def test_auth_enabled_revoked_token_returns_401(otlp_module, monkeypatch, fresh_
 
     monkeypatch.setitem(otlp_module.CONFIG.get("auth", {}), "enabled", True)
 
-    token, user = mint_token("test@example.com", kind="ingest")
+    token, user = mint_token(
+        "test@example.com", kind="ingest", db_path=fresh_db.db_path
+    )
     # Get token_id from the database
     from src.auth.tokens import resolve_token
 
-    _, auth_token = resolve_token(token)
-    revoke_token(auth_token.id, user.id)
+    _, auth_token = resolve_token(token, db_path=fresh_db.db_path)
+    revoke_token(auth_token.id, user.id, db_path=fresh_db.db_path)
 
     captured = []
     monkeypatch.setattr(
@@ -1066,8 +1087,12 @@ def test_rate_limit_exceeded_returns_429(otlp_module, monkeypatch, fresh_db):
     monkeypatch.setitem(otlp_module.CONFIG.get("auth", {}), "enabled", True)
     monkeypatch.setitem(otlp_module.CONFIG.get("otlp", {}), "rate_limit_per_minute", 2)
 
-    token1, user1 = mint_token("user1@example.com", kind="ingest")
-    token2, user2 = mint_token("user2@example.com", kind="ingest")
+    token1, user1 = mint_token(
+        "user1@example.com", kind="ingest", db_path=fresh_db.db_path
+    )
+    token2, user2 = mint_token(
+        "user2@example.com", kind="ingest", db_path=fresh_db.db_path
+    )
 
     captured = []
 

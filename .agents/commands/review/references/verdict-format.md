@@ -1,6 +1,6 @@
 # Verdict Format
 
-```
+```markdown
 ## Intent
 <what the author is trying to achieve>
 
@@ -24,6 +24,6 @@ For each finding:
 
 ## Verdict Logic
 
-- **PASS** — no high-severity findings
+- **PASS** — no unresolved high-severity findings and no unresolved security, privacy, secret, cost, or schema findings at any severity
 - **CONTESTED** — high-severity findings but reviewers disagree on them
 - **REJECT** — high-severity findings with reviewer consensus

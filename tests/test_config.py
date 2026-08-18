@@ -5,6 +5,7 @@ import sys
 import threading
 from pathlib import Path
 
+import tomllib
 import yaml
 
 
@@ -588,7 +589,15 @@ exporter = { otlp-http = { endpoint = "http://localhost:4005/v1/logs", protocol 
     env["OTEL_EXPORTER_OTLP_LOGS_ENDPOINT"] = "http://127.0.0.1:49153/v1/logs"
 
     result = subprocess.run(
-        [sys.executable, str(script_path), str(config_path), "4005"],
+        [
+            sys.executable,
+            str(script_path),
+            str(config_path),
+            "4005",
+            "localhost",
+            "http://127.0.0.1:49153/v1/logs",
+            "ingest-secret",
+        ],
         env=env,
         text=True,
         capture_output=True,
@@ -598,6 +607,11 @@ exporter = { otlp-http = { endpoint = "http://localhost:4005/v1/logs", protocol 
     content = config_path.read_text(encoding="utf-8")
     assert 'endpoint = "http://127.0.0.1:49153/v1/logs"' in content
     assert "localhost:4005" not in content
+    parsed = tomllib.loads(content)
+    assert (
+        parsed["otel"]["exporter"]["otlp-http"]["headers"]["x-llm-tracker-token"]
+        == "ingest-secret"
+    )
 
 
 def test_configure_codex_settings_updates_nested_otel_endpoint(tmp_path):

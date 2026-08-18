@@ -28,7 +28,7 @@ def load_ingest_token() -> str | None:
                 encoding="utf-8"
             )
         )
-    except (OSError, json.JSONDecodeError):
+    except (OSError, UnicodeError, json.JSONDecodeError):
         return None
     token = credentials.get("ingest_token") if isinstance(credentials, dict) else None
     return token if isinstance(token, str) and token else None
@@ -66,11 +66,11 @@ def _set_inline_headers(line: str, token: str | None) -> str:
     if re.search(r"headers\s*=\s*\{[^{}]*\}", line):
         return re.sub(r"headers\s*=\s*\{[^{}]*\}", headers, line, count=1)
 
-    match = re.search(r"(otlp-http\s*=\s*\{[^{}]*)\}", line)
+    match = re.search(r"(?P<prefix>.*?)(?P<body>otlp-http\s*=\s*\{[^{}]*)\}", line)
     if not match:
         return line
-    body = match.group(1).rstrip() + ", " + headers
-    return body + line[match.end(1) :]
+    body = match.group("body").rstrip() + ", " + headers
+    return match.group("prefix") + body + line[match.end("body") :]
 
 
 def update_existing_otel_config(

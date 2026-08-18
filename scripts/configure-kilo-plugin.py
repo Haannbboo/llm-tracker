@@ -43,7 +43,7 @@ def load_ingest_token() -> str | None:
                 encoding="utf-8"
             )
         )
-    except (OSError, json.JSONDecodeError):
+    except (OSError, UnicodeError, json.JSONDecodeError):
         return None
     token = credentials.get("ingest_token") if isinstance(credentials, dict) else None
     return token if isinstance(token, str) and token else None

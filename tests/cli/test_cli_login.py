@@ -409,7 +409,7 @@ def test_wire_agents_passes_ingest_token_via_environment(
     assert wired == ["codex", "claude", "opencode", "kilo"]
     assert calls
     for cmd, kwargs in calls:
-        assert "ingest-secret" not in cmd
+        assert all("ingest-secret" not in str(arg) for arg in cmd)
         assert kwargs["env"]["LLM_TRACKER_INGEST_TOKEN"] == "ingest-secret"
 
 
