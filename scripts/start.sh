@@ -106,27 +106,28 @@ if [[ -f "${CONFIG_PATH}" ]]; then
   OTLP_PORT="${_otlp_line%% *}"
   OTLP_HOST="${_otlp_line#* }"
 fi
+OTLP_ENDPOINT=$("${PYTHON}" "${ROOT_DIR}/scripts/read-otlp-config.py" "${CONFIG_PATH}" --endpoint 2>/dev/null || echo "http://${OTLP_HOST}:${OTLP_PORT}/v1/logs")
 
 # ── Configure agent OTLP telemetry ──────────────────────────────────
 if command -v codex >/dev/null 2>&1; then
   CODEX_CONFIG="${HOME}/.codex/config.toml"
-  "${PYTHON}" "${ROOT_DIR}/scripts/configure-codex-settings.py" "${CODEX_CONFIG}" "${OTLP_PORT}" "${OTLP_HOST}"
+  "${PYTHON}" "${ROOT_DIR}/scripts/configure-codex-settings.py" "${CODEX_CONFIG}" "${OTLP_PORT}" "${OTLP_HOST}" "${OTLP_ENDPOINT}"
   pass "Codex configured"
 fi
 
 if command -v claude >/dev/null 2>&1; then
   CLAUDE_SETTINGS="${HOME}/.claude/settings.json"
-  "${PYTHON}" "${ROOT_DIR}/scripts/configure-claude-settings.py" "${CLAUDE_SETTINGS}" "${OTLP_PORT}" "${OTLP_HOST}"
+  "${PYTHON}" "${ROOT_DIR}/scripts/configure-claude-settings.py" "${CLAUDE_SETTINGS}" "${OTLP_PORT}" "${OTLP_HOST}" "${OTLP_ENDPOINT}"
   pass "Claude configured"
 fi
 
 if command -v opencode >/dev/null 2>&1; then
-  "${PYTHON}" "${ROOT_DIR}/scripts/configure-opencode-plugin.py" "${ROOT_DIR}" "${OTLP_PORT}" "${OTLP_HOST}"
+  "${PYTHON}" "${ROOT_DIR}/scripts/configure-opencode-plugin.py" "${ROOT_DIR}" "${OTLP_PORT}" "${OTLP_HOST}" "${OTLP_ENDPOINT}"
   pass "OpenCode configured"
 fi
 
 if command -v kilo >/dev/null 2>&1; then
-  "${PYTHON}" "${ROOT_DIR}/scripts/configure-kilo-plugin.py" "${ROOT_DIR}" "${OTLP_PORT}" "${OTLP_HOST}"
+  "${PYTHON}" "${ROOT_DIR}/scripts/configure-kilo-plugin.py" "${ROOT_DIR}" "${OTLP_PORT}" "${OTLP_HOST}" "${OTLP_ENDPOINT}"
   pass "Kilo Code configured"
 fi
 

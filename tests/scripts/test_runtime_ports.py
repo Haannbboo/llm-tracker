@@ -332,7 +332,11 @@ def test_start_configures_only_installed_agent_clis_under_isolated_home(tmp_path
                 exit 0
                 ;;
               */read-otlp-config.py)
-                printf '4002 localhost\\n'
+                if [[ "${{2:-}}" == "--endpoint" ]]; then
+                  printf 'http://localhost:4002/v1/logs\\n'
+                else
+                  printf '4002 localhost\\n'
+                fi
                 exit 0
                 ;;
               -c)

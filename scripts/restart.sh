@@ -86,6 +86,7 @@ fi
 # ── Resolve OTLP host from server.base_url ──────────────────────────
 _otlp_line=$("${PYTHON}" "${ROOT_DIR}/scripts/read-otlp-config.py" "${CONFIG_PATH}" 2>/dev/null || echo "4002 localhost")
 OTLP_HOST="${_otlp_line#* }"
+OTLP_ENDPOINT=$("${PYTHON}" "${ROOT_DIR}/scripts/read-otlp-config.py" "${CONFIG_PATH}" --endpoint 2>/dev/null || echo "http://${OTLP_HOST}:${OTLP_PORT}/v1/logs")
 info "OTLP host: ${OTLP_HOST}"
 
 # ── Port check ──────────────────────────────────────────────────────
@@ -106,28 +107,28 @@ step_header "Configuring agent telemetry"
 
 if command -v codex >/dev/null 2>&1; then
   CODEX_CONFIG="${HOME}/.codex/config.toml"
-  "${PYTHON}" "${ROOT_DIR}/scripts/configure-codex-settings.py" "${CODEX_CONFIG}" "${OTLP_PORT}" "${OTLP_HOST}"
+  "${PYTHON}" "${ROOT_DIR}/scripts/configure-codex-settings.py" "${CODEX_CONFIG}" "${OTLP_PORT}" "${OTLP_HOST}" "${OTLP_ENDPOINT}"
   pass "Codex configured"
 else
   info "Codex: not installed, skipped"
 fi
 
 if command -v claude >/dev/null 2>&1; then
-  "${PYTHON}" "${ROOT_DIR}/scripts/configure-claude-settings.py" "${HOME}/.claude/settings.json" "${OTLP_PORT}" "${OTLP_HOST}"
+  "${PYTHON}" "${ROOT_DIR}/scripts/configure-claude-settings.py" "${HOME}/.claude/settings.json" "${OTLP_PORT}" "${OTLP_HOST}" "${OTLP_ENDPOINT}"
   pass "Claude configured"
 else
   info "Claude: not installed, skipped"
 fi
 
 if command -v opencode >/dev/null 2>&1; then
-  "${PYTHON}" "${ROOT_DIR}/scripts/configure-opencode-plugin.py" "${ROOT_DIR}" "${OTLP_PORT}" "${OTLP_HOST}"
+  "${PYTHON}" "${ROOT_DIR}/scripts/configure-opencode-plugin.py" "${ROOT_DIR}" "${OTLP_PORT}" "${OTLP_HOST}" "${OTLP_ENDPOINT}"
   pass "OpenCode configured"
 else
   info "OpenCode: not installed, skipped"
 fi
 
 if command -v kilo >/dev/null 2>&1; then
-  "${PYTHON}" "${ROOT_DIR}/scripts/configure-kilo-plugin.py" "${ROOT_DIR}" "${OTLP_PORT}" "${OTLP_HOST}"
+  "${PYTHON}" "${ROOT_DIR}/scripts/configure-kilo-plugin.py" "${ROOT_DIR}" "${OTLP_PORT}" "${OTLP_HOST}" "${OTLP_ENDPOINT}"
   pass "Kilo Code configured"
 else
   info "Kilo Code: not installed, skipped"
