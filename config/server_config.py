@@ -49,12 +49,23 @@ def resolve_server_urls(config: dict) -> dict[str, str]:
     """
     server = config.get("server", {})
     base_url = server.get("base_url")
+    base = None
     if base_url:
-        base = base_url.rstrip("/")
-    else:
+        raw_base_url = str(base_url)
+        parsed = urlparse(
+            raw_base_url if "://" in raw_base_url else f"//{raw_base_url.rstrip('/')}"
+        )
+        if parsed.hostname:
+            host = parsed.hostname
+            if ":" in host and not host.startswith("["):
+                host = f"[{host}]"
+            base = f"{parsed.scheme or 'http'}://{host}"
+    if base is None:
         host = str(server.get("host", "127.0.0.1"))
         if host in ("0.0.0.0", "127.0.0.1"):
             host = "localhost"
+        elif ":" in host and not host.startswith("["):
+            host = f"[{host}]"
         base = f"http://{host}"
     port = int(server.get("port", 4000))
     api_port = int(server.get("api_port", port + 1))
