@@ -11,7 +11,7 @@ from typing import Literal
 import httpx
 import tomllib
 import yaml
-from fastapi import FastAPI, HTTPException, Query, Request, Response
+from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response
 from fastapi.responses import JSONResponse
 from fastapi.routing import APIRoute
 from fastapi.staticfiles import StaticFiles
@@ -30,7 +30,7 @@ from config.app import (
 from config.server_config import load_server_config
 
 from ._version import get_version
-from .auth import _auth_enabled, _resolve_request_user
+from .auth import _auth_enabled, _require_local_profile, _resolve_request_user
 from .auth import router as auth_router
 from .costs import resolve_cost_match
 from .database import (
@@ -88,8 +88,6 @@ _SPA_API_PREFIXES = (
     "/usage",
     "/sessions",
     "/model-effectiveness",
-    "/poll/",
-    "/evaluation-jobs",
     "/config",
     "/pricing",
     "/local/",
@@ -634,7 +632,10 @@ async def sessions_daily_effectiveness(date: str):
         raise HTTPException(status_code=400, detail=str(e))
 
 
-@app.put("/sessions/{session_id}/evaluation")
+@app.put(
+    "/local/sessions/{session_id}/evaluation",
+    dependencies=[Depends(_require_local_profile)],
+)
 async def put_session_evaluation(
     request: Request, session_id: str, update: SessionEvaluationUpdate
 ):
@@ -674,13 +675,19 @@ async def put_session_evaluation(
     return {"status": "success"}
 
 
-@app.get("/sessions/{session_id}/evaluation")
+@app.get(
+    "/local/sessions/{session_id}/evaluation",
+    dependencies=[Depends(_require_local_profile)],
+)
 async def get_evaluation(request: Request, session_id: str):
     evaluation = get_session_evaluation(session_id, user_id=_request_user_id(request))
     return {"evaluation": evaluation}
 
 
-@app.delete("/sessions/{session_id}/evaluation")
+@app.delete(
+    "/local/sessions/{session_id}/evaluation",
+    dependencies=[Depends(_require_local_profile)],
+)
 async def delete_evaluation(request: Request, session_id: str):
     deleted = delete_session_evaluation(session_id, user_id=_request_user_id(request))
     if not deleted:
@@ -688,7 +695,11 @@ async def delete_evaluation(request: Request, session_id: str):
     return {"status": "deleted"}
 
 
-@app.post("/sessions/{session_id}/evaluate-with-llm", status_code=202)
+@app.post(
+    "/local/sessions/{session_id}/evaluate-with-llm",
+    status_code=202,
+    dependencies=[Depends(_require_local_profile)],
+)
 async def evaluate_session_with_llm(
     http_request: Request,
     session_id: str,
@@ -722,7 +733,10 @@ async def evaluate_session_with_llm(
         raise
 
 
-@app.get("/poll/{job_id}")
+@app.get(
+    "/local/poll/{job_id}",
+    dependencies=[Depends(_require_local_profile)],
+)
 async def poll_job(request: Request, job_id: str):
     user_id = _request_user_id(request)
     job = (
@@ -735,7 +749,10 @@ async def poll_job(request: Request, job_id: str):
     return job
 
 
-@app.get("/evaluation-jobs/active")
+@app.get(
+    "/local/evaluation-jobs/active",
+    dependencies=[Depends(_require_local_profile)],
+)
 async def active_evaluation_jobs(request: Request, session_ids: str | None = None):
     parsed_session_ids = [
         item for item in (session_ids or "").split(",") if item
@@ -754,7 +771,10 @@ async def active_evaluation_jobs(request: Request, session_ids: str | None = Non
     }
 
 
-@app.get("/sessions/{session_id}/evaluation-jobs")
+@app.get(
+    "/local/sessions/{session_id}/evaluation-jobs",
+    dependencies=[Depends(_require_local_profile)],
+)
 async def session_evaluation_jobs(request: Request, session_id: str):
     user_id = _request_user_id(request)
     jobs = (
@@ -768,7 +788,10 @@ async def session_evaluation_jobs(request: Request, session_id: str):
     }
 
 
-@app.patch("/evaluation-jobs/{job_id}")
+@app.patch(
+    "/local/evaluation-jobs/{job_id}",
+    dependencies=[Depends(_require_local_profile)],
+)
 async def update_evaluation_job(
     request: Request, job_id: str, update: EvaluationJobUpdate
 ):
@@ -832,7 +855,7 @@ async def get_session_tool_calls_summary(request: Request, session_id: str):
     return summary
 
 
-@app.get("/config")
+@app.get("/config", dependencies=[Depends(_require_local_profile)])
 async def get_config():
     path = os.path.expanduser(CONFIG_PATH)
     if not os.path.exists(path):
@@ -876,7 +899,7 @@ async def _notify_proxy_refresh() -> None:
         )
 
 
-@app.put("/config")
+@app.put("/config", dependencies=[Depends(_require_local_profile)])
 async def update_config(update: ConfigUpdate):
     path = os.path.expanduser(CONFIG_PATH)
     try:
@@ -895,7 +918,7 @@ async def update_config(update: ConfigUpdate):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.patch("/config")
+@app.patch("/config", dependencies=[Depends(_require_local_profile)])
 async def patch_config(update: ConfigPatchUpdate):
     from ruamel.yaml import YAML
     from ruamel.yaml.error import YAMLError as RuamelYAMLError
@@ -937,7 +960,7 @@ async def patch_config(update: ConfigPatchUpdate):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.patch("/config/evaluation")
+@app.patch("/config/evaluation", dependencies=[Depends(_require_local_profile)])
 async def update_evaluation_config(update: EvaluationConfigUpdate):
     """Update the global evaluator type in config.yaml."""
     if update.evaluator not in VALID_EVALUATOR_AGENTS:
@@ -1195,7 +1218,7 @@ async def test_connectivity(test: ConnectivityTest):
         }
 
 
-@app.get("/local/agents")
+@app.get("/local/agents", dependencies=[Depends(_require_local_profile)])
 async def detect_local_agents():
     """Detect locally installed CLI agents. Only works when API has host access."""
     import shutil
@@ -1262,7 +1285,7 @@ def _agent_health(
     }
 
 
-@app.get("/local/setup-health")
+@app.get("/local/setup-health", dependencies=[Depends(_require_local_profile)])
 async def get_local_setup_health():
     """Report local AI-agent OTLP config without returning secrets."""
     home = Path.home()

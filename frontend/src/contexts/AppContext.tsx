@@ -70,15 +70,12 @@ export function isApiPath(pathname: string): boolean {
     pathname === '/sessions' ||
     pathname.startsWith('/sessions/') ||
     pathname === '/model-effectiveness' ||
-    pathname === '/evaluation-jobs' ||
-    pathname.startsWith('/evaluation-jobs/') ||
     pathname === '/config' ||
     pathname.startsWith('/config/') ||
     pathname === '/pricing' ||
     pathname.startsWith('/pricing/') ||
     pathname.startsWith('/local/') ||
     pathname === '/test-connectivity' ||
-    pathname.startsWith('/poll/') ||
     pathname === '/version'
   )
 }

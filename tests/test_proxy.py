@@ -40,6 +40,24 @@ def test_proxy_registers_v1_and_compatibility_paths(proxy_module):
     }.issubset(get_paths)
 
 
+def test_config_refresh_returns_404_when_auth_enabled(proxy_module, monkeypatch):
+    import config.app
+
+    monkeypatch.setitem(config.app.CONFIG, "auth", {"enabled": True, "allowlist": []})
+
+    response = TestClient(proxy_module.app).post("/config/refresh")
+
+    assert response.status_code == 404
+
+
+def test_config_refresh_works_when_auth_disabled(proxy_module, monkeypatch):
+    monkeypatch.setattr(proxy_module, "refresh_runtime_config", lambda: None)
+
+    response = TestClient(proxy_module.app).post("/config/refresh")
+
+    assert response.status_code == 200
+
+
 @pytest.mark.parametrize(
     ("base_url", "path", "expected"),
     [

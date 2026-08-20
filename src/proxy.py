@@ -15,7 +15,7 @@ from typing import Any
 from urllib.parse import urljoin
 
 import httpx
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 
 from config.app import (
@@ -26,6 +26,7 @@ from config.app import (
     refresh_runtime_config,
 )
 
+from .auth import _require_local_profile
 from .database import init_db
 from .recorder import record_tool_call, record_usage
 from .utils import extract_usage, find_stream_usage
@@ -548,7 +549,7 @@ async def list_models():
     }
 
 
-@app.post("/config/refresh")
+@app.post("/config/refresh", dependencies=[Depends(_require_local_profile)])
 async def refresh_config():
     """Reload config from disk so the proxy picks up provider/model changes."""
     await asyncio.to_thread(refresh_runtime_config)
