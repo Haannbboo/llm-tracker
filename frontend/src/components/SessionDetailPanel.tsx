@@ -75,7 +75,7 @@ export function SessionDetailContent({
     const requestId = ++historyRequestRef.current
     setHistoryLoading(true)
     try {
-      const response = await fetch(`/sessions/${encodeURIComponent(session.session_id)}/evaluation-jobs`)
+      const response = await fetch(`/local/sessions/${encodeURIComponent(session.session_id)}/evaluation-jobs`)
       if (!response.ok) throw new Error('Failed to load evaluation job history')
       const data: {
         jobs: EvaluationJobProgress[]
@@ -116,7 +116,7 @@ export function SessionDetailContent({
         : null
 
   const refreshPersistedEvaluation = async () => {
-    const response = await fetch(`/sessions/${encodeURIComponent(session.session_id)}/evaluation`)
+    const response = await fetch(`/local/sessions/${encodeURIComponent(session.session_id)}/evaluation`)
     if (!response.ok) throw new Error('Failed to refresh session evaluation')
 
     const data: { evaluation: SessionEvaluation | null } = await response.json()
@@ -126,7 +126,7 @@ export function SessionDetailContent({
 
   const pollLlmEvaluationJob = async (job: { job_id: string }) => {
     try {
-      const response = await fetch(`/poll/${encodeURIComponent(job.job_id)}`)
+      const response = await fetch(`/local/poll/${encodeURIComponent(job.job_id)}`)
       if (!response.ok) throw new Error('Failed to poll LLM evaluation job')
 
       const pollResult = await response.json()
@@ -165,7 +165,7 @@ export function SessionDetailContent({
     setLocalEvaluationOverride(null)
     setLlmEvaluationStatus('queued')
     try {
-      const response = await fetch(`/sessions/${encodeURIComponent(session.session_id)}/evaluate-with-llm`, {
+      const response = await fetch(`/local/sessions/${encodeURIComponent(session.session_id)}/evaluate-with-llm`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ evaluator_type: selectedEvaluatorType }),
@@ -207,11 +207,11 @@ export function SessionDetailContent({
     try {
       let response: Response
       if (outcome === 'reset') {
-        response = await fetch(`/sessions/${encodeURIComponent(session.session_id)}/evaluation`, {
+        response = await fetch(`/local/sessions/${encodeURIComponent(session.session_id)}/evaluation`, {
           method: 'DELETE',
         })
       } else {
-        response = await fetch(`/sessions/${encodeURIComponent(session.session_id)}/evaluation`, {
+        response = await fetch(`/local/sessions/${encodeURIComponent(session.session_id)}/evaluation`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({

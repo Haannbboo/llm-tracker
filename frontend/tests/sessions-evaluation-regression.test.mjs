@@ -70,7 +70,7 @@ describe('Session evaluation UI', () => {
   })
 
   test('session detail calls evaluation API', () => {
-    assert.match(detail, /\/sessions\//)
+    assert.match(detail, /\/local\/sessions\//)
     assert.match(detail, /evaluation/)
     assert.match(detail, /PUT|DELETE/)
   })
@@ -87,7 +87,7 @@ describe('Session evaluation UI', () => {
     assert.match(detail, /if \(!response\.ok\) throw new Error/)
     assert.match(detail, /onEvaluationPersisted\?\.\(\)/)
     assert.match(detail, /refreshPersistedEvaluation/)
-    assert.match(detail, /\/sessions\/\$\{encodeURIComponent\(session\.session_id\)\}\/evaluation/)
+    assert.match(detail, /\/local\/sessions\/\$\{encodeURIComponent\(session\.session_id\)\}\/evaluation/)
     assert.match(detail, /onEvaluationUpdate\?\.\(data\.evaluation\)/)
     assert.match(sessionsTab, /onEvaluationPersisted=\{refreshModelEffectiveness\}/)
   })
@@ -96,7 +96,7 @@ describe('Session evaluation UI', () => {
     assert.match(detail, /Evaluate with LLM/)
     assert.match(detail, /evaluate-with-llm/)
     assert.match(detail, /method: 'POST'/)
-    assert.match(detail, /\/poll\/\$\{encodeURIComponent\(job\.job_id\)\}/)
+    assert.match(detail, /\/local\/poll\/\$\{encodeURIComponent\(job\.job_id\)\}/)
     assert.match(detail, /llmEvaluationStatus === 'queued' \|\| llmEvaluationStatus === 'running'/)
     assert.match(detail, /Evaluating\.\.\./)
     assert.match(detail, /pollResult\.status === 'succeeded'/)
@@ -106,7 +106,7 @@ describe('Session evaluation UI', () => {
   })
 
   test('dashboard polls active evaluation jobs while sessions tab is open', () => {
-    assert.match(sessionsTab, /evaluation-jobs\/active/)
+    assert.match(sessionsTab, /\/local\/evaluation-jobs\/active/)
     assert.match(sessionsTab, /setActiveEvaluationJobs/)
     assert.match(sessionsTab, /setTimeout\(pollActiveEvaluationJobs, 2000\)/)
   })

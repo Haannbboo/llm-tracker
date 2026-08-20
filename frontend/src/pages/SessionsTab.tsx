@@ -147,7 +147,7 @@ export function SessionsTab({
 
   const pollActiveEvaluationJobs = useCallback(async () => {
     try {
-      const response = await fetch('/evaluation-jobs/active')
+      const response = await fetch('/local/evaluation-jobs/active')
       if (!response.ok) return
 
       const data: {
@@ -192,7 +192,7 @@ export function SessionsTab({
     if (job.status !== 'queued') return
     setEditingEvaluationJobId(job.job_id)
     try {
-      const response = await fetch(`/evaluation-jobs/${encodeURIComponent(job.job_id)}`, {
+      const response = await fetch(`/local/evaluation-jobs/${encodeURIComponent(job.job_id)}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ evaluator_type: evaluatorType }),

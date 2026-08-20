@@ -11,10 +11,10 @@ const proxiedRoutes = [
   '/local/agents',
   '/local/setup-health',
   '/model-effectiveness?group_by=model',
-  '/poll/job-123',
-  '/evaluation-jobs/active',
-  '/evaluation-jobs/job-123',
-  '/sessions/session-123/evaluation-jobs',
+  '/local/poll/job-123',
+  '/local/evaluation-jobs/active',
+  '/local/evaluation-jobs/job-123',
+  '/local/sessions/session-123/evaluation-jobs',
   '/pricing',
   '/pricing/z-ai/glm-5.1-20260406',
 ]
@@ -27,7 +27,7 @@ for (const route of proxiedRoutes) {
   )
 }
 
-const frontendRoutes = ['/', '/assets/index.js', '/favicon.ico', '/local/not-agents']
+const frontendRoutes = ['/', '/assets/index.js', '/favicon.ico']
 
 for (const route of frontendRoutes) {
   assert.equal(

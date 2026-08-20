@@ -3,7 +3,13 @@
 Narrow public surface — only what the rest of the codebase actually imports.
 """
 
-from .routes import _auth_enabled, _resolve_request_user, get_current_user, router
+from .routes import (
+    _auth_enabled,
+    _require_local_profile,
+    _resolve_request_user,
+    get_current_user,
+    router,
+)
 from .tokens import (
     list_user_tokens,
     mint_token,
@@ -14,6 +20,7 @@ from .tokens import (
 
 __all__ = [
     "_auth_enabled",
+    "_require_local_profile",
     "_resolve_request_user",
     "get_current_user",
     "list_user_tokens",

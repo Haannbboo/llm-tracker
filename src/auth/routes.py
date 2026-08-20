@@ -39,6 +39,12 @@ def _auth_enabled() -> bool:
     return bool(CONFIG.get("auth", {}).get("enabled"))
 
 
+def _require_local_profile() -> None:
+    """Deny local-only and admin-only routes outright when auth is enabled."""
+    if _auth_enabled():
+        raise HTTPException(status_code=404)
+
+
 def _request_token(request: Request) -> str | None:
     """Extract a session token from the Authorization header or session cookie."""
     header = request.headers.get("authorization") or ""
