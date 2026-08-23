@@ -277,6 +277,11 @@ export function getProviderColor(provider: string, providerColors: Record<string
   return providerColors[provider] || '#94a3b8';
 }
 
+export function formatModelName(model: string): string {
+  if (model.toLowerCase() === 'stealth/ox-alpha') return 'Ox Alpha'
+  return model
+}
+
 const ICON_STYLE = { width: 14, height: 14, display: 'block', objectFit: 'contain' as const }
 
 export function getModelIcon(model: string, theme: Theme = getTheme()) {
@@ -300,6 +305,7 @@ export function getModelIcon(model: string, theme: Theme = getTheme()) {
   if (m.includes('qwen')) return <img src="/models/qwen-color.svg" alt="" style={style} />
   if (m.startsWith('cohere/')) return <img src="/models/cohere.svg" alt="" style={style} />
   if (m.includes('dots')) return <img src="/models/dots-studio.png" alt="" style={style} />
+  if (m.startsWith('stealth')) return <img src="/models/stealth.svg" alt="" style={style} />
   return null
 }
 

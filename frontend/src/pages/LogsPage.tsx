@@ -11,7 +11,7 @@ import { ClickToCopy } from '../components/CopyButton'
 import { t } from '../i18n/index.ts'
 import {
   formatCost, formatLatency, formatNumber, formatRate, formatSpeed, formatTime,
-  value, getProviderIcon, getProviderBadgeBg, getProviderBadgeText, getModelIcon, getSourceIcon, getSourceBadgeBg, getSourceBadgeText, shortSessionId, resolveTimezone, ToolBadge, getSinceDate,
+  value, getProviderIcon, getProviderBadgeBg, getProviderBadgeText, getModelIcon, getSourceIcon, getSourceBadgeBg, getSourceBadgeText, shortSessionId, resolveTimezone, ToolBadge, getSinceDate, formatModelName,
 } from '../utils'
 import { getModelBadgeBackgroundColor, getModelTextColor } from '../model-badge'
 import type { DateRangeOption } from '../types'
@@ -258,7 +258,7 @@ export function LogsPage({ initialSessionFilter }: Props) {
                 textOverflow: 'ellipsis',
                 whiteSpace: 'nowrap'
               }}>
-                {row.model}
+                {formatModelName(row.model)}
               </span>
             </div>
           </td>

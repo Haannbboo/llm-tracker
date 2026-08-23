@@ -8,7 +8,7 @@ import { t } from '../i18n/index.ts'
 import {
   formatCompact, formatCost, formatDuration, formatLatency, formatNumber,
   formatTime, getModelIcon, getSourceBadgeBg, getSourceBadgeText, getSourceIcon,
-  shortSessionId, sessionAgentName, sessionDisplayName, sessionTaskTitle, getSinceDate, resolveTimezone, ToolBadge,
+  shortSessionId, sessionAgentName, sessionDisplayName, sessionTaskTitle, getSinceDate, resolveTimezone, ToolBadge, formatModelName,
 } from '../utils'
 import { getModelBadgeBackgroundColor, getModelTextColor } from '../model-badge'
 import type { DailyEffectivenessReport, EvaluatorOption, EvaluatorType, EvaluationJobProgress, ModelEffectivenessGroup, SessionOutcome, SessionSummary, SessionsSummary } from '../types'
@@ -786,7 +786,7 @@ export function SessionsTab({
                               textOverflow: 'ellipsis',
                               whiteSpace: 'nowrap',
                             }}>
-                              {session.model}
+                              {formatModelName(session.model)}
                             </span>
                           </div>
                         )}

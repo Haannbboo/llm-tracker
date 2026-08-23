@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import type { ActiveFilter, UsageSummary } from './types'
-import { getModelIcon, getProviderColor } from './utils'
+import { formatModelName, getModelIcon, getProviderColor } from './utils'
 import { t } from './i18n/index.ts'
 
 export function ModelSelector({
@@ -50,7 +50,7 @@ export function ModelSelector({
             ) : activeFilter.model ? (
               <>
                 {getModelIcon(activeFilter.model)}
-                <span style={{ fontSize: '13px' }}>{activeFilter.model}</span>
+                <span style={{ fontSize: '13px' }}>{formatModelName(activeFilter.model)}</span>
                 {activeFilter.only_failed && <span style={{ color: 'var(--color-red)', fontSize: '11px', fontWeight: 600, marginLeft: '4px' }}>(Failed)</span>}
               </>
             ) : (
@@ -168,7 +168,7 @@ export function ModelSelector({
                     }}
                   >
                     {getModelIcon(s.model)}
-                    <span>{s.model}</span>
+                    <span>{formatModelName(s.model)}</span>
                   </button>
                 ))}
               </div>

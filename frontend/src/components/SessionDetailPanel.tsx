@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import { ClickToCopy } from './CopyButton'
 import { t } from '../i18n/index.ts'
 import { useApp } from '../contexts/AppContext'
-import { formatCompact, formatCost, formatDuration, formatLatency, formatNumber, formatTime, value, getModelIcon, sessionTaskTitle, resolveTimezone, ToolBadge } from '../utils'
+import { formatCompact, formatCost, formatDuration, formatLatency, formatModelName, formatNumber, formatTime, value, getModelIcon, sessionTaskTitle, resolveTimezone, ToolBadge } from '../utils'
 import { getModelBadgeBackgroundColor, getModelTextColor } from '../model-badge'
 import type { EvaluatorOption, EvaluatorType, EvaluationJobProgress, SessionEvaluation, SessionOutcome, SessionSummary } from '../types'
 
@@ -284,7 +284,7 @@ export function SessionDetailContent({
                 whiteSpace: 'nowrap',
                 maxWidth: '160px'
               }}>
-                {session.model}
+                {formatModelName(session.model)}
               </span>
             </div>
           </div>
