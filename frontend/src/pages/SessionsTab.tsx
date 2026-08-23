@@ -502,7 +502,7 @@ export function SessionsTab({
                         <td>
                           <div className="model-effectiveness-model" title={group.key}>
                             {getModelIcon(group.key)}
-                            <span>{group.key}</span>
+                            <span>{formatModelName(group.key)}</span>
                           </div>
                         </td>
                         <td>

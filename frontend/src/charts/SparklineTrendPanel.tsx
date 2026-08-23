@@ -50,12 +50,12 @@ export function SparklineTrendPanel({
 }: {
   data: DailyDimensionData[]
   metric: Metric
-  topNames: string[]
+  topNames: { key: string; label: string }[]
   nameColors: Record<string, string>
 }) {
   const items = useMemo<SparklineItem[]>(() => {
-    return topNames.map(name => {
-      const rows = data.filter(d => d.dimension === name).sort((a, b) => a.period.localeCompare(b.period))
+    return topNames.map(({ key, label }) => {
+      const rows = data.filter(d => d.dimension === key).sort((a, b) => a.period.localeCompare(b.period))
       const values = rows.map(r => getMetricValue(r, metric))
 
       // Calculate change percentage (last vs first)
@@ -71,8 +71,8 @@ export function SparklineTrendPanel({
       }
 
       return {
-        name,
-        color: nameColors[name] || '#94a3b8',
+        name: label,
+        color: nameColors[label] || '#94a3b8',
         data: values,
         changePercent,
       }

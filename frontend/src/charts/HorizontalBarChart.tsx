@@ -5,6 +5,7 @@ import { t } from '../i18n/index.ts'
 
 export type BarItem = {
   name: string
+  id?: string
   icon: React.ReactNode
   tokens: number
   promptTokens?: number

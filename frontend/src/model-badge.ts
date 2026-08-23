@@ -39,7 +39,7 @@ export function getModelTextColor(model: string, theme: Theme = getTheme()): str
   if (m.includes('stepfun') || m.includes('step-')) return dark ? '#7dd5fc' : '#006f9f'
   if (m.includes('qwen')) return dark ? '#a5a0fc' : '#6336E7'
   if (m.includes('dots')) return dark ? '#d8fdfb' : '#0c4540'
-  if (m.startsWith('stealth')) return dark ? '#ECEEF1' : '#4B4E52'
+  if (m.startsWith('stealth')) return dark ? '#0f172a' : '#4B4E52'
   return dark ? '#f1f5f9' : '#1e293b'
 }
 

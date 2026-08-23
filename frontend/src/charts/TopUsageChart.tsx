@@ -145,6 +145,7 @@ export function TopUsageChart({
       }
       return Array.from(map.entries()).map(([model, v]) => ({
         name: formatModelName(model),
+        id: model,
         icon: getModelIcon(model, theme),
         tokens: v.tokens,
         promptTokens: v.prompt,
@@ -223,7 +224,7 @@ export function TopUsageChart({
     })
   }, [summary, dimension, theme, sourceSummary])
 
-  const topNames = useMemo(() => items.slice(0, 6).map(i => i.name), [items])
+  const topNames = useMemo(() => items.slice(0, 6).map(i => ({ key: i.id ?? i.name, label: i.name })), [items])
   const nameColors = useMemo(() => {
     const colors: Record<string, string> = {}
     for (const item of items) {
