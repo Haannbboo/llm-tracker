@@ -277,6 +277,11 @@ export function getProviderColor(provider: string, providerColors: Record<string
   return providerColors[provider] || '#94a3b8';
 }
 
+export function formatModelName(model: string): string {
+  if (model.toLowerCase() === 'stealth/ox-alpha') return 'Ox Alpha'
+  return model
+}
+
 const ICON_STYLE = { width: 14, height: 14, display: 'block', objectFit: 'contain' as const }
 
 export function getModelIcon(model: string, theme: Theme = getTheme()) {
@@ -299,6 +304,8 @@ export function getModelIcon(model: string, theme: Theme = getTheme()) {
   if (m.startsWith('nvidia/') || m.includes('nemotron')) return <img src="/models/nvidia.svg" alt="" style={style} />
   if (m.includes('qwen')) return <img src="/models/qwen-color.svg" alt="" style={style} />
   if (m.startsWith('cohere/')) return <img src="/models/cohere.svg" alt="" style={style} />
+  if (m.includes('dots')) return <img src="/models/dots-studio.png" alt="" style={style} />
+  if (m.startsWith('stealth')) return <img src="/models/stealth.svg" alt="" style={style} />
   return null
 }
 
@@ -306,10 +313,10 @@ type BadgeTheme = { light: string; dark: string }
 
 const PROVIDER_BADGES: Record<string, { color: string; bg: BadgeTheme; text: BadgeTheme }> = {
   'tencent/': { color: '#0052D9', bg: { light: '#0052D926', dark: '#0052D980' }, text: { light: '#003a8c', dark: '#d0dff5' } },
-  anthropic: { color: '#cc7c5e', bg: { light: '#cc7c5e26', dark: '#cc7c5e40' }, text: { light: '#cc7c5e', dark: '#cc7c5e' } },
-  google: { color: '#528af2', bg: { light: '#528af226', dark: '#528af240' }, text: { light: '#528af2', dark: '#528af2' } },
-  openai: { color: '#dcdcdc', bg: { light: '#dcdcdc80', dark: '#dcdcdc90' }, text: { light: '#475569', dark: '#94a3b8' } },
-  minimax: { color: '#ec6b53', bg: { light: '#ec6b5326', dark: '#ec6b5340' }, text: { light: '#ec6b53', dark: '#ec6b53' } },
+  anthropic: { color: '#cc7c5e', bg: { light: '#cc7c5e26', dark: '#cc7c5e40' }, text: { light: '#975a3d', dark: '#e8a878' } },
+  google: { color: '#528af2', bg: { light: '#528af226', dark: '#528af240' }, text: { light: '#1e40af', dark: '#a5b4fc' } },
+  openai: { color: '#dcdcdc', bg: { light: '#dcdcdc80', dark: '#dcdcdc90' }, text: { light: '#475569', dark: '#0f172a' } },
+  minimax: { color: '#ec6b53', bg: { light: '#ec6b5326', dark: '#ec6b5340' }, text: { light: '#b91c1c', dark: '#fca5a5' } },
   xiaomi: { color: '#dcc496', bg: { light: '#dcc49680', dark: '#dcc49690' }, text: { light: '#6b4f2a', dark: '#dcc496' } },
   openrouter: { color: '#6366f1', bg: { light: '#6366f126', dark: '#6366f140' }, text: { light: '#6366f1', dark: '#a5b4fc' } },
   poolside: { color: '#f97316', bg: { light: '#f9731626', dark: '#f9731640' }, text: { light: '#c2410c', dark: '#fdba74' } },
@@ -320,6 +327,7 @@ const PROVIDER_BADGES: Record<string, { color: string; bg: BadgeTheme; text: Bad
   stepfun: { color: '#01A9FF', bg: { light: '#01A9FF26', dark: '#01A9FF40' }, text: { light: '#006f9f', dark: '#7dd5fc' } },
   volce: { color: '#0095FD', bg: { light: '#0095FD26', dark: '#0095FD40' }, text: { light: '#0070c0', dark: '#66c2ff' } },
   qwen: { color: '#6F69F7', bg: { light: '#6F69F726', dark: '#6F69F740' }, text: { light: '#6336E7', dark: '#a5a0fc' } },
+  dots: { color: '#8FE2D6', bg: { light: '#8FE2D626', dark: '#8FE2D640' }, text: { light: '#0c4540', dark: '#d8fdfb' } },
 }
 
 function findProviderBadge(provider: string) {
@@ -364,6 +372,7 @@ export function getProviderIcon(provider: string, theme: Theme = getTheme()) {
   if (p.includes('nvidia')) return <img src="/models/nvidia.svg" alt="" style={style} />
   if (p.includes('cohere')) return <img src="/models/cohere.svg" alt="" style={style} />
   if (p.includes('qwen')) return <img src="/models/qwen-color.svg" alt="" style={style} />
+  if (p.includes('dots')) return <img src="/models/dots-studio.png" alt="" style={style} />
   return null
 }
 

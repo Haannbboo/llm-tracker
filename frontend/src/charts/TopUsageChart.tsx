@@ -2,7 +2,7 @@ import { useState, useMemo, useEffect } from 'react'
 import type { Theme } from '../theme'
 import type { UsageSummary } from '../types'
 import { getModelColor, getModelBadgeBackgroundColor, getModelTextColor } from '../model-badge'
-import { getModelIcon, getProviderIcon, getProviderBadgeBg, getProviderBadgeText, getSourceBadgeBg, getSourceBadgeText, getSourceIcon, PALETTE } from '../utils'
+import { formatModelName, getModelIcon, getProviderIcon, getProviderBadgeBg, getProviderBadgeText, getSourceBadgeBg, getSourceBadgeText, getSourceIcon, PALETTE } from '../utils'
 import { HorizontalBarChart } from './HorizontalBarChart'
 import type { BarItem, Metric } from './HorizontalBarChart'
 import { SparklineTrendPanel } from './SparklineTrendPanel'
@@ -144,7 +144,8 @@ export function TopUsageChart({
         map.set(s.model, existing)
       }
       return Array.from(map.entries()).map(([model, v]) => ({
-        name: model,
+        name: formatModelName(model),
+        id: model,
         icon: getModelIcon(model, theme),
         tokens: v.tokens,
         promptTokens: v.prompt,
@@ -223,7 +224,7 @@ export function TopUsageChart({
     })
   }, [summary, dimension, theme, sourceSummary])
 
-  const topNames = useMemo(() => items.slice(0, 6).map(i => i.name), [items])
+  const topNames = useMemo(() => items.slice(0, 6).map(i => ({ key: i.id ?? i.name, label: i.name })), [items])
   const nameColors = useMemo(() => {
     const colors: Record<string, string> = {}
     for (const item of items) {
