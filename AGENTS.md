@@ -135,6 +135,8 @@ Vite dev uses port `5173`. Bootstrap serves built frontend through FastAPI.
 
 ## Worktree dev environment
 
+Create feature worktrees in `../llm-tracker-worktrees/`, next to the main `llm-tracker` clone. After creating one, symlink the main clone's virtualenv into it (`ln -s /path/to/main/clone/.venv .venv`) — `scripts/llm-tracker` and tests need it; without it they fall back to system `python3` and fail on missing deps.
+
 `scripts/dev/dev-start.sh` launches an isolated dev environment for worktree work. It is fully independent from the main production server:
 
 | | Main API server | Dev API server |
