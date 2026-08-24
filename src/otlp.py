@@ -12,7 +12,7 @@ from typing import NoReturn
 
 from fastapi import FastAPI, HTTPException, Request
 
-from config.app import CONFIG
+from src.config.app import CONFIG
 
 from .auth import _auth_enabled, resolve_token
 from .auth.tokens import hash_token

@@ -12,7 +12,7 @@ from typing import Any
 from sqlalchemy import and_, exists, func, or_, select
 from sqlalchemy.orm import Session
 
-from config.app import CONFIG
+from src.config.app import CONFIG
 
 from .database import (
     EvaluationJob,

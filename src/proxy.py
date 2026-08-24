@@ -18,7 +18,7 @@ import httpx
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 
-from config.app import (
+from src.config.app import (
     CONFIG,
     MODEL_MAP,
     PROVIDER_MAP,

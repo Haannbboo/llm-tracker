@@ -20,8 +20,8 @@ from authlib.integrations.base_client import OAuthError
 from authlib.integrations.starlette_client import OAuth
 from joserfc.errors import JoseError
 
-from config.app import CONFIG
-from config.models import get_tracker_home
+from src.config.app import CONFIG
+from src.config.models import get_tracker_home
 
 logger = logging.getLogger(__name__)
 

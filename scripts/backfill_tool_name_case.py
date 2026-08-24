@@ -18,7 +18,7 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from sqlalchemy import func, select, update  # noqa: E402
 
-from config.app import CONFIG  # noqa: E402
+from src.config.app import CONFIG  # noqa: E402
 from src.database.engine import get_engine  # noqa: E402
 from src.database.models import SessionRecord, ToolCall  # noqa: E402
 

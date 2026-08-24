@@ -3,7 +3,7 @@ import json
 import pytest
 from fastapi.testclient import TestClient
 
-from config.models import ProviderConfig
+from src.config.models import ProviderConfig
 
 
 def test_proxy_registers_v1_and_compatibility_paths(proxy_module):
@@ -41,9 +41,11 @@ def test_proxy_registers_v1_and_compatibility_paths(proxy_module):
 
 
 def test_config_refresh_returns_404_when_auth_enabled(proxy_module, monkeypatch):
-    import config.app
+    import src.config.app
 
-    monkeypatch.setitem(config.app.CONFIG, "auth", {"enabled": True, "allowlist": []})
+    monkeypatch.setitem(
+        src.config.app.CONFIG, "auth", {"enabled": True, "allowlist": []}
+    )
 
     response = TestClient(proxy_module.app).post("/config/refresh")
 

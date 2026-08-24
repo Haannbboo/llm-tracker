@@ -23,7 +23,7 @@ if str(REPO_ROOT) not in sys.path:
 
 def main() -> int:
     """Apply the missing-key config merge and print a short status message."""
-    from config.merge import sync_config_file_with_defaults
+    from src.config.merge import sync_config_file_with_defaults
 
     if len(sys.argv) != 3:
         print(

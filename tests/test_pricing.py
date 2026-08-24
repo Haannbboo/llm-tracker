@@ -7,9 +7,9 @@ import urllib.error
 
 from fastapi.testclient import TestClient
 
-import config.pricing as pricing_module
-from config.app import ModelCost, ModelTier
-from config.pricing import (
+import src.config.pricing as pricing_module
+from src.config.app import ModelCost, ModelTier
+from src.config.pricing import (
     _claude_3x_alias,
     _is_chat_model,
     _parse_litellm_json,
@@ -883,7 +883,7 @@ def test_pricing_endpoint_provider_display_overwrites_global_same_key(
             },
         }
     )
-    monkeypatch.setattr("config.pricing.get_remote_pricing", lambda: {})
+    monkeypatch.setattr("src.config.pricing.get_remote_pricing", lambda: {})
 
     response = TestClient(api_module.app).get("/pricing")
 
@@ -921,7 +921,7 @@ def test_pricing_with_multiplier(api_module, monkeypatch):
             },
         }
     )
-    monkeypatch.setattr("config.pricing.get_remote_pricing", lambda: {})
+    monkeypatch.setattr("src.config.pricing.get_remote_pricing", lambda: {})
 
     response = TestClient(api_module.app).get("/pricing?provider=prov-a")
 
@@ -968,7 +968,7 @@ def test_pricing_without_provider_shows_all(api_module, monkeypatch):
         }
     )
     monkeypatch.setattr(
-        "config.pricing.get_remote_pricing",
+        "src.config.pricing.get_remote_pricing",
         lambda: {"remote-model": ModelCost(input=3.0, output=6.0, cache_read=0.3)},
     )
 
@@ -996,7 +996,7 @@ def test_pricing_unknown_provider_defaults_multiplier_1(api_module, monkeypatch)
             "providers": {},
         }
     )
-    monkeypatch.setattr("config.pricing.get_remote_pricing", lambda: {})
+    monkeypatch.setattr("src.config.pricing.get_remote_pricing", lambda: {})
 
     response = TestClient(api_module.app).get("/pricing?provider=missing")
 
@@ -1036,7 +1036,7 @@ def test_pricing_two_providers_same_model_route_correctly(api_module, monkeypatc
             },
         }
     )
-    monkeypatch.setattr("config.pricing.get_remote_pricing", lambda: {})
+    monkeypatch.setattr("src.config.pricing.get_remote_pricing", lambda: {})
 
     prov_a = TestClient(api_module.app).get("/pricing?provider=prov-a").json()
     prov_b = TestClient(api_module.app).get("/pricing?provider=prov-b").json()
@@ -1076,7 +1076,7 @@ def test_pricing_provider_override_beats_global_and_fallback_gets_multiplier(
             },
         }
     )
-    monkeypatch.setattr("config.pricing.get_remote_pricing", lambda: {})
+    monkeypatch.setattr("src.config.pricing.get_remote_pricing", lambda: {})
 
     response = TestClient(api_module.app).get("/pricing?provider=prov-a")
 
@@ -1095,7 +1095,7 @@ def test_single_model_pricing_contains_litellm_match(api_module, monkeypatch):
     api_module.CONFIG.clear()
     api_module.CONFIG.update({"models": {}, "providers": {}})
     monkeypatch.setattr(
-        "config.pricing.get_remote_pricing",
+        "src.config.pricing.get_remote_pricing",
         lambda: {
             "openrouter/xiaomi/mimo-v2.5-pro": ModelCost(
                 input=1.0, output=3.0, cache_read=0.2
@@ -1122,7 +1122,7 @@ def test_single_model_pricing_includes_tiers(api_module, monkeypatch):
     api_module.CONFIG.clear()
     api_module.CONFIG.update({"models": {}, "providers": {}})
     monkeypatch.setattr(
-        "config.pricing.get_remote_pricing",
+        "src.config.pricing.get_remote_pricing",
         lambda: {
             "dashscope/qwen3.7-plus": ModelCost(
                 input=0.4,
@@ -1174,7 +1174,7 @@ def test_single_model_pricing_includes_tiers(api_module, monkeypatch):
 def test_single_model_pricing_unresolved_includes_empty_tiers(api_module, monkeypatch):
     api_module.CONFIG.clear()
     api_module.CONFIG.update({"models": {}, "providers": {}})
-    monkeypatch.setattr("config.pricing.get_remote_pricing", lambda: {})
+    monkeypatch.setattr("src.config.pricing.get_remote_pricing", lambda: {})
 
     response = TestClient(api_module.app).get("/pricing/no-such-model")
 
@@ -1195,7 +1195,7 @@ def test_single_model_pricing_yaml_override_beats_litellm(api_module, monkeypatc
         }
     )
     monkeypatch.setattr(
-        "config.pricing.get_remote_pricing",
+        "src.config.pricing.get_remote_pricing",
         lambda: {"test-model": ModelCost(input=9.0, output=9.0, cache_read=9.0)},
     )
 
@@ -1230,7 +1230,7 @@ def test_single_model_pricing_provider_scope_and_multiplier(api_module, monkeypa
             },
         }
     )
-    monkeypatch.setattr("config.pricing.get_remote_pricing", lambda: {})
+    monkeypatch.setattr("src.config.pricing.get_remote_pricing", lambda: {})
 
     response = TestClient(api_module.app).get("/pricing/test-model?provider=prov-a")
 
@@ -1250,7 +1250,7 @@ def test_single_model_pricing_cheapest_contains_match(api_module, monkeypatch):
     api_module.CONFIG.clear()
     api_module.CONFIG.update({"models": {}, "providers": {}})
     monkeypatch.setattr(
-        "config.pricing.get_remote_pricing",
+        "src.config.pricing.get_remote_pricing",
         lambda: {
             "openrouter/xiaomi/mimo-v2.5-pro": ModelCost(
                 input=1.0, output=3.0, cache_read=0.2
@@ -1282,7 +1282,7 @@ def test_single_model_pricing_slashed_model_exact_yaml(api_module, monkeypatch):
             "providers": {},
         }
     )
-    monkeypatch.setattr("config.pricing.get_remote_pricing", lambda: {})
+    monkeypatch.setattr("src.config.pricing.get_remote_pricing", lambda: {})
 
     response = TestClient(api_module.app).get("/pricing/z-ai/glm-5.1-20260406")
 
@@ -1297,7 +1297,7 @@ def test_single_model_pricing_slashed_model_exact_yaml(api_module, monkeypatch):
 def test_single_model_pricing_unresolved(api_module, monkeypatch):
     api_module.CONFIG.clear()
     api_module.CONFIG.update({"models": {}, "providers": {}})
-    monkeypatch.setattr("config.pricing.get_remote_pricing", lambda: {})
+    monkeypatch.setattr("src.config.pricing.get_remote_pricing", lambda: {})
 
     response = TestClient(api_module.app).get("/pricing/unknown-model")
 
@@ -1326,7 +1326,7 @@ def test_single_model_pricing_provider_contains_match(api_module, monkeypatch):
             },
         }
     )
-    monkeypatch.setattr("config.pricing.get_remote_pricing", lambda: {})
+    monkeypatch.setattr("src.config.pricing.get_remote_pricing", lambda: {})
 
     response = TestClient(api_module.app).get("/pricing/mimo-v2.5-pro?provider=prov-a")
 
@@ -1343,7 +1343,7 @@ def test_single_model_pricing_case_insensitive(api_module, monkeypatch):
     api_module.CONFIG.clear()
     api_module.CONFIG.update({"models": {}, "providers": {}})
     monkeypatch.setattr(
-        "config.pricing.get_remote_pricing",
+        "src.config.pricing.get_remote_pricing",
         lambda: {
             "openrouter/xiaomi/mimo-v2.5-pro": ModelCost(
                 input=1.0, output=3.0, cache_read=0.2
@@ -1363,7 +1363,7 @@ def test_single_model_pricing_case_insensitive(api_module, monkeypatch):
 def test_single_model_pricing_rejects_empty_model(api_module, monkeypatch):
     api_module.CONFIG.clear()
     api_module.CONFIG.update({"models": {}, "providers": {}})
-    monkeypatch.setattr("config.pricing.get_remote_pricing", lambda: {})
+    monkeypatch.setattr("src.config.pricing.get_remote_pricing", lambda: {})
 
     response = TestClient(api_module.app).get("/pricing/")
 

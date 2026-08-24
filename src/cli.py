@@ -21,7 +21,7 @@ from urllib.parse import urlencode, urlparse
 
 import httpx
 
-from config.app import CONFIG
+from src.config.app import CONFIG
 
 from . import evaluation as evaluation_module
 from .auth import mint_token
@@ -151,13 +151,13 @@ class DatabaseUsageClient:
 
 
 def build_api_base_url() -> str:
-    from config.server_config import resolve_server_urls
+    from src.config.server_config import resolve_server_urls
 
     return resolve_server_urls(CONFIG)["api_url"]
 
 
 def build_proxy_base_urls() -> tuple[str, str]:
-    from config.server_config import resolve_server_urls
+    from src.config.server_config import resolve_server_urls
 
     proxy_url = resolve_server_urls(CONFIG)["proxy_url"]
     return f"{proxy_url}/v1", proxy_url
@@ -313,7 +313,7 @@ def run_token_command(command: list[str]) -> int:
 
 
 def credentials_path() -> Path:
-    from config.models import get_tracker_home
+    from src.config.models import get_tracker_home
 
     return Path(get_tracker_home()) / "credentials.json"
 

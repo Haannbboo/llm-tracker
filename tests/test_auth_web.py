@@ -38,10 +38,10 @@ def _enable_auth(
     client_id="test-client-id",
     client_secret="test-client-secret",
 ):
-    import config.app
+    import src.config.app
 
     monkeypatch.setitem(
-        config.app.CONFIG,
+        src.config.app.CONFIG,
         "auth",
         {
             "enabled": True,
@@ -236,14 +236,14 @@ def test_google_callback_state_replay(api_module, monkeypatch, fresh_db):
 
 
 def test_google_callback_expired_state(api_module, monkeypatch, fresh_db):
-    import config.app
+    import src.config.app
 
     _enable_auth(monkeypatch)
     _mock_google_flow(api_module, monkeypatch)
     client = TestClient(api_module.app)
     state = _start_login(api_module, monkeypatch, client)
 
-    state_path = Path(config.app.get_config_path()).parent / "oauth_state.json"
+    state_path = Path(src.config.app.get_config_path()).parent / "oauth_state.json"
     stored = json.loads(state_path.read_text())
     stored[state]["exp"] = time.time() - 1
     state_path.write_text(json.dumps(stored))

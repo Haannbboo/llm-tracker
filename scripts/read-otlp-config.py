@@ -15,7 +15,7 @@ import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from config.server_config import resolve_server_urls
+from src.config.server_config import resolve_server_urls
 
 
 def main() -> None:

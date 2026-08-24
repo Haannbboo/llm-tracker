@@ -1,4 +1,4 @@
-from config.server_config import resolve_server_urls
+from src.config.server_config import resolve_server_urls
 
 
 def test_resolve_server_urls_uses_scheme_and_configured_ports():

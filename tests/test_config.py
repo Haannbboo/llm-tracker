@@ -693,7 +693,7 @@ models: {}
         "http://127.0.0.1:49153/v1/logs",
     )
 
-    namespace = runpy.run_path(str(repo_root / "config" / "otlp.conf.py"))
+    namespace = runpy.run_path(str(repo_root / "src" / "config" / "otlp.conf.py"))
 
     assert namespace["bind"] == "127.0.0.1:49153"
 
@@ -719,7 +719,7 @@ models: {}
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.delenv("OTEL_EXPORTER_OTLP_LOGS_ENDPOINT", raising=False)
 
-    namespace = runpy.run_path(str(repo_root / "config" / "otlp.conf.py"))
+    namespace = runpy.run_path(str(repo_root / "src" / "config" / "otlp.conf.py"))
 
     assert namespace["bind"] == "127.0.0.1:4005"
 

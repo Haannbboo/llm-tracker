@@ -18,7 +18,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, model_validator
 from starlette.middleware.base import BaseHTTPMiddleware
 
-from config.app import (
+from src.config.app import (
     CONFIG,
     CONFIG_PATH,
     ResolvedCost,
@@ -27,7 +27,7 @@ from config.app import (
     refresh_runtime_config,
     set_evaluation_evaluator,
 )
-from config.server_config import load_server_config
+from src.config.server_config import load_server_config
 
 from ._version import get_version
 from .auth import _auth_enabled, _require_local_profile, _resolve_request_user
@@ -1016,8 +1016,8 @@ def _resolve_live_cost_maps():
     """Live-resolved pricing (config overrides + freshest LiteLLM data), shared
     by /pricing/{model} and /usage/{id}/recalculate-cost so both price a model
     identically instead of drifting from independently maintained copies."""
-    from config.app import resolve_all_costs
-    from config.pricing import get_remote_pricing
+    from src.config.app import resolve_all_costs
+    from src.config.pricing import get_remote_pricing
 
     with _config_lock:
         config_snapshot = dict(CONFIG)
@@ -1033,8 +1033,8 @@ def _resolve_live_cost_maps():
 @app.get("/pricing")
 async def get_pricing(provider: str | None = None):
     """Return all models with resolved pricing and source metadata."""
-    from config.app import resolve_all_costs
-    from config.pricing import get_remote_pricing
+    from src.config.app import resolve_all_costs
+    from src.config.pricing import get_remote_pricing
 
     with _config_lock:
         config_snapshot = dict(CONFIG)
@@ -1241,7 +1241,7 @@ async def detect_local_agents():
 
 
 def _local_setup_expected_endpoints() -> dict[str, str]:
-    from config.server_config import resolve_server_urls
+    from src.config.server_config import resolve_server_urls
 
     urls = resolve_server_urls(CONFIG)
     base = urls["otlp_url"]
