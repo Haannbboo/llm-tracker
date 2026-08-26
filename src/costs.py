@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from decimal import Decimal
 
-from config.app import (
+from src.config.app import (
     MODEL_COSTS,
     MODEL_SEGMENT_COSTS,
     PROVIDER_MAP,

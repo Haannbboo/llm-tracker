@@ -62,7 +62,7 @@ def resolve_server_urls(config: dict) -> dict[str, str]:
             base = f"{parsed.scheme or 'http'}://{host}"
     if base is None:
         host = str(server.get("host", "127.0.0.1"))
-        if host in ("0.0.0.0", "127.0.0.1"):
+        if host in ("0.0.0.0", "127.0.0.1", "::"):
             host = "localhost"
         elif ":" in host and not host.startswith("["):
             host = f"[{host}]"

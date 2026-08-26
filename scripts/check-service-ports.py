@@ -25,7 +25,7 @@ def _info(msg: str) -> None:
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from config.runtime_ports import (  # noqa: E402
+from src.config.runtime_ports import (  # noqa: E402
     PortListener,
     detect_port_issues,
     format_port_issue,

@@ -153,7 +153,7 @@ supervisor.rpcinterface_factory = supervisor.rpcinterface:make_main_rpcinterface
 serverurl=unix://${SOCKET_PATH}
 
 [program:llm-tracker-proxy]
-command=${PYTHON} -m gunicorn -c ${ROOT_DIR}/config/proxy.conf.py src.proxy:app
+command=${PYTHON} -m gunicorn -c ${ROOT_DIR}/src/config/proxy.conf.py src.proxy:app
 environment=OBJC_DISABLE_INITIALIZE_FORK_SAFETY=YES
 directory=${ROOT_DIR}
 autostart=true
@@ -165,7 +165,7 @@ stdout_logfile=${ROOT_DIR}/logs/proxy.stdout.log
 stderr_logfile=${ROOT_DIR}/logs/proxy.stderr.log
 
 [program:llm-tracker-api]
-command=${PYTHON} -m gunicorn -c ${ROOT_DIR}/config/api.conf.py src.api:app
+command=${PYTHON} -m gunicorn -c ${ROOT_DIR}/src/config/api.conf.py src.api:app
 environment=OBJC_DISABLE_INITIALIZE_FORK_SAFETY=YES
 directory=${ROOT_DIR}
 autostart=true
@@ -177,7 +177,7 @@ stdout_logfile=${ROOT_DIR}/logs/api.stdout.log
 stderr_logfile=${ROOT_DIR}/logs/api.stderr.log
 
 [program:llm-tracker-otlp]
-command=${PYTHON} -m gunicorn -c ${ROOT_DIR}/config/otlp.conf.py src.otlp:app
+command=${PYTHON} -m gunicorn -c ${ROOT_DIR}/src/config/otlp.conf.py src.otlp:app
 environment=OBJC_DISABLE_INITIALIZE_FORK_SAFETY=YES
 directory=${ROOT_DIR}
 autostart=true

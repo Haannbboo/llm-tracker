@@ -9,7 +9,7 @@ from typing import Any
 from sqlalchemy import create_engine
 from sqlalchemy.engine import Engine
 
-from config.app import CONFIG
+from src.config.app import CONFIG
 
 from .models import Base
 

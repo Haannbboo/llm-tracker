@@ -387,6 +387,9 @@ def set_evaluation_evaluator(evaluator: str, path: str | None = None) -> None:
         config = {}
     evaluation = config.setdefault("evaluation", {})
     evaluation["evaluator"] = evaluator
+    config_parent = os.path.dirname(config_path)
+    if config_parent:
+        os.makedirs(config_parent, exist_ok=True)
     with open(config_path, "w", encoding="utf-8") as f:
         yaml.safe_dump(config, f, default_flow_style=False, sort_keys=False)
     _reload_config(path)

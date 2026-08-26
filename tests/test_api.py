@@ -1761,10 +1761,12 @@ OLD_PRE_RENAME_PATHS = [
 
 
 def _authenticated_client(api_module, fresh_db, monkeypatch):
-    import config.app
+    import src.config.app
     from src.auth.tokens import mint_token
 
-    monkeypatch.setitem(config.app.CONFIG, "auth", {"enabled": True, "allowlist": []})
+    monkeypatch.setitem(
+        src.config.app.CONFIG, "auth", {"enabled": True, "allowlist": []}
+    )
     token, _ = mint_token("a@example.com", kind="cli", db_path=fresh_db.db_path)
     client = TestClient(api_module.app)
     client.headers["Authorization"] = f"Bearer {token}"

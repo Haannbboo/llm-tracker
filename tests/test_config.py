@@ -693,7 +693,7 @@ models: {}
         "http://127.0.0.1:49153/v1/logs",
     )
 
-    namespace = runpy.run_path(str(repo_root / "config" / "otlp.conf.py"))
+    namespace = runpy.run_path(str(repo_root / "src" / "config" / "otlp.conf.py"))
 
     assert namespace["bind"] == "127.0.0.1:49153"
 
@@ -719,9 +719,34 @@ models: {}
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.delenv("OTEL_EXPORTER_OTLP_LOGS_ENDPOINT", raising=False)
 
-    namespace = runpy.run_path(str(repo_root / "config" / "otlp.conf.py"))
+    namespace = runpy.run_path(str(repo_root / "src" / "config" / "otlp.conf.py"))
 
     assert namespace["bind"] == "127.0.0.1:4005"
+
+
+def test_gunicorn_configs_resolve_log_paths_to_repo_root(tmp_path, monkeypatch):
+    repo_root = Path(__file__).resolve().parents[1]
+    config_dir = tmp_path / ".llm-tracker"
+    config_dir.mkdir()
+    (config_dir / "config.yaml").write_text(
+        """
+server:
+  host: 127.0.0.1
+  port: 4000
+  api_port: 4001
+  otlp_port: 4005
+db:
+  path: usage.db
+providers: {}
+models: {}
+""",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("HOME", str(tmp_path))
+
+    for conf in ("api.conf.py", "proxy.conf.py", "otlp.conf.py"):
+        namespace = runpy.run_path(str(repo_root / "src" / "config" / conf))
+        assert namespace["ROOT"] == str(repo_root)
 
 
 def test_replace_contents_updates_keys(config_module):
@@ -825,3 +850,12 @@ def test_load_config_ignores_yaml_google_creds_when_env_unset(
 
     assert config["auth"]["google_client_id"] == ""
     assert config["auth"]["google_client_secret"] == ""
+
+
+def test_set_evaluation_evaluator_creates_missing_parent_dirs(config_module, tmp_path):
+    target = tmp_path / ".llm-tracker" / "nested" / "config.yaml"
+
+    config_module.set_evaluation_evaluator("remote", path=str(target))
+
+    saved = yaml.safe_load(target.read_text(encoding="utf-8"))
+    assert saved["evaluation"]["evaluator"] == "remote"

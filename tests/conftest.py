@@ -51,8 +51,8 @@ providers:
 
 
 PROJECT_MODULES = [
-    "config.app",
-    "config.runtime_ports",
+    "src.config.app",
+    "src.config.runtime_ports",
     "src.api",
     "src.auth",
     "src.cli",
@@ -102,10 +102,10 @@ def isolated_home(
     monkeypatch.setenv("LLM_TRACKER_CONFIG", str(config_path))
     clear_project_modules()
     # Patch CONFIG["db"] so cached modules see the test's DB path.
-    import config.app
+    import src.config.app
 
     monkeypatch.setitem(
-        config.app.CONFIG,
+        src.config.app.CONFIG,
         "db",
         {
             "path": str(tmp_path / "usage.db"),
@@ -125,7 +125,7 @@ def load_module(isolated_home: Path) -> Callable[[str], ModuleType]:
 
 @pytest.fixture
 def config_module(load_module: Callable[[str], ModuleType]) -> ModuleType:
-    return load_module("config.app")
+    return load_module("src.config.app")
 
 
 @pytest.fixture
@@ -180,7 +180,7 @@ def utils_module(load_module: Callable[[str], ModuleType]) -> ModuleType:
 
 @pytest.fixture
 def runtime_ports_module(load_module: Callable[[str], ModuleType]) -> ModuleType:
-    return load_module("config.runtime_ports")
+    return load_module("src.config.runtime_ports")
 
 
 # ponytail: lightweight DB fixture — one DB per session, truncate tables between tests.
@@ -255,7 +255,7 @@ def fresh_db(_session_db: str, monkeypatch: pytest.MonkeyPatch):
     """
     # Import each time — fast because sys.modules caches.
     # Only slow after isolated_home clears modules (rare, ~17 tests).
-    import config.app
+    import src.config.app
     import src.database as db
     import src.schema_migrations as sm
 
@@ -263,8 +263,8 @@ def fresh_db(_session_db: str, monkeypatch: pytest.MonkeyPatch):
     db_url = db_path if "://" in db_path else f"sqlite:///{db_path}"
 
     # Patch CONFIG so functions called without db_path use the test DB
-    monkeypatch.setitem(config.app.CONFIG["db"], "path", db_path)
-    monkeypatch.setitem(config.app.CONFIG["db"], "url", db_url)
+    monkeypatch.setitem(src.config.app.CONFIG["db"], "path", db_path)
+    monkeypatch.setitem(src.config.app.CONFIG["db"], "url", db_url)
 
     # Truncate all tables for a clean slate (much faster than recreating DB)
     engine = db.get_engine(db_path)

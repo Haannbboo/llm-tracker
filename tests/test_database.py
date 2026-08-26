@@ -5307,7 +5307,7 @@ def test_recalculate_usage_cost_updates_row_and_daily_rollup(fresh_db):
     replace) the matching usage_daily rollup, since other rows share it."""
     from decimal import Decimal
 
-    from config.app import ModelCost
+    from src.config.app import ModelCost
 
     database_module = fresh_db.database_module
     db_path = fresh_db.db_path
@@ -5402,7 +5402,7 @@ def test_recalculate_usage_cost_adjusts_session_rollup(fresh_db):
     import json
     from decimal import Decimal
 
-    from config.app import ModelCost
+    from src.config.app import ModelCost
 
     database_module = fresh_db.database_module
     db_path = fresh_db.db_path
@@ -6198,7 +6198,7 @@ def test_upsert_daily_aggregate_accumulates_after_migration_recreate(
 def test_recalculate_usage_cost_targets_user_slice(fresh_db):
     """The daily delta UPDATE lands only in the row matching the usage row's
     user_id when both a NULL-slice and a real-user-slice row exist."""
-    from config.app import ModelCost
+    from src.config.app import ModelCost
 
     database_module = fresh_db.database_module
     db_path = fresh_db.db_path
