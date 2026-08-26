@@ -850,3 +850,12 @@ def test_load_config_ignores_yaml_google_creds_when_env_unset(
 
     assert config["auth"]["google_client_id"] == ""
     assert config["auth"]["google_client_secret"] == ""
+
+
+def test_set_evaluation_evaluator_creates_missing_parent_dirs(config_module, tmp_path):
+    target = tmp_path / ".llm-tracker" / "nested" / "config.yaml"
+
+    config_module.set_evaluation_evaluator("remote", path=str(target))
+
+    saved = yaml.safe_load(target.read_text(encoding="utf-8"))
+    assert saved["evaluation"]["evaluator"] == "remote"
