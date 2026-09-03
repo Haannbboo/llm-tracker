@@ -29,12 +29,6 @@ export function getLocalTimezone(): string {
   return Intl.DateTimeFormat().resolvedOptions().timeZone
 }
 
-export function getTimezone(): string {
-  const saved = localStorage.getItem(TIMEZONE_KEY) || 'auto'
-  if (saved === 'auto') return getLocalTimezone()
-  return validateTimezone(saved)
-}
-
 export function resolveTimezone(tz: string): string {
   return tz === 'auto' ? getLocalTimezone() : validateTimezone(tz)
 }
@@ -306,6 +300,10 @@ export function getModelIcon(model: string, theme: Theme = getTheme()) {
   if (m.startsWith('cohere/')) return <img src="/models/cohere.svg" alt="" style={style} />
   if (m.includes('dots')) return <img src="/models/dots-studio.png" alt="" style={style} />
   if (m.startsWith('stealth')) return <img src="/models/stealth.svg" alt="" style={style} />
+  if (m.startsWith('muse')) return <img src="/models/meta.svg" alt="" style={style} />
+  if (m.startsWith('x-ai/') || m.includes('grok')) return <img src={dark ? '/models/grok-dark.svg' : '/models/grok.svg'} alt="" style={style} />
+  if (m.includes('longcat')) return <img src="/models/longcat-color.svg" alt="" style={style} />
+  if (m.replace(/[-_\s]/g, '').includes('commandcode')) return <img src={dark ? '/models/commandcode-dark.svg' : '/models/commandcode.svg'} alt="" style={style} />
   return null
 }
 
@@ -336,10 +334,6 @@ function findProviderBadge(provider: string) {
     if (key.endsWith('/') ? p.startsWith(key) : p.includes(key)) return val
   }
   return null
-}
-
-export function getProviderBadgeColor(provider: string): string {
-  return findProviderBadge(provider)?.color ?? '#f1f5f9'
 }
 
 export function getProviderBadgeBg(provider: string, theme: Theme = getTheme()): string {
@@ -373,6 +367,7 @@ export function getProviderIcon(provider: string, theme: Theme = getTheme()) {
   if (p.includes('cohere')) return <img src="/models/cohere.svg" alt="" style={style} />
   if (p.includes('qwen')) return <img src="/models/qwen-color.svg" alt="" style={style} />
   if (p.includes('dots')) return <img src="/models/dots-studio.png" alt="" style={style} />
+  if (p.replace(/[-_\s]/g, '').includes('commandcode')) return <img src={dark ? '/models/commandcode-dark.svg' : '/models/commandcode.svg'} alt="" style={style} />
   return null
 }
 
@@ -527,23 +522,6 @@ export function buildSessionInsights(sessions: import('./types').SessionSummary[
   }
 
   return insights
-}
-
-export function getProviderDisplayName(provider: string): string {
-  const normalized = provider.toLowerCase()
-  if (normalized.includes('anthropic')) return 'Anthropic'
-  if (normalized.includes('openai')) return 'OpenAI'
-  if (normalized.includes('google')) return 'Google'
-  if (normalized.includes('minimax')) return 'MiniMax'
-  if (normalized.includes('xiaomi')) return 'Xiaomi'
-  if (normalized.includes('openrouter')) return 'OpenRouter'
-  if (normalized.includes('stepfun')) return 'StepFun'
-  if (normalized.includes('poolside')) return 'Poolside'
-  if (normalized.includes('volce')) return 'Volce'
-  if (normalized.includes('deepseek')) return 'DeepSeek'
-  if (normalized.includes('z-ai')) return 'Z-AI'
-  if (normalized.startsWith('tencent/')) return 'Tencent'
-  return provider
 }
 
 export function getAgentDisplayName(name: string) {

@@ -24,52 +24,6 @@ export type UsageSummary = {
   status_unknown: number | null
 }
 
-export type ProviderUsage = {
-  provider: string
-  requests: number | null
-  prompt_tokens: number | null
-  completion_tokens: number | null
-  reasoning_tokens: number | null
-  cached_tokens: number | null
-  total_tokens: number | null
-  avg_latency_ms: number | null
-  latency_sum_ms: number | null
-  avg_throughput: number | null
-  input_cost_usd: number | null
-  output_cost_usd: number | null
-  total_cost_usd: number | null
-  avg_effective_price_usd: number | null
-  avg_effective_price_per_million_usd: number | null
-  successful_requests: number | null
-  failed_requests: number | null
-  status_429: number | null
-  status_4xx: number | null
-  status_5xx: number | null
-  status_unknown: number | null
-}
-
-export type SourceUsage = {
-  client_source: string | null
-  requests: number | null
-  prompt_tokens: number | null
-  completion_tokens: number | null
-  reasoning_tokens: number | null
-  cached_tokens: number | null
-  total_tokens: number | null
-  avg_latency_ms: number | null
-  latency_sum_ms: number | null
-  avg_throughput: number | null
-  input_cost_usd: number | null
-  output_cost_usd: number | null
-  total_cost_usd: number | null
-  successful_requests: number | null
-  failed_requests: number | null
-  status_429: number | null
-  status_4xx: number | null
-  status_5xx: number | null
-  status_unknown: number | null
-}
-
 export type UsageRow = {
   id: string
   ts: number
@@ -314,12 +268,6 @@ export type AuthUser = {
   created_at: number
 }
 
-export type AuthMeResponse = {
-  auth_enabled: boolean
-  user: AuthUser | null
-  token?: { kind: string; device_name: string | null } | null
-}
-
 export type DeviceRow = {
   id: string
   kind: string
@@ -327,8 +275,4 @@ export type DeviceRow = {
   created_at: number
   last_used_at: number | null
   current: boolean
-}
-
-export type DevicesResponse = {
-  devices: DeviceRow[]
 }
