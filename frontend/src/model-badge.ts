@@ -18,6 +18,9 @@ export function getModelColor(model: string): string {
   if (m.includes('qwen')) return '#6F69F7'
   if (m.includes('dots')) return '#8FE2D6'
   if (m.startsWith('stealth')) return '#ECEEF1'
+  if (m.startsWith('muse')) return '#0081fb'
+  if (m.includes('longcat')) return '#29E154'
+  if (m.startsWith('x-ai/') || m.includes('grok')) return '#111827'
   return '#f1f5f9'
 }
 
@@ -40,6 +43,9 @@ export function getModelTextColor(model: string, theme: Theme = getTheme()): str
   if (m.includes('qwen')) return dark ? '#a5a0fc' : '#6336E7'
   if (m.includes('dots')) return dark ? '#d8fdfb' : '#0c4540'
   if (m.startsWith('stealth')) return dark ? '#0f172a' : '#4B4E52'
+  if (m.startsWith('muse')) return dark ? '#9ec8ff' : '#0040d0'
+  if (m.includes('longcat')) return dark ? '#86efac' : '#166534'
+  if (m.startsWith('x-ai/') || m.includes('grok')) return dark ? '#e5e7eb' : '#111827'
   return dark ? '#f1f5f9' : '#1e293b'
 }
 
@@ -47,17 +53,11 @@ export function getModelBadgeBackgroundColor(model: string, theme: Theme = getTh
   const dark = theme === 'dark'
   const m = model.toLowerCase()
   if (m.startsWith('tencent/') || m.startsWith('hy3')) return dark ? '#0052D980' : '#0052D926'
-  if (m.includes('gpt-5') || m.includes('gpt-4')) {
-    const base = '#dcdcdc'
-    return dark ? `${base}90` : `${base}80`
-  }
+  if (m.includes('gpt-5') || m.includes('gpt-4')) return dark ? '#dcdcdc90' : '#dcdcdc80'
   if (m.includes('claude')) return dark ? '#cc7c5e60' : '#cc7c5e80'
   if (m.includes('gemini')) return dark ? '#528af260' : '#528af280'
   if (m.includes('minimax')) return dark ? '#ec6b5360' : '#ec6b5380'
-  if (m.includes('mimo-')) {
-    const base = '#dcc496'
-    return dark ? `${base}90` : `${base}80`
-  }
+  if (m.includes('mimo-')) return dark ? '#dcc49690' : '#dcc49680'
   if (m.includes('inclusionai') || m.includes('ling')) return dark ? '#6366f140' : '#6366f126'
   if (m.includes('poolside')) return dark ? '#f9731640' : '#f9731626'
   if (m.includes('deepseek')) return dark ? '#4d7cff40' : '#4d7cff26'
@@ -67,9 +67,9 @@ export function getModelBadgeBackgroundColor(model: string, theme: Theme = getTh
   if (m.includes('stepfun') || m.includes('step-')) return dark ? '#01A9FF40' : '#01A9FF26'
   if (m.includes('qwen')) return dark ? '#6F69F740' : '#6F69F726'
   if (m.includes('dots')) return dark ? '#8FE2D640' : '#8FE2D626'
-  if (m.startsWith('stealth')) {
-    const base = '#ECEEF1'
-    return dark ? `${base}90` : `${base}80`
-  }
+  if (m.startsWith('stealth')) return dark ? '#ECEEF190' : '#ECEEF180'
+  if (m.startsWith('muse')) return dark ? '#0081fb80' : '#0081fb26'
+  if (m.includes('longcat')) return dark ? '#29E15440' : '#29E15426'
+  if (m.startsWith('x-ai/') || m.includes('grok')) return dark ? '#11182740' : '#11182726'
   return dark ? '#64748b40' : '#64748b26'
 }
