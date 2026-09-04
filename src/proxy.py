@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import os
 import time
 from contextlib import asynccontextmanager
@@ -32,6 +33,7 @@ from .recorder import record_tool_call, record_usage
 from .utils import extract_usage, find_stream_usage
 
 REQUEST_TIMEOUT_SECONDS = 300
+logger = logging.getLogger(__name__)
 PROXY_USER_AGENT_DIR = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
     "logs",
@@ -112,6 +114,7 @@ def resolve_provider(model: str) -> tuple[ProviderConfig, str]:
             if provider_name in PROVIDER_MAP:
                 return PROVIDER_MAP[provider_name], upstream_model
 
+    logger.warning("no provider configured for model=%s", model)
     raise HTTPException(
         status_code=404,
         detail=f"No provider configured for model '{model}'",
@@ -124,6 +127,20 @@ def build_upstream_url(base_url: str, path: str) -> str:
     if stripped_path.startswith("v1/"):
         stripped_path = stripped_path[3:]
     return urljoin(base_url.rstrip("/") + "/", stripped_path)
+
+
+def _parse_upstream_error_body(error_body: bytes) -> dict[str, Any]:
+    """Best-effort JSON parse of an upstream error body for relaying.
+
+    Decode to text before json.loads: json.loads(bytes) first decodes to str and
+    raises UnicodeDecodeError (not a JSONDecodeError) when the body isn't valid
+    UTF-8 (e.g. a non-UTF8 gateway error page), which would 500 the proxy.
+    """
+    error_text = error_body.decode("utf-8", errors="replace") if error_body else ""
+    try:
+        return json.loads(error_text) if error_text else {"error": "upstream error"}
+    except json.JSONDecodeError:
+        return {"error": error_text}
 
 
 def build_forward_headers(
@@ -329,6 +346,13 @@ async def _forward_stream_or_error(
         raise
 
     if upstream.status_code >= 400:
+        logger.warning(
+            "upstream rejected: client=%s model=%s upstream=%s status=%s",
+            client_ip,
+            model,
+            url,
+            upstream.status_code,
+        )
         try:
             error_body = await upstream.aread()
         except Exception:
@@ -338,13 +362,10 @@ async def _forward_stream_or_error(
                 pass
             raise
         await client.aclose()
-        try:
-            error_content = (
-                json.loads(error_body) if error_body else {"error": "upstream error"}
-            )
-        except json.JSONDecodeError:
-            error_content = {"error": error_body.decode(errors="ignore")}
-        return JSONResponse(content=error_content, status_code=upstream.status_code)
+        return JSONResponse(
+            content=_parse_upstream_error_body(error_body),
+            status_code=upstream.status_code,
+        )
 
     async def _relay():
         # Anthropic streams usage across two events: message_start carries
@@ -453,10 +474,25 @@ async def forward(request: Request, path: str):
         response = await client.post(url, headers=headers, content=body)
 
     latency_ms = int((time.monotonic() - started_at) * 1000)
-    response_json = response.json()
+    error_content: dict[str, Any] | None = None
+    if response.status_code >= 400:
+        logger.warning(
+            "upstream rejected: client=%s model=%s upstream=%s status=%s",
+            client_ip,
+            model,
+            url,
+            response.status_code,
+        )
+        # Relaying the upstream error still records a failed usage row (status
+        # >= 400) so 4xx/5xx show up in usage/session accounting. The body may
+        # be non-JSON/non-UTF8, so parse it defensively instead of response.json().
+        error_content = _parse_upstream_error_body(response.content)
 
-    usage_fields = extract_usage(response_json.get("usage", {}))
-    tool_calls = extract_tool_calls(response_json)
+    response_json = response.json() if error_content is None else None
+    usage_fields = (
+        extract_usage(response_json.get("usage", {})) if response_json else {}
+    )
+    tool_calls = extract_tool_calls(response_json) if response_json else []
     usage = record_usage(
         provider=provider.name,
         model=model,
@@ -481,6 +517,8 @@ async def forward(request: Request, path: str):
 
     _record_tool_calls_for_usage(usage, tool_calls, client_source)
 
+    if error_content is not None:
+        return JSONResponse(content=error_content, status_code=response.status_code)
     return JSONResponse(content=response_json, status_code=response.status_code)
 
 
