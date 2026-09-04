@@ -955,7 +955,7 @@ async def test_streaming_forward_relays_non_utf8_upstream_error(
         status_code = 502
 
         async def aread(self):
-            return b"\xe4\xb8\x8d\xe6\x98\xaf utf8 body"
+            return b"\xff upstream error"
 
     class FakeRequest:
         def __init__(self, method, url, headers, content):
@@ -1000,7 +1000,8 @@ async def test_streaming_forward_relays_non_utf8_upstream_error(
     response = await proxy_module.forward(request, "/v1/chat/completions")
 
     assert response.status_code == 502
-    assert b"upstream error" not in response.body
+    assert "\ufffd".encode() in response.body
+    assert b'{"error":' in response.body
 
 
 @pytest.mark.anyio
@@ -1012,7 +1013,7 @@ async def test_non_streaming_forward_relays_non_utf8_upstream_error(
 
     class FakeResponse:
         status_code = 502
-        content = b"\xe4\xb8\x8d\xe6\x98\xaf utf8 body"
+        content = b"\xff upstream error"
 
     class FakeAsyncClient:
         def __init__(self, timeout):
@@ -1053,7 +1054,8 @@ async def test_non_streaming_forward_relays_non_utf8_upstream_error(
     response = await proxy_module.forward(request, "/v1/chat/completions")
 
     assert response.status_code == 502
-    assert b"upstream error" not in response.body
+    assert "\ufffd".encode() in response.body
+    assert b'{"error":' in response.body
     assert captured["status"] == 502, "failed usage row should still be recorded"
     assert captured["model"] == "test-model"
 
