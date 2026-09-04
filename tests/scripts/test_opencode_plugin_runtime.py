@@ -36,20 +36,33 @@ def _copy_clean_plugin_workspace(tmp_path: Path) -> Path:
     return plugins_dir / "opencode"
 
 
+def _npm_install(plugin_dir: Path) -> None:
+    """Run npm install for the copied plugin workspace.
+
+    A timeout is treated as a skip, not a failure: cold-cache or congested npm
+    on slow CI runners can exceed the budget, and that is an environment
+    problem, not a plugin regression. The test still runs when npm is healthy.
+    """
+    try:
+        install = subprocess.run(
+            ["npm", "install", "--no-package-lock"],
+            cwd=plugin_dir,
+            text=True,
+            capture_output=True,
+            timeout=60,
+        )
+    except subprocess.TimeoutExpired:
+        pytest.skip("npm install timed out; npm registry too slow on this runner")
+    assert install.returncode == 0, install.stderr
+
+
 @pytest.mark.slow
 def test_opencode_plugin_emits_status_for_failed_assistant_messages(tmp_path):
     if not shutil.which("npm") or not shutil.which("node"):
         pytest.skip("node and npm are required for the OpenCode plugin runtime test")
 
     plugin_dir = _copy_clean_plugin_workspace(tmp_path)
-    install = subprocess.run(
-        ["npm", "install", "--no-package-lock"],
-        cwd=plugin_dir,
-        text=True,
-        capture_output=True,
-        timeout=60,
-    )
-    assert install.returncode == 0, install.stderr
+    _npm_install(plugin_dir)
     shared_src = plugin_dir.parent / "shared" / "src"
     shared_src.joinpath("PRIVATE.local.md").write_text("private\n", encoding="utf-8")
     shared_src.joinpath("generated.js").write_text("export {}\n", encoding="utf-8")
@@ -228,14 +241,7 @@ def test_opencode_plugin_otlp_emit_uses_abort_signal(tmp_path):
         pytest.skip("node and npm are required for the OpenCode plugin runtime test")
 
     plugin_dir = _copy_clean_plugin_workspace(tmp_path)
-    install = subprocess.run(
-        ["npm", "install", "--no-package-lock"],
-        cwd=plugin_dir,
-        text=True,
-        capture_output=True,
-        timeout=60,
-    )
-    assert install.returncode == 0, install.stderr
+    _npm_install(plugin_dir)
     build = subprocess.run(
         ["npm", "run", "build"],
         cwd=plugin_dir,
