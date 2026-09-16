@@ -25,6 +25,7 @@ from .base import (
 log = logging.getLogger(__name__)
 
 OPENROUTER_URL = "https://openrouter.ai/api/v1/models"
+CACHE_NAME = "openrouter"
 DEFAULT_TTL_SECONDS = 6 * 60 * 60
 
 # Non-base variants we don't want to price as distinct models.
@@ -175,23 +176,23 @@ def _fetch_openrouter_json() -> object | None:
 class OpenRouterSource:
     """Price source adapter for OpenRouter's model catalog."""
 
-    name = "openrouter"
+    name = CACHE_NAME
 
     def __init__(self, ttl_seconds: int = DEFAULT_TTL_SECONDS) -> None:
         self.ttl_seconds = ttl_seconds
 
     def fetch(self) -> list[SourceEntry]:
         costs: dict[str, ModelCost] = {}
-        if cache_is_fresh(self.name, self.ttl_seconds):
-            costs = parse_openrouter_json(load_cache_json(self.name))
+        if cache_is_fresh(CACHE_NAME, self.ttl_seconds):
+            costs = parse_openrouter_json(load_cache_json(CACHE_NAME))
 
         if not costs:
             raw = _fetch_openrouter_json()
             if raw is not None:
-                save_cache_json(self.name, raw)
+                save_cache_json(CACHE_NAME, raw)
                 costs = parse_openrouter_json(raw)
             else:
-                costs = parse_openrouter_json(load_cache_json(self.name))
+                costs = parse_openrouter_json(load_cache_json(CACHE_NAME))
 
         return [
             SourceEntry(provider=None, key=key, cost=cost)

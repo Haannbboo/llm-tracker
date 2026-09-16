@@ -180,7 +180,9 @@ def resolve_all_costs(
         if isinstance(models, dict):
             for model_name, model_config in models.items():
                 normalized_model = normalize_model_cost_key(model_name)
-                base_cost = global_costs.get(normalized_model)
+                base_cost = provider_costs.get(provider_name, {}).get(
+                    normalized_model
+                ) or global_costs.get(normalized_model)
                 model_cost = _parse_model_cost(
                     model_config,
                     base_cost.cost if base_cost is not None else None,

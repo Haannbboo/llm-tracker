@@ -464,21 +464,6 @@ export function LogsPage({ initialSessionFilter }: Props) {
                 void handleRecalculateCost(row.id);
               };
 
-              if (total === 0) {
-                return (
-                  <button
-                    type="button"
-                    className={`cost-recalc-btn ${costValueClass}`}
-                    style={{ color: 'var(--color-green)', fontWeight: 500 }}
-                    onClick={handleCostClick}
-                    title={t('Click to recalculate')}
-                    aria-label={t('Click to recalculate')}
-                  >
-                    $0.00
-                  </button>
-                );
-              }
-
               const prompt = value(row.prompt_tokens);
               const cached = value(row.cached_tokens);
               const cacheCreation = value(row.cache_creation_tokens);

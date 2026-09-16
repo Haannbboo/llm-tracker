@@ -11,6 +11,8 @@ import json
 import os
 import time
 
+import pytest
+
 _OPENROUTER_PAYLOAD = {
     "data": [
         {
@@ -174,3 +176,13 @@ def test_registry_defaults_ttl_when_absent_or_invalid(load_module):
         ):
             sources = registry.build_sources({"pricing": {"sources": [spec]}})
             assert sources[0].ttl_seconds == default
+
+
+def test_cache_path_rejects_unsafe_names(load_module):
+    base = load_module("src.pricing.sources.base")
+
+    for bad in ("../config", "a/b", ".", "..", "", "-flag"):
+        with pytest.raises(ValueError):
+            base.cache_path(bad)
+
+    assert base.cache_path("openrouter").name == "openrouter.json"

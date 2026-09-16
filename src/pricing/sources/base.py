@@ -11,6 +11,7 @@ from __future__ import annotations
 import http.client
 import json
 import logging
+import re
 import socket
 import time
 import urllib.error
@@ -27,6 +28,10 @@ log = logging.getLogger(__name__)
 
 CACHE_DIR_NAME = "pricing"
 REQUEST_TIMEOUT = 10  # seconds
+
+# Cache names come from config (`pricing.sources[].name`), so reject anything
+# that could escape the pricing cache directory.
+_CACHE_NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
 
 
 @dataclass(frozen=True)
@@ -62,6 +67,8 @@ class PriceSource(Protocol):
 
 
 def cache_path(name: str) -> Path:
+    if not _CACHE_NAME_RE.fullmatch(name):
+        raise ValueError(f"Invalid pricing cache name: {name!r}")
     return Path(get_tracker_home()) / CACHE_DIR_NAME / f"{name}.json"
 
 

@@ -56,7 +56,7 @@ def build_sources(config: dict[str, Any]) -> list[PriceSource]:
         else:
             log.warning("Unknown pricing source type: %s", source_type)
             continue
-        source.name = name  # honor a custom config name for provenance/cache
+        source.name = name  # config name is for provenance/display only
         sources.append(source)
     return sources
 

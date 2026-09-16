@@ -89,7 +89,7 @@ def record_usage(
         cache_creation_tokens=cache_creation_tokens,
         provider=provider,
         model=model,
-        model_cost=resolved.cost if resolved.match is not None else None,
+        model_cost=resolved.cost,
         multiplier=resolved.multiplier,
     )
     base_url_id = resolve_base_url_id(

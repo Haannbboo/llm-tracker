@@ -778,6 +778,43 @@ def test_resolve_all_costs_both_scopes_coexist(config_module, pricing_maps_modul
     assert resolved.provider_costs["prov-a"]["test-model"].cost.input == 5.0
 
 
+def test_resolve_all_costs_provider_override_inherits_provider_scoped_base(
+    config_module, pricing_maps_module
+):
+    config = {
+        "models": {},
+        "providers": {
+            "prov-a": {
+                "base_url": "https://a.com",
+                "models": {"test-model": {"cost": {"input": 9.0}}},
+            },
+        },
+    }
+    fetched = [
+        FetchedSource(
+            name="prov-src",
+            priority=0,
+            entries=(
+                SourceEntry(
+                    provider="prov-a",
+                    key="test-model",
+                    cost=ModelCost(
+                        input=1.0, output=2.0, cache_read=0.1, cache_write=0.25
+                    ),
+                ),
+            ),
+        )
+    ]
+
+    resolved = pricing_maps_module.resolve_all_costs(config, fetched)
+
+    cost = resolved.provider_costs["prov-a"]["test-model"].cost
+    assert cost.input == 9.0  # YAML override wins
+    assert cost.output == 2.0  # inherited from provider-scoped fetched cost
+    assert cost.cache_read == 0.1
+    assert cost.cache_write == 0.25
+
+
 def test_resolve_all_costs_remote_and_yaml_scopes_coexist(
     config_module, pricing_maps_module
 ):

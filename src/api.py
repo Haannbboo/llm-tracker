@@ -334,21 +334,23 @@ async def get_usage(
     status_4xx: bool = False,
     status_5xx: bool = False,
 ):
-    return enrich_rows(
-        fetch_recent_usage(
-            limit=limit,
-            offset=offset,
-            provider=provider,
-            model=model,
-            client_source=client_source,
-            session_id=session_id,
-            tool_name=tool_name,
-            since=since,
-            until=until,
-            only_failed=only_failed,
-            status_429=status_429,
-            status_4xx=status_4xx,
-            status_5xx=status_5xx,
+    return await asyncio.to_thread(
+        lambda: enrich_rows(
+            fetch_recent_usage(
+                limit=limit,
+                offset=offset,
+                provider=provider,
+                model=model,
+                client_source=client_source,
+                session_id=session_id,
+                tool_name=tool_name,
+                since=since,
+                until=until,
+                only_failed=only_failed,
+                status_429=status_429,
+                status_4xx=status_4xx,
+                status_5xx=status_5xx,
+            )
         )
     )
 
