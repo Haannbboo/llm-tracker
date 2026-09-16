@@ -35,7 +35,7 @@ export function LogsPage({ initialSessionFilter }: Props) {
     sessionStorage.removeItem('llm-tracker-logs-filters')
   }, [])
 
-  const { showToast, configParsed, requestUsageRefresh, activeFilter, setActiveFilter, activeSource, setActiveSource, dateRange, setDateRange, customSince, setCustomSince, customUntil, setCustomUntil, timezone } = useApp()
+  const { showToast, requestUsageRefresh, activeFilter, setActiveFilter, activeSource, setActiveSource, dateRange, setDateRange, customSince, setCustomSince, customUntil, setCustomUntil, timezone } = useApp()
   const tz = resolveTimezone(timezone)
   const {
     columns,
@@ -126,7 +126,7 @@ export function LogsPage({ initialSessionFilter }: Props) {
       showToast(t('Cost recalculated'))
       // Patch just this row's cost fields in place — a full requestUsageRefresh()
       // would refetch and re-render the whole table for a single-cell change.
-      setUsageRows(rows => rows.map(row => row.id === usageId ? { ...row, ...data.new_costs } : row))
+      setUsageRows(rows => rows.map(row => row.id === usageId ? { ...row, ...data.new_costs, pricing: data.pricing, price_snapshot_id: data.price_snapshot_id, cost_estimated: data.cost_estimated } : row))
     } catch {
       showToast(t('Failed to recalculate cost'))
     } finally {
@@ -482,23 +482,22 @@ export function LogsPage({ initialSessionFilter }: Props) {
               const prompt = value(row.prompt_tokens);
               const cached = value(row.cached_tokens);
               const cacheCreation = value(row.cache_creation_tokens);
-              const inputCost = value(row.input_cost_usd);
               const outputCost = value(row.output_cost_usd);
 
-              // cache_creation_tokens is disjoint from prompt_tokens (Anthropic
-              // semantics), so it's included in the base for these proportional
-              // splits -- otherwise cache-write dollars get silently folded into "Input".
-              const totalInputTokens = prompt + cacheCreation;
-              const cacheReadRatio = totalInputTokens > 0 ? (cached / totalInputTokens) : 0;
-              const cacheWriteRatio = totalInputTokens > 0 ? (cacheCreation / totalInputTokens) : 0;
-              const cacheCost = inputCost * cacheReadRatio;
-              const cacheWriteCost = inputCost * cacheWriteRatio;
-              const actualInputCost = inputCost - cacheCost - cacheWriteCost;
+              // The backend splits input cost by component at record time using
+              // the selected pricing tier; use those values directly instead of
+              // re-deriving them from input_cost_usd by token ratios.
+              const actualInputCost = value(row.normal_input_cost_usd);
+              const cacheCost = value(row.cache_read_cost_usd);
+              const cacheWriteCost = value(row.cache_write_cost_usd);
 
               const uncachedTokens = Math.max(0, prompt - cached);
               const completionTokens = value(row.completion_tokens);
 
-              const modelConfig = configParsed?.providers?.[row.provider]?.models?.[row.model]?.cost || configParsed?.models?.[row.model]?.cost;
+              // Rates and provenance come from the backend's pricing snapshot so
+              // they reflect exactly how this row was priced.
+              const pricing = row.pricing;
+              const multiplierNote = pricing && pricing.multiplier !== 1 ? ` x ${pricing.multiplier}` : '';
 
               return (
                 <div className="has-tooltip" style={{ borderBottom: 'none' }}>
@@ -512,14 +511,26 @@ export function LogsPage({ initialSessionFilter }: Props) {
                   >
                     {formatCost(total)}
                   </button>
+                  {row.cost_estimated && (
+                    <span
+                      title={t('Estimated: priced from current rates, not a stored snapshot')}
+                      style={{
+                        marginLeft: '4px',
+                        fontSize: '10px',
+                        color: 'var(--color-yellow, #b58900)',
+                      }}
+                    >
+                      est.
+                    </span>
+                  )}
                   <div className="tooltip-text" style={{ width: '200px', marginLeft: '-100px' }}>
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
                         <span style={{ color: 'rgba(255, 255, 255, 0.6)' }}>{t('Input:')}</span>
                         <div style={{ textAlign: 'right' }}>
                           <div>{formatCost(actualInputCost)}</div>
-                          {modelConfig?.input !== undefined && (
-                            <div style={{ fontSize: '9px', color: 'rgba(255, 255, 255, 0.4)' }}>{formatNumber(uncachedTokens)} tokens x {formatRate(modelConfig.input)}</div>
+                          {pricing && (
+                            <div style={{ fontSize: '9px', color: 'rgba(255, 255, 255, 0.4)' }}>{formatNumber(uncachedTokens)} tokens x {formatRate(pricing.input)}{multiplierNote}</div>
                           )}
                         </div>
                       </div>
@@ -527,8 +538,8 @@ export function LogsPage({ initialSessionFilter }: Props) {
                         <span style={{ color: 'rgba(255, 255, 255, 0.6)' }}>{t('Output:')}</span>
                         <div style={{ textAlign: 'right' }}>
                           <div>{formatCost(outputCost)}</div>
-                          {modelConfig?.output !== undefined && (
-                            <div style={{ fontSize: '9px', color: 'rgba(255, 255, 255, 0.4)' }}>{formatNumber(completionTokens)} tokens x {formatRate(modelConfig.output)}</div>
+                          {pricing && (
+                            <div style={{ fontSize: '9px', color: 'rgba(255, 255, 255, 0.4)' }}>{formatNumber(completionTokens)} tokens x {formatRate(pricing.output)}{multiplierNote}</div>
                           )}
                         </div>
                       </div>
@@ -537,8 +548,8 @@ export function LogsPage({ initialSessionFilter }: Props) {
                           <span style={{ color: 'rgba(255, 255, 255, 0.6)' }}>{t('Cache:')}</span>
                           <div style={{ textAlign: 'right' }}>
                             <div style={{ color: 'var(--color-green)' }}>{formatCost(cacheCost)}</div>
-                            {modelConfig?.cacheRead !== undefined && (
-                              <div style={{ fontSize: '9px', color: 'rgba(255, 255, 255, 0.4)' }}>{formatNumber(cached)} tokens x {formatRate(modelConfig.cacheRead)}</div>
+                            {pricing && (
+                              <div style={{ fontSize: '9px', color: 'rgba(255, 255, 255, 0.4)' }}>{formatNumber(cached)} tokens x {formatRate(pricing.cache_read)}{multiplierNote}</div>
                             )}
                           </div>
                         </div>
@@ -548,8 +559,8 @@ export function LogsPage({ initialSessionFilter }: Props) {
                           <span style={{ color: 'rgba(255, 255, 255, 0.6)' }}>{t('Cache write:')}</span>
                           <div style={{ textAlign: 'right' }}>
                             <div style={{ color: 'var(--color-purple)' }}>{formatCost(cacheWriteCost)}</div>
-                            {modelConfig?.cacheWrite !== undefined && (
-                              <div style={{ fontSize: '9px', color: 'rgba(255, 255, 255, 0.4)' }}>{formatNumber(cacheCreation)} tokens x {formatRate(modelConfig.cacheWrite)}</div>
+                            {pricing && pricing.cache_write !== null && (
+                              <div style={{ fontSize: '9px', color: 'rgba(255, 255, 255, 0.4)' }}>{formatNumber(cacheCreation)} tokens x {formatRate(pricing.cache_write)}{multiplierNote}</div>
                             )}
                           </div>
                         </div>
@@ -558,6 +569,23 @@ export function LogsPage({ initialSessionFilter }: Props) {
                         <span style={{ color: 'rgba(255, 255, 255, 0.6)' }}>{t('Total:')}</span>
                         <span>{formatCost(total)}</span>
                       </div>
+                      {pricing && (
+                        <div style={{ marginTop: '4px', paddingTop: '4px', borderTop: '1px solid #334155', fontSize: '9px', color: 'rgba(255, 255, 255, 0.5)', lineHeight: 1.5 }}>
+                          <div>
+                            {t('Source:')} {pricing.source ?? t('unknown')}
+                            {pricing.estimated && ` (${t('estimated')})`}
+                          </div>
+                          {pricing.multiplier !== 1 && (
+                            <div>{t('Multiplier:')} x{pricing.multiplier}</div>
+                          )}
+                          {pricing.tier && (
+                            <div>
+                              {t('Tier:')} {formatNumber(pricing.tier.min_tokens)}
+                              {pricing.tier.max_tokens === null ? '+' : `–${formatNumber(pricing.tier.max_tokens)}`} {t('tokens')}
+                            </div>
+                          )}
+                        </div>
+                      )}
                     </div>
                   </div>
                 </div>

@@ -1,8 +1,19 @@
 pricing:
-  # Auto-fetch model pricing from LiteLLM on startup and config refresh.
-  # Prices are cached locally at ~/.llm-tracker/litellm_pricing.json.
+  # Auto-fetch model pricing from the configured sources on startup and config
+  # refresh. Each source caches locally under ~/.llm-tracker/pricing/.
   # Set to false to disable and rely on YAML-only pricing.
   auto_fetch: true
+  # Ranked price sources: earlier entries win collisions, later ones fill gaps.
+  # YAML `models:`/`providers:` overrides always take precedence. Absent list
+  # defaults to litellm only.
+  sources:
+    - name: openrouter
+      type: openrouter
+      enabled: true
+      ttl_seconds: 21600   # 6h; OpenRouter lists new models quickly
+    - name: litellm
+      type: litellm
+      enabled: true
 
 evaluation:
   auto_enabled: true

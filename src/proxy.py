@@ -23,9 +23,9 @@ from src.config.app import (
     CONFIG,
     MODEL_MAP,
     PROVIDER_MAP,
-    ProviderConfig,
     refresh_runtime_config,
 )
+from src.config.models import ProviderConfig
 
 from .auth import _require_local_profile
 from .database import init_db

@@ -20,6 +20,7 @@ CLAUDE.local.md
 .superpowers/*
 
 .coverage*
+graphify-out/
 
 # Project specific
 todo.md

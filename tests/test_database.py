@@ -102,6 +102,7 @@ def test_init_db_log_usage_and_fetch_rows(database_module, isolated_home):
         "status": 200,
         "client_ip": None,
         "base_url_id": base_url_id,
+        "price_snapshot_id": None,
         "base_url": "https://api.example.com/v1",
     }
 
@@ -165,6 +166,7 @@ def test_fetch_recent_usage_returns_expected_row_shape(fresh_db):
         "status",
         "client_ip",
         "base_url_id",
+        "price_snapshot_id",
         "base_url",
     }
 
@@ -635,6 +637,29 @@ def test_migrate_database_adds_usage_columns(
     assert defaults["total_cost_usd"] == "0"
 
 
+def test_migrate_database_creates_price_snapshots_table(fresh_db):
+    database_module = fresh_db.database_module
+    db_path = fresh_db.db_path
+    database_module.init_db(db_path)
+
+    import sqlite3
+
+    connection = sqlite3.connect(db_path)
+    table_info = connection.execute("PRAGMA table_info(price_snapshots)").fetchall()
+    connection.close()
+
+    column_names = {row[1] for row in table_info}
+    assert {
+        "date",
+        "provider",
+        "model",
+        "source",
+        "rates_json",
+        "recorded_at",
+        "rates_hash",
+    } <= column_names
+
+
 def test_get_usage_high_watermark_ts_returns_latest_ts(fresh_db):
     database_module = fresh_db.database_module
     db_path = fresh_db.db_path
@@ -763,6 +788,9 @@ def test_merge_usage_database_copies_usage_and_base_url_metadata(
     assert rows[0]["session_id"] == "session-run-1"
     assert rows[0]["prompt_length"] == 123
     assert rows[0]["base_url"] == "https://api.example.com/v1"
+    # Snapshots are not copied between DBs, so the binding is intentionally
+    # dropped (the merged row reads as estimated).
+    assert rows[0]["price_snapshot_id"] is None
 
     with database_module.get_engine(main_db).connect() as connection:
         base_urls = connection.execute(
@@ -5307,7 +5335,7 @@ def test_recalculate_usage_cost_updates_row_and_daily_rollup(fresh_db):
     replace) the matching usage_daily rollup, since other rows share it."""
     from decimal import Decimal
 
-    from src.config.app import ModelCost
+    from src.pricing.models import ModelCost
 
     database_module = fresh_db.database_module
     db_path = fresh_db.db_path
@@ -5379,6 +5407,14 @@ def test_recalculate_usage_cost_updates_row_and_daily_rollup(fresh_db):
     assert result.new_costs["input_cost_usd"] == Decimal("2")
     assert result.new_costs["output_cost_usd"] == Decimal("4")
     assert result.new_costs["total_cost_usd"] == Decimal("6")
+    assert result.pricing is not None
+    assert result.pricing["source"] == "yaml"
+    assert result.pricing["multiplier"] == 1.0
+    assert result.pricing["input"] == 2.0
+    assert result.pricing["output"] == 4.0
+    assert result.pricing["tier"] is None
+    assert result.pricing["snapshot_id"] is not None
+    assert result.pricing["estimated"] is False
 
     row = next(
         r
@@ -5402,7 +5438,7 @@ def test_recalculate_usage_cost_adjusts_session_rollup(fresh_db):
     import json
     from decimal import Decimal
 
-    from src.config.app import ModelCost
+    from src.pricing.models import ModelCost
 
     database_module = fresh_db.database_module
     db_path = fresh_db.db_path
@@ -6198,7 +6234,7 @@ def test_upsert_daily_aggregate_accumulates_after_migration_recreate(
 def test_recalculate_usage_cost_targets_user_slice(fresh_db):
     """The daily delta UPDATE lands only in the row matching the usage row's
     user_id when both a NULL-slice and a real-user-slice row exist."""
-    from src.config.app import ModelCost
+    from src.pricing.models import ModelCost
 
     database_module = fresh_db.database_module
     db_path = fresh_db.db_path

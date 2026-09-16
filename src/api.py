@@ -21,18 +21,17 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from src.config.app import (
     CONFIG,
     CONFIG_PATH,
-    ResolvedCost,
     _apply_patch,
     _config_lock,
     refresh_runtime_config,
     set_evaluation_evaluator,
 )
 from src.config.server_config import load_server_config
+from src.pricing.models import ResolvedCost
 
 from ._version import get_version
 from .auth import _auth_enabled, _require_local_profile, _resolve_request_user
 from .auth import router as auth_router
-from .costs import resolve_cost_match
 from .database import (
     VALID_OUTCOMES,
     VALID_SOURCES,
@@ -73,6 +72,8 @@ from .evaluation import (
     start_session_evaluation_job,
 )
 from .evaluation_worker import load_evaluation_worker_config, run_evaluation_worker
+from .pricing.costs import resolve_cost_match
+from .pricing.snapshots import enrich_rows
 
 logger = logging.getLogger(__name__)
 EVALUATION_WORKER_SHUTDOWN_TIMEOUT_SECONDS = 5
@@ -333,20 +334,22 @@ async def get_usage(
     status_4xx: bool = False,
     status_5xx: bool = False,
 ):
-    return fetch_recent_usage(
-        limit=limit,
-        offset=offset,
-        provider=provider,
-        model=model,
-        client_source=client_source,
-        session_id=session_id,
-        tool_name=tool_name,
-        since=since,
-        until=until,
-        only_failed=only_failed,
-        status_429=status_429,
-        status_4xx=status_4xx,
-        status_5xx=status_5xx,
+    return enrich_rows(
+        fetch_recent_usage(
+            limit=limit,
+            offset=offset,
+            provider=provider,
+            model=model,
+            client_source=client_source,
+            session_id=session_id,
+            tool_name=tool_name,
+            since=since,
+            until=until,
+            only_failed=only_failed,
+            status_429=status_429,
+            status_4xx=status_4xx,
+            status_5xx=status_5xx,
+        )
     )
 
 
@@ -909,7 +912,7 @@ async def update_config(update: ConfigUpdate):
         os.makedirs(os.path.dirname(path), exist_ok=True)
         with open(path, "w", encoding="utf-8") as f:
             f.write(update.content)
-        refresh_runtime_config(path)
+        await asyncio.to_thread(refresh_runtime_config, path)
         asyncio.create_task(_notify_proxy_refresh())
         return {"status": "success"}
     except yaml.YAMLError as e:
@@ -947,7 +950,7 @@ async def patch_config(update: ConfigPatchUpdate):
         with open(path, "w", encoding="utf-8") as f:
             yaml_parser.dump(config, f)
 
-        refresh_runtime_config(path)
+        await asyncio.to_thread(refresh_runtime_config, path)
         asyncio.create_task(_notify_proxy_refresh())
         return {"status": "success"}
     except RuamelYAMLError as e:
@@ -1012,16 +1015,27 @@ def _resolve_provider_multiplier(config_snapshot: dict, provider: str | None) ->
     return float(provider_config.get("price_multiplier", 1.0))
 
 
-def _resolve_live_cost_maps():
-    """Live-resolved pricing (config overrides + freshest LiteLLM data), shared
+def _fetch_live_sources(config_snapshot):
+    """Fetch configured price sources unless auto_fetch is disabled."""
+    auto_fetch = config_snapshot.get("pricing", {}).get("auto_fetch", True)
+    if not auto_fetch:
+        return []
+    from src.pricing.sources.registry import fetch_sources
+
+    return fetch_sources(config_snapshot)
+
+
+async def _resolve_live_cost_maps():
+    """Live-resolved pricing (config overrides + freshest source data), shared
     by /pricing/{model} and /usage/{id}/recalculate-cost so both price a model
     identically instead of drifting from independently maintained copies."""
-    from src.config.app import resolve_all_costs
-    from src.config.pricing import get_remote_pricing
+    from src.pricing.maps import resolve_all_costs
 
     with _config_lock:
         config_snapshot = dict(CONFIG)
-    resolved = resolve_all_costs(config_snapshot, get_remote_pricing())
+    resolved = resolve_all_costs(
+        config_snapshot, await asyncio.to_thread(_fetch_live_sources, config_snapshot)
+    )
     model_costs = {key: rc.cost for key, rc in resolved.global_costs.items()}
     provider_model_costs = {
         provider_name: {key: rc.cost for key, rc in costs.items()}
@@ -1033,13 +1047,14 @@ def _resolve_live_cost_maps():
 @app.get("/pricing")
 async def get_pricing(provider: str | None = None):
     """Return all models with resolved pricing and source metadata."""
-    from src.config.app import resolve_all_costs
-    from src.config.pricing import get_remote_pricing
+    from src.pricing.maps import resolve_all_costs
 
     with _config_lock:
         config_snapshot = dict(CONFIG)
 
-    resolved = resolve_all_costs(config_snapshot, get_remote_pricing())
+    resolved = resolve_all_costs(
+        config_snapshot, await asyncio.to_thread(_fetch_live_sources, config_snapshot)
+    )
     result: dict[str, dict] = {}
 
     if provider is not None:
@@ -1073,12 +1088,19 @@ async def get_model_pricing(model: str, provider: str | None = None):
     if not model:
         raise HTTPException(status_code=422, detail="model must not be empty")
 
-    config_snapshot, resolved, model_costs, provider_model_costs = (
-        _resolve_live_cost_maps()
-    )
+    (
+        config_snapshot,
+        resolved,
+        model_costs,
+        provider_model_costs,
+    ) = await _resolve_live_cost_maps()
     multiplier = _resolve_provider_multiplier(config_snapshot, provider)
-
-    match = resolve_cost_match(provider, model, model_costs, provider_model_costs)
+    match = resolve_cost_match(
+        provider,
+        model,
+        model_costs,
+        provider_model_costs,
+    )
     if match is None:
         return {
             "model": model,
@@ -1125,14 +1147,24 @@ async def recalculate_usage_cost_route(usage_id: str):
     provider/model no longer resolves against current pricing, rather than
     overwriting with a zeroed fallback cost.
     """
-    _config_snapshot, _resolved, model_costs, provider_model_costs = (
-        _resolve_live_cost_maps()
-    )
+    (
+        _config_snapshot,
+        _resolved,
+        model_costs,
+        provider_model_costs,
+    ) = await _resolve_live_cost_maps()
+    model_cost_sources = {key: rc.source for key, rc in _resolved.global_costs.items()}
+    provider_model_cost_sources = {
+        provider_name: {key: rc.source for key, rc in costs.items()}
+        for provider_name, costs in _resolved.provider_costs.items()
+    }
 
     result = recalculate_usage_cost(
         usage_id,
         model_costs=model_costs,
         provider_model_costs=provider_model_costs,
+        model_cost_sources=model_cost_sources,
+        provider_model_cost_sources=provider_model_cost_sources,
     )
     if result is None:
         raise HTTPException(status_code=404, detail="usage row not found")
@@ -1143,6 +1175,9 @@ async def recalculate_usage_cost_route(usage_id: str):
         "skipped": False,
         "old_costs": {k: float(v) for k, v in result.old_costs.items()},
         "new_costs": {k: float(v) for k, v in result.new_costs.items()},
+        "price_snapshot_id": result.price_snapshot_id,
+        "cost_estimated": result.price_snapshot_id is None,
+        "pricing": result.pricing,
     }
 
 

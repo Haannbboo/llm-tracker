@@ -7,9 +7,11 @@ import urllib.error
 
 from fastapi.testclient import TestClient
 
-import src.config.pricing as pricing_module
-from src.config.app import ModelCost, ModelTier
-from src.config.pricing import (
+import src.pricing.sources.base as base_module
+import src.pricing.sources.litellm as pricing_module
+from src.pricing.models import ModelCost, ModelTier
+from src.pricing.sources.base import FetchedSource, SourceEntry
+from src.pricing.sources.litellm import (
     _claude_3x_alias,
     _is_chat_model,
     _parse_litellm_json,
@@ -18,6 +20,17 @@ from src.config.pricing import (
     _strip_version_suffix,
     fetch_remote_pricing,
 )
+
+
+def _litellm(costs: dict[str, ModelCost]) -> list[FetchedSource]:
+    return [
+        FetchedSource(
+            name="litellm",
+            priority=0,
+            entries=tuple(SourceEntry(None, key, cost) for key, cost in costs.items()),
+        )
+    ]
+
 
 # --- Key normalization ---
 
@@ -70,7 +83,7 @@ def test_strip_version_suffix_with_v_suffix():
 # --- Model entry parsing ---
 
 
-def test_parse_model_cost_with_cache_write(config_module):
+def test_parse_model_cost_with_cache_write(config_module, pricing_maps_module):
     model_config = {
         "cost": {
             "input": 3.0,
@@ -80,22 +93,22 @@ def test_parse_model_cost_with_cache_write(config_module):
         }
     }
 
-    cost = config_module._parse_model_cost(model_config)
+    cost = pricing_maps_module._parse_model_cost(model_config)
 
     assert cost is not None
     assert cost.cache_write == 3.75
 
 
-def test_parse_model_cost_without_cache_write(config_module):
+def test_parse_model_cost_without_cache_write(config_module, pricing_maps_module):
     model_config = {"cost": {"input": 3.0, "output": 15.0, "cacheRead": 0.3}}
 
-    cost = config_module._parse_model_cost(model_config)
+    cost = pricing_maps_module._parse_model_cost(model_config)
 
     assert cost is not None
     assert cost.cache_write is None
 
 
-def test_parse_model_cost_with_tiers(config_module):
+def test_parse_model_cost_with_tiers(config_module, pricing_maps_module):
     model_config = {
         "cost": {
             "tiers": [
@@ -105,7 +118,7 @@ def test_parse_model_cost_with_tiers(config_module):
         }
     }
 
-    cost = config_module._parse_model_cost(model_config)
+    cost = pricing_maps_module._parse_model_cost(model_config)
 
     assert cost is not None
     assert len(cost.tiers) == 2
@@ -122,7 +135,9 @@ def test_parse_model_cost_with_tiers(config_module):
     assert cost.output == 1.6
 
 
-def test_parse_model_cost_with_tiers_inherits_flat_from_yaml(config_module):
+def test_parse_model_cost_with_tiers_inherits_flat_from_yaml(
+    config_module, pricing_maps_module
+):
     model_config = {
         "cost": {
             "input": 3.0,
@@ -135,7 +150,7 @@ def test_parse_model_cost_with_tiers_inherits_flat_from_yaml(config_module):
         }
     }
 
-    cost = config_module._parse_model_cost(model_config)
+    cost = pricing_maps_module._parse_model_cost(model_config)
 
     assert cost is not None
     assert cost.input == 3.0
@@ -144,7 +159,9 @@ def test_parse_model_cost_with_tiers_inherits_flat_from_yaml(config_module):
     assert cost.tiers[1].max_tokens is None
 
 
-def test_parse_model_cost_with_tiers_carries_per_tier_cache_write(config_module):
+def test_parse_model_cost_with_tiers_carries_per_tier_cache_write(
+    config_module, pricing_maps_module
+):
     model_config = {
         "cost": {
             "cacheWrite": 3.0,
@@ -160,7 +177,7 @@ def test_parse_model_cost_with_tiers_carries_per_tier_cache_write(config_module)
         }
     }
 
-    cost = config_module._parse_model_cost(model_config)
+    cost = pricing_maps_module._parse_model_cost(model_config)
 
     assert cost is not None
     first, second = cost.tiers
@@ -168,13 +185,15 @@ def test_parse_model_cost_with_tiers_carries_per_tier_cache_write(config_module)
     assert second.cache_write == 7.5  # explicit per-tier override wins
 
 
-def test_parse_model_cost_without_tiers_inherits_base_tiers(config_module):
-    base = config_module.ModelCost(
+def test_parse_model_cost_without_tiers_inherits_base_tiers(
+    config_module, pricing_maps_module
+):
+    base = pricing_maps_module.ModelCost(
         input=0.4,
         output=1.6,
         cache_read=0.08,
         tiers=(
-            config_module.ModelTier(
+            pricing_maps_module.ModelTier(
                 min_tokens=0, max_tokens=256000, input=0.4, output=1.6, cache_read=0.08
             ),
         ),
@@ -182,7 +201,7 @@ def test_parse_model_cost_without_tiers_inherits_base_tiers(config_module):
     # No flat prices and no tiers key: keep the base's tiered pricing.
     model_config = {"cost": {"cacheWrite": 3.0}}
 
-    cost = config_module._parse_model_cost(model_config, base)
+    cost = pricing_maps_module._parse_model_cost(model_config, base)
 
     assert cost is not None
     assert cost.tiers == base.tiers
@@ -190,13 +209,15 @@ def test_parse_model_cost_without_tiers_inherits_base_tiers(config_module):
     assert cost.input == 0.4
 
 
-def test_parse_model_cost_flat_prices_clear_inherited_tiers(config_module):
-    base = config_module.ModelCost(
+def test_parse_model_cost_flat_prices_clear_inherited_tiers(
+    config_module, pricing_maps_module
+):
+    base = pricing_maps_module.ModelCost(
         input=0.4,
         output=1.6,
         cache_read=0.08,
         tiers=(
-            config_module.ModelTier(
+            pricing_maps_module.ModelTier(
                 min_tokens=0, max_tokens=256000, input=0.4, output=1.6, cache_read=0.08
             ),
         ),
@@ -204,7 +225,7 @@ def test_parse_model_cost_flat_prices_clear_inherited_tiers(config_module):
     # Explicit flat prices are an override: tiers must not silently win.
     model_config = {"cost": {"input": 3.0, "output": 15.0}}
 
-    cost = config_module._parse_model_cost(model_config, base)
+    cost = pricing_maps_module._parse_model_cost(model_config, base)
 
     assert cost is not None
     assert cost.tiers == ()
@@ -212,27 +233,29 @@ def test_parse_model_cost_flat_prices_clear_inherited_tiers(config_module):
     assert cost.output == 15.0
 
 
-def test_parse_model_cost_empty_tiers_disables_tiers(config_module):
-    base = config_module.ModelCost(
+def test_parse_model_cost_empty_tiers_disables_tiers(
+    config_module, pricing_maps_module
+):
+    base = pricing_maps_module.ModelCost(
         input=0.4,
         output=1.6,
         cache_read=0.08,
         tiers=(
-            config_module.ModelTier(
+            pricing_maps_module.ModelTier(
                 min_tokens=0, max_tokens=256000, input=0.4, output=1.6, cache_read=0.08
             ),
         ),
     )
     model_config = {"cost": {"tiers": []}}
 
-    cost = config_module._parse_model_cost(model_config, base)
+    cost = pricing_maps_module._parse_model_cost(model_config, base)
 
     assert cost is not None
     assert cost.tiers == ()
     assert cost.input == 0.4
 
 
-def test_parse_model_cost_skips_malformed_tiers(config_module):
+def test_parse_model_cost_skips_malformed_tiers(config_module, pricing_maps_module):
     model_config = {
         "cost": {
             "tiers": [
@@ -244,7 +267,7 @@ def test_parse_model_cost_skips_malformed_tiers(config_module):
         }
     }
 
-    cost = config_module._parse_model_cost(model_config)
+    cost = pricing_maps_module._parse_model_cost(model_config)
 
     assert cost is not None
     assert len(cost.tiers) == 1
@@ -589,91 +612,10 @@ def test_parse_litellm_json_keys_are_lowercased():
     assert "gpt-5.4" in costs
 
 
-# --- build_cost_maps integration ---
-
-
-def test_remote_costs_fill_gaps(config_module):
-    config = {
-        "models": {
-            "claude-sonnet-4-6": {
-                "cost": {"input": 3.0, "output": 15.0, "cacheRead": 0.3}
-            },
-        },
-        "providers": {},
-    }
-    remote = {
-        "claude-sonnet-4-6": ModelCost(input=99.0, output=99.0, cache_read=99.0),
-        "gpt-5.4": ModelCost(input=2.5, output=15.0, cache_read=0.25),
-    }
-
-    model_costs, _ = config_module.build_cost_maps(config, remote)
-
-    # YAML wins for claude-sonnet-4-6
-    assert model_costs["claude-sonnet-4-6"].input == 3.0
-    # Remote fills gap for gpt-5.4
-    assert model_costs["gpt-5.4"].input == 2.5
-
-
-def test_remote_costs_do_not_override_yaml(config_module):
-    config = {
-        "models": {
-            "test-model": {"cost": {"input": 1.0, "output": 2.0, "cacheRead": 0.1}},
-        },
-        "providers": {},
-    }
-    remote = {
-        "test-model": ModelCost(input=999.0, output=999.0, cache_read=999.0),
-    }
-
-    model_costs, _ = config_module.build_cost_maps(config, remote)
-
-    assert model_costs["test-model"].input == 1.0
-
-
-def test_remote_costs_none_uses_yaml_only(config_module):
-    config = {
-        "models": {
-            "test-model": {"cost": {"input": 1.0, "output": 2.0, "cacheRead": 0.1}},
-        },
-        "providers": {},
-    }
-
-    model_costs, _ = config_module.build_cost_maps(config, None)
-
-    assert model_costs["test-model"].input == 1.0
-    assert len(model_costs) == 1
-
-
-def test_provider_override_takes_priority_over_remote(config_module):
-    config = {
-        "models": {},
-        "providers": {
-            "my-provider": {
-                "base_url": "https://example.com",
-                "models": {
-                    "special-model": {
-                        "cost": {"input": 5.0, "output": 10.0, "cacheRead": 0.5},
-                    },
-                },
-            },
-        },
-    }
-    remote = {
-        "special-model": ModelCost(input=1.0, output=2.0, cache_read=0.1),
-    }
-
-    model_costs, provider_costs = config_module.build_cost_maps(config, remote)
-
-    # Provider override wins over remote
-    assert provider_costs["my-provider"]["special-model"].input == 5.0
-    # Remote also populates global (since no global YAML entry)
-    assert model_costs["special-model"].input == 1.0
-
-
 # --- resolve_all_costs integration ---
 
 
-def test_resolve_all_costs_yaml_global(config_module):
+def test_resolve_all_costs_yaml_global(config_module, pricing_maps_module):
     config = {
         "models": {
             "claude-sonnet-4-6": {
@@ -683,14 +625,16 @@ def test_resolve_all_costs_yaml_global(config_module):
         "providers": {},
     }
 
-    resolved = config_module.resolve_all_costs(config)
+    resolved = pricing_maps_module.resolve_all_costs(config)
 
     assert resolved.global_costs["claude-sonnet-4-6"].source == "yaml"
     assert resolved.global_costs["claude-sonnet-4-6"].cost.input == 3.0
     assert resolved.provider_costs == {}
 
 
-def test_resolve_all_costs_provider_override_keeps_global(config_module):
+def test_resolve_all_costs_provider_override_keeps_global(
+    config_module, pricing_maps_module
+):
     config = {
         "models": {
             "test-model": {"cost": {"input": 1.0, "output": 2.0, "cacheRead": 0.1}},
@@ -707,7 +651,7 @@ def test_resolve_all_costs_provider_override_keeps_global(config_module):
         },
     }
 
-    resolved = config_module.resolve_all_costs(config)
+    resolved = pricing_maps_module.resolve_all_costs(config)
 
     assert resolved.global_costs["test-model"].cost.input == 1.0
     assert resolved.global_costs["test-model"].source == "yaml"
@@ -715,7 +659,7 @@ def test_resolve_all_costs_provider_override_keeps_global(config_module):
     assert resolved.provider_costs["my-provider"]["test-model"].source == "yaml"
 
 
-def test_resolve_all_costs_litellm_gap_fill(config_module):
+def test_resolve_all_costs_litellm_gap_fill(config_module, pricing_maps_module):
     config = {
         "models": {"claude-sonnet-4-6": {}},
         "providers": {},
@@ -724,13 +668,13 @@ def test_resolve_all_costs_litellm_gap_fill(config_module):
         "claude-sonnet-4-6": ModelCost(input=3.0, output=15.0, cache_read=0.3),
     }
 
-    resolved = config_module.resolve_all_costs(config, remote)
+    resolved = pricing_maps_module.resolve_all_costs(config, _litellm(remote))
 
     assert resolved.global_costs["claude-sonnet-4-6"].source == "litellm"
     assert resolved.global_costs["claude-sonnet-4-6"].cost.input == 3.0
 
 
-def test_resolve_all_costs_yaml_wins_over_litellm(config_module):
+def test_resolve_all_costs_yaml_wins_over_litellm(config_module, pricing_maps_module):
     config = {
         "models": {
             "test-model": {"cost": {"input": 1.0, "output": 2.0, "cacheRead": 0.1}},
@@ -741,13 +685,15 @@ def test_resolve_all_costs_yaml_wins_over_litellm(config_module):
         "test-model": ModelCost(input=99.0, output=99.0, cache_read=99.0),
     }
 
-    resolved = config_module.resolve_all_costs(config, remote)
+    resolved = pricing_maps_module.resolve_all_costs(config, _litellm(remote))
 
     assert resolved.global_costs["test-model"].cost.input == 1.0
     assert resolved.global_costs["test-model"].source == "yaml"
 
 
-def test_resolve_all_costs_partial_yaml_merges_with_litellm(config_module):
+def test_resolve_all_costs_partial_yaml_merges_with_litellm(
+    config_module, pricing_maps_module
+):
     config = {
         "models": {
             "test-model": {"cost": {"input": 9.0}},
@@ -763,7 +709,7 @@ def test_resolve_all_costs_partial_yaml_merges_with_litellm(config_module):
         ),
     }
 
-    resolved = config_module.resolve_all_costs(config, remote)
+    resolved = pricing_maps_module.resolve_all_costs(config, _litellm(remote))
 
     cost = resolved.global_costs["test-model"].cost
     assert resolved.global_costs["test-model"].source == "yaml"
@@ -773,7 +719,9 @@ def test_resolve_all_costs_partial_yaml_merges_with_litellm(config_module):
     assert cost.cache_write == 0.25
 
 
-def test_resolve_all_costs_partial_provider_yaml_merges_with_global(config_module):
+def test_resolve_all_costs_partial_provider_yaml_merges_with_global(
+    config_module, pricing_maps_module
+):
     config = {
         "models": {
             "test-model": {
@@ -797,7 +745,7 @@ def test_resolve_all_costs_partial_provider_yaml_merges_with_global(config_modul
         },
     }
 
-    resolved = config_module.resolve_all_costs(config)
+    resolved = pricing_maps_module.resolve_all_costs(config)
 
     cost = resolved.provider_costs["prov-a"]["test-model"].cost
     assert resolved.provider_costs["prov-a"]["test-model"].source == "yaml"
@@ -807,7 +755,7 @@ def test_resolve_all_costs_partial_provider_yaml_merges_with_global(config_modul
     assert cost.cache_write == 0.25
 
 
-def test_resolve_all_costs_both_scopes_coexist(config_module):
+def test_resolve_all_costs_both_scopes_coexist(config_module, pricing_maps_module):
     config = {
         "models": {
             "test-model": {"cost": {"input": 1.0, "output": 2.0, "cacheRead": 0.1}},
@@ -824,13 +772,15 @@ def test_resolve_all_costs_both_scopes_coexist(config_module):
         },
     }
 
-    resolved = config_module.resolve_all_costs(config)
+    resolved = pricing_maps_module.resolve_all_costs(config)
 
     assert resolved.global_costs["test-model"].cost.input == 1.0
     assert resolved.provider_costs["prov-a"]["test-model"].cost.input == 5.0
 
 
-def test_build_cost_maps_uses_resolved_behavior(config_module):
+def test_resolve_all_costs_remote_and_yaml_scopes_coexist(
+    config_module, pricing_maps_module
+):
     config = {
         "models": {
             "test-model": {"cost": {"input": 1.0, "output": 2.0, "cacheRead": 0.1}},
@@ -851,11 +801,11 @@ def test_build_cost_maps_uses_resolved_behavior(config_module):
         "test-model": ModelCost(input=99.0, output=99.0, cache_read=99.0),
     }
 
-    model_costs, provider_model_costs = config_module.build_cost_maps(config, remote)
+    resolved = pricing_maps_module.resolve_all_costs(config, _litellm(remote))
 
-    assert model_costs["test-model"].input == 1.0
-    assert model_costs["remote-only"].input == 3.0
-    assert provider_model_costs["prov-a"]["test-model"].input == 5.0
+    assert resolved.global_costs["test-model"].cost.input == 1.0
+    assert resolved.global_costs["remote-only"].cost.input == 3.0
+    assert resolved.provider_costs["prov-a"]["test-model"].cost.input == 5.0
 
 
 def test_pricing_endpoint_provider_display_overwrites_global_same_key(
@@ -883,7 +833,9 @@ def test_pricing_endpoint_provider_display_overwrites_global_same_key(
             },
         }
     )
-    monkeypatch.setattr("src.config.pricing.get_remote_pricing", lambda: {})
+    monkeypatch.setattr(
+        "src.pricing.sources.litellm.fetch_remote_pricing", lambda *args, **kwargs: {}
+    )
 
     response = TestClient(api_module.app).get("/pricing")
 
@@ -921,7 +873,9 @@ def test_pricing_with_multiplier(api_module, monkeypatch):
             },
         }
     )
-    monkeypatch.setattr("src.config.pricing.get_remote_pricing", lambda: {})
+    monkeypatch.setattr(
+        "src.pricing.sources.litellm.fetch_remote_pricing", lambda *args, **kwargs: {}
+    )
 
     response = TestClient(api_module.app).get("/pricing?provider=prov-a")
 
@@ -968,8 +922,10 @@ def test_pricing_without_provider_shows_all(api_module, monkeypatch):
         }
     )
     monkeypatch.setattr(
-        "src.config.pricing.get_remote_pricing",
-        lambda: {"remote-model": ModelCost(input=3.0, output=6.0, cache_read=0.3)},
+        "src.pricing.sources.litellm.fetch_remote_pricing",
+        lambda *args, **kwargs: {
+            "remote-model": ModelCost(input=3.0, output=6.0, cache_read=0.3)
+        },
     )
 
     response = TestClient(api_module.app).get("/pricing")
@@ -996,7 +952,9 @@ def test_pricing_unknown_provider_defaults_multiplier_1(api_module, monkeypatch)
             "providers": {},
         }
     )
-    monkeypatch.setattr("src.config.pricing.get_remote_pricing", lambda: {})
+    monkeypatch.setattr(
+        "src.pricing.sources.litellm.fetch_remote_pricing", lambda *args, **kwargs: {}
+    )
 
     response = TestClient(api_module.app).get("/pricing?provider=missing")
 
@@ -1036,7 +994,9 @@ def test_pricing_two_providers_same_model_route_correctly(api_module, monkeypatc
             },
         }
     )
-    monkeypatch.setattr("src.config.pricing.get_remote_pricing", lambda: {})
+    monkeypatch.setattr(
+        "src.pricing.sources.litellm.fetch_remote_pricing", lambda *args, **kwargs: {}
+    )
 
     prov_a = TestClient(api_module.app).get("/pricing?provider=prov-a").json()
     prov_b = TestClient(api_module.app).get("/pricing?provider=prov-b").json()
@@ -1076,7 +1036,9 @@ def test_pricing_provider_override_beats_global_and_fallback_gets_multiplier(
             },
         }
     )
-    monkeypatch.setattr("src.config.pricing.get_remote_pricing", lambda: {})
+    monkeypatch.setattr(
+        "src.pricing.sources.litellm.fetch_remote_pricing", lambda *args, **kwargs: {}
+    )
 
     response = TestClient(api_module.app).get("/pricing?provider=prov-a")
 
@@ -1095,8 +1057,8 @@ def test_single_model_pricing_contains_litellm_match(api_module, monkeypatch):
     api_module.CONFIG.clear()
     api_module.CONFIG.update({"models": {}, "providers": {}})
     monkeypatch.setattr(
-        "src.config.pricing.get_remote_pricing",
-        lambda: {
+        "src.pricing.sources.litellm.fetch_remote_pricing",
+        lambda *args, **kwargs: {
             "openrouter/xiaomi/mimo-v2.5-pro": ModelCost(
                 input=1.0, output=3.0, cache_read=0.2
             )
@@ -1122,8 +1084,8 @@ def test_single_model_pricing_includes_tiers(api_module, monkeypatch):
     api_module.CONFIG.clear()
     api_module.CONFIG.update({"models": {}, "providers": {}})
     monkeypatch.setattr(
-        "src.config.pricing.get_remote_pricing",
-        lambda: {
+        "src.pricing.sources.litellm.fetch_remote_pricing",
+        lambda *args, **kwargs: {
             "dashscope/qwen3.7-plus": ModelCost(
                 input=0.4,
                 output=1.6,
@@ -1174,7 +1136,9 @@ def test_single_model_pricing_includes_tiers(api_module, monkeypatch):
 def test_single_model_pricing_unresolved_includes_empty_tiers(api_module, monkeypatch):
     api_module.CONFIG.clear()
     api_module.CONFIG.update({"models": {}, "providers": {}})
-    monkeypatch.setattr("src.config.pricing.get_remote_pricing", lambda: {})
+    monkeypatch.setattr(
+        "src.pricing.sources.litellm.fetch_remote_pricing", lambda *args, **kwargs: {}
+    )
 
     response = TestClient(api_module.app).get("/pricing/no-such-model")
 
@@ -1195,8 +1159,10 @@ def test_single_model_pricing_yaml_override_beats_litellm(api_module, monkeypatc
         }
     )
     monkeypatch.setattr(
-        "src.config.pricing.get_remote_pricing",
-        lambda: {"test-model": ModelCost(input=9.0, output=9.0, cache_read=9.0)},
+        "src.pricing.sources.litellm.fetch_remote_pricing",
+        lambda *args, **kwargs: {
+            "test-model": ModelCost(input=9.0, output=9.0, cache_read=9.0)
+        },
     )
 
     response = TestClient(api_module.app).get("/pricing/test-model")
@@ -1230,7 +1196,9 @@ def test_single_model_pricing_provider_scope_and_multiplier(api_module, monkeypa
             },
         }
     )
-    monkeypatch.setattr("src.config.pricing.get_remote_pricing", lambda: {})
+    monkeypatch.setattr(
+        "src.pricing.sources.litellm.fetch_remote_pricing", lambda *args, **kwargs: {}
+    )
 
     response = TestClient(api_module.app).get("/pricing/test-model?provider=prov-a")
 
@@ -1250,8 +1218,8 @@ def test_single_model_pricing_cheapest_contains_match(api_module, monkeypatch):
     api_module.CONFIG.clear()
     api_module.CONFIG.update({"models": {}, "providers": {}})
     monkeypatch.setattr(
-        "src.config.pricing.get_remote_pricing",
-        lambda: {
+        "src.pricing.sources.litellm.fetch_remote_pricing",
+        lambda *args, **kwargs: {
             "openrouter/xiaomi/mimo-v2.5-pro": ModelCost(
                 input=1.0, output=3.0, cache_read=0.2
             ),
@@ -1282,7 +1250,9 @@ def test_single_model_pricing_slashed_model_exact_yaml(api_module, monkeypatch):
             "providers": {},
         }
     )
-    monkeypatch.setattr("src.config.pricing.get_remote_pricing", lambda: {})
+    monkeypatch.setattr(
+        "src.pricing.sources.litellm.fetch_remote_pricing", lambda *args, **kwargs: {}
+    )
 
     response = TestClient(api_module.app).get("/pricing/z-ai/glm-5.1-20260406")
 
@@ -1297,7 +1267,9 @@ def test_single_model_pricing_slashed_model_exact_yaml(api_module, monkeypatch):
 def test_single_model_pricing_unresolved(api_module, monkeypatch):
     api_module.CONFIG.clear()
     api_module.CONFIG.update({"models": {}, "providers": {}})
-    monkeypatch.setattr("src.config.pricing.get_remote_pricing", lambda: {})
+    monkeypatch.setattr(
+        "src.pricing.sources.litellm.fetch_remote_pricing", lambda *args, **kwargs: {}
+    )
 
     response = TestClient(api_module.app).get("/pricing/unknown-model")
 
@@ -1326,7 +1298,9 @@ def test_single_model_pricing_provider_contains_match(api_module, monkeypatch):
             },
         }
     )
-    monkeypatch.setattr("src.config.pricing.get_remote_pricing", lambda: {})
+    monkeypatch.setattr(
+        "src.pricing.sources.litellm.fetch_remote_pricing", lambda *args, **kwargs: {}
+    )
 
     response = TestClient(api_module.app).get("/pricing/mimo-v2.5-pro?provider=prov-a")
 
@@ -1343,8 +1317,8 @@ def test_single_model_pricing_case_insensitive(api_module, monkeypatch):
     api_module.CONFIG.clear()
     api_module.CONFIG.update({"models": {}, "providers": {}})
     monkeypatch.setattr(
-        "src.config.pricing.get_remote_pricing",
-        lambda: {
+        "src.pricing.sources.litellm.fetch_remote_pricing",
+        lambda *args, **kwargs: {
             "openrouter/xiaomi/mimo-v2.5-pro": ModelCost(
                 input=1.0, output=3.0, cache_read=0.2
             )
@@ -1363,7 +1337,9 @@ def test_single_model_pricing_case_insensitive(api_module, monkeypatch):
 def test_single_model_pricing_rejects_empty_model(api_module, monkeypatch):
     api_module.CONFIG.clear()
     api_module.CONFIG.update({"models": {}, "providers": {}})
-    monkeypatch.setattr("src.config.pricing.get_remote_pricing", lambda: {})
+    monkeypatch.setattr(
+        "src.pricing.sources.litellm.fetch_remote_pricing", lambda *args, **kwargs: {}
+    )
 
     response = TestClient(api_module.app).get("/pricing/")
 
@@ -1565,7 +1541,7 @@ def test_fetch_remote_pricing_skips_network_when_cache_fresh(tmp_path, monkeypat
     cache_path.write_text(
         json.dumps({"gpt-fresh": {"input_cost_per_token": 1e-06, "mode": "chat"}})
     )
-    monkeypatch.setattr(pricing_module, "_cache_path", lambda: cache_path)
+    monkeypatch.setattr(base_module, "cache_path", lambda name: cache_path)
     monkeypatch.setattr(pricing_module, "_remote_costs", None)
 
     def _fail_if_called():
@@ -1586,7 +1562,7 @@ def test_fetch_remote_pricing_refetches_when_cache_stale(tmp_path, monkeypatch):
     stale_mtime = time.time() - pricing_module.CACHE_TTL_SECONDS - 1
     os.utime(cache_path, (stale_mtime, stale_mtime))
 
-    monkeypatch.setattr(pricing_module, "_cache_path", lambda: cache_path)
+    monkeypatch.setattr(base_module, "cache_path", lambda name: cache_path)
     monkeypatch.setattr(pricing_module, "_remote_costs", None)
     monkeypatch.setattr(
         pricing_module,
@@ -1610,7 +1586,7 @@ def test_fetch_remote_pricing_refetches_when_fresh_cache_is_corrupt(
     cache_path = tmp_path / "litellm_pricing.json"
     cache_path.write_text("{not valid json")  # fresh mtime, but garbage content
 
-    monkeypatch.setattr(pricing_module, "_cache_path", lambda: cache_path)
+    monkeypatch.setattr(base_module, "cache_path", lambda name: cache_path)
     monkeypatch.setattr(pricing_module, "_remote_costs", None)
     monkeypatch.setattr(
         pricing_module,
@@ -1647,12 +1623,12 @@ def test_create_ipv4_connection_requests_af_inet_only(monkeypatch):
         return [(family, socktype, 0, "", (host, port))]
 
     fake_sock = _FakeSocket()
-    monkeypatch.setattr(pricing_module.socket, "getaddrinfo", _fake_getaddrinfo)
-    monkeypatch.setattr(pricing_module.socket, "socket", lambda *a, **k: fake_sock)
+    monkeypatch.setattr(base_module.socket, "getaddrinfo", _fake_getaddrinfo)
+    monkeypatch.setattr(base_module.socket, "socket", lambda *a, **k: fake_sock)
 
-    result = pricing_module._create_ipv4_connection(("example.com", 443))
+    result = base_module._create_ipv4_connection(("example.com", 443))
 
-    assert seen_family["family"] == pricing_module.socket.AF_INET
+    assert seen_family["family"] == base_module.socket.AF_INET
     assert result is fake_sock
     assert fake_sock.connected_to == ("example.com", 443)
 
@@ -1669,14 +1645,14 @@ def test_create_ipv4_connection_raises_when_all_candidates_fail(monkeypatch):
             pass
 
     monkeypatch.setattr(
-        pricing_module.socket,
+        base_module.socket,
         "getaddrinfo",
         lambda host, port, family, socktype: [(family, socktype, 0, "", (host, port))],
     )
-    monkeypatch.setattr(pricing_module.socket, "socket", lambda *a, **k: _FakeSocket())
+    monkeypatch.setattr(base_module.socket, "socket", lambda *a, **k: _FakeSocket())
 
     try:
-        pricing_module._create_ipv4_connection(("example.com", 443))
+        base_module._create_ipv4_connection(("example.com", 443))
         raise AssertionError("expected OSError")
     except OSError as exc:
         assert "connection refused" in str(exc)
@@ -1686,17 +1662,17 @@ def test_fetch_litellm_json_does_not_mutate_global_getaddrinfo(monkeypatch):
     """Regression guard for the original bug: this must not monkeypatch
     socket.getaddrinfo globally, since the same process also resolves DNS
     for concurrent, unrelated live proxy traffic."""
-    original_getaddrinfo = pricing_module.socket.getaddrinfo
+    original_getaddrinfo = base_module.socket.getaddrinfo
 
     class _RaisingOpener:
         def open(self, *a, **k):
             raise urllib.error.URLError("network unavailable in test")
 
     monkeypatch.setattr(
-        pricing_module.urllib.request, "build_opener", lambda *a, **k: _RaisingOpener()
+        base_module.urllib.request, "build_opener", lambda *a, **k: _RaisingOpener()
     )
 
     result = pricing_module._fetch_litellm_json()
 
     assert result is None
-    assert pricing_module.socket.getaddrinfo is original_getaddrinfo
+    assert base_module.socket.getaddrinfo is original_getaddrinfo

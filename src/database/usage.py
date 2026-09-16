@@ -26,7 +26,8 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import Session
 
-from ..costs import calculate_costs, resolve_cost_match
+from ..pricing.costs import calculate_costs, compute_input_split, resolve_pricing
+from ..pricing.models import normalize_model_cost_key
 from ..utils import micros_to_secs, secs_to_micros
 from .engine import get_engine
 from .models import BaseUrl, ToolCall, Usage, UsageDaily
@@ -361,6 +362,8 @@ class CostRecalcResult:
     reason: str | None = None
     old_costs: dict[str, Decimal] | None = None
     new_costs: dict[str, Decimal] | None = None
+    price_snapshot_id: int | None = None
+    pricing: dict[str, Any] | None = None
 
 
 def recalculate_usage_cost(
@@ -368,6 +371,8 @@ def recalculate_usage_cost(
     *,
     model_costs: dict[str, Any] | None = None,
     provider_model_costs: dict[str, dict[str, Any]] | None = None,
+    model_cost_sources: dict[str, str] | None = None,
+    provider_model_cost_sources: dict[str, dict[str, str]] | None = None,
     db_path: str | None = None,
 ) -> CostRecalcResult | None:
     """Recompute one Usage row's cost against current pricing and keep its
@@ -394,10 +399,16 @@ def recalculate_usage_cost(
         if usage is None:
             return None
 
-        match = resolve_cost_match(
-            usage.provider, usage.model, model_costs, provider_model_costs
+        resolved = resolve_pricing(
+            usage.provider,
+            usage.model,
+            usage.ts,
+            model_costs,
+            provider_model_costs,
+            model_cost_sources,
+            provider_model_cost_sources,
         )
-        if match is None:
+        if resolved.match is None:
             return CostRecalcResult(
                 skipped=True, reason="no pricing match for provider/model"
             )
@@ -413,13 +424,40 @@ def recalculate_usage_cost(
             cached_tokens=usage.cached_tokens,
             cache_creation_tokens=usage.cache_creation_tokens,
             provider=usage.provider,
-            model_cost=match.cost,
+            model_cost=resolved.cost,
+            multiplier=resolved.multiplier,
         )
         deltas = {field: new_costs[field] - old_costs[field] for field in old_costs}
 
         date = datetime.fromtimestamp(
             micros_to_secs(usage.ts), tz=timezone.utc
         ).strftime("%Y-%m-%d")
+
+        # Rebind the row to the exact rates just used so the displayed split
+        # matches the recalculated totals. Best-effort: a snapshot failure must
+        # not fail the recalculation.
+        try:
+            from ..pricing.snapshots import ensure_price_snapshot
+
+            usage.price_snapshot_id = ensure_price_snapshot(
+                date=date,
+                provider=usage.provider,
+                model=normalize_model_cost_key(usage.model),
+                source=resolved.source or "unknown",
+                cost=resolved.cost,
+                multiplier=resolved.multiplier,
+                db_path=db_path,
+            )
+        except Exception:
+            # Keep the row consistent: costs were recalculated but no snapshot
+            # was written, so clear the binding and let reads mark it estimated.
+            usage.price_snapshot_id = None
+            logger.warning(
+                "recalculate_usage_cost: failed to record price snapshot for "
+                "provider=%s model=%s",
+                usage.provider,
+                usage.model,
+            )
         # Atomic `col = col + delta` UPDATE rather than a select-mutate-commit
         # round trip: correct even under concurrent recalculations on SQLite,
         # where with_for_update() below is a silent no-op (same caveat as
@@ -490,7 +528,33 @@ def recalculate_usage_cost(
         usage.total_cost_usd = new_costs["total_cost_usd"]
         session.commit()
 
-        return CostRecalcResult(skipped=False, old_costs=old_costs, new_costs=new_costs)
+        components = compute_input_split(
+            prompt_tokens=usage.prompt_tokens,
+            cached_tokens=usage.cached_tokens,
+            cache_creation_tokens=usage.cache_creation_tokens,
+            cost=resolved.cost,
+            multiplier=resolved.multiplier,
+        )
+        from ..pricing.snapshots import build_pricing_detail
+
+        pricing = build_pricing_detail(
+            resolved.cost,
+            resolved.multiplier,
+            resolved.source,
+            {
+                "prompt_tokens": usage.prompt_tokens,
+                "cached_tokens": usage.cached_tokens,
+                "cache_creation_tokens": usage.cache_creation_tokens,
+            },
+            snapshot_id=usage.price_snapshot_id,
+        )
+        return CostRecalcResult(
+            skipped=False,
+            old_costs=old_costs,
+            new_costs={**new_costs, **components},
+            price_snapshot_id=usage.price_snapshot_id,
+            pricing=pricing,
+        )
 
 
 USAGE_COPY_FIELDS = (
@@ -518,6 +582,11 @@ USAGE_COPY_FIELDS = (
     "status",
     "client_ip",
 )
+
+# NOTE: price_snapshot_id is intentionally omitted from USAGE_COPY_FIELDS.
+# merge_usage_database does not copy the price_snapshots table, so copying the
+# id would dangle in the target DB. Merged rows read as estimated
+# (cost_estimated=True) until repriced there.
 
 
 def _usage_copy_kwargs(row: Usage) -> dict[str, Any]:
@@ -916,6 +985,7 @@ def fetch_recent_usage(
             Usage.status,
             Usage.client_ip,
             Usage.base_url_id,
+            Usage.price_snapshot_id,
             BaseUrl.base_url.label("base_url"),
             tool_agg.c.tool_names.label("tool_names"),
         )

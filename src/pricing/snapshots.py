@@ -1,0 +1,373 @@
+"""Per-day pricing snapshots enabling exact cost-split recomputation.
+
+At record time the prices used for a usage row are stored once per
+``(date, provider, model, source, rates_hash)``, and the usage row binds to the
+exact snapshot via ``usage.price_snapshot_id``. Because the row is
+content-addressed, a later price change inserts a new snapshot instead of
+mutating what earlier rows point to, and read-time enrichment can replay the
+exact rates that priced each row.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import json
+import time
+from datetime import datetime, timezone
+from decimal import Decimal
+from typing import Any
+
+from sqlalchemy import select, tuple_
+from sqlalchemy.dialects import postgresql, sqlite
+
+from ..database import PriceSnapshot, get_engine
+from ..utils import micros_to_secs
+from .costs import (
+    compute_input_split,
+    get_provider_price_multiplier,
+    resolve_cost_match,
+    resolve_token_rates,
+)
+from .models import ModelCost, ModelTier, normalize_model_cost_key
+
+COST_SPLIT_KEYS = (
+    "normal_input_cost_usd",
+    "cache_read_cost_usd",
+    "cache_write_cost_usd",
+)
+
+
+def serialize_rates(cost: ModelCost, multiplier: Decimal) -> str:
+    # Canonical JSON (sorted keys, no whitespace) so identical rate sets hash
+    # identically regardless of construction order or serializer.
+    return json.dumps(
+        {
+            "input": cost.input,
+            "output": cost.output,
+            "cache_read": cost.cache_read,
+            "cache_write": cost.cache_write,
+            "multiplier": str(multiplier),
+            "tiers": [
+                {
+                    "min_tokens": tier.min_tokens,
+                    "max_tokens": tier.max_tokens,
+                    "input": tier.input,
+                    "output": tier.output,
+                    "cache_read": tier.cache_read,
+                    "cache_write": tier.cache_write,
+                }
+                for tier in cost.tiers
+            ],
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+
+
+def rates_hash(payload: str) -> str:
+    """Content hash of a serialized rate set (used for snapshot versioning)."""
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def parse_rates(payload: str) -> tuple[ModelCost, Decimal]:
+    data = json.loads(payload)
+    tiers = tuple(
+        ModelTier(
+            min_tokens=tier["min_tokens"],
+            max_tokens=tier["max_tokens"],
+            input=tier["input"],
+            output=tier["output"],
+            cache_read=tier["cache_read"],
+            cache_write=tier.get("cache_write"),
+        )
+        for tier in data.get("tiers", [])
+    )
+    cost = ModelCost(
+        input=data["input"],
+        output=data["output"],
+        cache_read=data["cache_read"],
+        cache_write=data.get("cache_write"),
+        tiers=tiers,
+    )
+    return cost, Decimal(str(data["multiplier"]))
+
+
+def _ts_date(ts_micros: int | None) -> str:
+    return datetime.fromtimestamp(
+        micros_to_secs(ts_micros or 0), tz=timezone.utc
+    ).strftime("%Y-%m-%d")
+
+
+def ensure_price_snapshot(
+    *,
+    date: str,
+    provider: str,
+    model: str,
+    source: str,
+    cost: ModelCost,
+    multiplier: Decimal,
+    db_path: str | None = None,
+) -> int:
+    """Insert a snapshot if this exact rate set is new; return its row id.
+
+    Idempotent and race-safe (content-addressed ``ON CONFLICT DO NOTHING``),
+    called from the hot record path. ``cost`` must already be time-of-day
+    resolved (see ``resolve_effective_cost``).
+    """
+    engine = get_engine(db_path)
+    payload = serialize_rates(cost, multiplier)
+    digest = rates_hash(payload)
+    values = {
+        "date": date,
+        "provider": provider,
+        "model": model,
+        "source": source,
+        "rates_hash": digest,
+        "rates_json": payload,
+        "recorded_at": time.time_ns() // 1000,
+    }
+    key_columns = ["date", "provider", "model", "source", "rates_hash"]
+    insert_stmt: Any
+    if engine.dialect.name == "postgresql":
+        insert_stmt = postgresql.insert(PriceSnapshot).values(**values)
+    else:
+        insert_stmt = sqlite.insert(PriceSnapshot).values(**values)
+    stmt = insert_stmt.on_conflict_do_nothing(index_elements=key_columns)
+
+    with engine.begin() as connection:
+        connection.execute(stmt)
+        row_id = connection.execute(
+            select(PriceSnapshot.id).where(
+                PriceSnapshot.date == date,
+                PriceSnapshot.provider == provider,
+                PriceSnapshot.model == model,
+                PriceSnapshot.source == source,
+                PriceSnapshot.rates_hash == digest,
+            )
+        ).scalar()
+    if row_id is None:  # pragma: no cover - insert guarantees a row
+        raise RuntimeError("price snapshot insert did not return a row id")
+    return int(row_id)
+
+
+def get_price_snapshot(
+    *,
+    date: str,
+    provider: str,
+    model: str,
+    db_path: str | None = None,
+) -> tuple[ModelCost, Decimal, str] | None:
+    """Return the most recent snapshot for (date, provider, model).
+
+    Legacy/unbound lookup only; new rows read via ``price_snapshot_id``.
+    """
+    engine = get_engine(db_path)
+    with engine.connect() as connection:
+        record = connection.execute(
+            select(PriceSnapshot.rates_json, PriceSnapshot.source)
+            .where(
+                PriceSnapshot.date == date,
+                PriceSnapshot.provider == provider,
+                PriceSnapshot.model == model,
+            )
+            .order_by(PriceSnapshot.recorded_at.desc(), PriceSnapshot.id.desc())
+            .limit(1)
+        ).one_or_none()
+    if record is None:
+        return None
+    rates_json, source = record
+    cost, multiplier = parse_rates(rates_json)
+    return cost, multiplier, source
+
+
+def _load_snapshots_by_id(
+    ids: set[int], db_path: str | None = None
+) -> dict[int, tuple[ModelCost, Decimal, str]]:
+    """Batch-load snapshots for the bound ``usage.price_snapshot_id`` values."""
+    if not ids:
+        return {}
+    engine = get_engine(db_path)
+    with engine.connect() as connection:
+        result = connection.execute(
+            select(
+                PriceSnapshot.id, PriceSnapshot.rates_json, PriceSnapshot.source
+            ).where(PriceSnapshot.id.in_(list(ids)))
+        )
+        return {
+            int(row_id): (*parse_rates(payload), source)
+            for row_id, payload, source in result
+        }
+
+
+def _lookup_key(row: dict) -> tuple[str, str, str] | None:
+    provider = row.get("provider")
+    model = row.get("model")
+    if not provider or not model:
+        return None
+    return (_ts_date(row.get("ts")), provider, normalize_model_cost_key(model))
+
+
+def _load_snapshot_cache(
+    rows: list[dict], db_path: str | None = None
+) -> dict[tuple[str, str, str], tuple[ModelCost, Decimal, str]]:
+    """Fetch newest snapshots for unbound rows in a single query (avoids N+1)."""
+    keys = {key for key in (_lookup_key(row) for row in rows) if key is not None}
+    if not keys:
+        return {}
+    engine = get_engine(db_path)
+    with engine.connect() as connection:
+        result = connection.execute(
+            select(
+                PriceSnapshot.date,
+                PriceSnapshot.provider,
+                PriceSnapshot.model,
+                PriceSnapshot.rates_json,
+                PriceSnapshot.source,
+            )
+            .where(
+                tuple_(
+                    PriceSnapshot.date, PriceSnapshot.provider, PriceSnapshot.model
+                ).in_(list(keys))
+            )
+            .order_by(PriceSnapshot.recorded_at.desc(), PriceSnapshot.id.desc())
+        )
+        cache: dict[tuple[str, str, str], tuple[ModelCost, Decimal, str]] = {}
+        for date, provider, model, payload, source in result:
+            cache.setdefault((date, provider, model), (*parse_rates(payload), source))
+        return cache
+
+
+def _split(cost: ModelCost, multiplier: Decimal, row: dict) -> dict[str, float]:
+    split = compute_input_split(
+        prompt_tokens=row.get("prompt_tokens"),
+        cached_tokens=row.get("cached_tokens"),
+        cache_creation_tokens=row.get("cache_creation_tokens"),
+        cost=cost,
+        multiplier=multiplier,
+    )
+    return {key: float(value) for key, value in split.items()}
+
+
+def _row_input_tokens(row: dict) -> int:
+    """Total input tokens used for tier selection.
+
+    ``cache_creation_tokens`` is disjoint from ``prompt_tokens`` (Anthropic
+    semantics), so it's added rather than subtracted.
+    """
+    prompt = int(row.get("prompt_tokens") or 0)
+    cached = int(row.get("cached_tokens") or 0)
+    cache_created = int(row.get("cache_creation_tokens") or 0)
+    return max(prompt - cached, 0) + cached + cache_created
+
+
+def _resolve_row_rates(
+    row: dict,
+    db_path: str | None = None,
+    snapshot_cache: dict[tuple[str, str, str], tuple[ModelCost, Decimal, str]]
+    | None = None,
+    snapshots_by_id: dict[int, tuple[ModelCost, Decimal, str]] | None = None,
+) -> tuple[ModelCost, Decimal, str | None, int | None] | None:
+    """Resolve the rates that priced a row.
+
+    Returns ``(cost, multiplier, source, snapshot_id)`` or ``None`` when the
+    row's provider/model cannot be priced. ``snapshot_id`` is non-None only for
+    rows pinned to their bound snapshot; legacy/unbound rows fall back to the
+    newest snapshot or current config and read as estimated.
+    """
+    key = _lookup_key(row)
+    if key is None:
+        return None
+
+    snapshot_id = row.get("price_snapshot_id")
+    if snapshot_id is not None:
+        sid = int(snapshot_id)
+        snapshot = (
+            snapshots_by_id.get(sid)
+            if snapshots_by_id is not None
+            else _load_snapshots_by_id({sid}, db_path).get(sid)
+        )
+        if snapshot is not None:
+            cost, multiplier, source = snapshot
+            return cost, multiplier, source, sid
+
+    if snapshot_cache is not None:
+        snapshot = snapshot_cache.get(key)
+    else:
+        snapshot = get_price_snapshot(
+            date=key[0], provider=key[1], model=key[2], db_path=db_path
+        )
+    if snapshot is not None:
+        cost, multiplier, source = snapshot
+        return cost, multiplier, source, None
+
+    match = resolve_cost_match(row.get("provider"), str(row.get("model") or ""))
+    if match is None:
+        return None
+    return (
+        match.cost,
+        get_provider_price_multiplier(row.get("provider")),
+        match.source,
+        None,
+    )
+
+
+def build_pricing_detail(
+    cost: ModelCost,
+    multiplier: Decimal,
+    source: str | None,
+    row: dict,
+    *,
+    snapshot_id: int | None,
+) -> dict[str, Any]:
+    """Describe how a row's cost was calculated, for display in the UI."""
+    effective, tier = resolve_token_rates(cost, _row_input_tokens(row))
+    return {
+        "source": source,
+        "multiplier": float(multiplier),
+        "input": effective.input,
+        "output": effective.output,
+        "cache_read": effective.cache_read,
+        "cache_write": effective.cache_write,
+        "tier": None
+        if tier is None
+        else {"min_tokens": tier.min_tokens, "max_tokens": tier.max_tokens},
+        "snapshot_id": snapshot_id,
+        "estimated": snapshot_id is None,
+    }
+
+
+def enrich_rows(rows: list[dict], db_path: str | None = None) -> list[dict]:
+    """Merge the input-cost split and pricing detail into each usage row.
+
+    Rows bound to a snapshot (``price_snapshot_id``) use exactly that snapshot's
+    rates. Unbound/legacy rows fall back to the newest legacy snapshot or the
+    current config and are marked ``cost_estimated: true``.
+    """
+    bound_ids = {
+        int(row["price_snapshot_id"])
+        for row in rows
+        if row.get("price_snapshot_id") is not None
+    }
+    by_id = _load_snapshots_by_id(bound_ids, db_path)
+    legacy_cache = _load_snapshot_cache(
+        [row for row in rows if row.get("price_snapshot_id") is None], db_path
+    )
+
+    result: list[dict] = []
+    for row in rows:
+        rates = _resolve_row_rates(
+            row, db_path, snapshot_cache=legacy_cache, snapshots_by_id=by_id
+        )
+        if rates is None:
+            split = {split_key: 0.0 for split_key in COST_SPLIT_KEYS}
+            pricing: dict[str, Any] | None = None
+            estimated = True
+        else:
+            cost, multiplier, source, snapshot_id = rates
+            split = _split(cost, multiplier, row)
+            pricing = build_pricing_detail(
+                cost, multiplier, source, row, snapshot_id=snapshot_id
+            )
+            estimated = snapshot_id is None
+        result.append({**row, **split, "pricing": pricing, "cost_estimated": estimated})
+    return result

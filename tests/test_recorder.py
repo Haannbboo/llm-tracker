@@ -44,8 +44,8 @@ def test_record_usage_inserts_row(test_db):
 
 
 def test_record_usage_computes_costs(test_db):
-    from src import costs as costs_module
-    from src.costs import ModelCost
+    from src.pricing import costs as costs_module
+    from src.pricing.costs import ModelCost
     from src.recorder import record_usage
 
     original_model_costs = costs_module.MODEL_COSTS.copy()
@@ -89,6 +89,82 @@ def test_record_usage_computes_costs(test_db):
         costs_module.MODEL_COSTS.update(original_model_costs)
         costs_module.PROVIDER_MODEL_COSTS.clear()
         costs_module.PROVIDER_MODEL_COSTS.update(original_provider_costs)
+        costs_module.PROVIDER_MAP.clear()
+        costs_module.PROVIDER_MAP.update(original_provider_map)
+
+
+def test_record_usage_writes_price_snapshot(test_db):
+    from src.pricing import costs as costs_module
+    from src.pricing.costs import ModelCost
+    from src.pricing.snapshots import get_price_snapshot
+    from src.recorder import record_usage
+
+    original_model_costs = costs_module.MODEL_COSTS.copy()
+    original_model_cost_sources = costs_module.MODEL_COST_SOURCES.copy()
+    original_provider_map = costs_module.PROVIDER_MAP.copy()
+    costs_module.MODEL_COSTS.clear()
+    costs_module.MODEL_COST_SOURCES.clear()
+    costs_module.PROVIDER_MAP.clear()
+    costs_module.MODEL_COSTS["snap-model"] = ModelCost(
+        input=1.0, output=2.0, cache_read=0.5, cache_write=3.0
+    )
+    costs_module.MODEL_COST_SOURCES["snap-model"] = "litellm"
+
+    try:
+        record_usage(
+            ts=1779148800000000,
+            provider="snap-provider",
+            model="snap-model",
+            client_source="test",
+            session_id="sess-snap",
+            endpoint="/v1/chat/completions",
+            prompt_tokens=1000,
+            completion_tokens=500,
+            cached_tokens=200,
+            cache_creation_tokens=100,
+            total_tokens=1500,
+            status=200,
+            db_path=test_db,
+        )
+
+        snapshot = get_price_snapshot(
+            date="2026-05-19",
+            provider="snap-provider",
+            model="snap-model",
+            db_path=test_db,
+        )
+        assert snapshot is not None
+        cost, multiplier, _source = snapshot
+        from dataclasses import asdict
+
+        assert asdict(cost) == asdict(
+            ModelCost(input=1.0, output=2.0, cache_read=0.5, cache_write=3.0)
+        )
+        assert multiplier == 1.0
+
+        from src.pricing.snapshots import enrich_rows
+
+        enriched = enrich_rows(
+            [
+                {
+                    "ts": 1779148800000000,
+                    "provider": "snap-provider",
+                    "model": "snap-model",
+                    "prompt_tokens": 1000,
+                    "cached_tokens": 200,
+                    "cache_creation_tokens": 100,
+                }
+            ],
+            db_path=test_db,
+        )[0]
+        assert enriched["normal_input_cost_usd"] == 0.0008
+        assert enriched["cache_read_cost_usd"] == 0.0001
+        assert enriched["cache_write_cost_usd"] == 0.0003
+    finally:
+        costs_module.MODEL_COSTS.clear()
+        costs_module.MODEL_COSTS.update(original_model_costs)
+        costs_module.MODEL_COST_SOURCES.clear()
+        costs_module.MODEL_COST_SOURCES.update(original_model_cost_sources)
         costs_module.PROVIDER_MAP.clear()
         costs_module.PROVIDER_MAP.update(original_provider_map)
 

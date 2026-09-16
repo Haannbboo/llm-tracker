@@ -1,0 +1,124 @@
+"""OpenRouter source parsing and time-of-day rate resolution."""
+
+from __future__ import annotations
+
+from datetime import datetime, timezone
+
+from src.pricing.models import ModelCost, TimeRate, resolve_effective_cost
+from src.pricing.sources.openrouter import _hhmm_to_minutes, parse_openrouter_json
+
+
+def _payload() -> dict:
+    return {
+        "data": [
+            {
+                "id": "deepseek/deepseek-v4.1-flash",
+                "pricing": {
+                    "prompt": "0.00000015",
+                    "completion": "0.0000006",
+                    "input_cache_read": "0.000000003",
+                    "overrides": [
+                        {
+                            "utc_days": ["saturday", "sunday"],
+                            "prompt": "0.00000015",
+                            "completion": "0.0000006",
+                            "input_cache_read": "0.000000003",
+                        },
+                        {
+                            "utc_days": [
+                                "monday",
+                                "tuesday",
+                                "wednesday",
+                                "thursday",
+                                "friday",
+                            ],
+                            "utc_start": 100,
+                            "utc_end": 400,
+                            "prompt": "0.0000003",
+                            "completion": "0.0000012",
+                            "input_cache_read": "0.000000006",
+                        },
+                    ],
+                },
+            },
+            {
+                "id": "vendor/free-model:free",
+                "pricing": {"prompt": "0", "completion": "0"},
+            },
+            {"id": "~vendor/latest", "pricing": {"prompt": "1", "completion": "1"}},
+            {
+                "id": "vendor/m1:free:variant",
+                "pricing": {"prompt": "1", "completion": "1"},
+            },
+            {
+                "id": "vendor/m2",
+                "is_free": True,
+                "pricing": {"prompt": "1", "completion": "1"},
+            },
+            {"id": "vendor/bad", "pricing": "not-a-dict"},
+        ]
+    }
+
+
+def _at(iso: str) -> int:
+    return int(
+        datetime.fromisoformat(iso).replace(tzinfo=timezone.utc).timestamp() * 1_000_000
+    )
+
+
+def test_parse_skips_variants_and_converts_to_per_million():
+    costs = parse_openrouter_json(_payload())
+
+    assert "deepseek/deepseek-v4.1-flash" in costs
+    assert "deepseek-v4.1-flash" in costs  # vendor-stripped alias
+    assert "vendor/free-model:free" not in costs
+    assert "~vendor/latest" not in costs
+    assert "vendor/m1:free:variant" not in costs  # marker anywhere, not just suffix
+    assert "vendor/m2" not in costs  # is_free entries skipped
+    assert "vendor/bad" not in costs
+
+    cost = costs["deepseek/deepseek-v4.1-flash"]
+    assert (cost.input, cost.output, cost.cache_read) == (0.15, 0.6, 0.003)
+
+
+def test_parse_tolerates_garbage():
+    assert parse_openrouter_json(None) == {}
+    assert parse_openrouter_json({"data": "nope"}) == {}
+
+
+def test_hhmm_parsing():
+    assert _hhmm_to_minutes(0) == 0
+    assert _hhmm_to_minutes(100) == 60
+    assert _hhmm_to_minutes(130) == 90  # 01:30, not 1.30 hours
+    assert _hhmm_to_minutes(2359) == 23 * 60 + 59
+
+
+def test_time_resolution_peak_offpeak_and_weekend():
+    cost = parse_openrouter_json(_payload())["deepseek/deepseek-v4.1-flash"]
+
+    # 2026-09-14 is a Monday; 02:00 UTC is inside the weekday peak window.
+    assert resolve_effective_cost(cost, _at("2026-09-14T02:00:00")).input == 0.3
+    # 05:00 UTC is outside it -> base/off-peak.
+    assert resolve_effective_cost(cost, _at("2026-09-14T05:00:00")).input == 0.15
+    # Weekend whole-day window.
+    assert resolve_effective_cost(cost, _at("2026-09-12T12:00:00")).input == 0.15
+    assert resolve_effective_cost(cost, _at("2026-09-13T12:00:00")).input == 0.15
+
+
+def test_end_of_day_window_is_not_a_wrap():
+    """end_minute == 0 with a non-zero start means 24:00, not a wrap."""
+    cost = ModelCost(
+        input=1.0,
+        output=1.0,
+        cache_read=0.0,
+        time_rates=(
+            TimeRate(
+                days=None,
+                start_minute=18 * 60,
+                end_minute=0,
+                cost=ModelCost(input=3.0, output=3.0, cache_read=0.0),
+            ),
+        ),
+    )
+    assert resolve_effective_cost(cost, _at("2026-09-14T20:00:00")).input == 3.0
+    assert resolve_effective_cost(cost, _at("2026-09-14T05:00:00")).input == 1.0

@@ -315,6 +315,56 @@ def test_usage_endpoint_allows_zero_limit(api_module, monkeypatch):
     assert captured["limit"] == 0
 
 
+def test_usage_endpoint_includes_cost_split_components(api_module, monkeypatch):
+    import src.database as database_module
+
+    database_module.init_db()
+    monkeypatch.setattr(
+        api_module,
+        "fetch_recent_usage",
+        lambda **kwargs: [
+            {
+                "id": "row-1",
+                "ts": 1779148800000000,
+                "provider": "test-provider",
+                "model": "test-model",
+                "client_source": "codex",
+                "session_id": None,
+                "endpoint": "otlp",
+                "prompt_tokens": 1000,
+                "prompt_length": 0,
+                "completion_tokens": 500,
+                "reasoning_tokens": None,
+                "cached_tokens": 200,
+                "cache_creation_tokens": 0,
+                "total_tokens": 1500,
+                "latency_ms": 100,
+                "ttft_ms": None,
+                "tool_tokens": None,
+                "tool_names": None,
+                "input_cost_usd": 0.0,
+                "output_cost_usd": 0.0,
+                "total_cost_usd": 0.0,
+                "status": 200,
+                "client_ip": None,
+                "base_url_id": None,
+                "base_url": None,
+            }
+        ],
+    )
+
+    response = TestClient(api_module.app).get("/usage")
+
+    assert response.status_code == 200
+    rows = response.json()
+    assert len(rows) == 1
+    # test-model: input 2.0, cacheRead 0.5, provider multiplier 1.25.
+    # normal: 800*2/1e6*1.25 = 0.002; cache_read: 200*0.5/1e6*1.25 = 0.000125
+    assert rows[0]["normal_input_cost_usd"] == pytest.approx(0.002)
+    assert rows[0]["cache_read_cost_usd"] == pytest.approx(0.000125)
+    assert rows[0]["cache_write_cost_usd"] == 0
+
+
 def test_usage_endpoint_includes_cors_for_localhost_origin(api_module, monkeypatch):
     monkeypatch.setattr(api_module, "fetch_recent_usage", lambda **kwargs: [])
 
@@ -1859,3 +1909,22 @@ def test_old_pre_rename_paths_are_gone_when_auth_enabled(
     client = _authenticated_client(api_module, fresh_db, monkeypatch)
     response = client.request(method, path)
     _assert_route_removed(response)
+
+
+def test_slow_fetch_does_not_block_event_loop(api_module, monkeypatch):
+    """A slow upstream fetch must not stall the event loop."""
+    import time
+
+    def slow_fetch(*args, **kwargs):
+        time.sleep(0.2)
+        return []
+
+    monkeypatch.setattr(api_module, "_fetch_live_sources", slow_fetch)
+
+    async def main():
+        task = asyncio.create_task(api_module._resolve_live_cost_maps())
+        await asyncio.sleep(0.05)
+        assert not task.done(), "event loop was blocked by pricing fetch"
+        await asyncio.wait_for(task, timeout=1)
+
+    asyncio.run(main())
