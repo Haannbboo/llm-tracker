@@ -4,9 +4,8 @@ import { useSettingsData } from '../hooks/useSettingsData'
 import { useDevices } from '../hooks/useDevices'
 import { CopyButton } from '../components/CopyButton'
 import { t } from '../i18n/index.ts'
-import { FIXED_PROVIDER_COLORS, getProviderColor, getModelIcon, getAgentDisplayName, formatTime } from '../utils'
+import { FIXED_PROVIDER_COLORS, getProviderColor, getAgentDisplayName, formatTime } from '../utils'
 import { TimezoneSelector } from '../components/TimezoneSelector'
-import type { PricingEntry } from '../types'
 import { useDashboardAgents } from '../hooks/useDashboardAgents'
 import { useVersion } from '../hooks/useVersion'
 
@@ -52,12 +51,10 @@ export function SettingsPage({ providerColors }: Props) {
   }
 
   const {
-    selectedPricingProvider, setSelectedPricingProvider,
-    pricingSearch, setPricingSearch, filteredPricingModels,
     testBaseUrl, setTestBaseUrl, testApiKey, setTestApiKey,
     testFormat, setTestFormat, testModel, setTestModel,
     testMessage, setTestMessage, testResult, isTesting,
-    handleSaveConfig, handleRunTest, handleCostChange, handleEvaluationEvaluatorChange,
+    handleSaveConfig, handleRunTest, handleEvaluationEvaluatorChange,
     manualCurlEquivalent,
     evaluationEvaluator, evaluationEvaluators,
   } = useSettingsData()
@@ -87,22 +84,7 @@ export function SettingsPage({ providerColors }: Props) {
     ? setupLocalAgentTotal > 0
       ? `${setupMatchingAgents}/${setupLocalAgentTotal}`
       : t('No local Agent')
-    : t('Unknown')
-  const pricingMultiplier = selectedPricingProvider === 'global'
-    ? 1
-    : filteredPricingModels.find(model => typeof model.multiplier === 'number')?.multiplier
-      ?? Number(configParsed?.providers?.[selectedPricingProvider]?.price_multiplier ?? 1)
-  const formatPrice = (value: number | null | undefined) => (
-    typeof value === 'number' ? value.toFixed(3) : '—'
-  )
-  const providerPriceDetail = (base: number | null | undefined, effective: number | null | undefined) => (
-    selectedPricingProvider !== 'global' && effective !== undefined ? (
-      <div style={{ marginTop: '4px', fontSize: '11px', color: 'var(--text-muted)', lineHeight: 1.4 }}>
-        <div style={{ color: 'var(--text-secondary)', fontWeight: 600 }}>{t('Effective:')} {formatPrice(effective)}</div>
-        <div>{t('Base:')} {formatPrice(base)}</div>
-      </div>
-    ) : null
-  )
+      : t('Unknown')
 
   return (
     <div className="settings-page" style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
@@ -354,163 +336,6 @@ export function SettingsPage({ providerColors }: Props) {
               </table>
             </div>
           </div>
-
-      <div className="panel">
-        <div className="panel-tabs" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <div className="tab active"><span>💎</span> {t('Model Pricing')}</div>
-          <div style={{ paddingRight: '20px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <span style={{ fontSize: '11px', fontWeight: 500, color: 'var(--text-muted)', textTransform: 'uppercase' }}>{t('Scope:')}</span>
-            <select
-              value={selectedPricingProvider}
-              onChange={(e) => setSelectedPricingProvider(e.target.value)}
-              style={{
-                padding: '4px 12px',
-                borderRadius: '6px',
-                border: '1px solid var(--border-color)',
-                fontSize: '13px',
-                fontWeight: 600,
-                background: 'var(--surface-hover)',
-                outline: 'none'
-              }}
-            >
-              <option value="global">{t('Global Default')}</option>
-              {configParsed?.providers && Object.keys(configParsed.providers).map(p => (
-                <option key={p} value={p}>{t('Provider:')} {p}</option>
-              ))}
-            </select>
-            {selectedPricingProvider !== 'global' && (
-              <span style={{ fontSize: '11px', color: 'var(--text-secondary)', fontWeight: 600 }}>
-                {t('Multiplier:')} {pricingMultiplier.toFixed(3)}x
-              </span>
-            )}
-          </div>
-        </div>
-        <div style={{ padding: '8px 16px' }}>
-          <input
-            type="text"
-            placeholder={t('Search models...')}
-            value={pricingSearch}
-            onChange={(e) => setPricingSearch(e.target.value)}
-            style={{
-              width: '100%',
-              padding: '6px 12px',
-              borderRadius: '6px',
-              border: '1px solid var(--border-color)',
-              fontSize: '13px',
-              background: 'var(--input-bg)',
-              color: 'var(--text-primary)',
-              outline: 'none',
-            }}
-          />
-        </div>
-        <div className="panel-body" style={{ padding: '0', maxHeight: '600px', overflowY: 'auto' }}>
-          <table className="table">
-            <thead>
-              <tr>
-                <th style={{ width: '180px' }}>{t('Model')}</th>
-                <th>{t('Input (per 1M)')}</th>
-                <th>{t('Output (per 1M)')}</th>
-                <th>{t('Cache Read (per 1M)')}</th>
-                <th>{t('Cache Write (per 1M)')}</th>
-                <th style={{ width: '60px' }}>{t('Source')}</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filteredPricingModels.length > 0 ? filteredPricingModels.map((model) => {
-                const name = model.name;
-                const isYaml = model.source === 'yaml';
-                const globalCost = configParsed?.models?.[name]?.cost || {};
-                const providerCost = selectedPricingProvider !== 'global'
-                  ? (configParsed?.providers?.[selectedPricingProvider]?.models?.[name]?.cost || {})
-                  : null;
-                const hasProviderOverride = providerCost !== null && Object.keys(providerCost).length > 0;
-                const activeCost = hasProviderOverride ? providerCost : globalCost;
-                const modelPrice = (field: string) => {
-                  if (field === 'cacheRead') return model.cache_read;
-                  if (field === 'cacheWrite') return model.cache_write;
-                  return model[field as keyof PricingEntry] as number | null | undefined;
-                };
-
-                const inputProps = (field: string) => {
-                  const price = modelPrice(field);
-                  return {
-                    type: "number",
-                    step: "0.001",
-                    value: activeCost[field] !== undefined ? activeCost[field] : "",
-                    placeholder: activeCost[field] !== undefined
-                      ? String(activeCost[field])
-                      : price !== undefined && price !== null ? String(price) : "—",
-                    onChange: (e: React.ChangeEvent<HTMLInputElement>) => handleCostChange(name, field, e.target.value),
-                    style: {
-                      width: '100%',
-                      padding: '6px 8px',
-                      borderRadius: '4px',
-                      border: '1px solid transparent',
-                      background: !isYaml && activeCost[field] === undefined ? 'transparent' : 'var(--input-bg)',
-                      borderBottom: '1px solid var(--border-color)',
-                      fontSize: '13px',
-                      color: !isYaml && activeCost[field] === undefined ? 'var(--text-muted)' : 'var(--text-primary)',
-                      outline: 'none',
-                      textAlign: 'left' as const
-                    }
-                  };
-                };
-
-                return (
-                  <tr key={name} style={{ background: hasProviderOverride ? 'var(--icon-yellow-bg)' : isYaml ? 'rgba(255, 215, 0, 0.05)' : 'transparent' }}>
-                    <td style={{ fontWeight: 700 }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                        {getModelIcon(name)}
-                        {name}
-                        {hasProviderOverride && <span title={t('Provider Override')} style={{ fontSize: '10px' }}>💰</span>}
-                      </div>
-                    </td>
-                    <td>
-                      <input {...inputProps('input')} />
-                      {providerPriceDetail(model.input, model.effective_input)}
-                    </td>
-                    <td>
-                      <input {...inputProps('output')} />
-                      {providerPriceDetail(model.output, model.effective_output)}
-                    </td>
-                    <td>
-                      <input {...inputProps('cacheRead')} />
-                      {providerPriceDetail(model.cache_read, model.effective_cache_read)}
-                    </td>
-                    <td>
-                      <input {...inputProps('cacheWrite')} />
-                      {providerPriceDetail(model.cache_write, model.effective_cache_write)}
-                    </td>
-                    <td>
-                      <span style={{
-                        fontSize: '10px',
-                        fontWeight: 600,
-                        padding: '2px 6px',
-                        borderRadius: '4px',
-                        background: isYaml ? 'var(--icon-yellow-bg)' : 'var(--surface-hover)',
-                        color: isYaml ? '#b8860b' : 'var(--text-muted)',
-                      }}>
-                        {isYaml ? 'YAML' : model.source}
-                      </span>
-                    </td>
-                  </tr>
-                );
-              }) : (
-                <tr>
-                  <td colSpan={6} style={{ textAlign: 'center', padding: '24px', color: 'var(--text-muted)' }}>
-                    {pricingSearch ? t('No models match your search.') : t('No pricing data available.')}
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
-        {filteredPricingModels.length > 0 && (
-          <div style={{ padding: '8px 16px', fontSize: '11px', color: 'var(--text-muted)', borderTop: '1px solid var(--border-color)' }}>
-            {t('Showing')} {filteredPricingModels.length} {t('models')} ({filteredPricingModels.filter(m => m.source === 'yaml').length} {t('YAML')}, {filteredPricingModels.filter(m => m.source !== 'yaml').length} {t('auto')})
-          </div>
-        )}
-      </div>
 
       <div className="panel">
         <div className="panel-tabs">

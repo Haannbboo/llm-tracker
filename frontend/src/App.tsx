@@ -6,6 +6,7 @@ import { Navbar } from './components/Navbar'
 import { LoginGate } from './components/LoginGate'
 import { DashboardPage } from './pages/DashboardPage'
 import { LogsPage } from './pages/LogsPage'
+import { PricingPage } from './pages/PricingPage'
 import { SettingsPage } from './pages/SettingsPage'
 
 
@@ -15,11 +16,13 @@ function AppLayout() {
 
   const currentView = location.pathname.startsWith('/logs')
     ? 'logs'
-    : location.pathname.startsWith('/settings')
-      ? 'settings'
-      : 'dashboard'
+    : location.pathname.startsWith('/pricing')
+      ? 'pricing'
+      : location.pathname.startsWith('/settings')
+        ? 'settings'
+        : 'dashboard'
 
-  const handleNavigate = useCallback((view: 'dashboard' | 'logs' | 'settings') => {
+  const handleNavigate = useCallback((view: 'dashboard' | 'logs' | 'pricing' | 'settings') => {
     navigate(`/${view}`)
   }, [navigate])
 
@@ -40,6 +43,7 @@ function AppLayout() {
           <Routes>
             <Route path="/dashboard" element={<DashboardPage onNavigateToLogs={handleNavigateToLogs} />} />
             <Route path="/logs" element={<LogsPage />} />
+            <Route path="/pricing" element={<PricingPage />} />
             <Route path="/settings" element={<SettingsPage />} />
             <Route path="*" element={<Navigate to="/dashboard" replace />} />
           </Routes>

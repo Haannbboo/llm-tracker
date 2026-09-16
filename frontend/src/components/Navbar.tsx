@@ -1,7 +1,7 @@
 import { t } from '../i18n/index.ts'
 import { useApp } from '../contexts/AppContext'
 
-type View = 'dashboard' | 'logs' | 'settings'
+type View = 'dashboard' | 'logs' | 'pricing' | 'settings'
 
 export function Navbar({ currentView, onNavigate }: { currentView: View; onNavigate: (v: View) => void }) {
   const { theme, toggleThemeHandler, lang, setLang, auth } = useApp()
@@ -23,6 +23,9 @@ export function Navbar({ currentView, onNavigate }: { currentView: View; onNavig
         </button>
         <button className={`nav-item ${currentView === 'logs' ? 'active' : ''}`} onClick={() => onNavigate('logs')}>
           📜 {t('Request Logs')}
+        </button>
+        <button className={`nav-item ${currentView === 'pricing' ? 'active' : ''}`} onClick={() => onNavigate('pricing')}>
+          💎 {t('Pricing')}
         </button>
         <button className={`nav-item nav-item-settings ${currentView === 'settings' ? 'active' : ''}`} onClick={() => onNavigate('settings')}>
           {auth.enabled && auth.user ? (

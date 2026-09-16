@@ -467,4 +467,19 @@ export const zh: Record<string, string> = {
   'Cost recalculated': '费用已重新计算',
   'Failed to recalculate cost': '重新计算费用失败',
   'No current pricing match — cost left unchanged': '未找到当前定价匹配项，费用未变更',
+
+  // Pricing page
+  'Pricing': '定价',
+  'Details': '详情',
+  'All': '全部',
+  'Save Pricing': '保存定价',
+  'Effective:': '实际:',
+  'Base:': '基准:',
+  'Token tiers': 'Token 阶梯价',
+  'Time-of-day rates': '时段价格',
+  'Window (UTC)': '时段 (UTC)',
+  'Days': '星期',
+  'Every day': '每天',
+  'Range (tokens)': '区间 (tokens)',
+  'Precedence: YAML overrides win; otherwise the configured price sources are checked in order (earlier wins), then a containing-name fallback.': '优先级：YAML 覆盖优先；否则按配置的定价源顺序查找（靠前者优先），最后按包含名称回退匹配。',
 }
