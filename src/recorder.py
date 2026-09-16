@@ -6,15 +6,22 @@ resolution, Usage construction, and persistence.
 
 from __future__ import annotations
 
+import logging
 import time
+from datetime import datetime, timezone
 
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
-from .costs import calculate_costs
 from .database.base_url import resolve_base_url_id
 from .database.models import ToolCall, Usage
 from .database.usage import log_usage, merge_duplicate_usage
+from .pricing.costs import ResolvedPricing, calculate_costs, resolve_pricing
+from .pricing.models import normalize_model_cost_key
+from .pricing.snapshots import ensure_price_snapshot
+from .utils import micros_to_secs
+
+log = logging.getLogger(__name__)
 
 
 def record_usage(
@@ -74,6 +81,7 @@ def record_usage(
     if duplicate is not None:
         return duplicate
 
+    resolved = resolve_pricing(provider, model, usage_ts)
     costs = calculate_costs(
         prompt_tokens=prompt_tokens,
         completion_tokens=completion_tokens,
@@ -81,6 +89,8 @@ def record_usage(
         cache_creation_tokens=cache_creation_tokens,
         provider=provider,
         model=model,
+        model_cost=resolved.cost,
+        multiplier=resolved.multiplier,
     )
     base_url_id = resolve_base_url_id(
         base_url=base_url,
@@ -88,6 +98,11 @@ def record_usage(
         provider_name=base_url_provider or provider,
         source=base_url_source,
     )
+
+    # Snapshot the pricing that was in effect so the row's cost split can be
+    # recomputed exactly later. Best-effort: a snapshot failure must never turn
+    # a persisted usage row into a failed request.
+    snapshot_id = _record_price_snapshot(resolved, provider, model, usage_ts, db_path)
 
     usage = Usage(
         ts=usage_ts,
@@ -110,10 +125,39 @@ def record_usage(
         status=status,
         client_ip=client_ip,
         base_url_id=base_url_id,
+        price_snapshot_id=snapshot_id,
         **costs,
     )
     log_usage(usage, db_path=db_path)
     return usage
+
+
+def _record_price_snapshot(
+    resolved: ResolvedPricing,
+    provider: str,
+    model: str,
+    usage_ts: int,
+    db_path: str | None,
+) -> int | None:
+    """Persist the exact rates used for this row, returning the snapshot id."""
+    if resolved.match is None:
+        return None
+    date = datetime.fromtimestamp(micros_to_secs(usage_ts), tz=timezone.utc).strftime(
+        "%Y-%m-%d"
+    )
+    try:
+        return ensure_price_snapshot(
+            date=date,
+            provider=provider,
+            model=normalize_model_cost_key(model),
+            source=resolved.source or "unknown",
+            cost=resolved.cost,
+            multiplier=resolved.multiplier,
+            db_path=db_path,
+        )
+    except Exception:
+        log.warning("Failed to record price snapshot for %s/%s", provider, model)
+        return None
 
 
 def normalize_tool_name(tool_name: str) -> str:

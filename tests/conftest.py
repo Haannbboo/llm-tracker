@@ -56,10 +56,10 @@ PROJECT_MODULES = [
     "src.api",
     "src.auth",
     "src.cli",
-    "src.costs",
     "src.database",
     "src.evaluation",
     "src.evaluation_worker",
+    "src.pricing",
     "src.schema_migrations",
     "src.otlp",
     "src.proxy",
@@ -129,6 +129,11 @@ def config_module(load_module: Callable[[str], ModuleType]) -> ModuleType:
 
 
 @pytest.fixture
+def pricing_maps_module(load_module: Callable[[str], ModuleType]) -> ModuleType:
+    return load_module("src.pricing.maps")
+
+
+@pytest.fixture
 def api_module(load_module: Callable[[str], ModuleType]) -> ModuleType:
     return load_module("src.api")
 
@@ -140,7 +145,7 @@ def cli_module(load_module: Callable[[str], ModuleType]) -> ModuleType:
 
 @pytest.fixture
 def costs_module(load_module: Callable[[str], ModuleType]) -> ModuleType:
-    return load_module("src.costs")
+    return load_module("src.pricing.costs")
 
 
 @pytest.fixture
@@ -192,6 +197,7 @@ def runtime_ports_module(load_module: Callable[[str], ModuleType]) -> ModuleType
 # data will leak between fresh_db tests and cause spurious failures.
 # Verify with: list of tables should match inspect(engine).get_table_names()
 _TRUNCATE_TABLES = [
+    "price_snapshots",
     "usage_daily",
     "tool_calls",
     "evaluation_jobs",

@@ -1,27 +1,29 @@
 from decimal import Decimal
 
 
-def _sync_segment_index(config_module):
-    config_module.MODEL_SEGMENT_COSTS.clear()
-    config_module.MODEL_SEGMENT_COSTS.update(
-        config_module.build_segment_index(config_module.MODEL_COSTS)
+def _sync_segment_index(pricing_maps_module):
+    pricing_maps_module.MODEL_SEGMENT_COSTS.clear()
+    pricing_maps_module.MODEL_SEGMENT_COSTS.update(
+        pricing_maps_module.build_segment_index(pricing_maps_module.MODEL_COSTS)
     )
-    config_module.PROVIDER_MODEL_SEGMENT_COSTS.clear()
-    config_module.PROVIDER_MODEL_SEGMENT_COSTS.update(
+    pricing_maps_module.PROVIDER_MODEL_SEGMENT_COSTS.clear()
+    pricing_maps_module.PROVIDER_MODEL_SEGMENT_COSTS.update(
         {
-            provider: config_module.build_segment_index(costs)
-            for provider, costs in config_module.PROVIDER_MODEL_COSTS.items()
+            provider: pricing_maps_module.build_segment_index(costs)
+            for provider, costs in pricing_maps_module.PROVIDER_MODEL_COSTS.items()
         }
     )
 
 
-def test_build_segment_index_keeps_cheapest_per_segment(config_module):
-    index = config_module.build_segment_index(
+def test_build_segment_index_keeps_cheapest_per_segment(
+    config_module, pricing_maps_module
+):
+    index = pricing_maps_module.build_segment_index(
         {
-            "openrouter/xiaomi/mimo-v2.5-pro": config_module.ModelCost(
+            "openrouter/xiaomi/mimo-v2.5-pro": pricing_maps_module.ModelCost(
                 input=1.0, output=3.0, cache_read=0.2
             ),
-            "gateway/xiaomi/mimo-v2.5-pro": config_module.ModelCost(
+            "gateway/xiaomi/mimo-v2.5-pro": pricing_maps_module.ModelCost(
                 input=0.5, output=1.0, cache_read=0.1
             ),
         }
@@ -29,26 +31,28 @@ def test_build_segment_index_keeps_cheapest_per_segment(config_module):
 
     assert index["mimo-v2.5-pro"] == (
         "gateway/xiaomi/mimo-v2.5-pro",
-        config_module.ModelCost(input=0.5, output=1.0, cache_read=0.1),
+        pricing_maps_module.ModelCost(input=0.5, output=1.0, cache_read=0.1),
     )
 
 
-def test_resolve_model_cost_prefers_provider_override(costs_module, config_module):
-    config_module.MODEL_COSTS.clear()
-    config_module.MODEL_COSTS.update(
+def test_resolve_model_cost_prefers_provider_override(
+    costs_module, config_module, pricing_maps_module
+):
+    pricing_maps_module.MODEL_COSTS.clear()
+    pricing_maps_module.MODEL_COSTS.update(
         {
-            "alpha-1": config_module.ModelCost(
+            "alpha-1": pricing_maps_module.ModelCost(
                 input=1.0,
                 output=2.0,
                 cache_read=0.1,
             )
         }
     )
-    config_module.PROVIDER_MODEL_COSTS.clear()
-    config_module.PROVIDER_MODEL_COSTS.update(
+    pricing_maps_module.PROVIDER_MODEL_COSTS.clear()
+    pricing_maps_module.PROVIDER_MODEL_COSTS.update(
         {
             "alpha": {
-                "alpha-1": config_module.ModelCost(
+                "alpha-1": pricing_maps_module.ModelCost(
                     input=3.0,
                     output=4.0,
                     cache_read=0.3,
@@ -59,29 +63,31 @@ def test_resolve_model_cost_prefers_provider_override(costs_module, config_modul
 
     assert costs_module.resolve_model_cost(
         "alpha", "alpha-1"
-    ) == config_module.ModelCost(
+    ) == pricing_maps_module.ModelCost(
         input=3.0,
         output=4.0,
         cache_read=0.3,
     )
 
 
-def test_resolve_model_cost_falls_back_to_global(costs_module, config_module):
-    config_module.MODEL_COSTS.clear()
-    config_module.MODEL_COSTS.update(
+def test_resolve_model_cost_falls_back_to_global(
+    costs_module, config_module, pricing_maps_module
+):
+    pricing_maps_module.MODEL_COSTS.clear()
+    pricing_maps_module.MODEL_COSTS.update(
         {
-            "alpha-1": config_module.ModelCost(
+            "alpha-1": pricing_maps_module.ModelCost(
                 input=1.5,
                 output=2.5,
                 cache_read=0.15,
             )
         }
     )
-    config_module.PROVIDER_MODEL_COSTS.clear()
+    pricing_maps_module.PROVIDER_MODEL_COSTS.clear()
 
     assert costs_module.resolve_model_cost(
         "alpha", "alpha-1"
-    ) == config_module.ModelCost(
+    ) == pricing_maps_module.ModelCost(
         input=1.5,
         output=2.5,
         cache_read=0.15,
@@ -89,110 +95,116 @@ def test_resolve_model_cost_falls_back_to_global(costs_module, config_module):
 
 
 def test_resolve_model_cost_matches_model_names_case_insensitively(
-    costs_module, config_module
+    costs_module, config_module, pricing_maps_module
 ):
-    config_module.MODEL_COSTS.clear()
-    config_module.MODEL_COSTS.update(
+    pricing_maps_module.MODEL_COSTS.clear()
+    pricing_maps_module.MODEL_COSTS.update(
         {
-            "minimax-m2.7": config_module.ModelCost(
+            "minimax-m2.7": pricing_maps_module.ModelCost(
                 input=1.5,
                 output=2.5,
                 cache_read=0.15,
             )
         }
     )
-    config_module.PROVIDER_MODEL_COSTS.clear()
+    pricing_maps_module.PROVIDER_MODEL_COSTS.clear()
 
     assert costs_module.resolve_model_cost(
         "alpha", "MiniMax-M2.7"
-    ) == config_module.ModelCost(
+    ) == pricing_maps_module.ModelCost(
         input=1.5,
         output=2.5,
         cache_read=0.15,
     )
 
 
-def test_resolve_model_cost_matches_containing_model_name(costs_module, config_module):
-    config_module.MODEL_COSTS.clear()
-    config_module.MODEL_COSTS.update(
+def test_resolve_model_cost_matches_containing_model_name(
+    costs_module, config_module, pricing_maps_module
+):
+    pricing_maps_module.MODEL_COSTS.clear()
+    pricing_maps_module.MODEL_COSTS.update(
         {
-            "openrouter/xiaomi/mimo-v2.5-pro": config_module.ModelCost(
+            "openrouter/xiaomi/mimo-v2.5-pro": pricing_maps_module.ModelCost(
                 input=1.0,
                 output=3.0,
                 cache_read=0.2,
             )
         }
     )
-    config_module.PROVIDER_MODEL_COSTS.clear()
+    pricing_maps_module.PROVIDER_MODEL_COSTS.clear()
 
-    _sync_segment_index(config_module)
+    _sync_segment_index(pricing_maps_module)
 
     assert costs_module.resolve_model_cost(
         "openrouter", "mimo-v2.5-pro"
-    ) == config_module.ModelCost(input=1.0, output=3.0, cache_read=0.2)
+    ) == pricing_maps_module.ModelCost(input=1.0, output=3.0, cache_read=0.2)
 
 
-def test_resolve_model_cost_uses_cheapest_containing_match(costs_module, config_module):
-    config_module.MODEL_COSTS.clear()
-    config_module.MODEL_COSTS.update(
+def test_resolve_model_cost_uses_cheapest_containing_match(
+    costs_module, config_module, pricing_maps_module
+):
+    pricing_maps_module.MODEL_COSTS.clear()
+    pricing_maps_module.MODEL_COSTS.update(
         {
-            "openrouter/xiaomi/mimo-v2.5-pro": config_module.ModelCost(
+            "openrouter/xiaomi/mimo-v2.5-pro": pricing_maps_module.ModelCost(
                 input=1.0,
                 output=3.0,
                 cache_read=0.2,
             ),
-            "gateway/xiaomi/mimo-v2.5-pro": config_module.ModelCost(
+            "gateway/xiaomi/mimo-v2.5-pro": pricing_maps_module.ModelCost(
                 input=0.5,
                 output=1.0,
                 cache_read=0.1,
             ),
         }
     )
-    config_module.PROVIDER_MODEL_COSTS.clear()
+    pricing_maps_module.PROVIDER_MODEL_COSTS.clear()
 
-    _sync_segment_index(config_module)
+    _sync_segment_index(pricing_maps_module)
 
     assert costs_module.resolve_model_cost(
         "openrouter", "mimo-v2.5-pro"
-    ) == config_module.ModelCost(input=0.5, output=1.0, cache_read=0.1)
+    ) == pricing_maps_module.ModelCost(input=0.5, output=1.0, cache_read=0.1)
 
 
-def test_resolve_model_cost_does_not_match_model_variant(costs_module, config_module):
-    config_module.MODEL_COSTS.clear()
-    config_module.MODEL_COSTS.update(
+def test_resolve_model_cost_does_not_match_model_variant(
+    costs_module, config_module, pricing_maps_module
+):
+    pricing_maps_module.MODEL_COSTS.clear()
+    pricing_maps_module.MODEL_COSTS.update(
         {
-            "openrouter/openai/gpt-5-mini": config_module.ModelCost(
+            "openrouter/openai/gpt-5-mini": pricing_maps_module.ModelCost(
                 input=0.25,
                 output=2.0,
                 cache_read=0.025,
             )
         }
     )
-    config_module.PROVIDER_MODEL_COSTS.clear()
+    pricing_maps_module.PROVIDER_MODEL_COSTS.clear()
 
-    _sync_segment_index(config_module)
+    _sync_segment_index(pricing_maps_module)
 
     assert costs_module.resolve_model_cost("openrouter", "gpt-5") is None
 
 
 def test_resolve_model_cost_prefers_provider_containing_match(
-    costs_module, config_module
+    costs_module, config_module, pricing_maps_module
 ):
-    config_module.MODEL_COSTS.clear()
-    config_module.MODEL_COSTS.update(
+    pricing_maps_module.MODEL_COSTS.clear()
+    pricing_maps_module.MODEL_COSTS.update(
         {
-            "openrouter/xiaomi/mimo-v2.5-pro": config_module.ModelCost(
+            "openrouter/xiaomi/mimo-v2.5-pro": pricing_maps_module.ModelCost(
                 input=0.1,
                 output=0.1,
                 cache_read=0.1,
             )
         }
     )
-    config_module.PROVIDER_MODEL_COSTS.clear()
-    config_module.PROVIDER_MODEL_COSTS.update(
+    pricing_maps_module.PROVIDER_MODEL_COSTS.clear()
+    pricing_maps_module.PROVIDER_MODEL_COSTS.update(
         {
             "x": {
-                "gateway/mimo-v2.5-pro": config_module.ModelCost(
+                "gateway/mimo-v2.5-pro": pricing_maps_module.ModelCost(
                     input=2.0,
                     output=3.0,
                     cache_read=0.2,
@@ -201,31 +213,31 @@ def test_resolve_model_cost_prefers_provider_containing_match(
         }
     )
 
-    _sync_segment_index(config_module)
+    _sync_segment_index(pricing_maps_module)
 
     assert costs_module.resolve_model_cost(
         "x", "mimo-v2.5-pro"
-    ) == config_module.ModelCost(input=2.0, output=3.0, cache_read=0.2)
+    ) == pricing_maps_module.ModelCost(input=2.0, output=3.0, cache_read=0.2)
 
 
 def test_resolve_model_cost_global_exact_beats_provider_containing(
-    costs_module, config_module
+    costs_module, config_module, pricing_maps_module
 ):
-    config_module.MODEL_COSTS.clear()
-    config_module.MODEL_COSTS.update(
+    pricing_maps_module.MODEL_COSTS.clear()
+    pricing_maps_module.MODEL_COSTS.update(
         {
-            "mimo-v2.5-pro": config_module.ModelCost(
+            "mimo-v2.5-pro": pricing_maps_module.ModelCost(
                 input=1.0,
                 output=2.0,
                 cache_read=0.1,
             )
         }
     )
-    config_module.PROVIDER_MODEL_COSTS.clear()
-    config_module.PROVIDER_MODEL_COSTS.update(
+    pricing_maps_module.PROVIDER_MODEL_COSTS.clear()
+    pricing_maps_module.PROVIDER_MODEL_COSTS.update(
         {
             "x": {
-                "gateway/mimo-v2.5-pro": config_module.ModelCost(
+                "gateway/mimo-v2.5-pro": pricing_maps_module.ModelCost(
                     input=5.0,
                     output=6.0,
                     cache_read=0.5,
@@ -234,24 +246,28 @@ def test_resolve_model_cost_global_exact_beats_provider_containing(
         }
     )
 
-    _sync_segment_index(config_module)
+    _sync_segment_index(pricing_maps_module)
 
     assert costs_module.resolve_model_cost(
         "x", "mimo-v2.5-pro"
-    ) == config_module.ModelCost(input=1.0, output=2.0, cache_read=0.1)
+    ) == pricing_maps_module.ModelCost(input=1.0, output=2.0, cache_read=0.1)
 
 
-def test_resolve_model_cost_returns_none_for_unknown_model(costs_module, config_module):
-    config_module.MODEL_COSTS.clear()
-    config_module.PROVIDER_MODEL_COSTS.clear()
+def test_resolve_model_cost_returns_none_for_unknown_model(
+    costs_module, config_module, pricing_maps_module
+):
+    pricing_maps_module.MODEL_COSTS.clear()
+    pricing_maps_module.PROVIDER_MODEL_COSTS.clear()
 
     assert costs_module.resolve_model_cost("missing", "missing-model") is None
 
 
-def test_calculate_costs_computes_provider_model_costs(costs_module, config_module):
-    config_module.MODEL_COSTS.clear()
+def test_calculate_costs_computes_provider_model_costs(
+    costs_module, config_module, pricing_maps_module
+):
+    pricing_maps_module.MODEL_COSTS.clear()
     config_module.PROVIDER_MAP.clear()
-    config_module.PROVIDER_MODEL_COSTS.clear()
+    pricing_maps_module.PROVIDER_MODEL_COSTS.clear()
     config_module.PROVIDER_MAP.update(
         {
             "alpha": config_module.ProviderConfig(
@@ -259,10 +275,10 @@ def test_calculate_costs_computes_provider_model_costs(costs_module, config_modu
             )
         }
     )
-    config_module.PROVIDER_MODEL_COSTS.update(
+    pricing_maps_module.PROVIDER_MODEL_COSTS.update(
         {
             "alpha": {
-                "alpha-1": config_module.ModelCost(
+                "alpha-1": pricing_maps_module.ModelCost(
                     input=2.0,
                     output=6.0,
                     cache_read=0.5,
@@ -303,12 +319,14 @@ def test_calculate_costs_returns_zero_for_missing_pricing(costs_module, config_m
     }
 
 
-def test_calculate_costs_clamps_negative_uncached_input(costs_module, config_module):
+def test_calculate_costs_clamps_negative_uncached_input(
+    costs_module, config_module, pricing_maps_module
+):
     result = costs_module.calculate_costs(
         prompt_tokens=50,
         completion_tokens=0,
         cached_tokens=100,
-        model_cost=config_module.ModelCost(input=2.0, output=4.0, cache_read=0.5),
+        model_cost=pricing_maps_module.ModelCost(input=2.0, output=4.0, cache_read=0.5),
     )
 
     assert result == {
@@ -318,13 +336,15 @@ def test_calculate_costs_clamps_negative_uncached_input(costs_module, config_mod
     }
 
 
-def test_calculate_costs_includes_cache_write_cost(costs_module, config_module):
+def test_calculate_costs_includes_cache_write_cost(
+    costs_module, config_module, pricing_maps_module
+):
     result = costs_module.calculate_costs(
         prompt_tokens=1000,
         completion_tokens=500,
         cached_tokens=200,
         cache_creation_tokens=100,
-        model_cost=config_module.ModelCost(
+        model_cost=pricing_maps_module.ModelCost(
             input=2.0, output=4.0, cache_read=0.5, cache_write=3.0
         ),
     )
@@ -339,14 +359,14 @@ def test_calculate_costs_includes_cache_write_cost(costs_module, config_module):
 
 
 def test_calculate_costs_treats_missing_cache_write_price_as_zero(
-    costs_module, config_module
+    costs_module, config_module, pricing_maps_module
 ):
     result = costs_module.calculate_costs(
         prompt_tokens=1000,
         completion_tokens=0,
         cached_tokens=0,
         cache_creation_tokens=500,
-        model_cost=config_module.ModelCost(input=2.0, output=4.0, cache_read=0.5),
+        model_cost=pricing_maps_module.ModelCost(input=2.0, output=4.0, cache_read=0.5),
     )
 
     assert result == {
@@ -356,9 +376,11 @@ def test_calculate_costs_treats_missing_cache_write_price_as_zero(
     }
 
 
-def test_calculate_costs_applies_provider_price_multiplier(costs_module, config_module):
-    config_module.MODEL_COSTS.clear()
-    config_module.PROVIDER_MODEL_COSTS.clear()
+def test_calculate_costs_applies_provider_price_multiplier(
+    costs_module, config_module, pricing_maps_module
+):
+    pricing_maps_module.MODEL_COSTS.clear()
+    pricing_maps_module.PROVIDER_MODEL_COSTS.clear()
     config_module.PROVIDER_MAP.clear()
     config_module.PROVIDER_MAP.update(
         {
@@ -367,10 +389,10 @@ def test_calculate_costs_applies_provider_price_multiplier(costs_module, config_
             )
         }
     )
-    config_module.PROVIDER_MODEL_COSTS.update(
+    pricing_maps_module.PROVIDER_MODEL_COSTS.update(
         {
             "alpha": {
-                "alpha-1": config_module.ModelCost(
+                "alpha-1": pricing_maps_module.ModelCost(
                     input=2.0,
                     output=6.0,
                     cache_read=0.5,
@@ -394,20 +416,20 @@ def test_calculate_costs_applies_provider_price_multiplier(costs_module, config_
     }
 
 
-def _tiered_cost(config_module):
-    return config_module.ModelCost(
+def _tiered_cost(pricing_maps_module):
+    return pricing_maps_module.ModelCost(
         input=0.4,
         output=1.6,
         cache_read=0.08,
         tiers=(
-            config_module.ModelTier(
+            pricing_maps_module.ModelTier(
                 min_tokens=0,
                 max_tokens=256000,
                 input=0.4,
                 output=1.6,
                 cache_read=0.08,
             ),
-            config_module.ModelTier(
+            pricing_maps_module.ModelTier(
                 min_tokens=256000,
                 max_tokens=1000000,
                 input=1.2,
@@ -418,12 +440,14 @@ def _tiered_cost(config_module):
     )
 
 
-def test_calculate_costs_uses_first_tier_below_range(costs_module, config_module):
+def test_calculate_costs_uses_first_tier_below_range(
+    costs_module, config_module, pricing_maps_module
+):
     result = costs_module.calculate_costs(
         prompt_tokens=1000,
         completion_tokens=500,
         cached_tokens=200,
-        model_cost=_tiered_cost(config_module),
+        model_cost=_tiered_cost(pricing_maps_module),
     )
 
     # input: 800*0.4/1e6, cache_read: 200*0.08/1e6, output: 500*1.6/1e6
@@ -434,12 +458,14 @@ def test_calculate_costs_uses_first_tier_below_range(costs_module, config_module
     }
 
 
-def test_calculate_costs_uses_second_tier_for_long_context(costs_module, config_module):
+def test_calculate_costs_uses_second_tier_for_long_context(
+    costs_module, config_module, pricing_maps_module
+):
     result = costs_module.calculate_costs(
         prompt_tokens=300000,
         completion_tokens=500,
         cached_tokens=100000,
-        model_cost=_tiered_cost(config_module),
+        model_cost=_tiered_cost(pricing_maps_module),
     )
 
     # input: 200000*1.2/1e6, cache_read: 100000*0.24/1e6, output: 500*4.8/1e6
@@ -451,13 +477,13 @@ def test_calculate_costs_uses_second_tier_for_long_context(costs_module, config_
 
 
 def test_calculate_costs_falls_back_to_last_tier_above_range(
-    costs_module, config_module
+    costs_module, config_module, pricing_maps_module
 ):
     result = costs_module.calculate_costs(
         prompt_tokens=2000000,
         completion_tokens=0,
         cached_tokens=0,
-        model_cost=_tiered_cost(config_module),
+        model_cost=_tiered_cost(pricing_maps_module),
     )
 
     assert result == {
@@ -468,14 +494,14 @@ def test_calculate_costs_falls_back_to_last_tier_above_range(
 
 
 def test_calculate_costs_tier_selection_counts_cache_creation_tokens(
-    costs_module, config_module
+    costs_module, config_module, pricing_maps_module
 ):
     result = costs_module.calculate_costs(
         prompt_tokens=256000,
         completion_tokens=0,
         cached_tokens=0,
         cache_creation_tokens=100,
-        model_cost=_tiered_cost(config_module),
+        model_cost=_tiered_cost(pricing_maps_module),
     )
 
     # 256100 total input tokens crosses into the second tier (input price 1.2);
@@ -484,27 +510,29 @@ def test_calculate_costs_tier_selection_counts_cache_creation_tokens(
 
 
 def test_calculate_costs_tier_boundary_uses_next_tier_at_exact_max(
-    costs_module, config_module
+    costs_module, config_module, pricing_maps_module
 ):
     result = costs_module.calculate_costs(
         prompt_tokens=256000,
         completion_tokens=0,
         cached_tokens=0,
-        model_cost=_tiered_cost(config_module),
+        model_cost=_tiered_cost(pricing_maps_module),
     )
 
     # tokens == first tier's max_tokens: half-open range puts it in tier 2
     assert result["input_cost_usd"] == Decimal("0.3072")
 
 
-def test_calculate_costs_flat_cache_write_with_tiers(costs_module, config_module):
-    cost = config_module.ModelCost(
+def test_calculate_costs_flat_cache_write_with_tiers(
+    costs_module, config_module, pricing_maps_module
+):
+    cost = pricing_maps_module.ModelCost(
         input=0.4,
         output=1.6,
         cache_read=0.08,
         cache_write=3.0,
         tiers=(
-            config_module.ModelTier(
+            pricing_maps_module.ModelTier(
                 min_tokens=0, max_tokens=256000, input=0.4, output=1.6, cache_read=0.08
             ),
         ),
@@ -526,14 +554,16 @@ def test_calculate_costs_flat_cache_write_with_tiers(costs_module, config_module
     }
 
 
-def test_calculate_costs_uses_per_tier_cache_write_price(costs_module, config_module):
-    cost = config_module.ModelCost(
+def test_calculate_costs_uses_per_tier_cache_write_price(
+    costs_module, config_module, pricing_maps_module
+):
+    cost = pricing_maps_module.ModelCost(
         input=0.4,
         output=1.6,
         cache_read=0.08,
         cache_write=3.0,
         tiers=(
-            config_module.ModelTier(
+            pricing_maps_module.ModelTier(
                 min_tokens=0,
                 max_tokens=256000,
                 input=0.4,
@@ -541,7 +571,7 @@ def test_calculate_costs_uses_per_tier_cache_write_price(costs_module, config_mo
                 cache_read=0.08,
                 cache_write=3.0,
             ),
-            config_module.ModelTier(
+            pricing_maps_module.ModelTier(
                 min_tokens=256000,
                 max_tokens=1000000,
                 input=1.2,
@@ -565,7 +595,7 @@ def test_calculate_costs_uses_per_tier_cache_write_price(costs_module, config_mo
 
 
 def test_calculate_costs_tiered_pricing_applies_provider_multiplier(
-    costs_module, config_module
+    costs_module, config_module, pricing_maps_module
 ):
     config_module.PROVIDER_MAP.clear()
     config_module.PROVIDER_MAP.update(
@@ -581,7 +611,7 @@ def test_calculate_costs_tiered_pricing_applies_provider_multiplier(
         completion_tokens=500,
         cached_tokens=100000,
         provider="alpha",
-        model_cost=_tiered_cost(config_module),
+        model_cost=_tiered_cost(pricing_maps_module),
     )
 
     assert result == {

@@ -2,6 +2,13 @@ import time
 from typing import Any
 
 
+def replace_contents(target: dict, source: dict) -> None:
+    """Update target in place to match source without a clear-then-fill window."""
+    target.update(source)
+    for stale in set(target) - set(source):
+        del target[stale]
+
+
 def secs_to_micros(secs: int | float) -> int:
     """Convert epoch seconds to integer microseconds."""
     return round(secs * 1_000_000)
