@@ -8,6 +8,7 @@ from __future__ import annotations
 import calendar
 import json
 import logging
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from decimal import Decimal
@@ -30,7 +31,7 @@ from ..pricing.costs import calculate_costs, compute_input_split, resolve_pricin
 from ..pricing.models import normalize_model_cost_key
 from ..utils import micros_to_secs, secs_to_micros
 from .engine import get_engine
-from .models import BaseUrl, ToolCall, Usage, UsageDaily
+from .models import BaseUrl, PriceSnapshot, ToolCall, Usage, UsageDaily
 
 logger = logging.getLogger(__name__)
 
@@ -557,6 +558,72 @@ def recalculate_usage_cost(
         )
 
 
+def fetch_estimated_usage_ids(
+    *,
+    provider: str | None = None,
+    model: str | None = None,
+    since: str | None = None,
+    until: str | None = None,
+    limit: int | None = None,
+    db_path: str | None = None,
+) -> list[str]:
+    """Ids of usage rows not bound to a price snapshot (i.e. estimated)."""
+    filters = _usage_filters(provider=provider, model=model, since=since, until=until)
+    filters.append(Usage.price_snapshot_id.is_(None))
+    query = select(Usage.id).where(and_(*filters)).order_by(Usage.ts.asc())
+    if limit is not None:
+        query = query.limit(limit)
+    with get_engine(db_path).connect() as connection:
+        return [row[0] for row in connection.execute(query)]
+
+
+def reprice_estimated_rows(
+    *,
+    provider: str | None = None,
+    model: str | None = None,
+    since: str | None = None,
+    until: str | None = None,
+    limit: int | None = None,
+    model_costs: dict[str, Any] | None = None,
+    provider_model_costs: dict[str, dict[str, Any]] | None = None,
+    model_cost_sources: dict[str, str] | None = None,
+    provider_model_cost_sources: dict[str, dict[str, str]] | None = None,
+    db_path: str | None = None,
+) -> dict[str, int]:
+    """Rebind and recompute estimated (unbound) usage rows to current pricing.
+
+    Only rows with ``price_snapshot_id IS NULL`` are touched. Each row goes
+    through ``recalculate_usage_cost`` so stored costs, session/daily rollups,
+    and the snapshot binding stay consistent. Rows whose provider/model no
+    longer resolves are left untouched and counted as skipped. Pass explicit
+    ``model_costs`` / source maps to price every row from one pricing
+    generation; otherwise the runtime maps are used.
+    """
+    ids = fetch_estimated_usage_ids(
+        provider=provider,
+        model=model,
+        since=since,
+        until=until,
+        limit=limit,
+        db_path=db_path,
+    )
+    repriced = skipped = 0
+    for usage_id in ids:
+        result = recalculate_usage_cost(
+            usage_id,
+            model_costs=model_costs,
+            provider_model_costs=provider_model_costs,
+            model_cost_sources=model_cost_sources,
+            provider_model_cost_sources=provider_model_cost_sources,
+            db_path=db_path,
+        )
+        if result is None or result.skipped:
+            skipped += 1
+        else:
+            repriced += 1
+    return {"candidates": len(ids), "repriced": repriced, "skipped": skipped}
+
+
 USAGE_COPY_FIELDS = (
     "id",
     "user_id",
@@ -583,14 +650,39 @@ USAGE_COPY_FIELDS = (
     "client_ip",
 )
 
-# NOTE: price_snapshot_id is intentionally omitted from USAGE_COPY_FIELDS.
-# merge_usage_database does not copy the price_snapshots table, so copying the
-# id would dangle in the target DB. Merged rows read as estimated
-# (cost_estimated=True) until repriced there.
+# NOTE: price_snapshot_id is omitted from USAGE_COPY_FIELDS because its value is
+# remapped through the copied price_snapshots table in merge_usage_database.
+# _usage_copy_kwargs still mirrors the copied columns; the merge sets the
+# binding explicitly.
 
 
 def _usage_copy_kwargs(row: Usage) -> dict[str, Any]:
     return {field: getattr(row, field) for field in USAGE_COPY_FIELDS}
+
+
+def _copy_price_snapshots(
+    snapshots: Sequence[PriceSnapshot], target_db_path: str | None
+) -> dict[int, int]:
+    """Recreate source snapshots in the target; return {source_id: target_id}.
+
+    Content-addressed, so an identical rate set already in the target is reused
+    rather than duplicated.
+    """
+    from ..pricing.snapshots import ensure_price_snapshot, parse_rates
+
+    id_map: dict[int, int] = {}
+    for snap in snapshots:
+        cost, multiplier = parse_rates(snap.rates_json)
+        id_map[snap.id] = ensure_price_snapshot(
+            date=snap.date,
+            provider=snap.provider,
+            model=snap.model,
+            source=snap.source,
+            cost=cost,
+            multiplier=multiplier,
+            db_path=target_db_path,
+        )
+    return id_map
 
 
 def merge_usage_database(
@@ -612,6 +704,10 @@ def merge_usage_database(
             .order_by(Usage.id.asc())
         ).all()
         tool_calls = source.execute(select(ToolCall)).scalars().all()
+        snapshots = source.execute(select(PriceSnapshot)).scalars().all()
+
+    # Copy snapshots first so merged rows can be bound to their target ids.
+    snapshot_id_map = _copy_price_snapshots(snapshots, target_db_path)
 
     with Session(target_engine) as target:
         for row, base_url in rows:
@@ -623,9 +719,15 @@ def merge_usage_database(
                     provider_name=base_url.provider_name,
                     source=base_url.source,
                 )
+            copy_kwargs = _usage_copy_kwargs(row)
+            copy_kwargs["price_snapshot_id"] = (
+                snapshot_id_map.get(row.price_snapshot_id)
+                if row.price_snapshot_id is not None
+                else None
+            )
             target.add(
                 Usage(
-                    **_usage_copy_kwargs(row),
+                    **copy_kwargs,
                     base_url_id=base_url_id,
                 )
             )

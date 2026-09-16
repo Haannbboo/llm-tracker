@@ -490,7 +490,7 @@ export function SettingsPage({ providerColors }: Props) {
                         background: isYaml ? 'var(--icon-yellow-bg)' : 'var(--surface-hover)',
                         color: isYaml ? '#b8860b' : 'var(--text-muted)',
                       }}>
-                        {isYaml ? 'YAML' : 'Auto'}
+                        {isYaml ? 'YAML' : model.source}
                       </span>
                     </td>
                   </tr>
@@ -507,7 +507,7 @@ export function SettingsPage({ providerColors }: Props) {
         </div>
         {filteredPricingModels.length > 0 && (
           <div style={{ padding: '8px 16px', fontSize: '11px', color: 'var(--text-muted)', borderTop: '1px solid var(--border-color)' }}>
-            {t('Showing')} {filteredPricingModels.length} {t('models')} ({filteredPricingModels.filter(m => m.source === 'yaml').length} {t('YAML')}, {filteredPricingModels.filter(m => m.source === 'litellm').length} {t('auto')})
+            {t('Showing')} {filteredPricingModels.length} {t('models')} ({filteredPricingModels.filter(m => m.source === 'yaml').length} {t('YAML')}, {filteredPricingModels.filter(m => m.source !== 'yaml').length} {t('auto')})
           </div>
         )}
       </div>

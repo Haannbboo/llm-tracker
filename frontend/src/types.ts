@@ -261,7 +261,7 @@ export type OnboardingCopiedCommand = {
   command: string
 }
 
-export type PricingSource = 'yaml' | 'litellm'
+export type PricingSource = 'yaml' | 'litellm' | 'openrouter'
 
 export type PricingEntry = {
   input: number

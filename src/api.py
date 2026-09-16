@@ -55,6 +55,7 @@ from .database import (
     list_active_evaluation_jobs_with_progress,
     list_session_evaluation_jobs_with_progress,
     recalculate_usage_cost,
+    reprice_estimated_rows,
     summarize_session_tool_calls,
     summarize_sessions,
     summarize_tool_calls,
@@ -1085,7 +1086,8 @@ async def get_model_pricing(model: str, provider: str | None = None):
     """Return resolved pricing for a single model.
 
     Follows the same resolution used at record time: config overrides first,
-    then LiteLLM, with a containing-name fallback when no exact match exists.
+    then the configured price sources (in priority order), with a
+    containing-name fallback when no exact match exists.
     """
     if not model:
         raise HTTPException(status_code=422, detail="model must not be empty")
@@ -1144,7 +1146,7 @@ async def recalculate_usage_cost_route(usage_id: str):
     """Recompute one usage row's cost against current pricing.
 
     Uses the same live-resolved pricing snapshot as /pricing/{model} (config
-    overrides + freshest LiteLLM data), not the periodically-refreshed
+    overrides + freshest source data), not the periodically-refreshed
     record-time cache. Skips (leaves the row untouched) when the row's
     provider/model no longer resolves against current pricing, rather than
     overwriting with a zeroed fallback cost.
@@ -1181,6 +1183,49 @@ async def recalculate_usage_cost_route(usage_id: str):
         "cost_estimated": result.price_snapshot_id is None,
         "pricing": result.pricing,
     }
+
+
+@app.post("/usage/reprice", dependencies=[Depends(_require_local_profile)])
+async def reprice_estimated_usage(
+    provider: str | None = None,
+    model: str | None = None,
+    since: str | None = None,
+    until: str | None = None,
+    limit: int | None = None,
+):
+    """Reprice estimated (unbound) usage rows against current pricing.
+
+    Recomputes stored costs, session/daily rollups, and the snapshot binding for
+    every row with no ``price_snapshot_id``, optionally filtered by
+    provider/model/date range and capped with ``limit``. Rows whose
+    provider/model no longer resolves are left untouched and reported as
+    skipped. Bulk work runs in a worker thread; an unfiltered run over a large
+    history can take a while.
+    """
+    (
+        _config_snapshot,
+        _resolved,
+        model_costs,
+        provider_model_costs,
+    ) = await _resolve_live_cost_maps()
+    model_cost_sources = {key: rc.source for key, rc in _resolved.global_costs.items()}
+    provider_model_cost_sources = {
+        provider_name: {key: rc.source for key, rc in costs.items()}
+        for provider_name, costs in _resolved.provider_costs.items()
+    }
+
+    return await asyncio.to_thread(
+        reprice_estimated_rows,
+        provider=provider,
+        model=model,
+        since=since,
+        until=until,
+        limit=limit,
+        model_costs=model_costs,
+        provider_model_costs=provider_model_costs,
+        model_cost_sources=model_cost_sources,
+        provider_model_cost_sources=provider_model_cost_sources,
+    )
 
 
 @app.post("/test-connectivity")

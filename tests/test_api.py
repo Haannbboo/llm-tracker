@@ -47,6 +47,34 @@ def test_usage_high_watermark_endpoint(api_module, monkeypatch):
     assert result == {"ts": 1718000000000000}
 
 
+def test_reprice_estimated_usage_endpoint_passes_filters(api_module, monkeypatch):
+    from types import SimpleNamespace
+
+    async def fake_live_cost_maps():
+        resolved = SimpleNamespace(global_costs={}, provider_costs={})
+        return {}, resolved, {}, {}
+
+    captured = {}
+
+    def fake_reprice(**kwargs):
+        captured.update(kwargs)
+        return {"candidates": 2, "repriced": 1, "skipped": 1}
+
+    monkeypatch.setattr(api_module, "_resolve_live_cost_maps", fake_live_cost_maps)
+    monkeypatch.setattr(api_module, "reprice_estimated_rows", fake_reprice)
+
+    result = asyncio.run(
+        api_module.reprice_estimated_usage(
+            provider="prov", model="mod", since=None, until=None, limit=10
+        )
+    )
+
+    assert result == {"candidates": 2, "repriced": 1, "skipped": 1}
+    assert captured["provider"] == "prov"
+    assert captured["model"] == "mod"
+    assert captured["limit"] == 10
+
+
 def test_usage_run_summary_endpoint_passes_filters(api_module, monkeypatch):
     captured = {}
 

@@ -750,6 +750,20 @@ def test_merge_usage_database_copies_usage_and_base_url_metadata(
         provider_name="test-provider",
         source="proxy_config",
     )
+    from decimal import Decimal
+
+    from src.pricing.models import ModelCost
+    from src.pricing.snapshots import ensure_price_snapshot
+
+    run_snapshot_id = ensure_price_snapshot(
+        date="2026-05-03",
+        provider="test-provider",
+        model="test-model",
+        source="litellm",
+        cost=ModelCost(input=1.0, output=2.0, cache_read=0.1),
+        multiplier=Decimal("1.0"),
+        db_path=run_db,
+    )
     database_module.log_usage(
         database_module.Usage(
             ts=TS_2026_05_03_18,
@@ -773,6 +787,7 @@ def test_merge_usage_database_copies_usage_and_base_url_metadata(
             total_cost_usd=0.3,
             status=200,
             base_url_id=run_base_url_id,
+            price_snapshot_id=run_snapshot_id,
         ),
         db_path=run_db,
     )
@@ -788,9 +803,17 @@ def test_merge_usage_database_copies_usage_and_base_url_metadata(
     assert rows[0]["session_id"] == "session-run-1"
     assert rows[0]["prompt_length"] == 123
     assert rows[0]["base_url"] == "https://api.example.com/v1"
-    # Snapshots are not copied between DBs, so the binding is intentionally
-    # dropped (the merged row reads as estimated).
-    assert rows[0]["price_snapshot_id"] is None
+    # The snapshot is copied and the merged row is rebound to the target id.
+    assert rows[0]["price_snapshot_id"] is not None
+    from src.pricing.snapshots import get_price_snapshot
+
+    stored = get_price_snapshot(
+        date="2026-05-03",
+        provider="test-provider",
+        model="test-model",
+        db_path=main_db,
+    )
+    assert stored is not None
 
     with database_module.get_engine(main_db).connect() as connection:
         base_urls = connection.execute(
@@ -841,6 +864,113 @@ def test_merge_usage_database_copies_tool_calls(database_module, isolated_home):
     rows = database_module.fetch_recent_usage(limit=10, db_path=main_db)
     assert len(rows) == 1
     assert rows[0]["tool_names"] == "bash"
+
+
+def test_reprice_estimated_rows_rebinds_and_updates_costs(
+    database_module, isolated_home
+):
+    from src.pricing.models import ModelCost
+
+    db_path = str(isolated_home / "reprice.db")
+    database_module.init_db(db_path)
+    database_module.log_usage(
+        database_module.Usage(
+            ts=TS_2026_05_03_18,
+            provider="test-provider",
+            model="test-model",
+            client_source="codex",
+            endpoint="otlp",
+            prompt_tokens=1000,
+            completion_tokens=500,
+            cached_tokens=0,
+            total_tokens=1500,
+            input_cost_usd=0.0,
+            output_cost_usd=0.0,
+            total_cost_usd=0.0,
+            status=200,
+        ),
+        db_path=db_path,
+    )
+
+    model_costs = {"test-model": ModelCost(input=2.0, output=4.0, cache_read=0.5)}
+    summary = database_module.reprice_estimated_rows(
+        model_costs=model_costs,
+        provider_model_costs={},
+        model_cost_sources={},
+        provider_model_cost_sources={},
+        db_path=db_path,
+    )
+
+    assert summary == {"candidates": 1, "repriced": 1, "skipped": 0}
+    rows = database_module.fetch_recent_usage(limit=1, db_path=db_path)
+    assert rows[0]["price_snapshot_id"] is not None
+    # (1000*2/1e6 + 500*4/1e6) * 1.25 provider multiplier = 0.005
+    assert rows[0]["total_cost_usd"] == pytest.approx(0.005)
+
+    # Already bound: a second pass has nothing to do.
+    again = database_module.reprice_estimated_rows(
+        model_costs=model_costs,
+        provider_model_costs={},
+        model_cost_sources={},
+        provider_model_cost_sources={},
+        db_path=db_path,
+    )
+    assert again == {"candidates": 0, "repriced": 0, "skipped": 0}
+
+
+def test_reprice_estimated_rows_respects_filters_and_skips_unresolvable(
+    database_module, isolated_home
+):
+    from src.pricing.models import ModelCost
+
+    db_path = str(isolated_home / "reprice-filter.db")
+    database_module.init_db(db_path)
+    for provider, model in (("p1", "m1"), ("p2", "m2")):
+        database_module.log_usage(
+            database_module.Usage(
+                ts=TS_2026_05_03_18,
+                provider=provider,
+                model=model,
+                client_source="codex",
+                endpoint="otlp",
+                prompt_tokens=1000,
+                completion_tokens=0,
+                cached_tokens=0,
+                total_tokens=1000,
+                input_cost_usd=0.0,
+                output_cost_usd=0.0,
+                total_cost_usd=0.0,
+                status=200,
+            ),
+            db_path=db_path,
+        )
+
+    model_costs = {"m1": ModelCost(input=2.0, output=4.0, cache_read=0.5)}
+    common = {
+        "model_costs": model_costs,
+        "provider_model_costs": {},
+        "model_cost_sources": {},
+        "provider_model_cost_sources": {},
+        "db_path": db_path,
+    }
+
+    # Only p1 is in scope and its model resolves.
+    assert database_module.reprice_estimated_rows(provider="p1", **common) == {
+        "candidates": 1,
+        "repriced": 1,
+        "skipped": 0,
+    }
+    # p2 is in scope but its model does not resolve: skipped, left unbound.
+    assert database_module.reprice_estimated_rows(provider="p2", **common) == {
+        "candidates": 1,
+        "repriced": 0,
+        "skipped": 1,
+    }
+
+    rows = database_module.fetch_recent_usage(limit=10, db_path=db_path)
+    by_provider = {row["provider"]: row for row in rows}
+    assert by_provider["p1"]["price_snapshot_id"] is not None
+    assert by_provider["p2"]["price_snapshot_id"] is None
 
 
 def test_summarize_usage_window_groups_by_session_source_and_model(fresh_db):
