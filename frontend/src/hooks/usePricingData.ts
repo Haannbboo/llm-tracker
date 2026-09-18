@@ -16,6 +16,32 @@ function pricingUrlFor(provider: string): string {
     : `/pricing?provider=${encodeURIComponent(provider)}`
 }
 
+/** Pricing source keys in resolution-priority order (manual first, then the
+ *  enabled `pricing.sources` from config). When config is unavailable (e.g.
+ *  `/config` is unreachable), falls back to the sources seen in the data. */
+export function pricingSourceOrder(
+  config: Record<string, any> | null,
+  seenSources?: string[],
+): string[] {
+  const specs = config?.pricing?.sources
+  if (Array.isArray(specs) && specs.some((s) => s && typeof s === 'object')) {
+    const names = specs
+      .filter((s: any) => s && typeof s === 'object' && s.enabled !== false)
+      .map((s: any) => String(s.name || s.type || ''))
+      .filter((name: string) => name === 'litellm' || name === 'openrouter')
+    return [...new Set(['yaml', ...names])]
+  }
+  const seen = new Set(seenSources ?? [])
+  const order = ['yaml']
+  for (const name of ['openrouter', 'litellm']) {
+    if (seen.size === 0 || seen.has(name)) order.push(name)
+  }
+  for (const name of [...seen].sort()) {
+    if (!order.includes(name)) order.push(name)
+  }
+  return order
+}
+
 export function usePricingData() {
   const {
     configParsed,
@@ -60,12 +86,15 @@ export function usePricingData() {
       if (search && !name.toLowerCase().includes(search)) continue
       models.push({ name, ...data })
     }
-    models.sort((a, b) => {
-      if (a.source !== b.source) return a.source === 'yaml' ? -1 : 1
-      return a.name.localeCompare(b.name)
-    })
+    // Manual overrides first, then sources in config priority order.
+    const order = pricingSourceOrder(configParsed, models.map((m) => m.source))
+    const rank = (source: string) => {
+      const i = order.indexOf(source)
+      return i === -1 ? order.length : i
+    }
+    models.sort((a, b) => rank(a.source) - rank(b.source) || a.name.localeCompare(b.name))
     return models
-  }, [pricingData, pricingSearch])
+  }, [pricingData, pricingSearch, configParsed])
 
   const handleCostChange = useCallback((model: string, field: string, val: string) => {
     const numValue = val === '' ? undefined : Number(val)

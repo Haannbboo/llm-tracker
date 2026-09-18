@@ -1,4 +1,6 @@
 import { useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
+import { PricingPage } from './PricingPage'
 import { useApp } from '../contexts/AppContext'
 import { useSettingsData } from '../hooks/useSettingsData'
 import { useDevices } from '../hooks/useDevices'
@@ -20,7 +22,9 @@ const DEVICE_KIND_LABELS: Record<string, string> = {
 }
 
 export function SettingsPage({ providerColors }: Props) {
-  const [activeSection, setActiveSection] = useState<'tracker' | 'services' | 'connectivity' | 'devices'>('tracker')
+  const [searchParams, setSearchParams] = useSearchParams()
+  const section = searchParams.get('section')
+  const activeSection = section && ['tracker', 'pricing', 'services', 'connectivity', 'devices'].includes(section) ? section : 'tracker'
   const colors = providerColors ?? FIXED_PROVIDER_COLORS
   const {
     configParsed, configContent, setConfigContent,
@@ -101,6 +105,7 @@ export function SettingsPage({ providerColors }: Props) {
         >
           {[
             { id: 'tracker', label: t('LLM-Tracker Settings') },
+            { id: 'pricing', label: t('Pricing') },
             { id: 'services', label: t('Services') },
             { id: 'connectivity', label: t('Connectivity Test') },
             ...(auth.enabled && auth.user ? [{ id: 'devices', label: t('Devices') }] : []),
@@ -109,13 +114,15 @@ export function SettingsPage({ providerColors }: Props) {
               key={section.id}
               type="button"
               className={`tab-toggle-btn ${activeSection === section.id ? 'active' : ''}`}
-              onClick={() => setActiveSection(section.id as 'tracker' | 'services' | 'connectivity' | 'devices')}
+              onClick={() => setSearchParams({ section: section.id })}
             >
               {section.label}
             </button>
           ))}
         </div>
       </div>
+
+      {activeSection === 'pricing' && <PricingPage />}
 
       {activeSection === 'services' && (
         <>

@@ -481,5 +481,7 @@ export const zh: Record<string, string> = {
   'Days': '星期',
   'Every day': '每天',
   'Range (tokens)': '区间 (tokens)',
-  'Precedence: YAML overrides win; otherwise the configured price sources are checked in order (earlier wins), then a containing-name fallback.': '优先级：YAML 覆盖优先；否则按配置的定价源顺序查找（靠前者优先），最后按包含名称回退匹配。',
+  'Precedence: Manual config overrides win; otherwise the configured price sources are checked in order (earlier wins), then a containing-name fallback.': '优先级：手动配置覆盖优先；否则按配置的定价源顺序查找（靠前者优先），最后按包含名称回退匹配。',
+  'Priority': '优先级',
+  'No models for this source yet.': '该来源暂无模型。',
 }

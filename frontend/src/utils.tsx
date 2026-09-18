@@ -273,6 +273,7 @@ export function getProviderColor(provider: string, providerColors: Record<string
 
 export function formatModelName(model: string): string {
   if (model.toLowerCase() === 'stealth/ox-alpha') return 'Ox Alpha'
+  if (model.toLowerCase() === 'union-alpha') return 'Union Alpha'
   return model
 }
 
@@ -299,8 +300,8 @@ export function getModelIcon(model: string, theme: Theme = getTheme()) {
   if (m.includes('qwen')) return <img src="/models/qwen-color.svg" alt="" style={style} />
   if (m.startsWith('cohere/')) return <img src="/models/cohere.svg" alt="" style={style} />
   if (m.includes('dots')) return <img src="/models/dots-studio.png" alt="" style={style} />
-  if (m.startsWith('stealth')) return <img src="/models/stealth.svg" alt="" style={style} />
-  if (m.startsWith('muse')) return <img src="/models/meta.svg" alt="" style={style} />
+  if (m.startsWith('stealth') || m.endsWith('-alpha')) return <img src="/models/stealth.svg" alt="" style={style} />
+  if (m.includes('muse') || m.includes('meta/')) return <img src="/models/meta.svg" alt="" style={style} />
   if (m.startsWith('x-ai/') || m.includes('grok')) return <img src={dark ? '/models/grok-dark.svg' : '/models/grok.svg'} alt="" style={style} />
   if (m.includes('longcat')) return <img src="/models/longcat-color.svg" alt="" style={style} />
   if (m.replace(/[-_\s]/g, '').includes('commandcode')) return <img src={dark ? '/models/commandcode-dark.svg' : '/models/commandcode.svg'} alt="" style={style} />

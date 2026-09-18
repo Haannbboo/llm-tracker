@@ -60,6 +60,15 @@ _PROVIDER_PREFIX_RE = re.compile(
     re.IGNORECASE,
 )
 
+# Context-window rate steps: input_cost_per_token_above_200k_tokens, etc.
+# Anchored so suffixed variants (_priority/_flex/_1hr) and non-token fields
+# (audio/image/character) never match.
+_ABOVE_THRESHOLD_RE = re.compile(
+    r"^(input_cost_per_token|output_cost_per_token"
+    r"|cache_read_input_token_cost|cache_creation_input_token_cost)"
+    r"_above_(\d+)k_tokens$"
+)
+
 # Date suffixes appended to model names: claude-sonnet-4-5-20250929
 _DATE_SUFFIX_RE = re.compile(r"-\d{8}(?:-\w+)?(?:-v\d+(?::\d+)?)?$")
 
@@ -142,6 +151,60 @@ def _parse_tiered_pricing(entry: dict[str, Any]) -> tuple[ModelTier, ...] | None
     return tuple(tiers) or None
 
 
+def _parse_above_threshold_tiers(
+    entry: dict[str, Any],
+) -> tuple[ModelTier, ...] | None:
+    """Parse LiteLLM `*_above_<N>k_tokens` context-window steps into two tiers.
+
+    E.g. qwen3.7-flash prices input at one rate below 256k context tokens and
+    another above it. Missing above-threshold fields fall back to base rates.
+    """
+    above: dict[str, tuple[int, Any]] = {}
+    for field, value in entry.items():
+        match = _ABOVE_THRESHOLD_RE.match(field)
+        if match and value is not None:
+            above[match.group(1)] = (int(match.group(2)) * 1000, value)
+    if not above:
+        return None
+    thresholds = {threshold for threshold, _ in above.values()}
+    if len(thresholds) != 1:
+        return None
+    (threshold,) = thresholds
+
+    def per_million(value: Any) -> float:
+        return round(float(value or 0) * 1_000_000, 6)
+
+    def opt_million(value: Any) -> float | None:
+        return None if value is None else per_million(value)
+
+    def tier_rate(base_field: str, low: float) -> float:
+        found = above.get(base_field)
+        return per_million(found[1]) if found is not None else low
+
+    low = ModelTier(
+        min_tokens=0,
+        max_tokens=threshold,
+        input=per_million(entry.get("input_cost_per_token")),
+        output=per_million(entry.get("output_cost_per_token")),
+        cache_read=per_million(entry.get("cache_read_input_token_cost")),
+        cache_write=opt_million(entry.get("cache_creation_input_token_cost")),
+    )
+    above_cache_write = above.get("cache_creation_input_token_cost")
+    high = ModelTier(
+        min_tokens=threshold,
+        max_tokens=None,
+        input=tier_rate("input_cost_per_token", low.input),
+        output=tier_rate("output_cost_per_token", low.output),
+        cache_read=tier_rate("cache_read_input_token_cost", low.cache_read),
+        cache_write=(
+            per_million(above_cache_write[1])
+            if above_cache_write is not None
+            else low.cache_write
+        ),
+    )
+    return (low, high)
+
+
 def _parse_model_entry(
     model_key: str, entry: dict[str, Any]
 ) -> tuple[str, ModelCost] | None:
@@ -152,7 +215,7 @@ def _parse_model_entry(
     if not _is_chat_model(entry):
         return None
 
-    tiers = _parse_tiered_pricing(entry)
+    tiers = _parse_tiered_pricing(entry) or _parse_above_threshold_tiers(entry)
 
     input_cost = entry.get("input_cost_per_token")
     output_cost = entry.get("output_cost_per_token")

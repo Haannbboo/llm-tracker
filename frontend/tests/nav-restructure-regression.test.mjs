@@ -14,9 +14,20 @@ const zhSource = readFileSync(join(here, 'src', 'i18n', 'zh.ts'), 'utf-8')
 
 // Top-level nav: exactly 3 tabs
 test('top nav has exactly Dashboard, Request Logs, Settings', () => {
+  assert.deepEqual([...navbarSource.matchAll(/onNavigate\('([^']+)'\)/g)].map(match => match[1]), ['dashboard', 'logs', 'settings'])
   assert.match(navbarSource, /nav-item[\s\S]*currentView === 'dashboard'[\s\S]*Dashboard/)
   assert.match(navbarSource, /nav-item[\s\S]*currentView === 'logs'[\s\S]*Request Logs/)
   assert.match(navbarSource, /nav-item[\s\S]*currentView === 'settings'[\s\S]*Settings/)
+})
+
+test('pricing is a Settings tab and its old route redirects there', () => {
+  assert.match(settingsSource, /import \{ PricingPage \} from '\.\/PricingPage'/)
+  assert.match(settingsSource, /\{ id: 'pricing', label: t\('Pricing'\) \}/)
+  assert.match(settingsSource, /activeSection === 'pricing' && <PricingPage \/>/)
+  assert.match(settingsSource, /searchParams\.get\('section'\)/)
+  assert.match(settingsSource, /onClick=\{\(\) => setSearchParams\(\{ section: section\.id \}\)\}/)
+  assert.match(appSource, /<Route path="\/pricing" element=\{<Navigate to="\/settings\?section=pricing" replace \/>\} \/>/)
+  assert.doesNotMatch(appSource, /import \{ PricingPage \}/)
 })
 
 test('Sessions is NOT a top-level nav item', () => {

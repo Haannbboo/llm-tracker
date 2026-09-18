@@ -12,7 +12,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from ..models import ModelCost, TimeRate, normalize_model_cost_key
+from ..models import ModelCost, ModelTier, TimeRate, normalize_model_cost_key
 from .base import (
     REQUEST_TIMEOUT,
     SourceEntry,
@@ -110,6 +110,50 @@ def _parse_window(raw: dict) -> TimeRate | None:
     )
 
 
+def _build_token_tiers(
+    base_input: float | None,
+    base_output: float | None,
+    base_cache_read: float | None,
+    raws: list[dict],
+) -> tuple[ModelTier, ...]:
+    """Build context tiers from `min_prompt_tokens` pricing overrides."""
+    steps: list[tuple[int, dict]] = []
+    for raw in raws:
+        try:
+            min_tokens = int(raw["min_prompt_tokens"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        if min_tokens <= 0:
+            continue
+        steps.append((min_tokens, raw))
+    if not steps:
+        return ()
+    # A repeated threshold would build a zero-width tier; last one wins.
+    steps = list({min_tokens: raw for min_tokens, raw in steps}.items())
+    steps.sort(key=lambda step: step[0])
+
+    def rate(value: Any, base: float | None) -> float:
+        amount = _per_million(value)
+        return amount if amount is not None else base or 0.0
+
+    # Pad with the base rates so the first tier falls out of the same loop.
+    padded = [(0, {})] + steps
+    tiers = []
+    for index, (min_tokens, raw) in enumerate(padded):
+        max_tokens = padded[index + 1][0] if index + 1 < len(padded) else None
+        tiers.append(
+            ModelTier(
+                min_tokens=min_tokens,
+                max_tokens=max_tokens,
+                input=rate(raw.get("prompt"), base_input),
+                output=rate(raw.get("completion"), base_output),
+                cache_read=rate(raw.get("input_cache_read"), base_cache_read),
+                cache_write=_per_million(raw.get("input_cache_write")),
+            )
+        )
+    return tuple(tiers)
+
+
 def _parse_model_entry(entry: dict) -> tuple[str, ModelCost] | None:
     model_id = entry.get("id")
     if not isinstance(model_id, str) or not model_id or not _is_base_variant(model_id):
@@ -127,18 +171,27 @@ def _parse_model_entry(entry: dict) -> tuple[str, ModelCost] | None:
     cache_read = _per_million(pricing.get("input_cache_read"))
 
     time_rates: list[TimeRate] = []
+    tier_overrides: list[dict] = []
     overrides = pricing.get("overrides")
     if isinstance(overrides, list):
         for raw in overrides:
-            if isinstance(raw, dict):
-                window = _parse_window(raw)
-                if window is not None:
-                    time_rates.append(window)
+            if not isinstance(raw, dict):
+                continue
+            if "min_prompt_tokens" in raw and not any(
+                key in raw for key in ("utc_start", "utc_end", "utc_days")
+            ):
+                # Context-threshold override, not a time window.
+                tier_overrides.append(raw)
+                continue
+            window = _parse_window(raw)
+            if window is not None:
+                time_rates.append(window)
 
     cost = ModelCost(
         input=input_cost or 0.0,
         output=output_cost or 0.0,
         cache_read=cache_read or 0.0,
+        tiers=_build_token_tiers(input_cost, output_cost, cache_read, tier_overrides),
         time_rates=tuple(time_rates),
     )
     return normalize_model_cost_key(model_id), cost

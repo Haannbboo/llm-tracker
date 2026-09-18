@@ -1,14 +1,14 @@
-import { Fragment, useMemo, useState, type ChangeEvent } from 'react'
+import { Fragment, useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react'
 import { t } from '../i18n/index.ts'
 import { useApp } from '../contexts/AppContext'
 import { formatNumber, getModelIcon } from '../utils'
-import { usePricingData } from '../hooks/usePricingData'
+import { usePricingData, pricingSourceOrder } from '../hooks/usePricingData'
 import type { PricingEntry } from '../types'
 
 const DAY_LABELS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
 
 const SOURCE_STYLES: Record<string, { bg: string; color: string; label: string }> = {
-  yaml: { bg: 'var(--icon-yellow-bg)', color: '#b8860b', label: 'YAML' },
+  yaml: { bg: 'var(--icon-yellow-bg)', color: '#b8860b', label: 'Manual' },
   litellm: { bg: 'rgba(59, 130, 246, 0.15)', color: '#3b82f6', label: 'LiteLLM' },
   openrouter: { bg: 'rgba(147, 51, 234, 0.15)', color: '#9333ea', label: 'OpenRouter' },
 }
@@ -23,7 +23,7 @@ function formatMinutes(minute: number): string {
 }
 
 function formatWindow(start: number, end: number): string {
-  const endLabel = end === 0 && start !== 0 ? '24:00' : formatMinutes(end)
+  const endLabel = end >= 24 * 60 || (end === 0 && start !== 0) ? '24:00' : formatMinutes(end)
   return `${formatMinutes(start)}–${endLabel}`
 }
 
@@ -33,6 +33,8 @@ function formatDays(days: number[] | null): string {
 }
 
 type Model = { name: string } & PricingEntry
+
+const PAGE_SIZE = 200
 
 export function PricingPage() {
   const { configParsed } = useApp()
@@ -47,8 +49,13 @@ export function PricingPage() {
     handleSavePricing,
   } = usePricingData()
 
-  const [sourceFilter, setSourceFilter] = useState<'all' | 'yaml' | 'litellm' | 'openrouter'>('all')
+  const [sourceFilter, setSourceFilter] = useState<'all' | 'yaml' | 'litellm' | 'openrouter'>('yaml')
   const [expanded, setExpanded] = useState<string | null>(null)
+  const [visibleCount, setVisibleCount] = useState(PAGE_SIZE)
+
+  useEffect(() => {
+    setVisibleCount(PAGE_SIZE)
+  }, [sourceFilter, pricingSearch])
 
   const models = useMemo(
     () => (sourceFilter === 'all'
@@ -57,15 +64,28 @@ export function PricingPage() {
     [filteredPricingModels, sourceFilter],
   )
 
+  const visibleModels = models.slice(0, visibleCount)
+
+  const scrollRef = useRef<HTMLDivElement | null>(null)
+  const sentinelRef = useRef<HTMLDivElement | null>(null)
+
+  useEffect(() => {
+    const sentinel = sentinelRef.current
+    if (!sentinel || visibleCount >= models.length) return
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry?.isIntersecting) setVisibleCount((c) => Math.min(c + PAGE_SIZE, models.length))
+      },
+      { root: scrollRef.current, rootMargin: '200px' },
+    )
+    observer.observe(sentinel)
+    return () => observer.disconnect()
+  }, [visibleCount, models.length])
+
   const counts = useMemo(() => {
     const bySource: Record<string, number> = { yaml: 0, litellm: 0, openrouter: 0 }
     for (const m of filteredPricingModels) bySource[m.source] = (bySource[m.source] ?? 0) + 1
-    return {
-      total: filteredPricingModels.length,
-      yaml: bySource.yaml ?? 0,
-      litellm: bySource.litellm ?? 0,
-      openrouter: bySource.openrouter ?? 0,
-    }
+    return bySource
   }, [filteredPricingModels])
 
   const pricingMultiplier = selectedPricingProvider === 'global'
@@ -124,18 +144,48 @@ export function PricingPage() {
     ) : null
   )
 
-  const statCard = (label: string, value: string | number, accent?: string) => (
-    <div style={{
-      flex: '1 1 140px',
-      minWidth: '140px',
-      padding: '12px 14px',
-      borderRadius: '10px',
-      background: 'var(--surface-hover)',
-      border: '1px solid var(--border-color)',
-    }}>
-      <div style={{ fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.4px', color: 'var(--text-muted)' }}>{label}</div>
+  const statCard = (label: string, value: string | number, accent?: string, opts?: { key?: string; active?: boolean; onClick?: () => void; rank?: number }) => (
+    <div
+      key={opts?.key}
+      onClick={opts?.onClick}
+      style={{
+        flex: '1 1 140px',
+        minWidth: '140px',
+        padding: '12px 14px',
+        borderRadius: '10px',
+        background: 'var(--surface-hover)',
+        border: `1px solid ${opts?.active ? (accent ?? 'var(--text-primary)') : 'var(--border-color)'}`,
+        cursor: opts?.onClick ? 'pointer' : 'default',
+      }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.4px', color: 'var(--text-muted)' }}>
+        {opts?.rank !== undefined && (
+          <span
+            title={t('Priority')}
+            style={{
+              fontSize: '10px',
+              fontWeight: 700,
+              padding: '1px 6px',
+              borderRadius: '8px',
+              background: accent ?? 'var(--text-muted)',
+              color: '#fff',
+            }}
+          >
+            #{opts.rank}
+          </span>
+        )}
+        <span>{label}</span>
+      </div>
       <div style={{ marginTop: '4px', fontSize: '20px', fontWeight: 700, color: accent ?? 'var(--text-primary)' }}>{value}</div>
     </div>
+  )
+
+  const toggleSourceFilter = (source: 'yaml' | 'litellm' | 'openrouter') => {
+    setSourceFilter((prev) => (prev === source ? 'all' : source))
+  }
+
+  const sourceOrder = useMemo(
+    () => pricingSourceOrder(configParsed, filteredPricingModels.map((m) => m.source)),
+    [configParsed, filteredPricingModels],
   )
 
   return (
@@ -188,13 +238,15 @@ export function PricingPage() {
         </div>
         <div className="panel-body" style={{ padding: '16px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
           <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
-            {t('Precedence: YAML overrides win; otherwise the configured price sources are checked in order (earlier wins), then a containing-name fallback.')}
+            {t('Precedence: Manual config overrides win; otherwise the configured price sources are checked in order (earlier wins), then a containing-name fallback.')}
           </div>
           <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
-            {statCard(t('Models'), counts.total)}
-            {statCard(t('YAML'), counts.yaml, '#b8860b')}
-            {statCard('LiteLLM', counts.litellm, '#3b82f6')}
-            {statCard('OpenRouter', counts.openrouter, '#9333ea')}
+            {sourceOrder.map((key, index) => {
+              if (key !== 'yaml' && key !== 'litellm' && key !== 'openrouter') return null
+              const style = sourceStyle(key)
+              const filter = key as 'yaml' | 'litellm' | 'openrouter'
+              return statCard(key === 'yaml' ? t('Manual') : style.label, counts[key] ?? 0, style.color, { key, active: sourceFilter === filter, onClick: () => toggleSourceFilter(filter), rank: index + 1 })
+            })}
           </div>
           <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', alignItems: 'center' }}>
             <input
@@ -213,25 +265,12 @@ export function PricingPage() {
                 outline: 'none',
               }}
             />
-            <div style={{ display: 'flex', gap: '4px' }}>
-              {(['all', 'yaml', 'litellm', 'openrouter'] as const).map((source) => (
-                <button
-                  key={source}
-                  type="button"
-                  className={`tab-toggle-btn ${sourceFilter === source ? 'active' : ''}`}
-                  onClick={() => setSourceFilter(source)}
-                  style={{ fontSize: '12px', padding: '5px 10px' }}
-                >
-                  {source === 'all' ? t('All') : sourceStyle(source).label}
-                </button>
-              ))}
-            </div>
           </div>
         </div>
       </div>
 
       <div className="panel">
-        <div className="panel-body" style={{ padding: '0', maxHeight: '640px', overflowY: 'auto' }}>
+        <div ref={scrollRef} className="panel-body" style={{ padding: '0', maxHeight: '640px', overflowY: 'auto' }}>
           <table className="table">
             <thead>
               <tr>
@@ -245,7 +284,7 @@ export function PricingPage() {
               </tr>
             </thead>
             <tbody>
-              {models.length > 0 ? models.map((model) => {
+              {visibleModels.length > 0 ? visibleModels.map((model) => {
                 const style = sourceStyle(model.source)
                 const hasTiers = (model.tiers?.length ?? 0) > 0
                 const hasWindows = (model.time_rates?.length ?? 0) > 0
@@ -366,16 +405,27 @@ export function PricingPage() {
               }) : (
                 <tr>
                   <td colSpan={7} style={{ textAlign: 'center', padding: '24px', color: 'var(--text-muted)' }}>
-                    {pricingSearch ? t('No models match your search.') : t('No pricing data available.')}
+                    {pricingSearch
+                      ? t('No models match your search.')
+                      : sourceFilter !== 'all'
+                        ? t('No models for this source yet.')
+                        : t('No pricing data available.')}
+                  </td>
+                </tr>
+              )}
+              {visibleCount < models.length && (
+                <tr>
+                  <td colSpan={7} style={{ padding: '0', border: 'none' }}>
+                    <div ref={sentinelRef} style={{ height: '1px' }} />
                   </td>
                 </tr>
               )}
             </tbody>
           </table>
         </div>
-        {filteredPricingModels.length > 0 && (
+        {models.length > 0 && (
           <div style={{ padding: '8px 16px', fontSize: '11px', color: 'var(--text-muted)', borderTop: '1px solid var(--border-color)' }}>
-            {t('Showing')} {filteredPricingModels.length} {t('models')} ({counts.yaml} {t('YAML')}, {counts.litellm + counts.openrouter} {t('auto')})
+            {t('Showing')} {visibleModels.length} / {models.length} {t('models')}
           </div>
         )}
       </div>
