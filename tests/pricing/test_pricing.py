@@ -1202,6 +1202,7 @@ def test_single_model_pricing_includes_tiers(api_module, monkeypatch):
             "input": 0.4,
             "output": 1.6,
             "cache_read": 0.08,
+            "cache_write": None,
         },
         {
             "min_tokens": 256000,
@@ -1209,6 +1210,7 @@ def test_single_model_pricing_includes_tiers(api_module, monkeypatch):
             "input": 1.2,
             "output": 4.8,
             "cache_read": 0.24,
+            "cache_write": None,
         },
     ]
 

@@ -994,6 +994,7 @@ def _pricing_entry(resolved_cost, scope: str, multiplier: float) -> dict:
                 "input": tier.input,
                 "output": tier.output,
                 "cache_read": tier.cache_read,
+                "cache_write": tier.cache_write,
             }
             for tier in cost.tiers
         ],

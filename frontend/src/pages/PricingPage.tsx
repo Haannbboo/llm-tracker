@@ -37,7 +37,7 @@ type Model = { name: string } & PricingEntry
 const PAGE_SIZE = 200
 
 export function PricingPage() {
-  const { configParsed } = useApp()
+  const { configParsed, configStatus } = useApp()
   const {
     selectedPricingProvider,
     setSelectedPricingProvider,
@@ -109,12 +109,15 @@ export function PricingPage() {
     return model[field as keyof PricingEntry] as number | null | undefined
   }
 
+  const saving = configStatus === 'saving'
+
   const inputProps = (model: Model, field: string) => {
     const price = modelPrice(model, field)
     const active = activeCost(model.name)
     return {
       type: 'number' as const,
       step: '0.001',
+      disabled: saving,
       value: active[field] !== undefined ? active[field] : '',
       placeholder: active[field] !== undefined
         ? String(active[field])
@@ -148,6 +151,14 @@ export function PricingPage() {
     <div
       key={opts?.key}
       onClick={opts?.onClick}
+      role={opts?.onClick ? 'button' : undefined}
+      tabIndex={opts?.onClick ? 0 : undefined}
+      onKeyDown={opts?.onClick ? (e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault()
+          opts.onClick?.()
+        }
+      } : undefined}
       style={{
         flex: '1 1 140px',
         minWidth: '140px',
@@ -221,15 +232,15 @@ export function PricingPage() {
             <button
               type="button"
               className="nav-item"
-              disabled={!hasPricingEdits}
+              disabled={!hasPricingEdits || saving}
               onClick={handleSavePricing}
               style={{
                 fontSize: '12px',
                 fontWeight: 600,
                 padding: '6px 14px',
                 borderRadius: '6px',
-                opacity: hasPricingEdits ? 1 : 0.5,
-                cursor: hasPricingEdits ? 'pointer' : 'not-allowed',
+                opacity: hasPricingEdits && !saving ? 1 : 0.5,
+                cursor: hasPricingEdits && !saving ? 'pointer' : 'not-allowed',
               }}
             >
               {t('Save Pricing')}
@@ -355,6 +366,7 @@ export function PricingPage() {
                                     <th>{t('Input')}</th>
                                     <th>{t('Output')}</th>
                                     <th>{t('Cache Read')}</th>
+                                    <th>{t('Cache Write')}</th>
                                   </tr>
                                 </thead>
                                 <tbody>
@@ -364,6 +376,7 @@ export function PricingPage() {
                                       <td>{formatPrice(tier.input)}</td>
                                       <td>{formatPrice(tier.output)}</td>
                                       <td>{formatPrice(tier.cache_read)}</td>
+                                      <td>{formatPrice(tier.cache_write)}</td>
                                     </tr>
                                   ))}
                                 </tbody>
@@ -381,6 +394,7 @@ export function PricingPage() {
                                     <th>{t('Input')}</th>
                                     <th>{t('Output')}</th>
                                     <th>{t('Cache Read')}</th>
+                                    <th>{t('Cache Write')}</th>
                                   </tr>
                                 </thead>
                                 <tbody>
@@ -391,6 +405,7 @@ export function PricingPage() {
                                       <td>{formatPrice(window.input)}</td>
                                       <td>{formatPrice(window.output)}</td>
                                       <td>{formatPrice(window.cache_read)}</td>
+                                      <td>{formatPrice(window.cache_write)}</td>
                                     </tr>
                                   ))}
                                 </tbody>

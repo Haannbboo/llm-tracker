@@ -269,6 +269,7 @@ export type PricingTier = {
   input: number
   output: number
   cache_read: number
+  cache_write: number | null
 }
 
 export type PricingTimeRate = {

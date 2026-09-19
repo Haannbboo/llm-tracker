@@ -1,4 +1,4 @@
-import { useState, useCallback, useMemo, useEffect } from 'react'
+import { useState, useCallback, useMemo, useEffect, useRef } from 'react'
 import { t } from '../i18n/index.ts'
 import { useApp } from '../contexts/AppContext'
 import type { PricingEntry } from '../types.ts'
@@ -57,16 +57,22 @@ export function usePricingData() {
   const [selectedPricingProvider, setSelectedPricingProvider] = useState('global')
   const [pricingSearch, setPricingSearch] = useState('')
   const [costPatches, setCostPatches] = useState<CostPatch[]>([])
+  // Monotonic id: only the latest pricing response may update state, so a
+  // slow earlier fetch (or the save refetch) can't overwrite newer data.
+  const pricingSeqRef = useRef(0)
 
   useEffect(() => {
     const controller = new AbortController()
+    const seq = ++pricingSeqRef.current
 
     async function fetchPricing() {
       try {
         const response = await fetch(pricingUrlFor(selectedPricingProvider), {
           signal: controller.signal,
         })
-        if (response.ok) setPricingData(await response.json())
+        if (response.ok && seq === pricingSeqRef.current) {
+          setPricingData(await response.json())
+        }
       } catch (err) {
         if (!(err instanceof DOMException && err.name === 'AbortError')) {
           console.error('Failed to load pricing:', err)
@@ -166,8 +172,11 @@ export function usePricingData() {
       setConfigParsed(data.parsed)
       setCostPatches([])
       try {
+        const seq = ++pricingSeqRef.current
         const pricingResp = await fetch(pricingUrlFor(selectedPricingProvider))
-        if (pricingResp.ok) setPricingData(await pricingResp.json())
+        if (pricingResp.ok && seq === pricingSeqRef.current) {
+          setPricingData(await pricingResp.json())
+        }
       } catch {
         /* non-critical */
       }
