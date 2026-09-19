@@ -994,8 +994,21 @@ def _pricing_entry(resolved_cost, scope: str, multiplier: float) -> dict:
                 "input": tier.input,
                 "output": tier.output,
                 "cache_read": tier.cache_read,
+                "cache_write": tier.cache_write,
             }
             for tier in cost.tiers
+        ],
+        "time_rates": [
+            {
+                "days": sorted(rate.days) if rate.days is not None else None,
+                "start_minute": rate.start_minute,
+                "end_minute": rate.end_minute,
+                "input": rate.cost.input,
+                "output": rate.cost.output,
+                "cache_read": rate.cost.cache_read,
+                "cache_write": rate.cost.cache_write,
+            }
+            for rate in cost.time_rates
         ],
         "source": resolved_cost.source,
         "scope": scope,

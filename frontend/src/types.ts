@@ -263,6 +263,25 @@ export type OnboardingCopiedCommand = {
 
 export type PricingSource = 'yaml' | 'litellm' | 'openrouter'
 
+export type PricingTier = {
+  min_tokens: number
+  max_tokens: number | null
+  input: number
+  output: number
+  cache_read: number
+  cache_write: number | null
+}
+
+export type PricingTimeRate = {
+  days: number[] | null
+  start_minute: number
+  end_minute: number
+  input: number
+  output: number
+  cache_read: number
+  cache_write: number | null
+}
+
 export type PricingEntry = {
   input: number
   output: number
@@ -270,6 +289,8 @@ export type PricingEntry = {
   cache_write: number | null
   source: PricingSource
   scope: string
+  tiers?: PricingTier[]
+  time_rates?: PricingTimeRate[]
   effective_input?: number
   effective_output?: number
   effective_cache_read?: number

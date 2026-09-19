@@ -75,6 +75,38 @@ def test_reprice_estimated_usage_endpoint_passes_filters(api_module, monkeypatch
     assert captured["limit"] == 10
 
 
+def test_pricing_entry_includes_tiers_and_time_rates(api_module):
+    from src.pricing.models import ModelCost, ModelTier, ResolvedCost, TimeRate
+
+    cost = ModelCost(
+        input=1.0,
+        output=2.0,
+        cache_read=0.1,
+        tiers=(
+            ModelTier(
+                min_tokens=0, max_tokens=1000, input=1.0, output=2.0, cache_read=0.1
+            ),
+        ),
+        time_rates=(
+            TimeRate(
+                days=frozenset({0, 6}),
+                start_minute=0,
+                end_minute=60,
+                cost=ModelCost(input=0.5, output=1.0, cache_read=0.05),
+            ),
+        ),
+    )
+
+    entry = api_module._pricing_entry(
+        ResolvedCost(cost=cost, source="openrouter"), "global", 1.0
+    )
+
+    assert entry["tiers"][0]["max_tokens"] == 1000
+    assert entry["time_rates"][0]["days"] == [0, 6]
+    assert entry["time_rates"][0]["start_minute"] == 0
+    assert entry["time_rates"][0]["input"] == 0.5
+
+
 def test_usage_run_summary_endpoint_passes_filters(api_module, monkeypatch):
     captured = {}
 
