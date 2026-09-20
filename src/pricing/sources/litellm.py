@@ -170,6 +170,14 @@ def _parse_above_threshold_tiers(
     if len(thresholds) != 1:
         return None
     (threshold,) = thresholds
+    if (
+        entry.get("input_cost_per_token") is None
+        and entry.get("output_cost_per_token") is None
+    ):
+        # Without base rates the low tier would be all zeros and would then be
+        # promoted to the flat price by _parse_model_entry, silently pricing
+        # requests at zero.
+        return None
 
     def per_million(value: Any) -> float:
         return round(float(value or 0) * 1_000_000, 6)

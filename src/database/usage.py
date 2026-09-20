@@ -564,15 +564,12 @@ def fetch_estimated_usage_ids(
     model: str | None = None,
     since: str | None = None,
     until: str | None = None,
-    limit: int | None = None,
     db_path: str | None = None,
 ) -> list[str]:
     """Ids of usage rows not bound to a price snapshot (i.e. estimated)."""
     filters = _usage_filters(provider=provider, model=model, since=since, until=until)
     filters.append(Usage.price_snapshot_id.is_(None))
     query = select(Usage.id).where(and_(*filters)).order_by(Usage.ts.asc())
-    if limit is not None:
-        query = query.limit(limit)
     with get_engine(db_path).connect() as connection:
         return [row[0] for row in connection.execute(query)]
 
@@ -598,17 +595,23 @@ def reprice_estimated_rows(
     longer resolves are left untouched and counted as skipped. Pass explicit
     ``model_costs`` / source maps to price every row from one pricing
     generation; otherwise the runtime maps are used.
+
+    ``limit`` caps the number of *successfully repriced* rows, not the number
+    scanned: unresolvable or unbound rows are skipped and the scan continues,
+    so an early stuck row can't stop later ones from being repriced.
     """
     ids = fetch_estimated_usage_ids(
         provider=provider,
         model=model,
         since=since,
         until=until,
-        limit=limit,
         db_path=db_path,
     )
-    repriced = skipped = 0
+    repriced = skipped = examined = 0
     for usage_id in ids:
+        if limit is not None and repriced >= limit:
+            break
+        examined += 1
         result = recalculate_usage_cost(
             usage_id,
             model_costs=model_costs,
@@ -617,11 +620,13 @@ def reprice_estimated_rows(
             provider_model_cost_sources=provider_model_cost_sources,
             db_path=db_path,
         )
-        if result is None or result.skipped:
+        # A snapshot failure leaves the row unbound, so don't report it as
+        # repriced; it stays eligible for a later run.
+        if result is None or result.skipped or result.price_snapshot_id is None:
             skipped += 1
         else:
             repriced += 1
-    return {"candidates": len(ids), "repriced": repriced, "skipped": skipped}
+    return {"candidates": examined, "repriced": repriced, "skipped": skipped}
 
 
 USAGE_COPY_FIELDS = (

@@ -517,6 +517,18 @@ def test_parse_model_entry_ignores_suffixed_above_threshold_fields():
     assert cost.tiers == ()
 
 
+def test_parse_model_entry_skips_above_threshold_without_base_rates():
+    entry = {
+        "mode": "chat",
+        "input_cost_per_token_above_256k_tokens": 2e-07,
+        "output_cost_per_token_above_256k_tokens": 8e-07,
+    }
+
+    # No base rates: the low tier would be all zeros, so skip instead of
+    # publishing the model at input=0/output=0.
+    assert _parse_model_entry("some-model", entry) is None
+
+
 def test_parse_model_entry_tier_falls_back_to_top_level_prices():
     entry = {
         "mode": "chat",

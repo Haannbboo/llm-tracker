@@ -66,7 +66,7 @@ def _hhmm_to_minutes(value: Any) -> int:
     return (ivalue // 100) * 60 + (ivalue % 100)
 
 
-def _parse_window(raw: dict) -> TimeRate | None:
+def _parse_window(raw: dict, base_cache_write: float | None = None) -> TimeRate | None:
     start_raw = raw.get("utc_start")
     end_raw = raw.get("utc_end")
     if start_raw is None and end_raw is None:
@@ -97,6 +97,7 @@ def _parse_window(raw: dict) -> TimeRate | None:
     if input_cost is None and output_cost is None:
         return None
     cache_read = _per_million(raw.get("input_cache_read"))
+    cache_write = _per_million(raw.get("input_cache_write"))
 
     return TimeRate(
         days=days,
@@ -106,6 +107,7 @@ def _parse_window(raw: dict) -> TimeRate | None:
             input=input_cost or 0.0,
             output=output_cost or 0.0,
             cache_read=cache_read or 0.0,
+            cache_write=(cache_write if cache_write is not None else base_cache_write),
         ),
     )
 
@@ -114,6 +116,7 @@ def _build_token_tiers(
     base_input: float | None,
     base_output: float | None,
     base_cache_read: float | None,
+    base_cache_write: float | None,
     raws: list[dict],
 ) -> tuple[ModelTier, ...]:
     """Build context tiers from `min_prompt_tokens` pricing overrides."""
@@ -136,6 +139,10 @@ def _build_token_tiers(
         amount = _per_million(value)
         return amount if amount is not None else base or 0.0
 
+    def opt_rate(value: Any, base: float | None) -> float | None:
+        amount = _per_million(value)
+        return amount if amount is not None else base
+
     # Pad with the base rates so the first tier falls out of the same loop.
     padded = [(0, {})] + steps
     tiers = []
@@ -148,7 +155,7 @@ def _build_token_tiers(
                 input=rate(raw.get("prompt"), base_input),
                 output=rate(raw.get("completion"), base_output),
                 cache_read=rate(raw.get("input_cache_read"), base_cache_read),
-                cache_write=_per_million(raw.get("input_cache_write")),
+                cache_write=opt_rate(raw.get("input_cache_write"), base_cache_write),
             )
         )
     return tuple(tiers)
@@ -169,6 +176,7 @@ def _parse_model_entry(entry: dict) -> tuple[str, ModelCost] | None:
     if input_cost is None and output_cost is None:
         return None
     cache_read = _per_million(pricing.get("input_cache_read"))
+    cache_write = _per_million(pricing.get("input_cache_write"))
 
     time_rates: list[TimeRate] = []
     tier_overrides: list[dict] = []
@@ -183,7 +191,7 @@ def _parse_model_entry(entry: dict) -> tuple[str, ModelCost] | None:
                 # Context-threshold override, not a time window.
                 tier_overrides.append(raw)
                 continue
-            window = _parse_window(raw)
+            window = _parse_window(raw, cache_write)
             if window is not None:
                 time_rates.append(window)
 
@@ -191,7 +199,10 @@ def _parse_model_entry(entry: dict) -> tuple[str, ModelCost] | None:
         input=input_cost or 0.0,
         output=output_cost or 0.0,
         cache_read=cache_read or 0.0,
-        tiers=_build_token_tiers(input_cost, output_cost, cache_read, tier_overrides),
+        cache_write=cache_write,
+        tiers=_build_token_tiers(
+            input_cost, output_cost, cache_read, cache_write, tier_overrides
+        ),
         time_rates=tuple(time_rates),
     )
     return normalize_model_cost_key(model_id), cost

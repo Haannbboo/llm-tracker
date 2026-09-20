@@ -138,6 +138,46 @@ def test_min_prompt_tokens_override_becomes_context_tiers_not_time_window():
     assert (high.input, high.output, high.cache_read) == (0.96, 3.84, 0.192)
 
 
+def test_cache_write_propagates_to_flat_tiers_and_windows():
+    payload = {
+        "data": [
+            {
+                "id": "vendor/cw-model",
+                "pricing": {
+                    "prompt": "0.0000004",
+                    "completion": "0.0000016",
+                    "input_cache_read": "0.00000008",
+                    "input_cache_write": "0.000002",
+                    "overrides": [
+                        {
+                            "min_prompt_tokens": 100000,
+                            "prompt": "0.0000012",
+                            "completion": "0.0000048",
+                            "input_cache_read": "0.00000024",
+                        },
+                        {
+                            "utc_start": 100,
+                            "utc_end": 400,
+                            "prompt": "0.0000008",
+                            "completion": "0.0000032",
+                        },
+                    ],
+                },
+            }
+        ]
+    }
+
+    cost = parse_openrouter_json(payload)["vendor/cw-model"]
+
+    assert cost.cache_write == 2.0
+    low, high = cost.tiers
+    # Both the padded base tier and a tier override that omits cache-write
+    # inherit the top-level rate.
+    assert (low.cache_write, high.cache_write) == (2.0, 2.0)
+    # Time-window overrides inherit it too.
+    assert cost.time_rates[0].cost.cache_write == 2.0
+
+
 def test_end_of_day_window_is_not_a_wrap():
     """end_minute == 0 with a non-zero start means 24:00, not a wrap."""
     cost = ModelCost(

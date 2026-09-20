@@ -973,6 +973,98 @@ def test_reprice_estimated_rows_respects_filters_and_skips_unresolvable(
     assert by_provider["p2"]["price_snapshot_id"] is None
 
 
+def test_reprice_limit_scans_past_unresolvable_rows(database_module, isolated_home):
+    from src.pricing.models import ModelCost
+
+    db_path = str(isolated_home / "reprice-limit.db")
+    database_module.init_db(db_path)
+    # Earlier row has no pricing match; the later row must still be repriced
+    # even though `limit=1` only allows one successful row.
+    for ts, model in (
+        (TS_2026_05_03_18, "missing-model"),
+        (TS_2026_05_03_18 + 1, "m1"),
+    ):
+        database_module.log_usage(
+            database_module.Usage(
+                ts=ts,
+                provider="p1",
+                model=model,
+                client_source="codex",
+                endpoint="otlp",
+                prompt_tokens=1000,
+                completion_tokens=0,
+                cached_tokens=0,
+                total_tokens=1000,
+                input_cost_usd=0.0,
+                output_cost_usd=0.0,
+                total_cost_usd=0.0,
+                status=200,
+            ),
+            db_path=db_path,
+        )
+
+    summary = database_module.reprice_estimated_rows(
+        limit=1,
+        model_costs={"m1": ModelCost(input=2.0, output=4.0, cache_read=0.5)},
+        provider_model_costs={},
+        model_cost_sources={},
+        provider_model_cost_sources={},
+        db_path=db_path,
+    )
+
+    assert summary == {"candidates": 2, "repriced": 1, "skipped": 1}
+    rows = database_module.fetch_recent_usage(limit=10, db_path=db_path)
+    by_model = {row["model"]: row for row in rows}
+    assert by_model["m1"]["price_snapshot_id"] is not None
+    assert by_model["missing-model"]["price_snapshot_id"] is None
+
+
+def test_reprice_counts_snapshot_failure_as_skipped(
+    database_module, isolated_home, monkeypatch
+):
+    from src.pricing import snapshots
+    from src.pricing.models import ModelCost
+
+    db_path = str(isolated_home / "reprice-snapshot-fail.db")
+    database_module.init_db(db_path)
+    database_module.log_usage(
+        database_module.Usage(
+            ts=TS_2026_05_03_18,
+            provider="p1",
+            model="m1",
+            client_source="codex",
+            endpoint="otlp",
+            prompt_tokens=1000,
+            completion_tokens=0,
+            cached_tokens=0,
+            total_tokens=1000,
+            input_cost_usd=0.0,
+            output_cost_usd=0.0,
+            total_cost_usd=0.0,
+            status=200,
+        ),
+        db_path=db_path,
+    )
+
+    def boom(**_kwargs):
+        raise RuntimeError("snapshot store unavailable")
+
+    monkeypatch.setattr(snapshots, "ensure_price_snapshot", boom)
+
+    summary = database_module.reprice_estimated_rows(
+        model_costs={"m1": ModelCost(input=2.0, output=4.0, cache_read=0.5)},
+        provider_model_costs={},
+        model_cost_sources={},
+        provider_model_cost_sources={},
+        db_path=db_path,
+    )
+
+    # Costs were recomputed but the row stays unbound, so it is not "repriced".
+    assert summary == {"candidates": 1, "repriced": 0, "skipped": 1}
+    rows = database_module.fetch_recent_usage(limit=1, db_path=db_path)
+    assert rows[0]["price_snapshot_id"] is None
+
+
 def test_summarize_usage_window_groups_by_session_source_and_model(fresh_db):
     database_module = fresh_db.database_module
     db_path = fresh_db.db_path
