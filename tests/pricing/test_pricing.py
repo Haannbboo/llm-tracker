@@ -474,6 +474,49 @@ def test_parse_model_entry_with_empty_tiered_pricing_still_skipped():
     assert _parse_model_entry("some-model", entry) is None
 
 
+def test_parse_model_entry_with_above_threshold_context_steps():
+    entry = {
+        "mode": "chat",
+        "input_cost_per_token": 3e-08,
+        "output_cost_per_token": 1.3e-07,
+        "cache_read_input_token_cost": 6e-09,
+        "cache_creation_input_token_cost": 3.8e-08,
+        "input_cost_per_token_above_256k_tokens": 2e-07,
+        "output_cost_per_token_above_256k_tokens": 8e-07,
+        "cache_read_input_token_cost_above_256k_tokens": 4e-08,
+        "cache_creation_input_token_cost_above_256k_tokens": 2.5e-07,
+    }
+
+    result = _parse_model_entry("openrouter/qwen/qwen3.7-flash", entry)
+
+    assert result is not None
+    _, cost = result
+    assert (cost.input, cost.output) == (0.03, 0.13)
+    assert len(cost.tiers) == 2
+    low, high = cost.tiers
+    assert (low.min_tokens, low.max_tokens) == (0, 256000)
+    assert (low.input, low.output) == (0.03, 0.13)
+    assert (high.min_tokens, high.max_tokens) == (256000, None)
+    assert (high.input, high.output) == (0.2, 0.8)
+    assert (high.cache_read, high.cache_write) == (0.04, 0.25)
+
+
+def test_parse_model_entry_ignores_suffixed_above_threshold_fields():
+    entry = {
+        "mode": "chat",
+        "input_cost_per_token": 4e-07,
+        "output_cost_per_token": 1.6e-06,
+        "input_cost_per_token_above_272k_tokens_priority": 1.2e-06,
+        "output_cost_per_token_above_272k_tokens_flex": 4.8e-06,
+    }
+
+    result = _parse_model_entry("azure/gpt-5.4", entry)
+
+    assert result is not None
+    _, cost = result
+    assert cost.tiers == ()
+
+
 def test_parse_model_entry_tier_falls_back_to_top_level_prices():
     entry = {
         "mode": "chat",
@@ -1159,6 +1202,7 @@ def test_single_model_pricing_includes_tiers(api_module, monkeypatch):
             "input": 0.4,
             "output": 1.6,
             "cache_read": 0.08,
+            "cache_write": None,
         },
         {
             "min_tokens": 256000,
@@ -1166,6 +1210,7 @@ def test_single_model_pricing_includes_tiers(api_module, monkeypatch):
             "input": 1.2,
             "output": 4.8,
             "cache_read": 0.24,
+            "cache_write": None,
         },
     ]
 

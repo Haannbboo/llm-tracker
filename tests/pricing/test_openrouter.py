@@ -105,6 +105,39 @@ def test_time_resolution_peak_offpeak_and_weekend():
     assert resolve_effective_cost(cost, _at("2026-09-13T12:00:00")).input == 0.15
 
 
+def test_min_prompt_tokens_override_becomes_context_tiers_not_time_window():
+    payload = {
+        "data": [
+            {
+                "id": "qwen/qwen3.7-plus",
+                "pricing": {
+                    "prompt": "0.00000032",
+                    "completion": "0.00000128",
+                    "input_cache_read": "0.000000064",
+                    "overrides": [
+                        {
+                            "min_prompt_tokens": 256000,
+                            "prompt": "0.00000096",
+                            "completion": "0.00000384",
+                            "input_cache_read": "0.000000192",
+                        }
+                    ],
+                },
+            }
+        ]
+    }
+
+    cost = parse_openrouter_json(payload)["qwen/qwen3.7-plus"]
+
+    assert cost.time_rates == ()
+    assert len(cost.tiers) == 2
+    low, high = cost.tiers
+    assert (low.min_tokens, low.max_tokens) == (0, 256000)
+    assert (low.input, low.output, low.cache_read) == (0.32, 1.28, 0.064)
+    assert (high.min_tokens, high.max_tokens) == (256000, None)
+    assert (high.input, high.output, high.cache_read) == (0.96, 3.84, 0.192)
+
+
 def test_end_of_day_window_is_not_a_wrap():
     """end_minute == 0 with a non-zero start means 24:00, not a wrap."""
     cost = ModelCost(
