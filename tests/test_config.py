@@ -201,8 +201,10 @@ def test_build_maps_normalizes_empty_api_key_to_none(config_module):
     assert provider_map["empty-key"].api_key is None
 
 
-def test_build_cost_maps_parses_global_and_provider_model_costs(config_module):
-    model_costs, provider_model_costs = config_module.build_cost_maps(
+def test_resolve_all_costs_parses_global_and_provider_model_costs(
+    config_module, pricing_maps_module
+):
+    resolved = pricing_maps_module.resolve_all_costs(
         {
             "models": {
                 "alpha-1": {"cost": {"input": 1.5, "output": 2.5, "cacheRead": 0.15}},
@@ -222,25 +224,26 @@ def test_build_cost_maps_parses_global_and_provider_model_costs(config_module):
         }
     )
 
-    assert model_costs["alpha-1"] == config_module.ModelCost(
+    assert resolved.global_costs["alpha-1"].cost == pricing_maps_module.ModelCost(
         input=1.5,
         output=2.5,
         cache_read=0.15,
     )
-    assert "beta-1" not in model_costs
-    assert provider_model_costs == {
-        "alpha": {
-            "alpha-1": config_module.ModelCost(
-                input=3.0,
-                output=4.0,
-                cache_read=0.3,
-            )
-        }
-    }
+    assert "beta-1" not in resolved.global_costs
+    assert set(resolved.provider_costs) == {"alpha"}
+    assert resolved.provider_costs["alpha"]["alpha-1"].cost == (
+        pricing_maps_module.ModelCost(
+            input=3.0,
+            output=4.0,
+            cache_read=0.3,
+        )
+    )
 
 
-def test_build_cost_maps_preserves_cache_write_metadata(config_module):
-    model_costs, provider_model_costs = config_module.build_cost_maps(
+def test_resolve_all_costs_preserves_cache_write_metadata(
+    config_module, pricing_maps_module
+):
+    resolved = pricing_maps_module.resolve_all_costs(
         {
             "models": {
                 "alpha-1": {
@@ -270,22 +273,26 @@ def test_build_cost_maps_preserves_cache_write_metadata(config_module):
         }
     )
 
-    assert model_costs["alpha-1"] == config_module.ModelCost(
+    assert resolved.global_costs["alpha-1"].cost == pricing_maps_module.ModelCost(
         input=1.5,
         output=2.5,
         cache_read=0.15,
         cache_write=1.875,
     )
-    assert provider_model_costs["alpha"]["alpha-1"] == config_module.ModelCost(
-        input=3.0,
-        output=4.0,
-        cache_read=0.3,
-        cache_write=3.75,
+    assert resolved.provider_costs["alpha"]["alpha-1"].cost == (
+        pricing_maps_module.ModelCost(
+            input=3.0,
+            output=4.0,
+            cache_read=0.3,
+            cache_write=3.75,
+        )
     )
 
 
-def test_build_cost_maps_normalizes_model_keys_to_lowercase(config_module):
-    model_costs, provider_model_costs = config_module.build_cost_maps(
+def test_resolve_all_costs_normalizes_model_keys_to_lowercase(
+    config_module, pricing_maps_module
+):
+    resolved = pricing_maps_module.resolve_all_costs(
         {
             "models": {
                 "MiniMax-M2.7": {
@@ -305,15 +312,15 @@ def test_build_cost_maps_normalizes_model_keys_to_lowercase(config_module):
         }
     )
 
-    assert "MiniMax-M2.7" not in model_costs
-    assert model_costs["minimax-m2.7"] == config_module.ModelCost(
+    assert "MiniMax-M2.7" not in resolved.global_costs
+    assert resolved.global_costs["minimax-m2.7"].cost == pricing_maps_module.ModelCost(
         input=1.5,
         output=2.5,
         cache_read=0.15,
     )
-    assert "MiniMax-M2.7" not in provider_model_costs["minimax"]
-    assert provider_model_costs["minimax"]["minimax-m2.7"] == (
-        config_module.ModelCost(
+    assert "MiniMax-M2.7" not in resolved.provider_costs["minimax"]
+    assert resolved.provider_costs["minimax"]["minimax-m2.7"].cost == (
+        pricing_maps_module.ModelCost(
             input=3.0,
             output=4.0,
             cache_read=0.3,
@@ -322,7 +329,7 @@ def test_build_cost_maps_normalizes_model_keys_to_lowercase(config_module):
 
 
 def test_refresh_runtime_config_updates_globals_in_place(
-    config_module, tmp_path, monkeypatch
+    config_module, tmp_path, monkeypatch, pricing_maps_module
 ):
     config_path = tmp_path / "config.yaml"
     monkeypatch.setenv("HOME", str(tmp_path))
@@ -370,13 +377,13 @@ providers:
         name="alpha",
         base_url="https://alpha.example/v1",
     )
-    assert config_module.MODEL_COSTS["alpha-1"] == config_module.ModelCost(
+    assert pricing_maps_module.MODEL_COSTS["alpha-1"] == pricing_maps_module.ModelCost(
         input=1.0,
         output=2.0,
         cache_read=0.1,
     )
-    assert config_module.PROVIDER_MODEL_COSTS["alpha"]["alpha-1"] == (
-        config_module.ModelCost(
+    assert pricing_maps_module.PROVIDER_MODEL_COSTS["alpha"]["alpha-1"] == (
+        pricing_maps_module.ModelCost(
             input=3.0,
             output=4.0,
             cache_read=0.3,

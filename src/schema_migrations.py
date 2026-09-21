@@ -595,6 +595,55 @@ def _migrate_usage_daily_tenancy(engine: Engine) -> bool:
     return True
 
 
+def _create_price_snapshots_table(engine: Engine) -> None:
+    if engine.dialect.name == "postgresql":
+        create_sql = """
+            CREATE TABLE price_snapshots (
+                id SERIAL PRIMARY KEY,
+                date TEXT NOT NULL,
+                provider TEXT NOT NULL,
+                model TEXT NOT NULL,
+                source TEXT NOT NULL,
+                rates_hash TEXT NOT NULL,
+                rates_json TEXT NOT NULL,
+                recorded_at BIGINT NOT NULL
+            )
+        """
+    else:
+        create_sql = """
+            CREATE TABLE price_snapshots (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                date TEXT NOT NULL,
+                provider TEXT NOT NULL,
+                model TEXT NOT NULL,
+                source TEXT NOT NULL,
+                rates_hash TEXT NOT NULL,
+                rates_json TEXT NOT NULL,
+                recorded_at BIGINT NOT NULL
+            )
+        """
+    with engine.begin() as connection:
+        connection.execute(text(create_sql))
+
+
+def _migrate_price_snapshots(engine: Engine) -> list[str]:
+    applied: list[str] = []
+    table = "price_snapshots"
+    if not _table_exists(engine, table):
+        _create_price_snapshots_table(engine)
+        applied.append("price_snapshots.create")
+
+    if _ensure_index(
+        engine,
+        table,
+        "uq_price_snapshots_version",
+        "CREATE UNIQUE INDEX IF NOT EXISTS uq_price_snapshots_version "
+        "ON price_snapshots (date, provider, model, source, rates_hash)",
+    ):
+        applied.append("price_snapshots.uq_version")
+    return applied
+
+
 def migrate_database(db_path: str | None = None) -> list[str]:
     engine = get_engine(db_path)
     applied: list[str] = []
@@ -1095,6 +1144,27 @@ def migrate_database(db_path: str | None = None) -> list[str]:
         with engine.begin() as connection:
             connection.execute(text(create_sql))
         applied.append("tool_calls.create")
+
+    # price_snapshots: versioned per-(date, provider, model, source) rates so a
+    # usage row's cost split can be recomputed exactly from the bound snapshot.
+    applied.extend(_migrate_price_snapshots(engine))
+
+    if _ensure_column(
+        engine,
+        "usage",
+        "price_snapshot_id",
+        sqlite_definition="INTEGER",
+        postgresql_definition="INTEGER",
+    ):
+        applied.append("usage.price_snapshot_id")
+    if _ensure_index(
+        engine,
+        "usage",
+        "ix_usage_price_snapshot_id",
+        "CREATE INDEX IF NOT EXISTS ix_usage_price_snapshot_id "
+        "ON usage (price_snapshot_id)",
+    ):
+        applied.append("usage.ix_price_snapshot_id")
 
     if _table_exists(engine, "tool_calls"):
         if _ensure_index(

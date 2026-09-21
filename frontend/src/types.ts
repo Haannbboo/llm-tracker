@@ -24,6 +24,18 @@ export type UsageSummary = {
   status_unknown: number | null
 }
 
+export type PricingDetail = {
+  source: string | null
+  multiplier: number
+  input: number
+  output: number
+  cache_read: number
+  cache_write: number | null
+  tier: { min_tokens: number; max_tokens: number | null } | null
+  snapshot_id: number | null
+  estimated: boolean
+}
+
 export type UsageRow = {
   id: string
   ts: number
@@ -43,11 +55,17 @@ export type UsageRow = {
   ttft_ms: number | null
   tool_tokens: number | null
   tool_names: string | null
+  normal_input_cost_usd: number | null
+  cache_read_cost_usd: number | null
+  cache_write_cost_usd: number | null
   input_cost_usd: number | null
   output_cost_usd: number | null
   total_cost_usd: number | null
   status: number | null
   client_ip: string | null
+  price_snapshot_id: number | null
+  cost_estimated: boolean | null
+  pricing: PricingDetail | null
 }
 
 export type DailyUsage = {
@@ -243,7 +261,26 @@ export type OnboardingCopiedCommand = {
   command: string
 }
 
-export type PricingSource = 'yaml' | 'litellm'
+export type PricingSource = 'yaml' | 'litellm' | 'openrouter'
+
+export type PricingTier = {
+  min_tokens: number
+  max_tokens: number | null
+  input: number
+  output: number
+  cache_read: number
+  cache_write: number | null
+}
+
+export type PricingTimeRate = {
+  days: number[] | null
+  start_minute: number
+  end_minute: number
+  input: number
+  output: number
+  cache_read: number
+  cache_write: number | null
+}
 
 export type PricingEntry = {
   input: number
@@ -252,6 +289,8 @@ export type PricingEntry = {
   cache_write: number | null
   source: PricingSource
   scope: string
+  tiers?: PricingTier[]
+  time_rates?: PricingTimeRate[]
   effective_input?: number
   effective_output?: number
   effective_cache_read?: number

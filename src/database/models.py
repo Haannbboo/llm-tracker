@@ -12,6 +12,8 @@ from sqlalchemy import (
     Integer,
     Numeric,
     String,
+    Text,
+    UniqueConstraint,
     text,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
@@ -62,6 +64,37 @@ class BaseUrl(Base):
     usages: Mapped[list[Usage]] = relationship(back_populates="base_url")
 
 
+class PriceSnapshot(Base):
+    """Pricing in effect for a (provider, model) on a given UTC date.
+
+    Written lazily at record time so the cost split of any usage row can be
+    recomputed exactly later, even after config/LiteLLM prices change.
+    ``source`` records where the pricing came from ("litellm", "yaml", or a
+    future source like "openrouter").
+    """
+
+    __tablename__ = "price_snapshots"
+    __table_args__ = (
+        UniqueConstraint(
+            "date",
+            "provider",
+            "model",
+            "source",
+            "rates_hash",
+            name="uq_price_snapshots_version",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    date: Mapped[str] = mapped_column(String, nullable=False)
+    provider: Mapped[str] = mapped_column(String, nullable=False)
+    model: Mapped[str] = mapped_column(String, nullable=False)
+    source: Mapped[str] = mapped_column(String, nullable=False)
+    rates_hash: Mapped[str] = mapped_column(String, nullable=False)
+    rates_json: Mapped[str] = mapped_column(Text, nullable=False)
+    recorded_at: Mapped[int] = mapped_column(BigInteger, nullable=False)
+
+
 class Usage(Base):
     __tablename__ = "usage"
 
@@ -102,6 +135,9 @@ class Usage(Base):
     client_ip: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
     base_url_id: Mapped[int | None] = mapped_column(
         Integer, ForeignKey("base_urls.id"), nullable=True
+    )
+    price_snapshot_id: Mapped[int | None] = mapped_column(
+        Integer, nullable=True, index=True
     )
     base_url: Mapped[BaseUrl | None] = relationship(back_populates="usages")
 
