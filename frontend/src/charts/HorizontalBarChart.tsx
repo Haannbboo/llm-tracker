@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { formatCompact, formatCost, formatNumber, formatRate, formatThroughput } from '../utils'
+import { formatCompact, formatCost, formatLatency, formatNumber, formatRate, formatThroughput } from '../utils'
 import { ChartTooltip, TooltipDivider, TooltipRow } from './ChartTooltip'
 import { t } from '../i18n/index.ts'
 
@@ -16,12 +16,14 @@ export type BarItem = {
   pricePerMillion?: number | null
   successRate?: number | null
   cacheHitRate?: number | null
+  totalTime?: number | null
+  avgTime?: number | null
   color: string
   badgeBg: string
   badgeText: string
 }
 
-export type Metric = 'tokens' | 'cost' | 'throughput' | 'successRate' | 'cacheHitRate' | 'count'
+export type Metric = 'tokens' | 'cost' | 'throughput' | 'successRate' | 'cacheHitRate' | 'count' | 'totalTime' | 'avgTime'
 
 export function HorizontalBarChart({
   title,
@@ -43,6 +45,8 @@ export function HorizontalBarChart({
     if (metric === 'cost') return item.cost
     if (metric === 'successRate') return item.successRate ?? 100
     if (metric === 'cacheHitRate') return item.cacheHitRate ?? 0
+    if (metric === 'totalTime') return item.totalTime ?? 0
+    if (metric === 'avgTime') return item.avgTime ?? 0
     return item.throughput ?? 0
   }
 
@@ -113,7 +117,7 @@ export function HorizontalBarChart({
                   </div>
                   <div style={{ display: 'flex', alignItems: 'baseline', gap: '6px' }}>
                     <span style={{ color: 'var(--text-secondary)', fontWeight: 700 }}>
-                      {metric === 'tokens' ? formatCompact(currentVal) : metric === 'count' ? formatNumber(currentVal) : metric === 'cost' ? formatCost(currentVal, 2) : metric === 'successRate' || metric === 'cacheHitRate' ? `${currentVal.toFixed(1)}%` : formatThroughput(currentVal)}
+                      {metric === 'tokens' ? formatCompact(currentVal) : metric === 'count' ? formatNumber(currentVal) : metric === 'cost' ? formatCost(currentVal, 2) : metric === 'successRate' || metric === 'cacheHitRate' ? `${currentVal.toFixed(1)}%` : metric === 'totalTime' || metric === 'avgTime' ? formatLatency(currentVal) : formatThroughput(currentVal)}
                     </span>
                     {metric === 'cost' && s.pricePerMillion != null && (
                       <span style={{ fontSize: '10px', color: 'var(--text-muted)' }}>

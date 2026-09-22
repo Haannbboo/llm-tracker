@@ -180,6 +180,25 @@ def test_opencode_plugin_emits_status_for_failed_assistant_messages(tmp_path):
           },
         })
 
+        await hooks.event({
+          event: {
+            type: "message.part.updated",
+            properties: {
+              part: {
+                type: "tool",
+                sessionID: "ses-1",
+                messageID: "msg-tool",
+                callID: "call-tool-1",
+                tool: "bash",
+                state: {
+                  status: "completed",
+                  time: { start: 5000, end: 5234 },
+                },
+              },
+            },
+          },
+        })
+
         const recordFor = (payload) => payload.resourceLogs[0].scopeLogs[0].logRecords[0]
         const attrsFor = (payload) =>
           Object.fromEntries(
@@ -233,6 +252,12 @@ def test_opencode_plugin_emits_status_for_failed_assistant_messages(tmp_path):
     assert records[3]["severityNumber"] == 17
     assert payloads[3]["http.response.status_code"] == 500
     assert "error.type" not in payloads[3]
+
+    assert records[4]["severityNumber"] == 9
+    assert payloads[4]["event.name"] == "opencode.tool_decision"
+    assert payloads[4]["tool_name"] == "bash"
+    assert payloads[4]["call_id"] == "call-tool-1"
+    assert payloads[4]["duration_ms"] == "234"
 
 
 @pytest.mark.slow

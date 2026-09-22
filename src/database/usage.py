@@ -1062,6 +1062,7 @@ def fetch_recent_usage(
         select(
             ToolCall.usage_id,
             tool_names_expr,
+            func.sum(ToolCall.duration_ms).label("tool_duration_ms"),
         )
         .group_by(ToolCall.usage_id)
         .subquery()
@@ -1095,6 +1096,7 @@ def fetch_recent_usage(
             Usage.price_snapshot_id,
             BaseUrl.base_url.label("base_url"),
             tool_agg.c.tool_names.label("tool_names"),
+            tool_agg.c.tool_duration_ms.label("tool_duration_ms"),
         )
         .select_from(Usage)
         .outerjoin(BaseUrl, Usage.base_url_id == BaseUrl.id)
@@ -1174,6 +1176,7 @@ def fetch_tool_calls(
             ToolCall.session_id,
             ToolCall.tool_name,
             ToolCall.client_source,
+            ToolCall.duration_ms,
             ToolCall.ts,
         )
         .where(and_(*filters))
@@ -1517,7 +1520,11 @@ def summarize_tool_calls(
     status_5xx: bool = False,
     db_path: str | None = None,
 ) -> list[dict[str, Any]]:
-    """Aggregate tool call counts by tool_name, filtered like the usage log."""
+    """Aggregate tool call counts and durations by tool_name, filtered like the usage log.
+
+    duration_ms is sparsely populated (only sources that emit tool timing),
+    so total/avg are None when no timed calls exist for a tool.
+    """
     filters = _usage_filters(
         provider=provider,
         model=model,
@@ -1533,6 +1540,8 @@ def summarize_tool_calls(
         select(
             ToolCall.tool_name,
             func.count(ToolCall.tool_use_id).label("count"),
+            func.sum(ToolCall.duration_ms).label("total_duration_ms"),
+            func.avg(ToolCall.duration_ms).label("avg_duration_ms"),
         )
         .select_from(ToolCall)
         .join(Usage, Usage.id == ToolCall.usage_id)

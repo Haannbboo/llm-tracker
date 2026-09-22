@@ -199,6 +199,82 @@ def _attr(attributes: list, key: str):
     return None
 
 
+def _optional_int(value) -> int | None:
+    if value is None or value == "":
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _record_ts_ms(record: dict) -> int:
+    """Milliseconds from a log record, falling back to observedTimeUnixNano.
+
+    Codex tool events ship timeUnixNano=0 with only the observation time set;
+    without the fallback the buffer entry looks stale and gets evicted before
+    the matching usage event arrives.
+    """
+    time_ns = record.get("timeUnixNano")
+    if time_ns is None or str(time_ns) == "0":
+        time_ns = record.get("observedTimeUnixNano")
+    if time_ns is None:
+        return 0
+    try:
+        return int(time_ns) // 1_000_000
+    except (TypeError, ValueError):
+        return 0
+
+
+def _buffer_tool_call(
+    buffer: dict[str, list[dict]],
+    key: str | None,
+    *,
+    tool_name: str,
+    tool_use_id: str,
+    ts: int,
+    duration_ms: int | None = None,
+) -> None:
+    """Buffer a tool call, merging on tool_use_id so redelivery can't double count."""
+    if not key:
+        return
+    entries = buffer.setdefault(key, [])
+    for entry in entries:
+        if entry["tool_use_id"] == tool_use_id:
+            if tool_name:
+                entry["tool_name"] = tool_name
+            if duration_ms is not None:
+                entry["duration_ms"] = duration_ms
+            return
+    entries.append(
+        {
+            "tool_name": tool_name,
+            "tool_use_id": tool_use_id,
+            "ts": ts,
+            "duration_ms": duration_ms,
+        }
+    )
+
+
+def _buffer_tool_duration(
+    buffer: dict[str, list[dict]],
+    key: str | None,
+    tool_use_id: str,
+    duration_ms: int | None,
+) -> None:
+    """Attach the duration from a trailing tool_result to an already-buffered call.
+
+    Only enriches existing entries; a result without a matching decision/name
+    event is ignored so tool counts stay unchanged.
+    """
+    if not key or duration_ms is None:
+        return
+    for entry in buffer.get(key, []):
+        if entry["tool_use_id"] == tool_use_id:
+            entry["duration_ms"] = duration_ms
+            return
+
+
 def _resource_attr(resource: dict, key: str):
     return _attr(resource.get("attributes", []), key)
 
@@ -422,6 +498,7 @@ def _parse_claude_record(
                 usage_id=usage.id,
                 session_id=usage.session_id,
                 tool_name=tool_info["tool_name"],
+                duration_ms=tool_info.get("duration_ms"),
                 user_id=user_id,
                 client_source="claude-code",
                 ts=tool_info["ts"],
@@ -539,6 +616,7 @@ def _parse_opencode_record(
                 usage_id=usage.id,
                 session_id=usage.session_id,
                 tool_name=tool_info["tool_name"],
+                duration_ms=tool_info.get("duration_ms"),
                 user_id=user_id,
                 client_source=client_source,
                 ts=tool_info["ts"],
@@ -695,6 +773,7 @@ def _parse_codex_record(
                     usage_id=usage.id,
                     session_id=usage.session_id,
                     tool_name=tool_info["tool_name"],
+                    duration_ms=tool_info.get("duration_ms"),
                     user_id=user_id,
                     client_source="codex",
                     ts=tool_info["ts"],
@@ -725,30 +804,46 @@ def _parse_log_record(
     )
     event_name = _attr(attrs, "event.name") or ""
 
-    # Buffer tool_decision events for later association with usage rows
+    # Buffer tool events for later association with usage rows. The decision
+    # event carries the tool name, the trailing result event the duration.
+    ts_attr = _record_ts_ms(record)
     if event_name == "tool_decision" and service_name == "claude-code":
         prompt_id = _attr(attrs, "prompt.id")
-        if prompt_id:
-            _claude_tool_buffer.setdefault(_scoped_id(prompt_id, user_id), []).append(
-                {
-                    "tool_name": _attr(attrs, "tool_name") or "",
-                    "tool_use_id": _attr(attrs, "tool_use_id")
-                    or _fallback_tool_use_id(),
-                    "ts": int(record.get("timeUnixNano", "0")) // 1_000_000,
-                }
-            )
+        _buffer_tool_call(
+            _claude_tool_buffer,
+            _scoped_id(prompt_id, user_id) if prompt_id else None,
+            tool_name=_attr(attrs, "tool_name") or "",
+            tool_use_id=_attr(attrs, "tool_use_id") or _fallback_tool_use_id(),
+            ts=ts_attr,
+        )
+    elif event_name == "tool_result" and service_name == "claude-code":
+        prompt_id = _attr(attrs, "prompt.id")
+        _buffer_tool_duration(
+            _claude_tool_buffer,
+            _scoped_id(prompt_id, user_id) if prompt_id else None,
+            _attr(attrs, "tool_use_id") or "",
+            _optional_int(_attr(attrs, "duration_ms")),
+        )
     elif event_name == "codex.tool_decision" and service_name in CODEX_SERVICE_NAMES:
         conv_id = _attr(attrs, "conversation.id")
         tool_name = _attr(attrs, "tool_name") or ""
         # Skip the exec wrapper — only keep native tool names
-        if conv_id and tool_name != "exec":
-            _codex_tool_buffer.setdefault(_scoped_id(conv_id, user_id), []).append(
-                {
-                    "tool_name": tool_name,
-                    "tool_use_id": _attr(attrs, "call_id") or _fallback_tool_use_id(),
-                    "ts": int(record.get("timeUnixNano", "0")) // 1_000_000,
-                }
+        if tool_name != "exec":
+            _buffer_tool_call(
+                _codex_tool_buffer,
+                _scoped_id(conv_id, user_id) if conv_id else None,
+                tool_name=tool_name,
+                tool_use_id=_attr(attrs, "call_id") or _fallback_tool_use_id(),
+                ts=ts_attr,
             )
+    elif event_name == "codex.tool_result" and service_name in CODEX_SERVICE_NAMES:
+        conv_id = _attr(attrs, "conversation.id")
+        _buffer_tool_duration(
+            _codex_tool_buffer,
+            _scoped_id(conv_id, user_id) if conv_id else None,
+            _attr(attrs, "call_id") or "",
+            _optional_int(_attr(attrs, "duration_ms")),
+        )
     elif (
         service_name in ({"opencode"} | KILO_SERVICE_NAMES)
         and event_name == f"{service_name}.tool_decision"
@@ -756,14 +851,13 @@ def _parse_log_record(
         message_id = _attr(attrs, "message.id")
         tool_name = _attr(attrs, "tool_name") or ""
         if message_id and tool_name:
-            _opencode_tool_buffer.setdefault(
-                _scoped_id(message_id, user_id), []
-            ).append(
-                {
-                    "tool_name": tool_name,
-                    "tool_use_id": _attr(attrs, "call_id") or _fallback_tool_use_id(),
-                    "ts": int(record.get("timeUnixNano", "0")) // 1_000_000,
-                }
+            _buffer_tool_call(
+                _opencode_tool_buffer,
+                _scoped_id(message_id, user_id),
+                tool_name=tool_name,
+                tool_use_id=_attr(attrs, "call_id") or _fallback_tool_use_id(),
+                ts=ts_attr,
+                duration_ms=_optional_int(_attr(attrs, "duration_ms")),
             )
 
     if (
@@ -784,6 +878,7 @@ def _parse_log_record(
                         usage_id=usage.id,
                         session_id=usage.session_id,
                         tool_name=tool_info["tool_name"],
+                        duration_ms=tool_info.get("duration_ms"),
                         user_id=user_id,
                         client_source="claude-code",
                         ts=tool_info["ts"],
@@ -806,6 +901,7 @@ def _parse_log_record(
                         usage_id=usage.id,
                         session_id=usage.session_id,
                         tool_name=tool_info["tool_name"],
+                        duration_ms=tool_info.get("duration_ms"),
                         user_id=user_id,
                         client_source="codex",
                         ts=tool_info["ts"],

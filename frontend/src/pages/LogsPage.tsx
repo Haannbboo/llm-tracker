@@ -87,7 +87,7 @@ export function LogsPage({ initialSessionFilter }: Props) {
   const [tableWidth, setTableWidth] = useState(0)
 
   // Tool calls for expanded row
-  const [expandedToolCalls, setExpandedToolCalls] = useState<{ tool_name: string; tool_use_id: string }[] | null>(null)
+  const [expandedToolCalls, setExpandedToolCalls] = useState<{ tool_name: string; tool_use_id: string; duration_ms?: number | null }[] | null>(null)
   useEffect(() => {
     if (!expandedRow) {
       setExpandedToolCalls(null)
@@ -582,9 +582,14 @@ export function LogsPage({ initialSessionFilter }: Props) {
         return (
           <td style={{ padding: '8px', fontWeight: 600 }}>
             {(() => {
-              const speed = formatSpeed(row.completion_tokens ?? row.total_tokens, row.latency_ms)
+              const tokens = row.completion_tokens ?? row.total_tokens
+              const toolMs = row.tool_duration_ms ?? 0
+              const latency = value(row.latency_ms)
+              const netMs = toolMs > 0 && latency > toolMs ? latency - toolMs : latency
+              const speed = formatSpeed(tokens, netMs)
+              const gross = toolMs > 0 && netMs !== latency ? formatSpeed(tokens, latency) : ''
               return speed ? (
-                <span title={`${formatNumber(row.completion_tokens ?? row.total_tokens)} tokens / ${formatLatency(row.latency_ms)}`}>
+                <span title={`${formatNumber(tokens)} tokens / ${formatLatency(netMs)} gen${toolMs > 0 ? ` (excl. ${formatLatency(toolMs)} tools${gross ? `, gross ${gross} / ${formatLatency(latency)}` : ''})` : ` / ${formatLatency(latency)}`}`}>
                   <span>{speed.split(' ')[0]}</span>
                   <span style={{ fontSize: '11px', color: 'var(--text-muted)', fontWeight: 400, marginLeft: '3px' }}>{speed.split(' ')[1]}</span>
                 </span>
@@ -868,9 +873,54 @@ export function LogsPage({ initialSessionFilter }: Props) {
                             <div className="detail-group">
                               <span className="detail-label">{t('Tool')}</span>
                               <span className="detail-value">
-                                {expandedToolCalls.map((tc) => (
-                                  <ToolBadge key={tc.tool_use_id} name={tc.tool_name} style={{ marginRight: 4 }} />
-                                ))}
+                                {(() => {
+                                  const timed = expandedToolCalls.filter((tc) => tc.duration_ms != null)
+                                  const toolSum = timed.reduce((s, tc) => s + (tc.duration_ms ?? 0), 0)
+                                  const latency = value(row.latency_ms)
+                                  const ttft = Math.min(value(row.ttft_ms), latency)
+                                  // Tool execution happens inside the message lifetime
+                                  // (tool completion precedes message_completed), so the
+                                  // usage-row latency already contains tool time.
+                                  const denom = Math.max(latency, toolSum, 1)
+                                  const toolCapped = Math.min(toolSum, denom)
+                                  const genMs = Math.max(0, latency - toolCapped)
+                                  const genExclTtft = Math.max(0, genMs - ttft)
+                                  return (
+                                    <>
+                                      {latency > 0 && (
+                                        <div style={{ fontSize: '11px', color: 'var(--text-secondary)', marginBottom: '6px' }}>
+                                          {t('Tool time')} {timed.length > 0 ? `${formatLatency(toolSum)} (${Math.round((toolCapped / denom) * 100)}%)` : '—'}
+                                          {timed.length === 0 && (
+                                            <span style={{ color: 'var(--text-muted)' }}> · {t('tool timing not reported by this source')}</span>
+                                          )}
+                                        </div>
+                                      )}
+                                      {latency > 0 && (
+                                        <div title={`TTFT ${formatLatency(ttft)} / Gen ${formatLatency(genExclTtft)} / Tools ${timed.length > 0 ? formatLatency(toolCapped) : '—'} (of ${formatLatency(latency)} total)`} style={{ display: 'flex', width: '100%', height: '4px', borderRadius: '2px', overflow: 'hidden', background: 'var(--progress-bg)', border: '1px solid var(--border-color)', marginBottom: '6px' }}>
+                                          {ttft > 0 && (
+                                            <div style={{ height: '100%', background: 'var(--color-blue)', width: `${(ttft / denom) * 100}%` }} />
+                                          )}
+                                          {genExclTtft > 0 && (
+                                            <div style={{ height: '100%', background: 'var(--color-purple)', width: `${(genExclTtft / denom) * 100}%` }} />
+                                          )}
+                                          {toolCapped > 0 && (
+                                            <div style={{ height: '100%', background: 'var(--color-green)', width: `${(toolCapped / denom) * 100}%` }} />
+                                          )}
+                                        </div>
+                                      )}
+                                      <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                                        {expandedToolCalls.map((tc) => (
+                                          <span key={tc.tool_use_id} title={tc.tool_use_id} style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                                            <ToolBadge name={tc.tool_name} />
+                                            {tc.duration_ms != null && (
+                                              <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{formatLatency(tc.duration_ms)}</span>
+                                            )}
+                                          </span>
+                                        ))}
+                                      </div>
+                                    </>
+                                  )
+                                })()}
                               </span>
                             </div>
                           )}

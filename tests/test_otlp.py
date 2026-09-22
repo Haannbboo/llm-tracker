@@ -756,6 +756,242 @@ def test_receive_logs_evicts_stale_tool_buffer_entries(otlp_module):
     assert "fresh" in otlp_module._claude_tool_buffer
 
 
+def _stub_tool_recording(otlp_module, monkeypatch, captured_tools: list) -> None:
+    monkeypatch.setattr(
+        otlp_module,
+        "record_usage",
+        lambda **fields: SimpleNamespace(id="u1", session_id="session-1"),
+    )
+    monkeypatch.setattr(
+        otlp_module, "record_tool_call", lambda **fields: captured_tools.append(fields)
+    )
+
+
+def test_claude_tool_result_duration_flows_to_record(otlp_module, monkeypatch):
+    captured_tools: list[dict] = []
+    _stub_tool_recording(otlp_module, monkeypatch, captured_tools)
+
+    def record(event_name: str, **extra) -> dict:
+        return {
+            "attributes": _attrs(
+                {"event.name": event_name, "prompt.id": "prompt-dur", **extra}
+            ),
+            "timeUnixNano": "1000000000",
+        }
+
+    otlp_module._parse_log_record(
+        record(
+            "tool_decision",
+            tool_name="Bash",
+            tool_use_id="tool-dur-1",
+        ),
+        "claude-code",
+        "session-1",
+    )
+    otlp_module._parse_log_record(
+        record(
+            "tool_result",
+            tool_name="Bash",
+            tool_use_id="tool-dur-1",
+            duration_ms=42,
+        ),
+        "claude-code",
+        "session-1",
+    )
+    otlp_module._parse_log_record(
+        record(
+            "claude_code.api_request",
+            input_tokens=10,
+            output_tokens=5,
+            status_code=200,
+        ),
+        "claude-code",
+        "session-1",
+    )
+
+    assert len(captured_tools) == 1
+    assert captured_tools[0]["tool_name"] == "Bash"
+    assert captured_tools[0]["duration_ms"] == 42
+
+
+def test_codex_tool_result_duration_flows_to_record(otlp_module, monkeypatch):
+    captured_tools: list[dict] = []
+    _stub_tool_recording(otlp_module, monkeypatch, captured_tools)
+
+    def record(event_name: str, **extra) -> dict:
+        return {
+            "attributes": _attrs(
+                {
+                    "event.name": event_name,
+                    "conversation.id": "conv-dur",
+                    **extra,
+                }
+            ),
+            "timeUnixNano": "1000000000",
+        }
+
+    otlp_module._parse_log_record(
+        record("codex.tool_decision", tool_name="exec_command", call_id="call-dur-1"),
+        "codex_cli_rs",
+        "session-1",
+    )
+    otlp_module._parse_log_record(
+        record(
+            "codex.tool_result",
+            tool_name="exec_command",
+            call_id="call-dur-1",
+            duration_ms=577,
+        ),
+        "codex_cli_rs",
+        "session-1",
+    )
+    otlp_module._parse_log_record(
+        record(
+            "codex.sse_event",
+            **{
+                "event.kind": "response.completed",
+                "input_token_count": 10,
+                "output_token_count": 5,
+                "http.response.status_code": 200,
+            },
+        ),
+        "codex_cli_rs",
+        "session-1",
+    )
+
+    assert len(captured_tools) == 1
+    assert captured_tools[0]["tool_name"] == "exec_command"
+    assert captured_tools[0]["duration_ms"] == 577
+
+
+def test_codex_tool_result_without_decision_is_not_recorded(otlp_module, monkeypatch):
+    """Enriching by call_id must not add tools the decision stream skipped."""
+    captured_tools: list[dict] = []
+    _stub_tool_recording(otlp_module, monkeypatch, captured_tools)
+
+    otlp_module._parse_log_record(
+        {
+            "attributes": _attrs(
+                {
+                    "event.name": "codex.tool_result",
+                    "conversation.id": "conv-result-only",
+                    "tool_name": "exec",
+                    "call_id": "call-only-result",
+                    "duration_ms": 12,
+                }
+            ),
+            "timeUnixNano": "1000000000",
+        },
+        "codex_cli_rs",
+        "session-1",
+    )
+    otlp_module._parse_log_record(
+        {
+            "attributes": _attrs(
+                {
+                    "event.name": "codex.sse_event",
+                    "event.kind": "response.completed",
+                    "conversation.id": "conv-result-only",
+                    "input_token_count": 10,
+                    "output_token_count": 5,
+                    "http.response.status_code": 200,
+                }
+            ),
+            "timeUnixNano": "2000000000",
+        },
+        "codex_cli_rs",
+        "session-1",
+    )
+
+    assert captured_tools == []
+
+
+def test_opencode_tool_decision_duration_flows_to_record(otlp_module, monkeypatch):
+    captured_tools: list[dict] = []
+    _stub_tool_recording(otlp_module, monkeypatch, captured_tools)
+
+    otlp_module._parse_log_record(
+        {
+            "attributes": _attrs(
+                {
+                    "event.name": "opencode.tool_decision",
+                    "message.id": "msg-dur",
+                    "call_id": "call-oc-1",
+                    "tool_name": "bash",
+                    "duration_ms": 150,
+                }
+            ),
+            "timeUnixNano": "1000000000",
+        },
+        "opencode",
+        "session-1",
+    )
+    otlp_module._parse_log_record(
+        {
+            "attributes": _attrs(
+                {
+                    "event.name": "opencode.message_completed",
+                    "message.id": "msg-dur",
+                    "session.id": "session-1",
+                    "provider": "anthropic",
+                    "model": "claude-sonnet-4-5",
+                    "input_token_count": 10,
+                    "output_token_count": 5,
+                }
+            ),
+            "timeUnixNano": "2000000000",
+        },
+        "opencode",
+        "session-1",
+    )
+
+    assert len(captured_tools) == 1
+    assert captured_tools[0]["tool_name"] == "bash"
+    assert captured_tools[0]["duration_ms"] == 150
+
+
+def test_codex_tool_event_uses_observed_timestamp_when_time_is_zero(otlp_module):
+    """Codex tool events send timeUnixNano=0; using it verbatim makes the
+    buffer entry look stale and it is evicted before the usage event lands."""
+    record = {
+        "attributes": _attrs(
+            {
+                "event.name": "codex.tool_decision",
+                "conversation.id": "conv-observed",
+                "tool_name": "exec_command",
+                "call_id": "call-observed",
+            }
+        ),
+        "timeUnixNano": "0",
+        "observedTimeUnixNano": "1789976902511803910",
+    }
+
+    otlp_module._parse_log_record(record, "codex_cli_rs", "session-1")
+
+    entry = otlp_module._codex_tool_buffer["conv-observed"][0]
+    assert entry["ts"] == 1789976902511
+
+
+def test_claude_tool_decision_redelivery_does_not_duplicate_buffer(otlp_module):
+    record = {
+        "attributes": _attrs(
+            {
+                "event.name": "tool_decision",
+                "prompt.id": "prompt-dup",
+                "tool_name": "Bash",
+                "tool_use_id": "tool-dup",
+            }
+        ),
+        "timeUnixNano": "1000000000",
+    }
+
+    otlp_module._parse_log_record(record, "claude-code", "session-1")
+    otlp_module._parse_log_record(record, "claude-code", "session-1")
+
+    buffered = otlp_module._claude_tool_buffer["prompt-dup"]
+    assert len(buffered) == 1
+
+
 # === Auth tests ===
 
 

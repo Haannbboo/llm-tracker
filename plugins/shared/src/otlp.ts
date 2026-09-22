@@ -96,12 +96,26 @@ export function buildToolEventPayload(
     callId: string
     toolName: string
     timestampMs: number
+    durationMs?: number
   },
   serviceName: string,
 ): Record<string, any> {
   const eventName = `${serviceName}.tool_decision`
   const scopeName = `${serviceName}-llm-tracker`
   const timeUnixNano = String(params.timestampMs * 1_000_000)
+  const attributes: Array<Record<string, any>> = [
+    { key: "event.name", value: { stringValue: eventName } },
+    { key: "session.id", value: { stringValue: params.sessionId } },
+    { key: "message.id", value: { stringValue: params.messageId } },
+    { key: "call_id", value: { stringValue: params.callId } },
+    { key: "tool_name", value: { stringValue: params.toolName } },
+  ]
+  if (typeof params.durationMs === "number" && params.durationMs >= 0) {
+    attributes.push({
+      key: "duration_ms",
+      value: { stringValue: String(params.durationMs) },
+    })
+  }
 
   return {
     resourceLogs: [
@@ -119,13 +133,7 @@ export function buildToolEventPayload(
               {
                 timeUnixNano,
                 severityNumber: 9,
-                attributes: [
-                  { key: "event.name", value: { stringValue: eventName } },
-                  { key: "session.id", value: { stringValue: params.sessionId } },
-                  { key: "message.id", value: { stringValue: params.messageId } },
-                  { key: "call_id", value: { stringValue: params.callId } },
-                  { key: "tool_name", value: { stringValue: params.toolName } },
-                ],
+                attributes,
               },
             ],
           },

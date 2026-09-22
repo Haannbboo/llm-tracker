@@ -333,6 +333,43 @@ def test_record_tool_call_links_to_usage(test_db):
     assert rows[0]["tool_names"] == "get_weather"
 
 
+def test_record_tool_call_persists_and_returns_duration(test_db):
+    from src.database.usage import fetch_tool_calls
+    from src.recorder import record_tool_call, record_usage
+
+    usage = record_usage(
+        provider="anthropic",
+        model="claude-sonnet-4-5",
+        endpoint="/v1/messages",
+        prompt_tokens=10,
+        completion_tokens=5,
+        status=200,
+        db_path=test_db,
+    )
+    assert usage is not None
+
+    record_tool_call(
+        tool_use_id="toolu_dur",
+        usage_id=usage.id,
+        tool_name="Bash",
+        duration_ms=1234,
+        ts=usage.ts,
+        db_path=test_db,
+    )
+    record_tool_call(
+        tool_use_id="toolu_nodur",
+        usage_id=usage.id,
+        tool_name="Read",
+        ts=usage.ts,
+        db_path=test_db,
+    )
+
+    calls = fetch_tool_calls(usage_id=usage.id, db_path=test_db)
+    by_id = {call["tool_use_id"]: call for call in calls}
+    assert by_id["toolu_dur"]["duration_ms"] == 1234
+    assert by_id["toolu_nodur"]["duration_ms"] is None
+
+
 def test_record_tool_call_multiple_per_usage(test_db):
     """Multiple tool calls from one usage row all get linked."""
     from src.recorder import record_tool_call, record_usage

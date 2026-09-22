@@ -1,13 +1,17 @@
 import { useEffect, useState } from 'react'
 import { getToolColor } from '../utils'
 import { HorizontalBarChart } from './HorizontalBarChart'
-import type { BarItem } from './HorizontalBarChart'
+import type { BarItem, Metric } from './HorizontalBarChart'
 import { t } from '../i18n/index.ts'
 
 type ToolCallRow = {
   tool_name: string
   count: number
+  total_duration_ms?: number | null
+  avg_duration_ms?: number | null
 }
+
+type ToolMetric = Extract<Metric, 'count' | 'totalTime' | 'avgTime'>
 
 export function ToolCallsChart({
   filterParams = {},
@@ -25,6 +29,7 @@ export function ToolCallsChart({
   }
 }) {
   const [rows, setRows] = useState<ToolCallRow[]>([])
+  const [metric, setMetric] = useState<ToolMetric>('count')
 
   useEffect(() => {
     const controller = new AbortController()
@@ -60,6 +65,8 @@ export function ToolCallsChart({
       icon: null,
       tokens: row.count,
       cost: 0,
+      totalTime: row.total_duration_ms ?? 0,
+      avgTime: row.avg_duration_ms ?? 0,
       color: c.bg,
       badgeBg: c.bg,
       badgeText: c.text,
@@ -71,7 +78,28 @@ export function ToolCallsChart({
       title={t('Tool Calls')}
       icon="🔧"
       items={items}
-      metric="count"
-    />
+      metric={metric}
+    >
+      <div style={{
+        padding: '8px 12px',
+        borderTop: '1px solid var(--border-color)',
+        display: 'flex',
+        flexWrap: 'wrap',
+        gap: '2px',
+        background: 'var(--tab-toggle-bg)',
+        borderRadius: '6px',
+        paddingTop: '8px',
+      }}>
+        {(['count', 'totalTime', 'avgTime'] as ToolMetric[]).map(m => (
+          <button
+            key={m}
+            className={`tab-toggle-btn ${metric === m ? 'active' : ''}`}
+            onClick={() => setMetric(m)}
+          >
+            {m === 'count' ? t('Count') : m === 'totalTime' ? t('Total time') : t('Avg time')}
+          </button>
+        ))}
+      </div>
+    </HorizontalBarChart>
   )
 }
