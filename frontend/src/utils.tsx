@@ -120,6 +120,15 @@ export function formatSpeed(tokens: number | null | undefined, latencyMs: number
   return tps >= 100 ? `${Math.round(tps)} tok/s` : `${tps.toFixed(1)} tok/s`
 }
 
+export function netThroughput(
+  completionTokens: number | null | undefined,
+  latencyMs: number | null | undefined,
+  toolMs: number | null | undefined,
+): number {
+  const net = Math.max(value(latencyMs) - value(toolMs), 0)
+  return net > 0 ? (value(completionTokens) * 1000) / net : 0
+}
+
 type DurationFormatOptions = {
   secondsFractionDigits?: number
 }

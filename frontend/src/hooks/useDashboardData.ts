@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import type { DailyUsage, UsageSummary } from '../types'
-import { getSinceDate, getTimezoneOffset, resolveTimezone, FIXED_PROVIDER_COLORS, PALETTE } from '../utils'
+import { getSinceDate, getTimezoneOffset, resolveTimezone, FIXED_PROVIDER_COLORS, PALETTE, netThroughput } from '../utils'
 import { t } from '../i18n/index.ts'
 import { useApp } from '../contexts/AppContext'
 
@@ -168,6 +168,7 @@ export function useDashboardData() {
     const totalCost = data.reduce((sum, row) => sum + (row.total_cost_usd || 0), 0)
     const latencyWeight = data.reduce((sum, row) => sum + (row.avg_latency_ms || 0) * (row.requests || 0), 0)
     const latencySum = data.reduce((sum, row) => sum + (row.latency_sum_ms || 0), 0)
+    const toolDurationSum = data.reduce((sum, row) => sum + (row.tool_duration_sum_ms || 0), 0)
 
     const successfulRequests = data.reduce((sum, row) => sum + (row.successful_requests || 0), 0)
     const successRate = requests > 0 ? (successfulRequests / requests) * 100 : 100
@@ -195,7 +196,7 @@ export function useDashboardData() {
       avgEffectivePricePerMillion: totalTokens === 0 ? 0 : (totalCost / totalTokens) * 1_000_000,
       rpm: requests / minutes,
       tpm: totalTokens / minutes,
-      avgThroughput: latencySum > 0 ? (completionTokens * 1000) / latencySum : 0,
+      avgThroughput: netThroughput(completionTokens, latencySum, toolDurationSum),
       avgTokensPerRequest: requests === 0 ? 0 : totalTokens / requests,
       successRate,
       statusBreakdown: { s429, s4xx, s5xx, sUnknown }

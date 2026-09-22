@@ -10,6 +10,7 @@ export type UsageSummary = {
   total_tokens: number | null
   avg_latency_ms: number | null
   latency_sum_ms: number | null
+  tool_duration_sum_ms: number | null
   avg_throughput: number | null
   input_cost_usd: number | null
   output_cost_usd: number | null
