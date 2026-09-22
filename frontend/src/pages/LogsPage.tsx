@@ -8,6 +8,7 @@ import { ModelSelector } from '../ModelSelector'
 import { RequestLogColumnsControl } from '../components/RequestLogColumnsControl'
 import { SessionSelector } from '../components/SessionSelector'
 import { ClickToCopy } from '../components/CopyButton'
+import { RequestTimeline } from '../components/RequestTimeline'
 import { t } from '../i18n/index.ts'
 import {
   formatCost, formatLatency, formatNumber, formatRate, formatSpeed, formatTime,
@@ -869,60 +870,12 @@ export function LogsPage({ initialSessionFilter }: Props) {
                               <span className="detail-value">{row.client_ip}</span>
                             </div>
                           )}
-                          {expandedToolCalls && expandedToolCalls.length > 0 && (
-                            <div className="detail-group">
-                              <span className="detail-label">{t('Tool')}</span>
-                              <span className="detail-value">
-                                {(() => {
-                                  const timed = expandedToolCalls.filter((tc) => tc.duration_ms != null)
-                                  const toolSum = timed.reduce((s, tc) => s + (tc.duration_ms ?? 0), 0)
-                                  const latency = value(row.latency_ms)
-                                  const ttft = Math.min(value(row.ttft_ms), latency)
-                                  // Tool execution happens inside the message lifetime
-                                  // (tool completion precedes message_completed), so the
-                                  // usage-row latency already contains tool time.
-                                  const denom = Math.max(latency, toolSum, 1)
-                                  const toolCapped = Math.min(toolSum, denom)
-                                  const genMs = Math.max(0, latency - toolCapped)
-                                  const genExclTtft = Math.max(0, genMs - ttft)
-                                  return (
-                                    <>
-                                      {latency > 0 && (
-                                        <div style={{ fontSize: '11px', color: 'var(--text-secondary)', marginBottom: '6px' }}>
-                                          {t('Tool time')} {timed.length > 0 ? `${formatLatency(toolSum)} (${Math.round((toolCapped / denom) * 100)}%)` : '—'}
-                                          {timed.length === 0 && (
-                                            <span style={{ color: 'var(--text-muted)' }}> · {t('tool timing not reported by this source')}</span>
-                                          )}
-                                        </div>
-                                      )}
-                                      {latency > 0 && (
-                                        <div title={`TTFT ${formatLatency(ttft)} / Gen ${formatLatency(genExclTtft)} / Tools ${timed.length > 0 ? formatLatency(toolCapped) : '—'} (of ${formatLatency(latency)} total)`} style={{ display: 'flex', width: '100%', height: '4px', borderRadius: '2px', overflow: 'hidden', background: 'var(--progress-bg)', border: '1px solid var(--border-color)', marginBottom: '6px' }}>
-                                          {ttft > 0 && (
-                                            <div style={{ height: '100%', background: 'var(--color-blue)', width: `${(ttft / denom) * 100}%` }} />
-                                          )}
-                                          {genExclTtft > 0 && (
-                                            <div style={{ height: '100%', background: 'var(--color-purple)', width: `${(genExclTtft / denom) * 100}%` }} />
-                                          )}
-                                          {toolCapped > 0 && (
-                                            <div style={{ height: '100%', background: 'var(--color-green)', width: `${(toolCapped / denom) * 100}%` }} />
-                                          )}
-                                        </div>
-                                      )}
-                                      <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-                                        {expandedToolCalls.map((tc) => (
-                                          <span key={tc.tool_use_id} title={tc.tool_use_id} style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
-                                            <ToolBadge name={tc.tool_name} />
-                                            {tc.duration_ms != null && (
-                                              <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{formatLatency(tc.duration_ms)}</span>
-                                            )}
-                                          </span>
-                                        ))}
-                                      </div>
-                                    </>
-                                  )
-                                })()}
-                              </span>
-                            </div>
+                          {expandedToolCalls && (
+                            <RequestTimeline
+                              latencyMs={row.latency_ms}
+                              ttftMs={row.ttft_ms}
+                              toolCalls={expandedToolCalls}
+                            />
                           )}
                         </div>
                       </td>

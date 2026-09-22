@@ -72,6 +72,17 @@ export const zh: Record<string, string> = {
   'Success': '成功率',
   'Cache': '缓存',
 
+  // Per-request time breakdown
+  'Time breakdown': '时间构成',
+  'TTFT': '首字延迟',
+  'Output generation': '输出生成',
+  'Parallel TUs': '并行工具调用',
+  'Parallel execution': '并行执行',
+  'Parallel': '并行',
+  'Untimed:': '未上报耗时:',
+  'no duration reported': '未上报耗时',
+  'Total': '总计',
+
   // Chart messages
   'No trend data available': '暂无趋势数据',
   'No cache data available': '暂无缓存数据',
