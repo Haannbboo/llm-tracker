@@ -1138,12 +1138,21 @@ def migrate_database(db_path: str | None = None) -> list[str]:
                 session_id TEXT,
                 tool_name TEXT NOT NULL,
                 client_source TEXT,
+                duration_ms INTEGER,
                 ts BIGINT NOT NULL
             )
         """
         with engine.begin() as connection:
             connection.execute(text(create_sql))
         applied.append("tool_calls.create")
+    elif _ensure_column(
+        engine,
+        "tool_calls",
+        "duration_ms",
+        sqlite_definition="INTEGER",
+        postgresql_definition="INTEGER",
+    ):
+        applied.append("tool_calls.duration_ms")
 
     # price_snapshots: versioned per-(date, provider, model, source) rates so a
     # usage row's cost split can be recomputed exactly from the bound snapshot.

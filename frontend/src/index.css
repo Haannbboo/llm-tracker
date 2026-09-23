@@ -301,6 +301,227 @@ a {
   text-decoration: underline;
 }
 
+/* Per-request stacked time breakdown (RequestTimeline) */
+.table .expanded-detail .request-timeline {
+  grid-column: 1 / -1;
+  max-width: 540px;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 4px;
+  padding: 12px 16px;
+  background: var(--input-bg);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  box-shadow: var(--shadow-sm);
+  box-sizing: border-box;
+}
+
+[data-theme="dark"] .table .expanded-detail .request-timeline {
+  background: rgba(15, 23, 42, 0.6);
+  border-color: rgba(255, 255, 255, 0.08);
+}
+
+.request-timeline-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.request-timeline-title {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.request-timeline-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.request-timeline-row-group {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.request-timeline-row {
+  display: grid;
+  grid-template-columns: 125px 1fr 65px;
+  align-items: center;
+  gap: 12px;
+  min-height: 20px;
+}
+
+.request-timeline-row.is-parallel-row:hover {
+  filter: brightness(1.05);
+}
+
+.request-timeline-row.is-sub-row {
+  opacity: 0.85;
+}
+
+.request-timeline-sub-bullet {
+  color: var(--text-muted);
+  font-size: 11px;
+  margin-right: 2px;
+}
+
+.request-timeline-label-col {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.request-timeline-label {
+  font-size: 12px;
+  color: var(--text-primary);
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.request-timeline-badge {
+  font-size: 10px;
+  font-weight: 600;
+  padding: 1px 5px;
+  border-radius: 3px;
+  background: var(--progress-bg);
+  color: var(--text-secondary);
+}
+
+.request-timeline-parallel-badges {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.request-timeline-parallel-pill {
+  font-size: 9px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  color: var(--text-muted);
+  background: var(--progress-bg);
+  padding: 1px 4px;
+  border-radius: 3px;
+}
+
+.request-timeline-more-count {
+  font-size: 10px;
+  color: var(--text-muted);
+}
+
+.request-timeline-track {
+  position: relative;
+  width: 100%;
+  height: 14px;
+  background: var(--progress-bg);
+  border-radius: 4px;
+  overflow: hidden;
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.08);
+}
+
+[data-theme="dark"] .request-timeline-track {
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.request-timeline-bar-segment {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  border-radius: 3px;
+  min-width: 4px;
+  transition: opacity 0.15s ease;
+}
+
+.request-timeline-bar-segment:hover {
+  filter: brightness(1.15);
+}
+
+.request-timeline-parallel-stack {
+  position: relative;
+  width: 100%;
+  height: 100%;
+}
+
+.request-timeline-bar-stacked {
+  position: absolute;
+  border-radius: 2px;
+  min-width: 3px;
+  transition: opacity 0.15s ease;
+}
+
+.request-timeline-bar-stacked:hover {
+  filter: brightness(1.2);
+}
+
+.request-timeline-duration-col {
+  text-align: right;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+.request-timeline-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding-top: 6px;
+  border-top: 1px solid var(--border-color);
+  font-size: 11px;
+}
+
+[data-theme="dark"] .request-timeline-footer {
+  border-top-color: rgba(255, 255, 255, 0.06);
+}
+
+.request-timeline-untimed {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  font-size: 11px;
+}
+
+.request-timeline-untimed-label {
+  color: var(--text-muted);
+}
+
+.request-timeline-untimed-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--text-secondary);
+  font-size: 11px;
+}
+
+.request-timeline-swatch {
+  width: 7px;
+  height: 7px;
+  border-radius: 2px;
+  flex: none;
+}
+
+.request-timeline-total {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-primary);
+  white-space: nowrap;
+}
+
 .table tbody tr.expandable-row {
   cursor: pointer;
 }

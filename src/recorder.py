@@ -173,6 +173,7 @@ def record_tool_call(
     tool_name: str,
     user_id: str | None = None,
     client_source: str | None = None,
+    duration_ms: int | None = None,
     ts: int,
     db_path: str | None = None,
 ) -> None:
@@ -191,6 +192,7 @@ def record_tool_call(
         session_id=session_id,
         tool_name=normalized_tool_name,
         client_source=client_source,
+        duration_ms=duration_ms,
         ts=ts,
     )
     with SASession(engine, expire_on_commit=False) as session:

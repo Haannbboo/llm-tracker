@@ -547,7 +547,7 @@ export function OverviewTab({
               <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
                 <div className="icon-box icon-purple">🚀</div>
                 <div>
-                  <div className="stat-label">{t('Average Throughput')}</div>
+                  <div className="stat-label">{t('Average Output')}</div>
                   <div className="stat-value">{formatThroughput(animatedThroughput)}</div>
                 </div>
               </div>

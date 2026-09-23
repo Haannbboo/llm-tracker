@@ -8,7 +8,7 @@ from __future__ import annotations
 import calendar
 import json
 import logging
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from decimal import Decimal
@@ -34,6 +34,13 @@ from .engine import get_engine
 from .models import BaseUrl, PriceSnapshot, ToolCall, Usage, UsageDaily
 
 logger = logging.getLogger(__name__)
+
+# Client sources whose recorded latency is the full assistant-message lifetime
+# and therefore already includes tool execution time. Tool-call duration is only
+# netted out of throughput for these. api_request-style sources (claude-code,
+# codex) time a single model call, so their latency already excludes tool time
+# and subtracting it would overstate throughput.
+TOOL_DURATION_IN_LATENCY_SOURCES = ("opencode", "kilo")
 
 
 def _iso_to_micros(value: str) -> int:
@@ -899,6 +906,79 @@ def _usage_filters(
     return filters
 
 
+def _tool_duration_sum_by(
+    *group_cols: Any,
+    since: str | None = None,
+    until: str | None = None,
+    provider: str | None = None,
+    model: str | None = None,
+    client_source: str | None = None,
+    db_path: str | None = None,
+) -> dict[tuple[Any, ...], int]:
+    """Tool-call duration sums grouped like a usage query.
+
+    One pass over tool_calls joined to usage (usage_id is indexed). Null
+    durations are ignored. Only sources whose latency already includes tool
+    execution time contribute (see TOOL_DURATION_IN_LATENCY_SOURCES); for any
+    group, ``sum(latency) - sum(tool_ms)`` is then the true generation time even
+    when sources are mixed. Group keys normalize None to "" so they match
+    usage_daily's client_source convention.
+    """
+    filters = _usage_filters(
+        provider=provider,
+        model=model,
+        client_source=client_source,
+        since=since,
+        until=until,
+    )
+    filters.append(Usage.client_source.in_(TOOL_DURATION_IN_LATENCY_SOURCES))
+    query = (
+        select(
+            *group_cols,
+            func.coalesce(func.sum(ToolCall.duration_ms), 0).label("tool_ms"),
+        )
+        .select_from(ToolCall)
+        .join(Usage, Usage.id == ToolCall.usage_id)
+        .where(and_(*filters))
+    )
+    query = query.group_by(*group_cols)
+    n = len(group_cols)
+    with get_engine(db_path).connect() as connection:
+        return {
+            tuple("" if row[i] is None else row[i] for i in range(n)): row[n]
+            for row in connection.execute(query)
+        }
+
+
+def _tool_duration_get(tool_map: dict[tuple[Any, ...], int], *keys: Any) -> int:
+    return tool_map.get(tuple("" if k is None else k for k in keys), 0)
+
+
+def _tool_net_throughput(
+    completion_tokens: Any, latency_sum_ms: Any, tool_duration_sum_ms: Any
+) -> float | None:
+    """Completion tokens per second, excluding tool execution time."""
+    net = max((latency_sum_ms or 0) - (tool_duration_sum_ms or 0), 0)
+    if net <= 0:
+        return None
+    return (completion_tokens or 0) * 1000.0 / net
+
+
+def _attach_tool_throughput(
+    rows: list[dict[str, Any]],
+    tool_map: dict[tuple[Any, ...], int],
+    key_fn: Callable[[dict[str, Any]], tuple[Any, ...]],
+) -> list[dict[str, Any]]:
+    """Attach tool-duration sums and net throughput to summary rows in place."""
+    for row in rows:
+        tool_ms = _tool_duration_get(tool_map, *key_fn(row))
+        row["tool_duration_sum_ms"] = tool_ms
+        row["avg_throughput"] = _tool_net_throughput(
+            row.get("completion_tokens"), row.get("latency_sum_ms"), tool_ms
+        )
+    return rows
+
+
 def _daily_usage_filters(
     *,
     since: str | None = None,
@@ -963,7 +1043,7 @@ def _daily_usage_token_columns(*, include_reasoning: bool = True) -> tuple[Any, 
 
 
 def _daily_usage_latency_columns(
-    *, include_avg_latency: bool = True, include_throughput: bool = True
+    *, include_avg_latency: bool = True
 ) -> tuple[Any, ...]:
     columns: list[Any] = []
     if include_avg_latency:
@@ -975,14 +1055,6 @@ def _daily_usage_latency_columns(
             ).label("avg_latency_ms")
         )
     columns.append(func.sum(UsageDaily.latency_sum_ms).label("latency_sum_ms"))
-    if include_throughput:
-        columns.append(
-            (
-                func.sum(UsageDaily.completion_tokens)
-                * 1000.0
-                / func.nullif(func.sum(UsageDaily.latency_sum_ms), 0)
-            ).label("avg_throughput")
-        )
     return tuple(columns)
 
 
@@ -1062,6 +1134,7 @@ def fetch_recent_usage(
         select(
             ToolCall.usage_id,
             tool_names_expr,
+            func.sum(ToolCall.duration_ms).label("tool_duration_ms"),
         )
         .group_by(ToolCall.usage_id)
         .subquery()
@@ -1095,6 +1168,7 @@ def fetch_recent_usage(
             Usage.price_snapshot_id,
             BaseUrl.base_url.label("base_url"),
             tool_agg.c.tool_names.label("tool_names"),
+            tool_agg.c.tool_duration_ms.label("tool_duration_ms"),
         )
         .select_from(Usage)
         .outerjoin(BaseUrl, Usage.base_url_id == BaseUrl.id)
@@ -1174,6 +1248,7 @@ def fetch_tool_calls(
             ToolCall.session_id,
             ToolCall.tool_name,
             ToolCall.client_source,
+            ToolCall.duration_ms,
             ToolCall.ts,
         )
         .where(and_(*filters))
@@ -1500,8 +1575,20 @@ def _summarize_usage_raw(
     )
     if filters:
         query = query.where(and_(*filters))
+    tool_map = _tool_duration_sum_by(
+        *group_cols,
+        since=since,
+        until=until,
+        provider=provider,
+        model=model,
+        client_source=client_source,
+        db_path=db_path,
+    )
     with get_engine(db_path).connect() as connection:
-        return [_row_to_dict(row) for row in connection.execute(query)]
+        result = [_row_to_dict(row) for row in connection.execute(query)]
+    return _attach_tool_throughput(
+        result, tool_map, lambda d: tuple(d.get(col.name) for col in group_cols)
+    )
 
 
 def summarize_tool_calls(
@@ -1517,7 +1604,11 @@ def summarize_tool_calls(
     status_5xx: bool = False,
     db_path: str | None = None,
 ) -> list[dict[str, Any]]:
-    """Aggregate tool call counts by tool_name, filtered like the usage log."""
+    """Aggregate tool call counts and durations by tool_name, filtered like the usage log.
+
+    duration_ms is sparsely populated (only sources that emit tool timing),
+    so total/avg are None when no timed calls exist for a tool.
+    """
     filters = _usage_filters(
         provider=provider,
         model=model,
@@ -1533,6 +1624,8 @@ def summarize_tool_calls(
         select(
             ToolCall.tool_name,
             func.count(ToolCall.tool_use_id).label("count"),
+            func.sum(ToolCall.duration_ms).label("total_duration_ms"),
+            func.avg(ToolCall.duration_ms).label("avg_duration_ms"),
         )
         .select_from(ToolCall)
         .join(Usage, Usage.id == ToolCall.usage_id)
@@ -1590,8 +1683,20 @@ def summarize_usage_by_source(
     )
     if filters:
         query = query.where(and_(*filters))
+    tool_map = _tool_duration_sum_by(
+        Usage.client_source,
+        since=since,
+        until=until,
+        provider=provider,
+        model=model,
+        client_source=client_source,
+        db_path=db_path,
+    )
     with get_engine(db_path).connect() as connection:
-        return [_row_to_dict(row) for row in connection.execute(query)]
+        result = [_row_to_dict(row) for row in connection.execute(query)]
+    return _attach_tool_throughput(
+        result, tool_map, lambda d: (d.get("client_source"),)
+    )
 
 
 def summarize_usage_by_provider(
@@ -1639,8 +1744,18 @@ def summarize_usage_by_provider(
     )
     if filters:
         query = query.where(and_(*filters))
+    tool_map = _tool_duration_sum_by(
+        Usage.provider,
+        since=since,
+        until=until,
+        provider=provider,
+        model=model,
+        client_source=client_source,
+        db_path=db_path,
+    )
     with get_engine(db_path).connect() as connection:
-        return [_row_to_dict(row) for row in connection.execute(query)]
+        result = [_row_to_dict(row) for row in connection.execute(query)]
+    return _attach_tool_throughput(result, tool_map, lambda d: (d.get("provider"),))
 
 
 def summarize_usage_daily(
@@ -1692,8 +1807,21 @@ def summarize_usage_daily(
     )
     if filters:
         query = query.where(and_(*filters))
+    tool_map = _tool_duration_sum_by(
+        Usage.provider,
+        Usage.model,
+        since=since,
+        until=until,
+        provider=provider,
+        model=model,
+        client_source=client_source,
+        db_path=db_path,
+    )
     with get_engine(db_path).connect() as connection:
-        return [_row_to_dict(row) for row in connection.execute(query)]
+        result = [_row_to_dict(row) for row in connection.execute(query)]
+    return _attach_tool_throughput(
+        result, tool_map, lambda d: (d.get("provider"), d.get("model"))
+    )
 
 
 # === Period aggregation ===
@@ -1793,11 +1921,6 @@ def aggregate_usage_by_period(
             func.coalesce(func.sum(Usage.completion_tokens), 0).label(
                 "completion_tokens"
             ),
-            (
-                func.sum(Usage.completion_tokens)
-                * 1000.0
-                / func.nullif(func.sum(Usage.latency_ms), 0)
-            ).label("avg_throughput"),
             func.coalesce(func.sum(Usage.cached_tokens), 0).label("cached_tokens"),
             func.coalesce(func.sum(Usage.cache_creation_tokens), 0).label(
                 "cache_creation_tokens"
@@ -1821,6 +1944,15 @@ def aggregate_usage_by_period(
     if filters:
         query = query.where(and_(*filters))
 
+    tool_map = _tool_duration_sum_by(
+        period_expr,
+        since=since,
+        until=until,
+        provider=provider,
+        model=model,
+        client_source=client_source,
+    )
+
     result = []
     with get_engine().connect() as connection:
         for row in connection.execute(query):
@@ -1832,19 +1964,19 @@ def aggregate_usage_by_period(
                     "requests": row.requests,
                     "prompt_tokens": row.prompt_tokens,
                     "completion_tokens": row.completion_tokens,
-                    "avg_throughput": _normalize_value(row.avg_throughput),
                     "cached_tokens": row.cached_tokens,
                     "cache_creation_tokens": row.cache_creation_tokens,
                     "total_tokens": row.total_tokens,
                     "input_cost_usd": _normalize_value(row.input_cost_usd),
                     "output_cost_usd": _normalize_value(row.output_cost_usd),
                     "total_cost_usd": _normalize_value(row.total_cost_usd),
+                    "latency_sum_ms": _normalize_value(row.latency_sum),
                     "avg_latency_ms": _normalize_value(avg_latency),
                     "successful_requests": row.successful_requests,
                     "failed_requests": row.failed_requests,
                 }
             )
-    return result
+    return _attach_tool_throughput(result, tool_map, lambda d: (d["period"],))
 
 
 def aggregate_daily_by_period(
@@ -1879,8 +2011,20 @@ def aggregate_daily_by_period(
     )
     if filters:
         query = query.where(and_(*filters))
+
+    # usage_daily.date is the UTC date of Usage.ts, so bucket tool sums the same.
+    tool_map = _tool_duration_sum_by(
+        _period_expression("day", "+00:00"),
+        since=since,
+        until=until,
+        provider=provider,
+        model=model,
+        client_source=client_source,
+        db_path=db_path,
+    )
     with get_engine(db_path).connect() as connection:
-        return [_row_to_dict(row) for row in connection.execute(query)]
+        result = [_row_to_dict(row) for row in connection.execute(query)]
+    return _attach_tool_throughput(result, tool_map, lambda d: (d.get("period"),))
 
 
 def aggregate_daily_by_dimension(

@@ -67,10 +67,21 @@ export const zh: Record<string, string> = {
   'Tokens': 'Tokens',
   'Cost': '费用',
   'Throughput': '吞吐量',
-  'Average Throughput': '平均速度',
+  'Average Output': '平均输出',
   'Speed': '速度',
   'Success': '成功率',
   'Cache': '缓存',
+
+  // Per-request time breakdown
+  'Time breakdown': '时间构成',
+  'TTFT': '首字延迟',
+  'Output generation': '输出生成',
+  'Parallel TUs': '并行工具调用',
+  'Parallel execution': '并行执行',
+  'Parallel': '并行',
+  'Untimed:': '未上报耗时:',
+  'no duration reported': '未上报耗时',
+  'Total': '总计',
 
   // Chart messages
   'No trend data available': '暂无趋势数据',

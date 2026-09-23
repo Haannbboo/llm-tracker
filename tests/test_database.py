@@ -95,6 +95,7 @@ def test_init_db_log_usage_and_fetch_rows(database_module, isolated_home):
         "ttft_ms": None,
         "tool_tokens": None,
         "tool_names": None,
+        "tool_duration_ms": None,
         "cache_creation_tokens": None,
         "input_cost_usd": 2e-05,
         "output_cost_usd": 3e-05,
@@ -159,6 +160,7 @@ def test_fetch_recent_usage_returns_expected_row_shape(fresh_db):
         "ttft_ms",
         "tool_tokens",
         "tool_names",
+        "tool_duration_ms",
         "cache_creation_tokens",
         "input_cost_usd",
         "output_cost_usd",
@@ -1388,9 +1390,123 @@ def test_aggregate_usage_by_period_includes_cost_totals(fresh_db):
             "total_cost_usd": 0.00015,
             "successful_requests": 2,
             "failed_requests": 0,
+            "latency_sum_ms": 300,
+            "tool_duration_sum_ms": 0,
             "avg_latency_ms": 150.0,
         }
     ]
+
+
+def test_throughput_excludes_tool_execution_time(fresh_db):
+    """Dashboard throughput nets tool-call duration out of the latency sum.
+
+    Only sources whose latency is the full assistant-message lifetime (so it
+    already contains tool execution) are netted; opencode is one of them.
+    """
+    from src.recorder import record_tool_call
+
+    database_module = fresh_db.database_module
+    db_path = fresh_db.db_path
+    database_module.init_db(db_path)
+
+    usage = database_module.Usage(
+        ts=TS_2026_04_17_10,
+        provider="anthropic",
+        model="claude-sonnet-4-6",
+        client_source="opencode",
+        endpoint="/v1/messages",
+        prompt_tokens=100,
+        completion_tokens=100,
+        total_tokens=200,
+        latency_ms=1000,
+        status=200,
+        input_cost_usd=0.0,
+        output_cost_usd=0.0,
+        total_cost_usd=0.0,
+    )
+    database_module.log_usage(usage, db_path=db_path)
+    record_tool_call(
+        tool_use_id="tool-throughput-1",
+        usage_id=usage.id,
+        tool_name="bash",
+        duration_ms=500,
+        ts=TS_2026_04_17_10 // 1000,
+        db_path=db_path,
+    )
+
+    # Net latency 1000 - 500 = 500ms → 100 tokens / 0.5s = 200 tok/s
+    daily = database_module.aggregate_usage_by_period(granularity="day")
+    assert daily[0]["avg_throughput"] == 200.0
+
+    # Rollup summary exposes the tool sum and nets throughput
+    summary = database_module.summarize_usage_daily()
+    assert summary[0]["tool_duration_sum_ms"] == 500
+    assert summary[0]["avg_throughput"] == 200.0
+
+    # Raw summary path (short range) too
+    raw = database_module.summarize_usage_daily(
+        since="2026-04-17T00:00:00", until="2026-04-17T23:59:59"
+    )
+    assert raw[0]["tool_duration_sum_ms"] == 500
+    assert raw[0]["avg_throughput"] == 200.0
+
+    # by-source too (source-dimension Speed bar reads avg_throughput)
+    by_source = database_module.summarize_usage_by_source()
+    assert by_source[0]["tool_duration_sum_ms"] == 500
+    assert by_source[0]["avg_throughput"] == 200.0
+
+    # by-provider API path nets in the rollup branch
+    by_provider = database_module.summarize_usage_by_provider()
+    assert by_provider[0]["tool_duration_sum_ms"] == 500
+    assert by_provider[0]["avg_throughput"] == 200.0
+
+    # daily rollup reader (TrendChart) nets too
+    daily_rollup = database_module.aggregate_daily_by_period()
+    assert daily_rollup[0]["tool_duration_sum_ms"] == 500
+    assert daily_rollup[0]["avg_throughput"] == 200.0
+
+
+def test_throughput_keeps_tool_time_for_api_request_sources(fresh_db):
+    """claude-code/codex latency is a single model call and excludes tool time.
+
+    Netted tool duration would overstate throughput, so their tool time stays
+    out of the throughput subtraction.
+    """
+    from src.recorder import record_tool_call
+
+    database_module = fresh_db.database_module
+    db_path = fresh_db.db_path
+    database_module.init_db(db_path)
+
+    usage = database_module.Usage(
+        ts=TS_2026_04_17_10,
+        provider="anthropic",
+        model="claude-sonnet-4-6",
+        client_source="claude-code",
+        endpoint="/v1/messages",
+        prompt_tokens=100,
+        completion_tokens=100,
+        total_tokens=200,
+        latency_ms=1000,
+        status=200,
+        input_cost_usd=0.0,
+        output_cost_usd=0.0,
+        total_cost_usd=0.0,
+    )
+    database_module.log_usage(usage, db_path=db_path)
+    record_tool_call(
+        tool_use_id="tool-claude-1",
+        usage_id=usage.id,
+        tool_name="bash",
+        duration_ms=500,
+        ts=TS_2026_04_17_10 // 1000,
+        db_path=db_path,
+    )
+
+    # Latency already excludes the tool, so throughput stays 100 tok/s.
+    daily = database_module.aggregate_usage_by_period(granularity="day")
+    assert daily[0]["tool_duration_sum_ms"] == 0
+    assert daily[0]["avg_throughput"] == 100.0
 
 
 def test_get_or_create_base_url_reuses_exact_url_and_updates_metadata(fresh_db):

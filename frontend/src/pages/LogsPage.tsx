@@ -8,10 +8,11 @@ import { ModelSelector } from '../ModelSelector'
 import { RequestLogColumnsControl } from '../components/RequestLogColumnsControl'
 import { SessionSelector } from '../components/SessionSelector'
 import { ClickToCopy } from '../components/CopyButton'
+import { RequestTimeline } from '../components/RequestTimeline'
 import { t } from '../i18n/index.ts'
 import {
   formatCost, formatLatency, formatNumber, formatRate, formatSpeed, formatTime,
-  value, getProviderIcon, getProviderBadgeBg, getProviderBadgeText, getModelIcon, getSourceIcon, getSourceBadgeBg, getSourceBadgeText, shortSessionId, resolveTimezone, ToolBadge, getSinceDate, formatModelName,
+  value, getProviderIcon, getProviderBadgeBg, getProviderBadgeText, getModelIcon, getSourceIcon, getSourceBadgeBg, getSourceBadgeText, shortSessionId, resolveTimezone, ToolBadge, getSinceDate, formatModelName, latencyIncludesToolTime,
 } from '../utils'
 import { getModelBadgeBackgroundColor, getModelTextColor } from '../model-badge'
 import type { DateRangeOption } from '../types'
@@ -87,7 +88,7 @@ export function LogsPage({ initialSessionFilter }: Props) {
   const [tableWidth, setTableWidth] = useState(0)
 
   // Tool calls for expanded row
-  const [expandedToolCalls, setExpandedToolCalls] = useState<{ tool_name: string; tool_use_id: string }[] | null>(null)
+  const [expandedToolCalls, setExpandedToolCalls] = useState<{ tool_name: string; tool_use_id: string; duration_ms?: number | null }[] | null>(null)
   useEffect(() => {
     if (!expandedRow) {
       setExpandedToolCalls(null)
@@ -582,9 +583,15 @@ export function LogsPage({ initialSessionFilter }: Props) {
         return (
           <td style={{ padding: '8px', fontWeight: 600 }}>
             {(() => {
-              const speed = formatSpeed(row.completion_tokens ?? row.total_tokens, row.latency_ms)
+              const tokens = row.completion_tokens ?? row.total_tokens
+              const toolMs = row.tool_duration_ms ?? 0
+              const latency = value(row.latency_ms)
+              const excluded = latencyIncludesToolTime(row.client_source) && toolMs > 0 && latency > toolMs
+              const netMs = excluded ? latency - toolMs : latency
+              const speed = formatSpeed(tokens, netMs)
+              const gross = excluded ? formatSpeed(tokens, latency) : ''
               return speed ? (
-                <span title={`${formatNumber(row.completion_tokens ?? row.total_tokens)} tokens / ${formatLatency(row.latency_ms)}`}>
+                <span title={`${formatNumber(tokens)} tokens / ${formatLatency(netMs)}${excluded ? ` gen (excl. ${formatLatency(toolMs)} tools, gross ${gross} / ${formatLatency(latency)})` : ''}`}>
                   <span>{speed.split(' ')[0]}</span>
                   <span style={{ fontSize: '11px', color: 'var(--text-muted)', fontWeight: 400, marginLeft: '3px' }}>{speed.split(' ')[1]}</span>
                 </span>
@@ -864,15 +871,12 @@ export function LogsPage({ initialSessionFilter }: Props) {
                               <span className="detail-value">{row.client_ip}</span>
                             </div>
                           )}
-                          {expandedToolCalls && expandedToolCalls.length > 0 && (
-                            <div className="detail-group">
-                              <span className="detail-label">{t('Tool')}</span>
-                              <span className="detail-value">
-                                {expandedToolCalls.map((tc) => (
-                                  <ToolBadge key={tc.tool_use_id} name={tc.tool_name} style={{ marginRight: 4 }} />
-                                ))}
-                              </span>
-                            </div>
+                          {expandedToolCalls && (
+                            <RequestTimeline
+                              latencyMs={row.latency_ms}
+                              ttftMs={row.ttft_ms}
+                              toolCalls={expandedToolCalls}
+                            />
                           )}
                         </div>
                       </td>

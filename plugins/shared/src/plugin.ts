@@ -145,6 +145,13 @@ export function createPlugin(clientSource: string) {
               const entries = Array.from(emittedTools)
               for (let i = 0; i < entries.length / 2; i++) emittedTools.delete(entries[i])
             }
+            const time = part.state?.time
+            const durationMs =
+              time &&
+              typeof time.start === "number" &&
+              typeof time.end === "number"
+                ? Math.max(0, time.end - time.start)
+                : undefined
             const toolPayload = buildToolEventPayload(
               {
                 sessionId: part.sessionID,
@@ -152,6 +159,7 @@ export function createPlugin(clientSource: string) {
                 callId: part.callID,
                 toolName: part.tool,
                 timestampMs: Date.now(),
+                durationMs,
               },
               clientSource,
             )

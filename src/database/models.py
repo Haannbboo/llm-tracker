@@ -350,4 +350,5 @@ class ToolCall(Base):
     session_id: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
     tool_name: Mapped[str] = mapped_column(String, nullable=False, index=True)
     client_source: Mapped[str | None] = mapped_column(String, nullable=True)
+    duration_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
     ts: Mapped[int] = mapped_column(BigInteger, nullable=False)
