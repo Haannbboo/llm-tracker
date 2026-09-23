@@ -35,6 +35,13 @@ from .models import BaseUrl, PriceSnapshot, ToolCall, Usage, UsageDaily
 
 logger = logging.getLogger(__name__)
 
+# Client sources whose recorded latency is the full assistant-message lifetime
+# and therefore already includes tool execution time. Tool-call duration is only
+# netted out of throughput for these. api_request-style sources (claude-code,
+# codex) time a single model call, so their latency already excludes tool time
+# and subtracting it would overstate throughput.
+TOOL_DURATION_IN_LATENCY_SOURCES = ("opencode", "kilo")
+
 
 def _iso_to_micros(value: str) -> int:
     """Convert an ISO-8601 datetime string to integer microseconds since epoch.
@@ -911,7 +918,10 @@ def _tool_duration_sum_by(
     """Tool-call duration sums grouped like a usage query.
 
     One pass over tool_calls joined to usage (usage_id is indexed). Null
-    durations are ignored. Group keys normalize None to "" so they match
+    durations are ignored. Only sources whose latency already includes tool
+    execution time contribute (see TOOL_DURATION_IN_LATENCY_SOURCES); for any
+    group, ``sum(latency) - sum(tool_ms)`` is then the true generation time even
+    when sources are mixed. Group keys normalize None to "" so they match
     usage_daily's client_source convention.
     """
     filters = _usage_filters(
@@ -921,6 +931,7 @@ def _tool_duration_sum_by(
         since=since,
         until=until,
     )
+    filters.append(Usage.client_source.in_(TOOL_DURATION_IN_LATENCY_SOURCES))
     query = (
         select(
             *group_cols,
@@ -928,9 +939,8 @@ def _tool_duration_sum_by(
         )
         .select_from(ToolCall)
         .join(Usage, Usage.id == ToolCall.usage_id)
+        .where(and_(*filters))
     )
-    if filters:
-        query = query.where(and_(*filters))
     query = query.group_by(*group_cols)
     n = len(group_cols)
     with get_engine(db_path).connect() as connection:
