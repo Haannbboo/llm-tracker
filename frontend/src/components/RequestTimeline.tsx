@@ -284,25 +284,63 @@ export function buildTimelineData({
   }
 
   // 4. Output generation time
-  // Generation represents token generation time excluding TTFT and tool execution
-  const genStart = toolMaxEnd
-  const genDuration = Math.max(0, totalMs - genStart)
+  // Generation represents token generation time excluding TTFT and tool
+  // execution. Agentic clients run tools between requests, so the tools attached
+  // to a row can sit anywhere in the window; subtract the union of tool-occupied
+  // time and draw generation as the complement rather than a single bar that
+  // starts after the last tool (which collapsed to ~0 whenever tools were spread).
+  const genStart = Math.max(0, Math.min(ttft, totalMs))
+  const clippedTools = toolsWithTiming
+    .map(
+      (t): [number, number] => [
+        Math.max(genStart, t.startMs),
+        Math.min(totalMs, t.endMs),
+      ],
+    )
+    .filter(([start, end]) => end > start)
+    .sort((a, b) => a[0] - b[0])
+  const mergedToolBusy: [number, number][] = []
+  for (const [start, end] of clippedTools) {
+    const last = mergedToolBusy[mergedToolBusy.length - 1]
+    if (last && start <= last[1]) {
+      last[1] = Math.max(last[1], end)
+    } else {
+      mergedToolBusy.push([start, end])
+    }
+  }
+  const toolBusyMs = mergedToolBusy.reduce((sum, [start, end]) => sum + (end - start), 0)
+  const genDuration = Math.max(0, totalMs - genStart - toolBusyMs)
   if (genDuration > 0) {
+    const genSegments: TimelineSegment[] = []
+    let cursor = genStart
+    for (const [start, end] of mergedToolBusy) {
+      if (start > cursor) {
+        genSegments.push({
+          key: `generation:${cursor}`,
+          label: t('Output generation'),
+          startMs: cursor,
+          durationMs: start - cursor,
+          color: GEN_COLOR,
+        })
+      }
+      cursor = Math.max(cursor, end)
+    }
+    if (totalMs > cursor) {
+      genSegments.push({
+        key: `generation:${cursor}`,
+        label: t('Output generation'),
+        startMs: cursor,
+        durationMs: totalMs - cursor,
+        color: GEN_COLOR,
+      })
+    }
     rows.push({
       id: 'generation',
       type: 'generation',
       label: t('Output generation'),
       startMs: genStart,
       durationMs: genDuration,
-      segments: [
-        {
-          key: 'generation',
-          label: t('Output generation'),
-          startMs: genStart,
-          durationMs: genDuration,
-          color: GEN_COLOR,
-        },
-      ],
+      segments: genSegments,
     })
   }
 

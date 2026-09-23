@@ -42,6 +42,14 @@ _claude_tool_buffer: dict[str, list[dict]] = {}
 _codex_tool_buffer: dict[str, list[dict]] = {}
 _opencode_tool_buffer: dict[str, list[dict]] = {}  # keyed by message.id
 
+# Most recent Claude usage row per prompt.id: prompt_key -> (usage_id, session_id, ts_ms).
+# Claude's prompt.id spans a whole user turn, so this lets a trailing tool_result
+# attach to the request that produced it instead of the next one.
+_claude_last_usage: dict[str, tuple[str, str | None, int]] = {}
+# Fallback window when a usage row has no known latency, used to tell a
+# just-decided tool (still awaiting its result) from a result-less stale one.
+CLAUDE_TOOL_FLUSH_GRACE_MS = 2000
+
 # Rate limiting state: token_id -> deque of request timestamps
 _rate_limit_state: dict[str, deque] = {}
 _last_rate_limit_cleanup = 0.0
@@ -275,6 +283,61 @@ def _buffer_tool_duration(
             return
 
 
+def _pop_buffered_tool(
+    buffer: dict[str, list[dict]], key: str | None, tool_use_id: str
+) -> dict | None:
+    """Remove and return a buffered tool call by id, or None when unmatched."""
+    if not key or not tool_use_id:
+        return None
+    entries = buffer.get(key)
+    if not entries:
+        return None
+    for index, entry in enumerate(entries):
+        if entry["tool_use_id"] == tool_use_id:
+            entries.pop(index)
+            if not entries:
+                del buffer[key]
+            return entry
+    return None
+
+
+def _flush_claude_tools(
+    prompt_key: str,
+    usage_id: str,
+    session_id: str | None,
+    user_id: str | None,
+    usage_start_ms: int,
+) -> None:
+    """Record buffered Claude tools that will never get a tool_result.
+
+    A new api_request for the same prompt can only start after every tool of the
+    previous request has produced its result, so any entry decided before this
+    request started is result-less (for example a rejected tool).
+    """
+    entries = _claude_tool_buffer.get(prompt_key)
+    if not entries:
+        return
+    remaining = []
+    for entry in entries:
+        if entry["ts"] >= usage_start_ms:
+            remaining.append(entry)
+            continue
+        record_tool_call(
+            tool_use_id=_scoped_tool_use_id(entry["tool_use_id"], user_id),
+            usage_id=usage_id,
+            session_id=session_id,
+            tool_name=entry["tool_name"],
+            duration_ms=entry.get("duration_ms"),
+            user_id=user_id,
+            client_source="claude-code",
+            ts=entry["ts"],
+        )
+    if remaining:
+        _claude_tool_buffer[prompt_key] = remaining
+    else:
+        _claude_tool_buffer.pop(prompt_key, None)
+
+
 def _resource_attr(resource: dict, key: str):
     return _attr(resource.get("attributes", []), key)
 
@@ -443,13 +506,6 @@ def _extract_claude_fields(
 
     total = prompt_tokens + int(output_tokens or 0) + int(cache_create or 0)
 
-    # Pop buffered tool calls for this prompt.id
-    prompt_id = _attr(attrs, "prompt.id")
-    tool_info: list[dict] = []
-    prompt_key = _scoped_id(prompt_id, user_id) if prompt_id else None
-    if prompt_key and prompt_key in _claude_tool_buffer:
-        tool_info = _claude_tool_buffer.pop(prompt_key)
-
     return {
         "ts": ts,
         "provider": metadata.provider,
@@ -475,7 +531,6 @@ def _extract_claude_fields(
         "base_url_provider": metadata.provider,
         "base_url_source": metadata.source,
         "user_id": user_id,
-        "_tool_info": tool_info,
     }
 
 
@@ -817,13 +872,27 @@ def _parse_log_record(
             ts=ts_attr,
         )
     elif event_name == "tool_result" and service_name == "claude-code":
+        # Record the tool as soon as its duration is known, attached to the
+        # request that produced it (the last usage row for this prompt). A
+        # following request cannot complete before this result exists.
         prompt_id = _attr(attrs, "prompt.id")
-        _buffer_tool_duration(
-            _claude_tool_buffer,
-            _scoped_id(prompt_id, user_id) if prompt_id else None,
-            _attr(attrs, "tool_use_id") or "",
-            _optional_int(_attr(attrs, "duration_ms")),
+        prompt_key = _scoped_id(prompt_id, user_id) if prompt_id else None
+        entry = _pop_buffered_tool(
+            _claude_tool_buffer, prompt_key, _attr(attrs, "tool_use_id") or ""
         )
+        if entry is not None:
+            last = _claude_last_usage.get(prompt_key) if prompt_key else None
+            usage_id, session_id = (last[0], last[1]) if last else (None, None)
+            record_tool_call(
+                tool_use_id=_scoped_tool_use_id(entry["tool_use_id"], user_id),
+                usage_id=usage_id,
+                session_id=session_id or usage_session_id,
+                tool_name=entry["tool_name"],
+                duration_ms=_optional_int(_attr(attrs, "duration_ms")),
+                user_id=user_id,
+                client_source="claude-code",
+                ts=entry["ts"],
+            )
     elif event_name == "codex.tool_decision" and service_name in CODEX_SERVICE_NAMES:
         conv_id = _attr(attrs, "conversation.id")
         tool_name = _attr(attrs, "tool_name") or ""
@@ -867,21 +936,28 @@ def _parse_log_record(
             record, attrs, usage_session_id or "", client_ip, user_id=user_id
         )
         if fields is not None:
-            tool_calls = fields.pop("_tool_info", [])
             usage = record_usage(**fields)
             if usage:
-                for tool_info in tool_calls:
-                    record_tool_call(
-                        tool_use_id=_scoped_tool_use_id(
-                            tool_info["tool_use_id"], user_id
-                        ),
-                        usage_id=usage.id,
-                        session_id=usage.session_id,
-                        tool_name=tool_info["tool_name"],
-                        duration_ms=tool_info.get("duration_ms"),
-                        user_id=user_id,
-                        client_source="claude-code",
-                        ts=tool_info["ts"],
+                prompt_id = _attr(attrs, "prompt.id")
+                prompt_key = _scoped_id(prompt_id, user_id) if prompt_id else None
+                usage_ts_ms = int(fields["ts"]) // 1000
+                latency_ms = int(fields.get("latency_ms") or 0)
+                # Treat an unknown latency as the grace window so a tool whose
+                # decision lands just before the request completes is not
+                # mistaken for a result-less one.
+                window_ms = latency_ms if latency_ms > 0 else CLAUDE_TOOL_FLUSH_GRACE_MS
+                if prompt_key:
+                    _flush_claude_tools(
+                        prompt_key,
+                        usage.id,
+                        usage.session_id,
+                        user_id,
+                        usage_ts_ms - window_ms,
+                    )
+                    _claude_last_usage[prompt_key] = (
+                        usage.id,
+                        usage.session_id,
+                        usage_ts_ms,
                     )
     elif event_name == CODEX_EVENT and service_name in CODEX_SERVICE_NAMES:
         if _handle_codex_state_event(attrs, user_id=user_id):
@@ -991,6 +1067,10 @@ async def receive_logs(request: Request):
         ]
         for k in stale_buf_keys:
             del buf[k]
+
+    for k, (_, _, usage_ts_ms) in list(_claude_last_usage.items()):
+        if now_ms - usage_ts_ms > 600_000:
+            del _claude_last_usage[k]
 
     PROMPT_LENGTH_TRACKER.evict_stale()
 

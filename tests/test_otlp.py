@@ -814,6 +814,133 @@ def test_claude_tool_result_duration_flows_to_record(otlp_module, monkeypatch):
     assert captured_tools[0]["duration_ms"] == 42
 
 
+def test_claude_tools_attach_to_the_request_that_produced_them(
+    otlp_module, monkeypatch
+):
+    """prompt.id spans a whole turn: each request must own only its own tools."""
+    captured_tools: list[dict] = []
+    usage_ids = iter(["u1", "u2"])
+    monkeypatch.setattr(
+        otlp_module,
+        "record_usage",
+        lambda **fields: SimpleNamespace(id=next(usage_ids), session_id="session-1"),
+    )
+    monkeypatch.setattr(
+        otlp_module, "record_tool_call", lambda **fields: captured_tools.append(fields)
+    )
+
+    def record(event_name: str, ts_ms: int, **extra) -> dict:
+        return {
+            "attributes": _attrs(
+                {"event.name": event_name, "prompt.id": "turn-1", **extra}
+            ),
+            "timeUnixNano": str(ts_ms * 1_000_000),
+        }
+
+    otlp_module._parse_log_record(
+        record("tool_decision", 1000, tool_name="Bash", tool_use_id="t1"),
+        "claude-code",
+        "s1",
+    )
+    otlp_module._parse_log_record(
+        record(
+            "claude_code.api_request",
+            1010,
+            input_tokens=10,
+            output_tokens=5,
+            duration_ms=500,
+        ),
+        "claude-code",
+        "s1",
+    )
+    otlp_module._parse_log_record(
+        record("tool_result", 1050, tool_name="Bash", tool_use_id="t1", duration_ms=40),
+        "claude-code",
+        "s1",
+    )
+    otlp_module._parse_log_record(
+        record("tool_decision", 5000, tool_name="Read", tool_use_id="t2"),
+        "claude-code",
+        "s1",
+    )
+    otlp_module._parse_log_record(
+        record(
+            "claude_code.api_request",
+            5010,
+            input_tokens=20,
+            output_tokens=5,
+            duration_ms=800,
+        ),
+        "claude-code",
+        "s1",
+    )
+    otlp_module._parse_log_record(
+        record("tool_result", 5040, tool_name="Read", tool_use_id="t2", duration_ms=15),
+        "claude-code",
+        "s1",
+    )
+
+    by_id = {t["tool_use_id"]: t for t in captured_tools}
+    assert by_id["t1"]["usage_id"] == "u1"
+    assert by_id["t1"]["duration_ms"] == 40
+    assert by_id["t2"]["usage_id"] == "u2"
+    assert by_id["t2"]["duration_ms"] == 15
+
+
+def test_claude_result_less_tool_flushes_to_next_request(otlp_module, monkeypatch):
+    """A decision with no tool_result (e.g. rejected) must still be recorded."""
+    captured_tools: list[dict] = []
+    usage_ids = iter(["u1", "u2"])
+    monkeypatch.setattr(
+        otlp_module,
+        "record_usage",
+        lambda **fields: SimpleNamespace(id=next(usage_ids), session_id="session-1"),
+    )
+    monkeypatch.setattr(
+        otlp_module, "record_tool_call", lambda **fields: captured_tools.append(fields)
+    )
+
+    def record(event_name: str, ts_ms: int, **extra) -> dict:
+        return {
+            "attributes": _attrs(
+                {"event.name": event_name, "prompt.id": "turn-1", **extra}
+            ),
+            "timeUnixNano": str(ts_ms * 1_000_000),
+        }
+
+    otlp_module._parse_log_record(
+        record("tool_decision", 1000, tool_name="Bash", tool_use_id="t1"),
+        "claude-code",
+        "s1",
+    )
+    otlp_module._parse_log_record(
+        record(
+            "claude_code.api_request",
+            1010,
+            input_tokens=10,
+            output_tokens=5,
+            duration_ms=200,
+        ),
+        "claude-code",
+        "s1",
+    )
+    otlp_module._parse_log_record(
+        record(
+            "claude_code.api_request",
+            5000,
+            input_tokens=20,
+            output_tokens=5,
+            duration_ms=300,
+        ),
+        "claude-code",
+        "s1",
+    )
+
+    by_id = {t["tool_use_id"]: t for t in captured_tools}
+    assert by_id["t1"]["usage_id"] == "u2"
+    assert by_id["t1"]["duration_ms"] is None
+
+
 def test_codex_tool_result_duration_flows_to_record(otlp_module, monkeypatch):
     captured_tools: list[dict] = []
     _stub_tool_recording(otlp_module, monkeypatch, captured_tools)
@@ -1128,6 +1255,21 @@ def test_authenticated_otlp_tool_calls_keep_user_id(otlp_module, monkeypatch, fr
             "timeUnixNano": "1800000000000000000",
         }
     )
+    records.append(
+        {
+            "attributes": _attrs(
+                {
+                    "event.name": "tool_result",
+                    "prompt.id": "prompt-1",
+                    "session.id": "session-1",
+                    "tool_name": "Bash",
+                    "tool_use_id": "tool-1",
+                    "duration_ms": 12,
+                }
+            ),
+            "timeUnixNano": "1800000000000000000",
+        }
+    )
 
     response = TestClient(otlp_module.app).post(
         "/v1/logs", json=body, headers={"x-llm-tracker-token": token}
@@ -1136,6 +1278,8 @@ def test_authenticated_otlp_tool_calls_keep_user_id(otlp_module, monkeypatch, fr
     assert response.status_code == 200
     assert captured_tools[0]["user_id"] == user.id
     assert captured_tools[0]["tool_use_id"] == f"{user.id}:tool-1"
+    assert captured_tools[0]["usage_id"] == "u1"
+    assert captured_tools[0]["duration_ms"] == 12
 
 
 def test_auth_lookup_timeout_returns_503(otlp_module, monkeypatch):

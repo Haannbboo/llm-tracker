@@ -55,6 +55,17 @@ describe('RequestTimeline per-tool color coding', () => {
     assert.match(timeline, /const displayTotal = latency > 0 \? latency : totalMs/)
   })
 
+  test('generation is the complement of tool-occupied time, not the span', () => {
+    // Regression: `totalMs - toolMaxEnd` treated the wall-clock gap between
+    // tools as tool time, collapsing generation to ~0 for agentic clients whose
+    // tools run between requests.
+    assert.doesNotMatch(timeline, /const genDuration = Math\.max\(0, totalMs - genStart\)/)
+    assert.match(timeline, /const toolBusyMs = mergedToolBusy\.reduce/)
+    assert.match(timeline, /const genDuration = Math\.max\(0, totalMs - genStart - toolBusyMs\)/)
+    // Generation is drawn as one or more segments filling the gaps between tools.
+    assert.match(timeline, /const genSegments: TimelineSegment\[\]/)
+  })
+
   test('supports extra components for future extensibility', () => {
     assert.match(timeline, /extraComponents\?: TimelineCustomComponent\[\]/)
   })
