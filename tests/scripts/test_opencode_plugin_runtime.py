@@ -254,6 +254,7 @@ def test_opencode_plugin_emits_status_for_failed_assistant_messages(tmp_path):
     assert "error.type" not in payloads[3]
 
     assert records[4]["severityNumber"] == 9
+    assert records[4]["timeUnixNano"] == "5234000000"
     assert payloads[4]["event.name"] == "opencode.tool_decision"
     assert payloads[4]["tool_name"] == "bash"
     assert payloads[4]["call_id"] == "call-tool-1"

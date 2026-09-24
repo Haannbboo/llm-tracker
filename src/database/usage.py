@@ -1235,7 +1235,11 @@ def fetch_tool_calls(
     user_id: str | None = None,
     db_path: str | None = None,
 ) -> list[dict[str, Any]]:
-    """Return tool calls for a single usage row or session, ordered by ts."""
+    """Return tool calls for a single usage row or session, ordered by ts.
+
+    Per-usage results include a row-relative ``start_ms`` when the source
+    reports tool duration, so the timeline can place parallel tools correctly.
+    """
     column = ToolCall.usage_id if usage_id is not None else ToolCall.session_id
     value = usage_id if usage_id is not None else session_id
     filters = [column == value]
@@ -1256,7 +1260,34 @@ def fetch_tool_calls(
         .limit(TOOL_CALLS_QUERY_LIMIT)
     )
     with get_engine(db_path).connect() as connection:
-        return [_row_to_dict(row) for row in connection.execute(query)]
+        rows = [_row_to_dict(row) for row in connection.execute(query)]
+        if usage_id is None or not rows:
+            return rows
+        usage_query = select(Usage.ts, Usage.latency_ms, Usage.client_source).where(
+            Usage.id == usage_id
+        )
+        if user_id is not None:
+            usage_query = usage_query.where(Usage.user_id == user_id)
+        usage_row = connection.execute(usage_query).first()
+        if usage_row is None:
+            return rows
+        # OpenCode/Kilo tool events carry the completion time and true execution
+        # duration, and their latency includes tool time, so the row-relative
+        # start is completion - duration. Other sources report a decision time
+        # with latency excluding tool time, so they get no explicit start.
+        usage_ts_micros, latency_ms, client_source = usage_row
+        row_start_ms = (
+            usage_ts_micros // 1000 - latency_ms
+            if client_source in TOOL_DURATION_IN_LATENCY_SOURCES and latency_ms
+            else None
+        )
+        for row in rows:
+            duration_ms = row["duration_ms"]
+            if row_start_ms is None or duration_ms is None or duration_ms < 0:
+                row["start_ms"] = None
+            else:
+                row["start_ms"] = max(0, row["ts"] - duration_ms - row_start_ms)
+        return rows
 
 
 def count_usage(

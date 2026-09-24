@@ -8,7 +8,7 @@ export type TimelineTool = {
   duration_ms?: number | null
   ts?: number
   is_parallel?: boolean
-  start_ms?: number
+  start_ms?: number | null
 }
 
 export type TimelineCustomComponent = {
@@ -94,6 +94,10 @@ export function buildTimelineData({
 
   const toolsWithTiming: ToolWithTiming[] = []
 
+  // Exact row-relative starts (when the API provides them) keep tools that ran
+  // concurrently overlapping, so they take precedence over the ts heuristic.
+  const hasExplicitStart = timedTools.every((tc) => tc.start_ms != null)
+
   // Check if tools have distinct timestamps
   const timestamps = timedTools.map((t) => t.ts).filter((ts): ts is number => ts != null)
   const hasDistinctTs =
@@ -101,7 +105,7 @@ export function buildTimelineData({
     timestamps.length > 1 &&
     new Set(timestamps).size > 1
 
-  if (hasDistinctTs) {
+  if (hasDistinctTs && !hasExplicitStart) {
     const minTs = Math.min(...timestamps)
     for (const tc of timedTools) {
       const dur = tc.duration_ms ?? 0
@@ -119,10 +123,11 @@ export function buildTimelineData({
     for (const tc of timedTools) {
       const dur = tc.duration_ms ?? 0
       if (tc.start_ms != null) {
+        const start = Math.max(0, tc.start_ms)
         toolsWithTiming.push({
           ...tc,
-          startMs: tc.start_ms,
-          endMs: tc.start_ms + dur,
+          startMs: start,
+          endMs: start + dur,
           durationMs: dur,
         })
       } else if (tc.is_parallel) {
@@ -284,12 +289,14 @@ export function buildTimelineData({
   }
 
   // 4. Output generation time
-  // Generation represents token generation time excluding TTFT and tool
-  // execution. Agentic clients run tools between requests, so the tools attached
-  // to a row can sit anywhere in the window; subtract the union of tool-occupied
-  // time and draw generation as the complement rather than a single bar that
-  // starts after the last tool (which collapsed to ~0 whenever tools were spread).
+  // Measured tool starts identify the model output preceding the first tool.
+  // Gaps after that are retained as an explicit Other interval rather than
+  // being mislabeled as another generation segment.
   const genStart = Math.max(0, Math.min(ttft, totalMs))
+  const hasMeasuredToolTimeline = hasExplicitStart && toolsWithTiming.length > 0
+  const generationEnd = hasMeasuredToolTimeline
+    ? Math.max(genStart, Math.min(totalMs, toolsWithTiming[0].startMs))
+    : totalMs
   const clippedTools = toolsWithTiming
     .map(
       (t): [number, number] => [
@@ -308,40 +315,100 @@ export function buildTimelineData({
       mergedToolBusy.push([start, end])
     }
   }
-  const toolBusyMs = mergedToolBusy.reduce((sum, [start, end]) => sum + (end - start), 0)
-  const genDuration = Math.max(0, totalMs - genStart - toolBusyMs)
-  if (genDuration > 0) {
-    const genSegments: TimelineSegment[] = []
-    let cursor = genStart
+
+  if (hasMeasuredToolTimeline) {
+    const genDuration = Math.max(0, generationEnd - genStart)
+    if (genDuration > 0) {
+      rows.push({
+        id: 'generation',
+        type: 'generation',
+        label: t('Output generation'),
+        startMs: genStart,
+        durationMs: genDuration,
+        segments: [
+          {
+            key: `generation:${genStart}`,
+            label: t('Output generation'),
+            startMs: genStart,
+            durationMs: genDuration,
+            color: GEN_COLOR,
+          },
+        ],
+      })
+    }
+
+    const otherSegments: TimelineSegment[] = []
+    let otherCursor = generationEnd
     for (const [start, end] of mergedToolBusy) {
-      if (start > cursor) {
+      const clippedStart = Math.max(generationEnd, start)
+      const clippedEnd = Math.min(totalMs, end)
+      if (clippedEnd <= clippedStart) continue
+      if (clippedStart > otherCursor) {
+        otherSegments.push({
+          key: `other:${otherCursor}`,
+          label: t('Other'),
+          startMs: otherCursor,
+          durationMs: clippedStart - otherCursor,
+          color: '#94a3b8',
+        })
+      }
+      otherCursor = Math.max(otherCursor, clippedEnd)
+    }
+    if (totalMs > otherCursor) {
+      otherSegments.push({
+        key: `other:${otherCursor}`,
+        label: t('Other'),
+        startMs: otherCursor,
+        durationMs: totalMs - otherCursor,
+        color: '#94a3b8',
+      })
+    }
+    if (otherSegments.length > 0) {
+      rows.push({
+        id: 'other',
+        type: 'custom',
+        label: t('Other'),
+        startMs: otherSegments[0].startMs,
+        durationMs: otherSegments.reduce((sum, segment) => sum + segment.durationMs, 0),
+        segments: otherSegments,
+      })
+    }
+  } else {
+    const toolBusyMs = mergedToolBusy.reduce((sum, [start, end]) => sum + (end - start), 0)
+    const genDuration = Math.max(0, totalMs - genStart - toolBusyMs)
+    if (genDuration > 0) {
+      const genSegments: TimelineSegment[] = []
+      let cursor = genStart
+      for (const [start, end] of mergedToolBusy) {
+        if (start > cursor) {
+          genSegments.push({
+            key: `generation:${cursor}`,
+            label: t('Output generation'),
+            startMs: cursor,
+            durationMs: start - cursor,
+            color: GEN_COLOR,
+          })
+        }
+        cursor = Math.max(cursor, end)
+      }
+      if (totalMs > cursor) {
         genSegments.push({
           key: `generation:${cursor}`,
           label: t('Output generation'),
           startMs: cursor,
-          durationMs: start - cursor,
+          durationMs: totalMs - cursor,
           color: GEN_COLOR,
         })
       }
-      cursor = Math.max(cursor, end)
-    }
-    if (totalMs > cursor) {
-      genSegments.push({
-        key: `generation:${cursor}`,
+      rows.push({
+        id: 'generation',
+        type: 'generation',
         label: t('Output generation'),
-        startMs: cursor,
-        durationMs: totalMs - cursor,
-        color: GEN_COLOR,
+        startMs: genStart,
+        durationMs: genDuration,
+        segments: genSegments,
       })
     }
-    rows.push({
-      id: 'generation',
-      type: 'generation',
-      label: t('Output generation'),
-      startMs: genStart,
-      durationMs: genDuration,
-      segments: genSegments,
-    })
   }
 
   // 5. Remaining extra components
@@ -364,6 +431,8 @@ export function buildTimelineData({
       ],
     })
   }
+
+  rows.sort((a, b) => a.startMs - b.startMs)
 
   const hasTiming = totalMs > 0 && rows.length > 0
   return { rows, untimed, totalMs, displayTotal, hasTiming }

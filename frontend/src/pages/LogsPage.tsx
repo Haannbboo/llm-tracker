@@ -8,7 +8,7 @@ import { ModelSelector } from '../ModelSelector'
 import { RequestLogColumnsControl } from '../components/RequestLogColumnsControl'
 import { SessionSelector } from '../components/SessionSelector'
 import { ClickToCopy } from '../components/CopyButton'
-import { RequestTimeline } from '../components/RequestTimeline'
+import { RequestTimeline, type TimelineTool } from '../components/RequestTimeline'
 import { t } from '../i18n/index.ts'
 import {
   formatCost, formatLatency, formatNumber, formatRate, formatSpeed, formatTime,
@@ -91,7 +91,7 @@ export function LogsPage({ initialSessionFilter }: Props) {
   const [tableWidth, setTableWidth] = useState(0)
 
   // Tool calls for expanded row
-  const [expandedToolCalls, setExpandedToolCalls] = useState<{ tool_name: string; tool_use_id: string; duration_ms?: number | null }[] | null>(null)
+  const [expandedToolCalls, setExpandedToolCalls] = useState<TimelineTool[] | null>(null)
   useEffect(() => {
     if (!expandedRow) {
       setExpandedToolCalls(null)
