@@ -57,6 +57,9 @@ export function LogsPage({ initialSessionFilter }: Props) {
   // Tool filter state (local to logs view)
   const [toolFilter, setToolFilter] = useState<string | null>(null)
 
+  // Hovering a row highlights every other row of the same session
+  const [hoveredSession, setHoveredSession] = useState<string | null>(null)
+
   // Logs data hook
   const {
     usageRows, setUsageRows, totalLogs, totalPages,
@@ -319,7 +322,7 @@ export function LogsPage({ initialSessionFilter }: Props) {
                 <div className="request-log-session-actions">
                   <button
                     type="button"
-                    className="request-log-session-filter"
+                    className={`request-log-session-filter${hoveredSession === sessionId ? ' session-hover-active' : ''}`}
                     title={sessionId}
                     aria-label={`${t('Filter logs by session')}: ${sessionId}`}
                     onClick={(e) => { e.stopPropagation(); setSessionFilter(sessionId); resetPage() }}
@@ -789,6 +792,8 @@ export function LogsPage({ initialSessionFilter }: Props) {
                 <Fragment key={row.id}>
                   <tr
                     className={`expandable-row${expandedRow === row.id ? ' expanded' : ''}`}
+                    onMouseEnter={() => setHoveredSession(row.session_id ?? null)}
+                    onMouseLeave={() => setHoveredSession(null)}
                     onClick={() => setExpandedRow(expandedRow === row.id ? null : row.id)}
                   >
                     {effectiveVisibleColumns.map((column) => (
