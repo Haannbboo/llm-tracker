@@ -159,7 +159,7 @@ export function TopUsageChart({
           : v.tokens > 0 ? (v.cost / v.tokens) * 1_000_000 : null,
         successRate: v.total > 0 ? (v.successful / v.total) * 100 : 100,
         cacheHitRate: (v.prompt + v.cacheCreation) > 0 ? (v.cached / (v.prompt + v.cacheCreation)) * 100 : 0,
-        color: getModelColor(model),
+        color: getModelColor(model, theme),
         badgeBg: getModelBadgeBackgroundColor(model, theme),
         badgeText: getModelTextColor(model, theme),
       }))

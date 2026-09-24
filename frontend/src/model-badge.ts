@@ -1,6 +1,6 @@
 import { getTheme, type Theme } from './theme'
 
-export function getModelColor(model: string): string {
+export function getModelColor(model: string, theme: Theme = getTheme()): string {
   const m = model.toLowerCase()
   if (m.startsWith('tencent/') || m.startsWith('hy3')) return '#0052D9'
   if (m.includes('gpt-5') || m.includes('gpt-4')) return '#dcdcdc'
@@ -17,7 +17,7 @@ export function getModelColor(model: string): string {
   if (m.includes('stepfun') || m.includes('step-')) return '#01A9FF'
   if (m.includes('qwen')) return '#6F69F7'
   if (m.includes('dots')) return '#8FE2D6'
-  if (m.startsWith('stealth')) return '#ECEEF1'
+  if (m.startsWith('stealth')) return theme === 'dark' ? '#9CA3AF' : '#D1D5DB'
   if (m.includes('muse') || m.includes('meta/')) return '#0081fb'
   if (m.includes('longcat')) return '#29E154'
   if (m.startsWith('x-ai/') || m.includes('grok')) return '#111827'
