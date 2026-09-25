@@ -37,9 +37,9 @@ logger = logging.getLogger(__name__)
 
 # Client sources whose recorded latency is the full assistant-message lifetime
 # and therefore already includes tool execution time. Tool-call duration is only
-# netted out of throughput for these. api_request-style sources (claude-code,
-# codex) time a single model call, so their latency already excludes tool time
-# and subtracting it would overstate throughput.
+# netted out of throughput for these. Model-call sources (claude-code, codex)
+# time a single request, so their latency already excludes tool time and
+# subtracting it would overstate throughput.
 TOOL_DURATION_IN_LATENCY_SOURCES = ("opencode", "kilo")
 
 
@@ -254,11 +254,31 @@ def log_usage(usage: Usage, db_path: str | None = None) -> None:
         )
 
 
-def upsert_daily_aggregate(usage: Usage, db_path: str | None = None) -> None:
-    """Incrementally update the daily aggregation table for a single usage row."""
-    date = datetime.fromtimestamp(micros_to_secs(usage.ts), tz=timezone.utc).strftime(
+def _usage_date(usage: Usage) -> str:
+    """UTC date bucket for a usage row's daily aggregate."""
+    return datetime.fromtimestamp(micros_to_secs(usage.ts), tz=timezone.utc).strftime(
         "%Y-%m-%d"
     )
+
+
+def _usage_daily_match(usage: Usage, date: str) -> Any:
+    """Filter selecting the usage_daily row that aggregates *usage*'s group.
+
+    Shared by every incremental usage_daily update so the match fields
+    (including the NULL-user_id convention) can't drift between callers.
+    """
+    return and_(
+        UsageDaily.date == date,
+        UsageDaily.provider == usage.provider,
+        UsageDaily.model == usage.model,
+        UsageDaily.client_source == (usage.client_source or ""),
+        func.coalesce(UsageDaily.user_id, "") == (usage.user_id or ""),
+    )
+
+
+def upsert_daily_aggregate(usage: Usage, db_path: str | None = None) -> None:
+    """Incrementally update the daily aggregation table for a single usage row."""
+    date = _usage_date(usage)
     client_source = usage.client_source or ""
     is_success = usage.status is None or usage.status < 400
     latency = usage.latency_ms or 0
@@ -437,9 +457,7 @@ def recalculate_usage_cost(
         )
         deltas = {field: new_costs[field] - old_costs[field] for field in old_costs}
 
-        date = datetime.fromtimestamp(
-            micros_to_secs(usage.ts), tz=timezone.utc
-        ).strftime("%Y-%m-%d")
+        date = _usage_date(usage)
 
         # Rebind the row to the exact rates just used so the displayed split
         # matches the recalculated totals. Best-effort: a snapshot failure must
@@ -472,15 +490,7 @@ def recalculate_usage_cost(
         # merge_duplicate_usage's row lock, elsewhere in this module).
         daily_result = session.execute(
             update(UsageDaily)
-            .where(
-                and_(
-                    UsageDaily.date == date,
-                    UsageDaily.provider == usage.provider,
-                    UsageDaily.model == usage.model,
-                    UsageDaily.client_source == (usage.client_source or ""),
-                    func.coalesce(UsageDaily.user_id, "") == (usage.user_id or ""),
-                )
-            )
+            .where(_usage_daily_match(usage, date))
             .values(
                 input_cost_usd=UsageDaily.input_cost_usd + deltas["input_cost_usd"],
                 output_cost_usd=UsageDaily.output_cost_usd + deltas["output_cost_usd"],

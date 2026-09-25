@@ -145,6 +145,26 @@ def test_extract_codex_fields_basic(otlp_module):
     assert fields["client_source"] == "codex"
 
 
+def test_extract_codex_fields_prefers_inline_ttft(otlp_module):
+    attrs = _attrs(
+        {
+            "event.kind": "response.completed",
+            "input_token_count": 16268,
+            "output_token_count": 5,
+            "cached_token_count": 11008,
+            "ttft_ms": 794,
+            "conversation.id": "codex-conv-2",
+        }
+    )
+    record = {"timeUnixNano": "1800000000000000000"}
+    otlp_module.codex_state["codex-conv-2"] = {"ts": 0, "duration_ms": 1800}
+
+    fields = otlp_module._extract_codex_fields(record, attrs, "codex-app-server")
+
+    assert fields["ttft_ms"] == 794
+    assert fields["latency_ms"] == 1800
+
+
 def test_extract_opencode_fields_basic(otlp_module):
     attrs = _attrs(
         {
@@ -567,6 +587,147 @@ def test_parse_codex_exec_record_uses_same_usage_parser(otlp_module, monkeypatch
     assert captured["usage"].prompt_tokens == 21742
     assert captured["usage"].completion_tokens == 6
     assert captured["usage"].cached_tokens == 6528
+
+
+def test_parse_codex_app_server_record_uses_same_usage_parser(otlp_module, monkeypatch):
+    captured = {}
+    monkeypatch.setattr(otlp_module, "record_usage", _capture_usage(captured))
+
+    response_ts = datetime(2026, 9, 25, 6, 35, 12, tzinfo=timezone.utc)
+    response_record = {
+        "timeUnixNano": str(int(response_ts.timestamp() * 1_000_000_000)),
+        "attributes": _attrs(
+            {
+                "event.name": "codex.sse_event",
+                "event.kind": "response.completed",
+                "conversation.id": "app-server-conv-1",
+                "model": "gpt-5.6-luna",
+                "input_token_count": 20531,
+                "output_token_count": 35,
+                "cached_token_count": 11008,
+                "reasoning_token_count": 19,
+            }
+        ),
+    }
+
+    otlp_module._parse_log_record(response_record, "codex-app-server", "")
+
+    assert captured["usage"].client_source == "codex"
+    assert captured["usage"].session_id == "app-server-conv-1"
+    assert captured["usage"].prompt_tokens == 20531
+    assert captured["usage"].completion_tokens == 35
+
+
+def test_codex_websocket_request_sets_request_latency(otlp_module, monkeypatch):
+    """response.completed has no duration; subtract the send timestamp instead."""
+    captured = {}
+    monkeypatch.setattr(otlp_module, "record_usage", _capture_usage(captured))
+    otlp_module.codex_state.clear()
+
+    otlp_module._parse_log_record(
+        {
+            "timeUnixNano": "0",
+            "attributes": _attrs(
+                {
+                    "event.name": "codex.websocket_request",
+                    "conversation.id": "conv-ws",
+                    "event.timestamp": "2026-09-25T08:12:03.213Z",
+                }
+            ),
+        },
+        "codex_exec",
+        "",
+    )
+    otlp_module._parse_log_record(
+        {
+            "timeUnixNano": "0",
+            "attributes": _attrs(
+                {
+                    "event.name": "codex.sse_event",
+                    "event.kind": "response.completed",
+                    "conversation.id": "conv-ws",
+                    "model": "gpt-6-luna",
+                    "input_token_count": 100,
+                    "output_token_count": 10,
+                    "ttft_ms": 933,
+                    "event.timestamp": "2026-09-25T08:12:05.215Z",
+                }
+            ),
+        },
+        "codex_exec",
+        "",
+    )
+
+    assert captured["usage"].latency_ms == 2002
+    assert captured["usage"].ttft_ms == 933
+
+
+def test_codex_api_request_duration_sets_request_latency(otlp_module, monkeypatch):
+    """HTTP mode: api_request carries the request's own duration."""
+    captured = {}
+    monkeypatch.setattr(otlp_module, "record_usage", _capture_usage(captured))
+    otlp_module.codex_state.clear()
+
+    otlp_module._parse_log_record(
+        {
+            "timeUnixNano": "0",
+            "attributes": _attrs(
+                {
+                    "event.name": "codex.api_request",
+                    "conversation.id": "conv-http",
+                    "endpoint": "/responses",
+                    "duration_ms": 2533,
+                }
+            ),
+        },
+        "codex_cli_rs",
+        "",
+    )
+    otlp_module._parse_log_record(
+        {
+            "timeUnixNano": "0",
+            "attributes": _attrs(
+                {
+                    "event.name": "codex.sse_event",
+                    "event.kind": "response.completed",
+                    "conversation.id": "conv-http",
+                    "model": "gpt-5",
+                    "input_token_count": 100,
+                    "output_token_count": 10,
+                }
+            ),
+        },
+        "codex_cli_rs",
+        "",
+    )
+
+    assert captured["usage"].latency_ms == 2533
+
+
+def test_codex_latency_stays_empty_without_request_start(otlp_module, monkeypatch):
+    captured = {}
+    monkeypatch.setattr(otlp_module, "record_usage", _capture_usage(captured))
+    otlp_module.codex_state.clear()
+
+    otlp_module._parse_log_record(
+        {
+            "timeUnixNano": "0",
+            "attributes": _attrs(
+                {
+                    "event.name": "codex.sse_event",
+                    "event.kind": "response.completed",
+                    "conversation.id": "conv-none",
+                    "model": "gpt-5",
+                    "input_token_count": 100,
+                    "output_token_count": 10,
+                }
+            ),
+        },
+        "codex_cli_rs",
+        "",
+    )
+
+    assert captured["usage"].latency_ms is None
 
 
 def test_usage_session_id_casts_codex_conversation_id_to_string(otlp_module):
