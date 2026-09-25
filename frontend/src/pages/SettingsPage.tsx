@@ -11,21 +11,17 @@ import { TimezoneSelector } from '../components/TimezoneSelector'
 import { useDashboardAgents } from '../hooks/useDashboardAgents'
 import { useVersion } from '../hooks/useVersion'
 
-type Props = {
-  providerColors?: Record<string, string>
-}
-
 const DEVICE_KIND_LABELS: Record<string, string> = {
   web: 'Browser',
   cli: 'CLI',
   ingest: 'Ingest',
 }
 
-export function SettingsPage({ providerColors }: Props) {
+export function SettingsPage() {
   const [searchParams, setSearchParams] = useSearchParams()
   const section = searchParams.get('section')
   const activeSection = section && ['tracker', 'pricing', 'services', 'connectivity', 'devices'].includes(section) ? section : 'tracker'
-  const colors = providerColors ?? FIXED_PROVIDER_COLORS
+  const colors = FIXED_PROVIDER_COLORS
   const {
     configParsed, configContent, setConfigContent,
     configStatus, error, auth, showToast, signOut,

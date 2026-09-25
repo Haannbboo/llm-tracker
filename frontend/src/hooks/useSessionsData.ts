@@ -14,7 +14,6 @@ export function useSessionsData(opts: {
   const { refreshTrigger, setError } = useApp()
 
   const [sessions, setSessions] = useState<SessionSummary[]>([])
-  const [sessionCount, setSessionCount] = useState(0)
   const [sessionsLoading, setSessionsLoading] = useState(true)
   const [sessionSortBy, setSessionSortBy] = useState<string>('started')
   const [sessionSortOrder, setSessionSortOrder] = useState<'asc' | 'desc'>('desc')
@@ -79,14 +78,13 @@ export function useSessionsData(opts: {
 
         const response = await fetch(sessionsUrl.toString(), sig)
         if (!response.ok) throw new Error(t('Failed to fetch session data'))
-        const sessionsData: { sessions: SessionSummary[]; total: number } = await response.json()
+        const sessionsData: { sessions: SessionSummary[] } = await response.json()
 
         if (sessionPage === 1) {
           setSessions(sessionsData.sessions)
         } else {
           setSessions(prev => [...prev, ...sessionsData.sessions])
         }
-        setSessionCount(sessionsData.total)
         setHasMoreSessions(sessionsData.sessions.length === 50)
       } catch (err) {
         if (controller.signal.aborted) return
@@ -103,12 +101,10 @@ export function useSessionsData(opts: {
   return {
     sessions,
     setSessions,
-    sessionCount,
     sessionsLoading,
     hasMoreSessions,
     sessionSortBy,
     sessionSortOrder,
-    sessionPage,
     selectedSession,
     setSelectedSession,
     handleSessionSort,

@@ -117,10 +117,8 @@ export function useOnboarding(opts: {
 
   return {
     verifyPhase, verificationResult, copiedOnboardingCommand,
-    armOnboardingVerification, handleVerifyEvent, resetVerification,
+    armOnboardingVerification, resetVerification,
     showFirstRunOnboarding,
-    foundLocalAgents, foundLocalAgentCount,
-    setupLocalAgentTotal, setupMatchingAgents, setupConfiguredAgents,
-    setupSummaryText, setupSummaryColor, verifyTimeoutGuidance,
+    setupConfiguredAgents, setupSummaryText, setupSummaryColor, verifyTimeoutGuidance,
   }
 }

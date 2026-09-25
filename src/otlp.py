@@ -534,32 +534,6 @@ def _extract_claude_fields(
     }
 
 
-def _parse_claude_record(
-    record: dict,
-    attrs: list,
-    session_id: str,
-    client_ip: str | None = None,
-    user_id: str | None = None,
-) -> None:
-    fields = _extract_claude_fields(
-        record, attrs, session_id, client_ip, user_id=user_id
-    )
-    tool_calls = fields.pop("_tool_info", [])
-    usage = record_usage(**fields)
-    if usage:
-        for tool_info in tool_calls:
-            record_tool_call(
-                tool_use_id=_scoped_tool_use_id(tool_info["tool_use_id"], user_id),
-                usage_id=usage.id,
-                session_id=usage.session_id,
-                tool_name=tool_info["tool_name"],
-                duration_ms=tool_info.get("duration_ms"),
-                user_id=user_id,
-                client_source="claude-code",
-                ts=tool_info["ts"],
-            )
-
-
 def _extract_opencode_fields(
     record: dict,
     attrs: list,
@@ -710,12 +684,6 @@ def _handle_codex_state_event(attrs: list, user_id: str | None = None) -> bool:
     return False
 
 
-def _parse_codex_api_request(
-    record: dict, attrs: list, user_id: str | None = None
-) -> None:
-    _handle_codex_state_event(attrs, user_id=user_id)
-
-
 def _extract_codex_fields(
     record: dict,
     attrs: list,
@@ -804,35 +772,6 @@ def _extract_codex_fields(
         "user_id": user_id,
         "_tool_info": tool_info,
     }
-
-
-def _parse_codex_record(
-    record: dict,
-    attrs: list,
-    service_name: str,
-    client_ip: str | None = None,
-    user_id: str | None = None,
-) -> None:
-    if _handle_codex_state_event(attrs, user_id=user_id):
-        return
-    fields = _extract_codex_fields(
-        record, attrs, service_name, client_ip, user_id=user_id
-    )
-    if fields is not None:
-        tool_calls = fields.pop("_tool_info", [])
-        usage = record_usage(**fields)
-        if usage:
-            for tool_info in tool_calls:
-                record_tool_call(
-                    tool_use_id=_scoped_tool_use_id(tool_info["tool_use_id"], user_id),
-                    usage_id=usage.id,
-                    session_id=usage.session_id,
-                    tool_name=tool_info["tool_name"],
-                    duration_ms=tool_info.get("duration_ms"),
-                    user_id=user_id,
-                    client_source="codex",
-                    ts=tool_info["ts"],
-                )
 
 
 def _parse_log_record(

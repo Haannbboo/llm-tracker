@@ -20,9 +20,6 @@ changed = False
 if server.get('host') == '127.0.0.1':
     server['host'] = '0.0.0.0'
     changed = True
-if server.get('otlp_host') == '127.0.0.1':
-    server['otlp_host'] = '0.0.0.0'
-    changed = True
 if changed:
     with open(path, 'w') as f:
         yaml.safe_dump(cfg, f, default_flow_style=False, sort_keys=False)

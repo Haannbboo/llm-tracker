@@ -17,11 +17,7 @@ import {
 import { getModelBadgeBackgroundColor, getModelTextColor } from '../model-badge'
 import type { DateRangeOption } from '../types'
 
-type Props = {
-  initialSessionFilter?: string | null
-}
-
-export function LogsPage({ initialSessionFilter }: Props) {
+export function LogsPage() {
   // Read session filter from sessionStorage (set by Dashboard/Sessions tab navigation)
   const storedSessionFilter = useMemo(() => {
     try {
@@ -52,7 +48,7 @@ export function LogsPage({ initialSessionFilter }: Props) {
   } = useDashboardData()
 
   // Session filter state (local to logs view)
-  const [sessionFilter, setSessionFilter] = useState<string | null>(initialSessionFilter ?? storedSessionFilter)
+  const [sessionFilter, setSessionFilter] = useState<string | null>(storedSessionFilter)
 
   // Tool filter state (local to logs view)
   const [toolFilter, setToolFilter] = useState<string | null>(null)

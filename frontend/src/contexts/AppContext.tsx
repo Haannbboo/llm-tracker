@@ -13,7 +13,6 @@ export type AuthState = {
 
 type AppContextType = {
   theme: 'light' | 'dark'
-  setTheme: (t: 'light' | 'dark') => void
   toggleThemeHandler: () => void
 
   lang: 'en' | 'zh'
@@ -216,7 +215,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   return (
     <AppContext.Provider value={{
-      theme, setTheme, toggleThemeHandler,
+      theme, toggleThemeHandler,
       lang, setLang,
       auth, signOut,
       configContent, setConfigContent, configParsed, setConfigParsed, configStatus, setConfigStatus,
