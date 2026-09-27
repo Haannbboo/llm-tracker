@@ -577,6 +577,7 @@ const TOOL_COLORS: Record<string, { bg: string; text: string }> = {
   todowrite: { bg: '#f59e0b', text: '#fff' },
   lsp:       { bg: '#6366f1', text: '#fff' },
   exec:      { bg: '#ea580c', text: '#fff' },
+  exec_command: { bg: '#bfdbfe', text: '#334155' },
   mcp_tool:  { bg: '#e11d48', text: '#fff' },
 }
 const TOOL_DEFAULT_COLOR = { bg: '#64748b', text: '#fff' }
