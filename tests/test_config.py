@@ -46,6 +46,25 @@ providers: {}
     assert config["models"] == {}
 
 
+def test_load_config_rejects_nonpositive_record_cap(config_module, tmp_path):
+    """A 0/negative record cap would silently drop every export; default wins."""
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        """
+server:
+  host: 127.0.0.1
+providers: {}
+otlp:
+  max_records_per_request: 0
+""",
+        encoding="utf-8",
+    )
+
+    config = config_module.load_config(str(config_path))
+
+    assert config["otlp"]["max_records_per_request"] == 1_000
+
+
 def test_load_config_keeps_database_url(config_module, tmp_path):
     config_path = tmp_path / "config.yaml"
     config_path.write_text(

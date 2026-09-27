@@ -54,7 +54,11 @@ def load_config(path: str | None = None) -> dict[str, Any]:
     otlp.setdefault("max_body_bytes", 2_000_000)  # 2 MB
     otlp.setdefault("rate_limit_per_minute", 300)  # 5 req/s per token
     # Byte cap bounds bytes, not records: each record costs a DB transaction.
-    otlp.setdefault("max_records_per_request", 1_000)
+    max_records = otlp.setdefault("max_records_per_request", 1_000)
+    if not isinstance(max_records, int) or max_records < 1:
+        # A zero/negative cap would silently drop every export. Fall back to the
+        # default instead of raising: this runs at import time.
+        otlp["max_records_per_request"] = 1_000
 
     evaluation = config.setdefault("evaluation", {})
     evaluation.setdefault("auto_enabled", True)

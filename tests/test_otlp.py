@@ -660,6 +660,8 @@ def test_codex_websocket_request_sets_request_latency(otlp_module, monkeypatch):
 
     assert captured["usage"].latency_ms == 2002
     assert captured["usage"].ttft_ms == 933
+    # ts comes from event.timestamp, not the batch flush time.
+    assert captured["usage"].ts == 1790323925215000
 
 
 def test_codex_api_request_duration_sets_request_latency(otlp_module, monkeypatch):
@@ -1644,7 +1646,27 @@ def test_record_count_cap_limits_db_work_per_request(otlp_module, monkeypatch):
     response = client.post("/v1/logs", json=body)
 
     assert response.status_code == 200
+    # 1 minimal claude record + 1 codex record processed, not all 21.
     assert len(duration_updates) == 1
+    # The rest are reported, not silently dropped.
+    assert response.json() == {
+        "partialSuccess": {
+            "rejectedLogRecords": 19,
+            "errorMessage": "record count exceeds otlp.max_records_per_request",
+        }
+    }
+
+
+def test_batch_within_cap_returns_no_partial_success(otlp_module, monkeypatch):
+    """A batch under the cap is a plain success, so clients see no rejection."""
+    monkeypatch.setitem(otlp_module.CONFIG.get("auth", {}), "enabled", False)
+    monkeypatch.setattr(otlp_module, "record_usage", lambda **fields: None)
+
+    client = TestClient(otlp_module.app)
+    response = client.post("/v1/logs", json=_minimal_otlp_body())
+
+    assert response.status_code == 200
+    assert response.json() == {}
 
 
 def test_body_too_large_streaming_cap_returns_413(otlp_module, monkeypatch):

@@ -11,7 +11,6 @@ from collections.abc import Iterator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from datetime import datetime
-from itertools import islice
 from typing import NoReturn
 
 from fastapi import FastAPI, HTTPException, Request
@@ -754,11 +753,17 @@ def _extract_codex_fields(
     if input_tokens is None:
         return None
 
-    time_ns = record.get("timeUnixNano", "0")
-    if time_ns == "0":
-        time_ns = record.get("observedTimeUnixNano", "0")
-
-    ts = int(time_ns) // 1000
+    # Codex ships timeUnixNano=0 and only sets observedTimeUnixNano (batch flush
+    # time), which can land well after the real completion. Prefer the event's
+    # own timestamp so ts agrees with the latency derived below.
+    completed_ms = _codex_event_ts_ms(attrs)
+    if completed_ms is not None:
+        ts = completed_ms * 1000  # ms -> us
+    else:
+        time_ns = record.get("timeUnixNano", "0")
+        if time_ns == "0":
+            time_ns = record.get("observedTimeUnixNano", "0")
+        ts = int(time_ns) // 1000
 
     conv_id = _attr(attrs, "conversation.id")
     usage_session_id = str(conv_id) if conv_id is not None else None
@@ -780,7 +785,6 @@ def _extract_codex_fields(
         if "duration_ms" in state:
             latency_ms = state["duration_ms"]
         elif "start_ms" in state:
-            completed_ms = _codex_event_ts_ms(attrs)
             if completed_ms is not None and completed_ms >= state["start_ms"]:
                 latency_ms = completed_ms - state["start_ms"]
         if ttft_ms is None and "ttft_ms" in state:
@@ -1124,17 +1128,28 @@ async def receive_logs(request: Request):
     body = await _read_capped_json(request)
 
     max_records = CONFIG.get("otlp", {}).get("max_records_per_request", 1_000)
-    records = list(islice(_iter_log_records(body), max_records + 1))
+    records = list(_iter_log_records(body))
+    rejected = 0
     if len(records) > max_records:
-        # Truncate rather than 413: real exports never come close, and failing
-        # the request would make agents retry the same oversized body forever.
+        rejected = len(records) - max_records
         log.warning(
-            "Dropped OTLP records past otlp.max_records_per_request=%d", max_records
+            "Rejected %d OTLP records past otlp.max_records_per_request=%d",
+            rejected,
+            max_records,
         )
         records = records[:max_records]
 
     for record, service_name, session_id in records:
         _parse_log_record(record, service_name, session_id, client_ip, user_id=user_id)
+    if rejected:
+        # OTLP partial success: still 200 so the exporter does not retry the same
+        # oversized batch forever, but the dropped count is reported, not hidden.
+        return {
+            "partialSuccess": {
+                "rejectedLogRecords": rejected,
+                "errorMessage": "record count exceeds otlp.max_records_per_request",
+            }
+        }
     return {}
 
 
