@@ -1,14 +1,17 @@
 import asyncio
 import concurrent.futures
 import json
+import logging
 import os
 import threading
 import time
 import uuid
 from collections import OrderedDict, deque
+from collections.abc import Iterator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from datetime import datetime
+from itertools import islice
 from typing import NoReturn
 
 from fastapi import FastAPI, HTTPException, Request
@@ -21,6 +24,8 @@ from .database import init_db
 from .provider_parser import parse_provider_metadata
 from .recorder import record_tool_call, record_usage, update_tool_call_duration
 from .utils import secs_to_micros
+
+log = logging.getLogger(__name__)
 
 CLAUDE_EVENT = "claude_code.api_request"
 CODEX_EVENT = "codex.sse_event"
@@ -1063,6 +1068,27 @@ async def _resolve_ingest_request(request: Request) -> tuple[str | None, str | N
     return user_id, token_id
 
 
+def _iter_log_records(body: dict) -> Iterator[tuple[dict, str, str]]:
+    """Yield (record, service_name, session_id) for each ingestable record."""
+    for resource_log in body.get("resourceLogs", []):
+        resource = resource_log.get("resource", {})
+        service_name = _resource_attr(resource, "service.name") or ""
+        if service_name in RETIRED_SERVICE_NAMES:
+            continue
+        session_id = _resource_attr(resource, "session.id") or ""
+        # Dump first unrecognised resource block to discover service name
+        if service_name not in KNOWN_SERVICE_NAMES and not os.path.exists(
+            CODEX_DEBUG_FILE + ".resource"
+        ):
+            with open(CODEX_DEBUG_FILE + ".resource", "w") as f:
+                json.dump(
+                    {"service_name": service_name, "resource": resource}, f, indent=2
+                )
+        for scope_log in resource_log.get("scopeLogs", []):
+            for record in scope_log.get("logRecords", []):
+                yield record, service_name, session_id
+
+
 @app.post("/v1/logs")
 async def receive_logs(request: Request):
     # Auth + rate limit + body cap — all before any record is parsed.
@@ -1097,25 +1123,18 @@ async def receive_logs(request: Request):
 
     body = await _read_capped_json(request)
 
-    for resource_log in body.get("resourceLogs", []):
-        resource = resource_log.get("resource", {})
-        service_name = _resource_attr(resource, "service.name") or ""
-        if service_name in RETIRED_SERVICE_NAMES:
-            continue
-        session_id = _resource_attr(resource, "session.id") or ""
-        # Dump first unrecognised resource block to discover service name
-        if service_name not in KNOWN_SERVICE_NAMES and not os.path.exists(
-            CODEX_DEBUG_FILE + ".resource"
-        ):
-            with open(CODEX_DEBUG_FILE + ".resource", "w") as f:
-                json.dump(
-                    {"service_name": service_name, "resource": resource}, f, indent=2
-                )
-        for scope_log in resource_log.get("scopeLogs", []):
-            for record in scope_log.get("logRecords", []):
-                _parse_log_record(
-                    record, service_name, session_id, client_ip, user_id=user_id
-                )
+    max_records = CONFIG.get("otlp", {}).get("max_records_per_request", 1_000)
+    records = list(islice(_iter_log_records(body), max_records + 1))
+    if len(records) > max_records:
+        # Truncate rather than 413: real exports never come close, and failing
+        # the request would make agents retry the same oversized body forever.
+        log.warning(
+            "Dropped OTLP records past otlp.max_records_per_request=%d", max_records
+        )
+        records = records[:max_records]
+
+    for record, service_name, session_id in records:
+        _parse_log_record(record, service_name, session_id, client_ip, user_id=user_id)
     return {}
 
 

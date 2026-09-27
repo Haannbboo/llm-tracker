@@ -53,6 +53,8 @@ def load_config(path: str | None = None) -> dict[str, Any]:
     otlp = config.setdefault("otlp", {})
     otlp.setdefault("max_body_bytes", 2_000_000)  # 2 MB
     otlp.setdefault("rate_limit_per_minute", 300)  # 5 req/s per token
+    # Byte cap bounds bytes, not records: each record costs a DB transaction.
+    otlp.setdefault("max_records_per_request", 1_000)
 
     evaluation = config.setdefault("evaluation", {})
     evaluation.setdefault("auto_enabled", True)

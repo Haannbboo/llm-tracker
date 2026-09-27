@@ -1607,6 +1607,46 @@ def test_body_too_large_returns_413(otlp_module, monkeypatch):
     assert len(captured) == 0
 
 
+def test_record_count_cap_limits_db_work_per_request(otlp_module, monkeypatch):
+    """A 2 MB body of many records must not run unbounded per-record DB work."""
+    monkeypatch.setitem(otlp_module.CONFIG.get("auth", {}), "enabled", False)
+    monkeypatch.setitem(
+        otlp_module.CONFIG.get("otlp", {}), "max_records_per_request", 2
+    )
+
+    duration_updates: list[dict] = []
+    monkeypatch.setattr(
+        otlp_module,
+        "update_tool_call_duration",
+        lambda **fields: duration_updates.append(fields),
+    )
+    monkeypatch.setattr(otlp_module, "record_usage", lambda **fields: None)
+
+    body = _minimal_otlp_body(service_name="codex_cli_rs")
+    scope_log = body["resourceLogs"][0]["scopeLogs"][0]
+    for i in range(20):
+        scope_log["logRecords"].append(
+            {
+                "attributes": _attrs(
+                    {
+                        "event.name": "codex.tool_result",
+                        "conversation.id": "conv-cap",
+                        "tool_name": "exec",
+                        "call_id": f"call-cap-{i}",
+                        "duration_ms": 10 + i,
+                    }
+                ),
+                "timeUnixNano": "1800000000000000000",
+            }
+        )
+
+    client = TestClient(otlp_module.app)
+    response = client.post("/v1/logs", json=body)
+
+    assert response.status_code == 200
+    assert len(duration_updates) == 1
+
+
 def test_body_too_large_streaming_cap_returns_413(otlp_module, monkeypatch):
     """Streaming body cap enforces limit when Content-Length is missing or understated."""
     monkeypatch.setitem(otlp_module.CONFIG.get("auth", {}), "enabled", False)
