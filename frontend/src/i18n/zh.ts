@@ -28,9 +28,6 @@ export const zh: Record<string, string> = {
   'Requests': '请求数',
   'Estimated Cost': '预估费用',
   'Performance': '性能',
-  'Average Response': '平均响应',
-  'RPM': 'RPM',
-  'TPM': 'TPM',
   'Success Rate:': '成功率：',
 
   // Dashboard widget details
@@ -42,7 +39,6 @@ export const zh: Record<string, string> = {
   'tokens/req': 'tokens/请求',
   '/ req': '/ 请求',
   'Avg $/M tokens:': '平均 $/百万 tokens：',
-  'Avg Throughput:': '平均吞吐量：',
 
   // Chart titles
   'Hourly Usage Trend': '每小时用量趋势',
@@ -55,8 +51,6 @@ export const zh: Record<string, string> = {
 
   // Chart labels
   'Top': '热门',
-  'Trend': '趋势',
-  'Insufficient data': '数据不足',
 
   // Chart legend labels
   'Input': '输入',

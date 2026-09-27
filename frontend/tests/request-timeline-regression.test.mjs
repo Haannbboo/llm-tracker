@@ -55,15 +55,28 @@ describe('RequestTimeline per-tool color coding', () => {
     assert.match(timeline, /const displayTotal = latency > 0 \? latency : totalMs/)
   })
 
-  test('generation is the complement of tool-occupied time, not the span', () => {
-    // Regression: `totalMs - toolMaxEnd` treated the wall-clock gap between
-    // tools as tool time, collapsing generation to ~0 for agentic clients whose
-    // tools run between requests.
-    assert.doesNotMatch(timeline, /const genDuration = Math\.max\(0, totalMs - genStart\)/)
+  test('generation ends at the first measured tool and residual time is Other', () => {
+    assert.match(timeline, /const hasMeasuredToolTimeline = hasExplicitStart && toolsWithTiming.length > 0/)
+    assert.match(timeline, /const generationEnd = hasMeasuredToolTimeline/)
+    assert.match(timeline, /const genDuration = Math\.max\(0, generationEnd - genStart\)/)
+    assert.match(timeline, /const otherSegments: TimelineSegment\[\]/)
+    assert.match(timeline, /id: 'other'/)
+    assert.match(timeline, /label: t\('Other'\)/)
+    // Sources without measured starts retain the existing complement fallback.
     assert.match(timeline, /const toolBusyMs = mergedToolBusy\.reduce/)
     assert.match(timeline, /const genDuration = Math\.max\(0, totalMs - genStart - toolBusyMs\)/)
-    // Generation is drawn as one or more segments filling the gaps between tools.
-    assert.match(timeline, /const genSegments: TimelineSegment\[\]/)
+  })
+
+  test('prefers exact row-relative starts over the timestamp heuristic', () => {
+    // API-provided start_ms keeps parallel tools overlapping; the timestamp
+    // heuristic is only a fallback for sources without explicit starts.
+    assert.match(timeline, /const hasExplicitStart = timedTools\.every\(\(tc\) => tc\.start_ms != null\)/)
+    assert.match(timeline, /if \(hasDistinctTs && !hasExplicitStart\)/)
+    assert.match(timeline, /const start = Math\.max\(0, tc\.start_ms\)/)
+  })
+
+  test('sorts rows by their calculated start time', () => {
+    assert.match(timeline, /rows\.sort\(\(a, b\) => a\.startMs - b\.startMs\)/)
   })
 
   test('supports extra components for future extensibility', () => {
@@ -73,7 +86,7 @@ describe('RequestTimeline per-tool color coding', () => {
 
 describe('LogsPage uses RequestTimeline', () => {
   test('expanded row renders the component with latency, ttft, and tool calls', () => {
-    assert.match(logsPage, /import \{ RequestTimeline \} from '\.\.\/components\/RequestTimeline'/)
+    assert.match(logsPage, /import \{ RequestTimeline[^}]*\} from '\.\.\/components\/RequestTimeline'/)
     assert.match(logsPage, /<RequestTimeline[\s\S]*latencyMs=\{row\.latency_ms\}[\s\S]*ttftMs=\{row\.ttft_ms\}[\s\S]*toolCalls=\{expandedToolCalls\}/)
   })
 })

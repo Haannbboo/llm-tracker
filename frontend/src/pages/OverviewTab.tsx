@@ -35,7 +35,6 @@ type OverviewTabProps = {
   localAgents: Record<string, { found: boolean; path: string | null }> | null
   sources: string[]
   error: string | null
-  setActiveFilter: (value: any) => void
   onNavigateToLogs: (filters?: any) => void
 }
 
@@ -63,14 +62,11 @@ export function OverviewTab({
   localAgents,
   sources,
   error,
-  setActiveFilter,
   onNavigateToLogs,
 }: OverviewTabProps) {
   const animatedTotalTokens = useCountUp(dashboardInitialLoading ? 0 : totals.totalTokens)
   const animatedRequests = useCountUp(dashboardInitialLoading ? 0 : totals.requests)
   const animatedCost = useCountUp(dashboardInitialLoading ? 0 : totals.totalCost)
-  const animatedRpm = useCountUp(dashboardInitialLoading ? 0 : totals.rpm)
-  const animatedLatency = useCountUp(dashboardInitialLoading ? 0 : totals.avgLatency)
   const animatedThroughput = useCountUp(dashboardInitialLoading ? 0 : totals.avgThroughput)
 
   return (
@@ -335,26 +331,6 @@ export function OverviewTab({
       ) : (
       <div className={`dashboard-refresh-surface ${dashboardRefreshing ? 'is-refreshing' : ''}`}>
       <div className="widgets-grid">
-        {dashboardInitialLoading ? (
-          Array.from({ length: 6 }, (_, i) => (
-            <div key={i} className="widget">
-              <div className="widget-body" style={{ flexDirection: 'column', alignItems: 'stretch', justifyContent: 'center', gap: '10px' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                    <div className="skeleton" style={{ width: 40, height: 40, borderRadius: 12 }} />
-                    <div>
-                      <div className="skeleton skeleton-text" style={{ width: 80 }} />
-                      <div className="skeleton skeleton-value" />
-                    </div>
-                  </div>
-                  <div className="skeleton" style={{ width: 100, height: 32, borderRadius: 6 }} />
-                </div>
-                <div className="skeleton skeleton-text-sm" style={{ width: '60%' }} />
-                <div className="skeleton skeleton-text-sm" style={{ width: '40%' }} />
-              </div>
-            </div>
-          ))
-        ) : (
           <>
         <div className="widget">
           <div className="widget-body" style={{ flexDirection: 'column', alignItems: 'stretch', justifyContent: 'center' }}>
@@ -434,117 +410,6 @@ export function OverviewTab({
           <div className="widget-body" style={{ flexDirection: 'column', alignItems: 'stretch', justifyContent: 'center' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                <div className={`icon-box ${totals.successRate < 100 ? 'icon-pink' : 'icon-green'}`}>
-                  {totals.successRate < 100 ? '🚨' : '✅'}
-                </div>
-                <div>
-                  <div className="stat-label">{t('Success Rate')}</div>
-                  <div
-                    className="stat-value"
-                    style={{ color: totals.successRate < 100 ? 'var(--color-red)' : 'var(--color-green)', cursor: totals.successRate < 100 ? 'pointer' : 'default' }}
-                    onClick={() => {
-                      if (totals.successRate < 100) {
-                        setActiveFilter({ provider: '', model: null, only_failed: true })
-                        onNavigateToLogs()
-                      }
-                    }}
-                    title={totals.successRate < 100 ? t('View failed requests in logs') : undefined}
-                  >
-                    {totals.successRate.toFixed(1)}%
-                  </div>
-                </div>
-              </div>
-              <div style={{ width: '100px' }}>
-                <Sparkline data={dailyUsage.map(d => d.requests > 0 ? (value(d.successful_requests) / d.requests) * 100 : 100)} color={totals.successRate < 100 ? 'var(--color-pink)' : 'var(--color-green)'} />
-              </div>
-            </div>
-            {totals.successRate < 100 && (
-              <div
-                className="stat-label"
-                style={{ marginTop: '4px', display: 'flex', gap: '8px', textTransform: 'none' }}
-              >
-                {totals.statusBreakdown.s429 > 0 && (
-                  <span
-                    className="status-link"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setActiveFilter({ provider: '', model: null, status_429: true })
-                      onNavigateToLogs()
-                    }}
-                  >
-                    429: {totals.statusBreakdown.s429}
-                  </span>
-                )}
-                {totals.statusBreakdown.s5xx > 0 && (
-                  <span
-                    className="status-link"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setActiveFilter({ provider: '', model: null, status_5xx: true })
-                      onNavigateToLogs()
-                    }}
-                  >
-                    5xx: {totals.statusBreakdown.s5xx}
-                  </span>
-                )}
-                {totals.statusBreakdown.s4xx > 0 && (
-                  <span
-                    className="status-link"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setActiveFilter({ provider: '', model: null, status_4xx: true })
-                      onNavigateToLogs()
-                    }}
-                  >
-                    4xx: {totals.statusBreakdown.s4xx}
-                  </span>
-                )}
-              </div>
-            )}
-          </div>
-        </div>
-
-        <div className="widget">
-          <div className="widget-body" style={{ flexDirection: 'column', alignItems: 'stretch', justifyContent: 'center' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                <div className="icon-box icon-blue">⚡</div>
-                <div>
-                  <div className="stat-label">{t('Performance')}</div>
-                  <div className="stat-value">{animatedRpm.toFixed(3)} <span style={{ fontSize: '12px', fontWeight: 500 }}>{t('RPM')}</span></div>
-                </div>
-              </div>
-              <div style={{ width: '100px' }}>
-                <Sparkline data={dailyUsage.map(d => value(d.total_tokens))} color="var(--color-purple)" />
-              </div>
-            </div>
-            <div className="stat-label" style={{ marginTop: '-2px' }}>
-              {t('Avg Throughput:')} <span style={{ color: 'var(--color-purple)', fontWeight: 600 }}>{formatCompact(totals.tpm)} {t('TPM')}</span>
-            </div>
-          </div>
-        </div>
-
-        <div className="widget">
-          <div className="widget-body" style={{ flexDirection: 'column', alignItems: 'stretch', justifyContent: 'center' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                <div className="icon-box icon-pink">~</div>
-                <div>
-                  <div className="stat-label">{t('Average Response')}</div>
-                  <div className="stat-value">{formatLatency(animatedLatency)}</div>
-                </div>
-              </div>
-              <div style={{ width: '100px' }}>
-                <Sparkline data={dailyUsage.map(d => value(d.avg_latency_ms))} color="var(--color-pink)" />
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <div className="widget">
-          <div className="widget-body" style={{ flexDirection: 'column', alignItems: 'stretch', justifyContent: 'center' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
                 <div className="icon-box icon-purple">🚀</div>
                 <div>
                   <div className="stat-label">{t('Average Output')}</div>
@@ -558,7 +423,6 @@ export function OverviewTab({
           </div>
         </div>
           </>
-        )}
       </div>
 
       <div className="overview-split-row" style={{ marginBottom: '24px' }}>
@@ -567,7 +431,6 @@ export function OverviewTab({
             summary={summary}
             theme={theme}
             filterParams={dashboardFilterParams}
-            showTrend={false}
           />
         </div>
         <div style={{ flex: 1, minWidth: 0 }}>

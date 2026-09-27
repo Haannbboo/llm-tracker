@@ -37,9 +37,9 @@ logger = logging.getLogger(__name__)
 
 # Client sources whose recorded latency is the full assistant-message lifetime
 # and therefore already includes tool execution time. Tool-call duration is only
-# netted out of throughput for these. api_request-style sources (claude-code,
-# codex) time a single model call, so their latency already excludes tool time
-# and subtracting it would overstate throughput.
+# netted out of throughput for these. Model-call sources (claude-code, codex)
+# time a single request, so their latency already excludes tool time and
+# subtracting it would overstate throughput.
 TOOL_DURATION_IN_LATENCY_SOURCES = ("opencode", "kilo")
 
 
@@ -254,11 +254,31 @@ def log_usage(usage: Usage, db_path: str | None = None) -> None:
         )
 
 
-def upsert_daily_aggregate(usage: Usage, db_path: str | None = None) -> None:
-    """Incrementally update the daily aggregation table for a single usage row."""
-    date = datetime.fromtimestamp(micros_to_secs(usage.ts), tz=timezone.utc).strftime(
+def _usage_date(usage: Usage) -> str:
+    """UTC date bucket for a usage row's daily aggregate."""
+    return datetime.fromtimestamp(micros_to_secs(usage.ts), tz=timezone.utc).strftime(
         "%Y-%m-%d"
     )
+
+
+def _usage_daily_match(usage: Usage, date: str) -> Any:
+    """Filter selecting the usage_daily row that aggregates *usage*'s group.
+
+    Shared by every incremental usage_daily update so the match fields
+    (including the NULL-user_id convention) can't drift between callers.
+    """
+    return and_(
+        UsageDaily.date == date,
+        UsageDaily.provider == usage.provider,
+        UsageDaily.model == usage.model,
+        UsageDaily.client_source == (usage.client_source or ""),
+        func.coalesce(UsageDaily.user_id, "") == (usage.user_id or ""),
+    )
+
+
+def upsert_daily_aggregate(usage: Usage, db_path: str | None = None) -> None:
+    """Incrementally update the daily aggregation table for a single usage row."""
+    date = _usage_date(usage)
     client_source = usage.client_source or ""
     is_success = usage.status is None or usage.status < 400
     latency = usage.latency_ms or 0
@@ -437,9 +457,7 @@ def recalculate_usage_cost(
         )
         deltas = {field: new_costs[field] - old_costs[field] for field in old_costs}
 
-        date = datetime.fromtimestamp(
-            micros_to_secs(usage.ts), tz=timezone.utc
-        ).strftime("%Y-%m-%d")
+        date = _usage_date(usage)
 
         # Rebind the row to the exact rates just used so the displayed split
         # matches the recalculated totals. Best-effort: a snapshot failure must
@@ -472,15 +490,7 @@ def recalculate_usage_cost(
         # merge_duplicate_usage's row lock, elsewhere in this module).
         daily_result = session.execute(
             update(UsageDaily)
-            .where(
-                and_(
-                    UsageDaily.date == date,
-                    UsageDaily.provider == usage.provider,
-                    UsageDaily.model == usage.model,
-                    UsageDaily.client_source == (usage.client_source or ""),
-                    func.coalesce(UsageDaily.user_id, "") == (usage.user_id or ""),
-                )
-            )
+            .where(_usage_daily_match(usage, date))
             .values(
                 input_cost_usd=UsageDaily.input_cost_usd + deltas["input_cost_usd"],
                 output_cost_usd=UsageDaily.output_cost_usd + deltas["output_cost_usd"],
@@ -1235,7 +1245,11 @@ def fetch_tool_calls(
     user_id: str | None = None,
     db_path: str | None = None,
 ) -> list[dict[str, Any]]:
-    """Return tool calls for a single usage row or session, ordered by ts."""
+    """Return tool calls for a single usage row or session, ordered by ts.
+
+    Per-usage results include a row-relative ``start_ms`` when the source
+    reports tool duration, so the timeline can place parallel tools correctly.
+    """
     column = ToolCall.usage_id if usage_id is not None else ToolCall.session_id
     value = usage_id if usage_id is not None else session_id
     filters = [column == value]
@@ -1256,7 +1270,34 @@ def fetch_tool_calls(
         .limit(TOOL_CALLS_QUERY_LIMIT)
     )
     with get_engine(db_path).connect() as connection:
-        return [_row_to_dict(row) for row in connection.execute(query)]
+        rows = [_row_to_dict(row) for row in connection.execute(query)]
+        if usage_id is None or not rows:
+            return rows
+        usage_query = select(Usage.ts, Usage.latency_ms, Usage.client_source).where(
+            Usage.id == usage_id
+        )
+        if user_id is not None:
+            usage_query = usage_query.where(Usage.user_id == user_id)
+        usage_row = connection.execute(usage_query).first()
+        if usage_row is None:
+            return rows
+        # OpenCode/Kilo tool events carry the completion time and true execution
+        # duration, and their latency includes tool time, so the row-relative
+        # start is completion - duration. Other sources report a decision time
+        # with latency excluding tool time, so they get no explicit start.
+        usage_ts_micros, latency_ms, client_source = usage_row
+        row_start_ms = (
+            usage_ts_micros // 1000 - latency_ms
+            if client_source in TOOL_DURATION_IN_LATENCY_SOURCES and latency_ms
+            else None
+        )
+        for row in rows:
+            duration_ms = row["duration_ms"]
+            if row_start_ms is None or duration_ms is None or duration_ms < 0:
+                row["start_ms"] = None
+            else:
+                row["start_ms"] = max(0, row["ts"] - duration_ms - row_start_ms)
+        return rows
 
 
 def count_usage(

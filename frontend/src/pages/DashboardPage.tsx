@@ -46,7 +46,6 @@ export function DashboardPage({ onNavigateToLogs }: Props) {
   })
 
   const [dashboardTab, setDashboardTab] = useState<'overview' | 'sessions'>('overview')
-  const resetPage = () => {}
 
   return (
     <>
@@ -58,7 +57,7 @@ export function DashboardPage({ onNavigateToLogs }: Props) {
             aria-label={t('Date Range')}
             className="input-plain"
             value={dateRange}
-            onChange={(e) => { setDateRange(e.target.value as any); resetPage(); }}
+            onChange={(e) => { setDateRange(e.target.value as any) }}
           >
             <option value="24h">{t('Last 24 Hours')}</option>
             <option value="7d">{t('Last 7 Days')}</option>
@@ -70,7 +69,7 @@ export function DashboardPage({ onNavigateToLogs }: Props) {
             activeFilter={activeFilter}
             summary={summary}
             providerColors={providerColors}
-            onChange={(f) => { setActiveFilter(f); resetPage(); }}
+            onChange={(f) => { setActiveFilter(f) }}
           />
           <select
             id="dashboard-source-filter"
@@ -78,7 +77,7 @@ export function DashboardPage({ onNavigateToLogs }: Props) {
             aria-label={t('Source Filter')}
             className="input-plain"
             value={activeSource || ''}
-            onChange={(e) => { setActiveSource(e.target.value || null); resetPage(); }}
+            onChange={(e) => { setActiveSource(e.target.value || null) }}
           >
             <option value="">{t('All Sources')}</option>
             {sources.map(source => (
@@ -125,7 +124,6 @@ export function DashboardPage({ onNavigateToLogs }: Props) {
           localAgents={localAgents}
           sources={sources}
           error={error}
-          setActiveFilter={setActiveFilter}
           onNavigateToLogs={onNavigateToLogs}
         />
       )}

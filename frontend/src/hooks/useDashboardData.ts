@@ -38,14 +38,10 @@ export function useDashboardData() {
     return map;
   }, [summary]);
 
-  const applyFilterParams = useCallback((url: URL, opts: { withPagination?: boolean; limit?: number; page?: number } = {}) => {
+  const applyFilterParams = useCallback((url: URL) => {
     const since = dateRange === 'custom' ? customSince : getSinceDate(dateRange)
     const until = dateRange === 'custom' ? customUntil : null
 
-    if (opts.withPagination && opts.limit !== undefined && opts.page !== undefined) {
-      url.searchParams.set('limit', String(opts.limit))
-      url.searchParams.set('offset', String((opts.page - 1) * opts.limit))
-    }
     if (activeFilter) {
       if (activeFilter.provider) url.searchParams.set('provider', activeFilter.provider)
       if (activeFilter.model) url.searchParams.set('model', activeFilter.model)
@@ -161,51 +157,31 @@ export function useDashboardData() {
     const requests = data.reduce((sum, row) => sum + (row.requests || 0), 0)
     const promptTokens = data.reduce((sum, row) => sum + (row.prompt_tokens || 0), 0)
     const completionTokens = data.reduce((sum, row) => sum + (row.completion_tokens || 0), 0)
-    const reasoningTokens = data.reduce((sum, row) => sum + (row.reasoning_tokens || 0), 0)
     const cachedTokens = data.reduce((sum, row) => sum + (row.cached_tokens || 0), 0)
     const cacheCreationTokens = data.reduce((sum, row) => sum + (row.cache_creation_tokens || 0), 0)
     const totalTokens = data.reduce((sum, row) => sum + (row.total_tokens || 0), 0)
     const totalCost = data.reduce((sum, row) => sum + (row.total_cost_usd || 0), 0)
-    const latencyWeight = data.reduce((sum, row) => sum + (row.avg_latency_ms || 0) * (row.requests || 0), 0)
     const latencySum = data.reduce((sum, row) => sum + (row.latency_sum_ms || 0), 0)
     const toolDurationSum = data.reduce((sum, row) => sum + (row.tool_duration_sum_ms || 0), 0)
-
-    const successfulRequests = data.reduce((sum, row) => sum + (row.successful_requests || 0), 0)
-    const successRate = requests > 0 ? (successfulRequests / requests) * 100 : 100
-
-    const s429 = data.reduce((sum, row) => sum + (row.status_429 || 0), 0)
-    const s4xx = data.reduce((sum, row) => sum + (row.status_4xx || 0), 0)
-    const s5xx = data.reduce((sum, row) => sum + (row.status_5xx || 0), 0)
-    const sUnknown = data.reduce((sum, row) => sum + (row.status_unknown || 0), 0)
-
-    let minutes = 1440;
-    if (dateRange === '7d') minutes = 10080;
-    else if (dateRange === '30d') minutes = 43200;
 
     return {
       requests,
       promptTokens,
       completionTokens,
-      reasoningTokens,
       cachedTokens,
       cacheCreationTokens,
       totalTokens,
       totalCost,
-      avgLatency: requests === 0 ? 0 : latencyWeight / requests,
       avgEffectivePrice: requests === 0 ? 0 : totalCost / requests,
       avgEffectivePricePerMillion: totalTokens === 0 ? 0 : (totalCost / totalTokens) * 1_000_000,
-      rpm: requests / minutes,
-      tpm: totalTokens / minutes,
       avgThroughput: netThroughput(completionTokens, latencySum, toolDurationSum),
-      avgTokensPerRequest: requests === 0 ? 0 : totalTokens / requests,
-      successRate,
-      statusBreakdown: { s429, s4xx, s5xx, sUnknown }
+      avgTokensPerRequest: requests === 0 ? 0 : totalTokens / requests
     }
-  }, [summary, dateRange])
+  }, [summary])
 
   return {
     summary, dailyUsage, heatmapData, totalTrackedEvents, sources,
     dashboardInitialLoading, dashboardRefreshing,
-    providerColors, applyFilterParams, dashboardFilterParams, totals,
+    providerColors, dashboardFilterParams, totals,
   }
 }

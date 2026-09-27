@@ -1,9 +1,10 @@
 import { getTheme, type Theme } from './theme'
 
-export function getModelColor(model: string): string {
+export function getModelColor(model: string, theme: Theme = getTheme()): string {
   const m = model.toLowerCase()
   if (m.startsWith('tencent/') || m.startsWith('hy3')) return '#0052D9'
-  if (m.includes('gpt-5') || m.includes('gpt-4')) return '#dcdcdc'
+  if (m.includes('gpt-5') || m.includes('gpt-4')) return theme === 'dark' ? '#64748b' : '#475569'
+  if (m.startsWith('stealth')) return theme === 'dark' ? '#9CA3AF' : '#D1D5DB'
   if (m.includes('claude')) return '#cc7c5e'
   if (m.includes('gemini')) return '#528af2'
   if (m.includes('minimax')) return '#ec6b53'
@@ -17,7 +18,6 @@ export function getModelColor(model: string): string {
   if (m.includes('stepfun') || m.includes('step-')) return '#01A9FF'
   if (m.includes('qwen')) return '#6F69F7'
   if (m.includes('dots')) return '#8FE2D6'
-  if (m.startsWith('stealth')) return '#ECEEF1'
   if (m.includes('muse') || m.includes('meta/')) return '#0081fb'
   if (m.includes('longcat')) return '#29E154'
   if (m.startsWith('x-ai/') || m.includes('grok')) return '#111827'
@@ -28,7 +28,8 @@ export function getModelTextColor(model: string, theme: Theme = getTheme()): str
   const dark = theme === 'dark'
   const m = model.toLowerCase()
   if (m.startsWith('tencent/') || m.startsWith('hy3')) return dark ? '#d0dff5' : '#003a8c'
-  if (m.includes('gpt-5') || m.includes('gpt-4')) return dark ? '#0f172a' : '#475569'
+  if (m.includes('gpt-5') || m.includes('gpt-4')) return dark ? '#94a3b8' : '#334155'
+  if (m.startsWith('stealth')) return dark ? '#0f172a' : '#4B4E52'
   if (m.includes('claude')) return dark ? '#e8a878' : '#975a3d'
   if (m.includes('gemini')) return dark ? '#a5b4fc' : '#1e40af'
   if (m.includes('minimax')) return dark ? '#fca5a5' : '#b91c1c'
@@ -42,7 +43,6 @@ export function getModelTextColor(model: string, theme: Theme = getTheme()): str
   if (m.includes('stepfun') || m.includes('step-')) return dark ? '#7dd5fc' : '#006f9f'
   if (m.includes('qwen')) return dark ? '#a5a0fc' : '#6336E7'
   if (m.includes('dots')) return dark ? '#d8fdfb' : '#0c4540'
-  if (m.startsWith('stealth')) return dark ? '#0f172a' : '#4B4E52'
   if (m.includes('muse') || m.includes('meta/')) return dark ? '#9ec8ff' : '#0040d0'
   if (m.includes('longcat')) return dark ? '#86efac' : '#166534'
   if (m.startsWith('x-ai/') || m.includes('grok')) return dark ? '#e5e7eb' : '#111827'
@@ -53,7 +53,8 @@ export function getModelBadgeBackgroundColor(model: string, theme: Theme = getTh
   const dark = theme === 'dark'
   const m = model.toLowerCase()
   if (m.startsWith('tencent/') || m.startsWith('hy3')) return dark ? '#0052D980' : '#0052D926'
-  if (m.includes('gpt-5') || m.includes('gpt-4')) return dark ? '#dcdcdc90' : '#dcdcdc80'
+  if (m.includes('gpt-5') || m.includes('gpt-4')) return dark ? '#64748b40' : '#47556926'
+  if (m.startsWith('stealth')) return dark ? '#ECEEF190' : '#ECEEF180'
   if (m.includes('claude')) return dark ? '#cc7c5e60' : '#cc7c5e80'
   if (m.includes('gemini')) return dark ? '#528af260' : '#528af280'
   if (m.includes('minimax')) return dark ? '#ec6b5360' : '#ec6b5380'
@@ -67,7 +68,6 @@ export function getModelBadgeBackgroundColor(model: string, theme: Theme = getTh
   if (m.includes('stepfun') || m.includes('step-')) return dark ? '#01A9FF40' : '#01A9FF26'
   if (m.includes('qwen')) return dark ? '#6F69F740' : '#6F69F726'
   if (m.includes('dots')) return dark ? '#8FE2D640' : '#8FE2D626'
-  if (m.startsWith('stealth')) return dark ? '#ECEEF190' : '#ECEEF180'
   if (m.includes('muse') || m.includes('meta/')) return dark ? '#0081fb80' : '#0081fb26'
   if (m.includes('longcat')) return dark ? '#29E15440' : '#29E15426'
   if (m.startsWith('x-ai/') || m.includes('grok')) return dark ? '#11182740' : '#11182726'

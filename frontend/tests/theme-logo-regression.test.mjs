@@ -72,14 +72,19 @@ test('provider icons choose the light and dark SVG assets from the current theme
   assert.equal(getProviderIcon('openai').props.src, '/models/chatgpt-dark.png')
 })
 
-test('gpt model badge text stays readable on the dark mode badge background', () => {
+test('gpt model colors stay visible in both themes', () => {
   const {
+    getModelColor,
     getModelBadgeBackgroundColor,
     getModelTextColor,
   } = loadSourceModule('src/model-badge.ts')
 
-  assert.equal(getModelBadgeBackgroundColor('gpt-5.4', 'dark'), '#dcdcdc90')
-  assert.equal(getModelTextColor('gpt-5.4', 'dark'), '#0f172a')
+  assert.equal(getModelColor('gpt-5.4', 'light'), '#475569')
+  assert.equal(getModelColor('gpt-5.4', 'dark'), '#64748b')
+  assert.equal(getModelBadgeBackgroundColor('gpt-5.4', 'light'), '#47556926')
+  assert.equal(getModelBadgeBackgroundColor('gpt-5.4', 'dark'), '#64748b40')
+  assert.equal(getModelTextColor('gpt-5.4', 'light'), '#334155')
+  assert.equal(getModelTextColor('gpt-5.4', 'dark'), '#94a3b8')
 })
 
 test('codex source badge text stays readable on the dark mode badge background', () => {

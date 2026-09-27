@@ -12,7 +12,6 @@ export function useSessionSelectorData(opts: {
 }) {
   const { refreshTrigger, setError } = useApp()
   const [sessions, setSessions] = useState<SessionSelectorRow[]>([])
-  const [sessionsLoading, setSessionsLoading] = useState(true)
 
   useEffect(() => {
     const controller = new AbortController()
@@ -21,7 +20,6 @@ export function useSessionSelectorData(opts: {
 
     async function fetchSessionSelectorData() {
       setError(null)
-      setSessionsLoading(true)
       try {
         const since = opts.dateRange === 'custom' ? opts.customSince : getSinceDate(opts.dateRange)
         const until = opts.dateRange === 'custom' ? opts.customUntil : null
@@ -37,13 +35,11 @@ export function useSessionSelectorData(opts: {
 
         const response = await fetch(sessionsUrl.toString(), sig)
         if (!response.ok) throw new Error(t('Failed to fetch session data'))
-        const data: { sessions: SessionSelectorRow[]; total: number | null } = await response.json()
+        const data: { sessions: SessionSelectorRow[] } = await response.json()
         setSessions(data.sessions)
       } catch (err) {
         if (controller.signal.aborted) return
         setError(err instanceof Error ? err.message : t('Unknown error'))
-      } finally {
-        setSessionsLoading(false)
       }
     }
 
@@ -51,5 +47,5 @@ export function useSessionSelectorData(opts: {
     return () => controller.abort()
   }, [opts.activeSource, opts.dateRange, opts.customSince, opts.customUntil, refreshTrigger, setError])
 
-  return { sessions, sessionsLoading }
+  return { sessions }
 }

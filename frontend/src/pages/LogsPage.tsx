@@ -8,7 +8,7 @@ import { ModelSelector } from '../ModelSelector'
 import { RequestLogColumnsControl } from '../components/RequestLogColumnsControl'
 import { SessionSelector } from '../components/SessionSelector'
 import { ClickToCopy } from '../components/CopyButton'
-import { RequestTimeline } from '../components/RequestTimeline'
+import { RequestTimeline, type TimelineTool } from '../components/RequestTimeline'
 import { t } from '../i18n/index.ts'
 import {
   formatCost, formatLatency, formatNumber, formatRate, formatSpeed, formatTime,
@@ -17,11 +17,7 @@ import {
 import { getModelBadgeBackgroundColor, getModelTextColor } from '../model-badge'
 import type { DateRangeOption } from '../types'
 
-type Props = {
-  initialSessionFilter?: string | null
-}
-
-export function LogsPage({ initialSessionFilter }: Props) {
+export function LogsPage() {
   // Read session filter from sessionStorage (set by Dashboard/Sessions tab navigation)
   const storedSessionFilter = useMemo(() => {
     try {
@@ -52,10 +48,13 @@ export function LogsPage({ initialSessionFilter }: Props) {
   } = useDashboardData()
 
   // Session filter state (local to logs view)
-  const [sessionFilter, setSessionFilter] = useState<string | null>(initialSessionFilter ?? storedSessionFilter)
+  const [sessionFilter, setSessionFilter] = useState<string | null>(storedSessionFilter)
 
   // Tool filter state (local to logs view)
   const [toolFilter, setToolFilter] = useState<string | null>(null)
+
+  // Hovering a row highlights every other row of the same session
+  const [hoveredSession, setHoveredSession] = useState<string | null>(null)
 
   // Logs data hook
   const {
@@ -88,7 +87,7 @@ export function LogsPage({ initialSessionFilter }: Props) {
   const [tableWidth, setTableWidth] = useState(0)
 
   // Tool calls for expanded row
-  const [expandedToolCalls, setExpandedToolCalls] = useState<{ tool_name: string; tool_use_id: string; duration_ms?: number | null }[] | null>(null)
+  const [expandedToolCalls, setExpandedToolCalls] = useState<TimelineTool[] | null>(null)
   useEffect(() => {
     if (!expandedRow) {
       setExpandedToolCalls(null)
@@ -198,7 +197,7 @@ export function LogsPage({ initialSessionFilter }: Props) {
       case 'status':
         return { width: colWidths.status, position: 'relative' }
       case 'tool':
-        return { width: colWidths.tool, position: 'relative' }
+        return { width: '12%', position: 'relative' }
       default:
         return { position: 'relative' }
     }
@@ -319,7 +318,7 @@ export function LogsPage({ initialSessionFilter }: Props) {
                 <div className="request-log-session-actions">
                   <button
                     type="button"
-                    className="request-log-session-filter"
+                    className={`request-log-session-filter${hoveredSession === sessionId ? ' session-hover-active' : ''}`}
                     title={sessionId}
                     aria-label={`${t('Filter logs by session')}: ${sessionId}`}
                     onClick={(e) => { e.stopPropagation(); setSessionFilter(sessionId); resetPage() }}
@@ -789,6 +788,8 @@ export function LogsPage({ initialSessionFilter }: Props) {
                 <Fragment key={row.id}>
                   <tr
                     className={`expandable-row${expandedRow === row.id ? ' expanded' : ''}`}
+                    onMouseEnter={() => setHoveredSession(row.session_id ?? null)}
+                    onMouseLeave={() => setHoveredSession(null)}
                     onClick={() => setExpandedRow(expandedRow === row.id ? null : row.id)}
                   >
                     {effectiveVisibleColumns.map((column) => (

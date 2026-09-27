@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from collections.abc import Sequence
+
 from sqlalchemy import inspect, text
 from sqlalchemy.engine import Engine
 from sqlalchemy.exc import SQLAlchemyError
@@ -566,7 +568,7 @@ def _migrate_usage_daily_tenancy(engine: Engine) -> bool:
 
     with engine.begin() as connection:
         if engine.dialect.name == "postgresql":
-            constraint_names = (
+            constraint_names: Sequence[str] = (
                 connection.execute(
                     text(
                         "SELECT constraint_name FROM information_schema.table_constraints "

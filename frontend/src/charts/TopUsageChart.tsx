@@ -5,28 +5,12 @@ import { getModelColor, getModelBadgeBackgroundColor, getModelTextColor } from '
 import { formatModelName, getModelIcon, getProviderIcon, getProviderBadgeBg, getProviderBadgeText, getSourceBadgeBg, getSourceBadgeText, getSourceIcon, PALETTE, netThroughput } from '../utils'
 import { HorizontalBarChart } from './HorizontalBarChart'
 import type { BarItem, Metric } from './HorizontalBarChart'
-import { SparklineTrendPanel } from './SparklineTrendPanel'
 import { t } from '../i18n/index.ts'
 
 type Dimension = 'model' | 'provider' | 'source'
 
-type DailyDimensionData = {
-  dimension: string
-  period: string
-  total_tokens: number | null
-  prompt_tokens: number | null
-  cached_tokens: number | null
-  cache_creation_tokens: number | null
-  total_cost_usd: number | null
-  completion_tokens: number | null
-  latency_sum_ms: number | null
-  successful_requests: number | null
-  failed_requests: number | null
-}
-
 type SourceSummaryRow = {
   client_source: string | null
-  requests: number | null
   total_tokens: number | null
   prompt_tokens: number | null
   cached_tokens: number | null
@@ -50,7 +34,6 @@ export function TopUsageChart({
   summary,
   theme,
   filterParams = {},
-  showTrend = true,
 }: {
   summary: UsageSummary[]
   theme: Theme
@@ -62,11 +45,9 @@ export function TopUsageChart({
     until?: string | null
     only_failed?: boolean
   }
-  showTrend?: boolean
 }) {
   const [dimension, setDimension] = useState<Dimension>('model')
   const [metric, setMetric] = useState<Metric>('tokens')
-  const [trendData, setTrendData] = useState<DailyDimensionData[]>([])
   const [sourceSummary, setSourceSummary] = useState<SourceSummaryRow[]>([])
 
   // Fetch source summary data when source dimension is selected
@@ -92,33 +73,6 @@ export function TopUsageChart({
       }
     }
     fetchSourceSummary()
-    return () => controller.abort()
-  }, [dimension, filterParams])
-
-  // Fetch trend data when dimension changes
-  useEffect(() => {
-    const controller = new AbortController()
-    async function fetchTrend() {
-      try {
-        const url = new URL('/usage/daily-by-dimension', window.location.origin)
-        url.searchParams.set('dimension', dimension === 'source' ? 'client_source' : dimension)
-
-        if (filterParams.provider) url.searchParams.set('provider', filterParams.provider)
-        if (filterParams.model) url.searchParams.set('model', filterParams.model)
-        if (filterParams.client_source) url.searchParams.set('client_source', filterParams.client_source)
-        if (filterParams.since) url.searchParams.set('since', filterParams.since)
-        if (filterParams.until) url.searchParams.set('until', filterParams.until)
-        if (filterParams.only_failed) url.searchParams.set('only_failed', 'true')
-
-        const res = await fetch(url.toString(), { signal: controller.signal })
-        if (res.ok) {
-          setTrendData(await res.json())
-        }
-      } catch {
-        // Ignore abort errors
-      }
-    }
-    fetchTrend()
     return () => controller.abort()
   }, [dimension, filterParams])
 
@@ -159,7 +113,7 @@ export function TopUsageChart({
           : v.tokens > 0 ? (v.cost / v.tokens) * 1_000_000 : null,
         successRate: v.total > 0 ? (v.successful / v.total) * 100 : 100,
         cacheHitRate: (v.prompt + v.cacheCreation) > 0 ? (v.cached / (v.prompt + v.cacheCreation)) * 100 : 0,
-        color: getModelColor(model),
+        color: getModelColor(model, theme),
         badgeBg: getModelBadgeBackgroundColor(model, theme),
         badgeText: getModelTextColor(model, theme),
       }))
@@ -226,15 +180,6 @@ export function TopUsageChart({
     })
   }, [summary, dimension, theme, sourceSummary])
 
-  const topNames = useMemo(() => items.slice(0, 6).map(i => ({ key: i.id ?? i.name, label: i.name })), [items])
-  const nameColors = useMemo(() => {
-    const colors: Record<string, string> = {}
-    for (const item of items) {
-      colors[item.name] = item.color
-    }
-    return colors
-  }, [items])
-
   const dimensionLabel = dimension === 'model' ? t('Models') : dimension === 'provider' ? t('Providers') : t('Sources')
 
   const chart = (
@@ -279,21 +224,5 @@ export function TopUsageChart({
     </HorizontalBarChart>
   )
 
-  if (!showTrend) return chart
-
-  return (
-    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '16px', alignItems: 'stretch' }}>
-      <div style={{ flex: '2 1 320px' }}>
-        {chart}
-      </div>
-      <div style={{ flex: '1 1 240px', minWidth: 0 }}>
-        <SparklineTrendPanel
-          data={trendData}
-          metric={metric}
-          topNames={topNames}
-          nameColors={nameColors}
-        />
-      </div>
-    </div>
-  )
+  return chart
 }

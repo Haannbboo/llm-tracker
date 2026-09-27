@@ -1,13 +1,16 @@
 import asyncio
 import concurrent.futures
 import json
+import logging
 import os
 import threading
 import time
 import uuid
 from collections import OrderedDict, deque
+from collections.abc import Iterator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
+from datetime import datetime
 from typing import NoReturn
 
 from fastapi import FastAPI, HTTPException, Request
@@ -18,8 +21,10 @@ from .auth import _auth_enabled, resolve_token
 from .auth.tokens import hash_token
 from .database import init_db
 from .provider_parser import parse_provider_metadata
-from .recorder import record_tool_call, record_usage
+from .recorder import record_tool_call, record_usage, update_tool_call_duration
 from .utils import secs_to_micros
+
+log = logging.getLogger(__name__)
 
 CLAUDE_EVENT = "claude_code.api_request"
 CODEX_EVENT = "codex.sse_event"
@@ -27,14 +32,18 @@ CODEX_API_REQUEST_EVENT = "codex.api_request"
 OPENCODE_EVENT = "opencode.message_completed"
 KILO_EVENT = "kilo.message_completed"
 CODEX_DEBUG_FILE = "/tmp/codex-otlp-debug.json"
-CODEX_SERVICE_NAMES = {"codex_cli_rs", "codex_exec"}
+CODEX_SERVICE_NAMES = {"codex_cli_rs", "codex_exec", "codex-app-server"}
 KILO_SERVICE_NAMES = {"kilo"}
 RETIRED_SERVICE_NAMES = {"gemini-cli"}
 KNOWN_SERVICE_NAMES = (
     {"claude-code", "opencode"} | CODEX_SERVICE_NAMES | KILO_SERVICE_NAMES
 )
 
-# State cache for merging Codex events: run/conversation key -> {duration_ms, ttft_ms, timestamp}
+# State cache for merging Codex events: conversation key -> {duration_ms, ttft_ms, start_ms}
+# `start_ms` comes from codex.websocket_request (the send time of a sampling
+# request); `duration_ms` from codex.api_request in HTTP mode, where it is the
+# request's own duration. response.completed turns whichever is present into a
+# per-request latency.
 codex_state: dict = {}
 
 # Tool-name buffers: keyed by correlation ID, values are lists of {tool_name, tool_use_id, ts}
@@ -207,6 +216,24 @@ def _attr(attributes: list, key: str):
     return None
 
 
+def _codex_event_ts_ms(attrs: list) -> int | None:
+    """Milliseconds from Codex's `event.timestamp` ISO attribute, or None.
+
+    Codex ships timeUnixNano=0 and only sets observedTimeUnixNano (batch flush
+    time), which cannot bound request latency. `event.timestamp` is stamped when
+    the event is produced, so differences between events are real durations.
+    """
+    value = _attr(attrs, "event.timestamp")
+    if not isinstance(value, str):
+        return None
+    try:
+        return int(
+            datetime.fromisoformat(value.replace("Z", "+00:00")).timestamp() * 1000
+        )
+    except ValueError:
+        return None
+
+
 def _optional_int(value) -> int | None:
     if value is None or value == "":
         return None
@@ -269,18 +296,19 @@ def _buffer_tool_duration(
     key: str | None,
     tool_use_id: str,
     duration_ms: int | None,
-) -> None:
+) -> bool:
     """Attach the duration from a trailing tool_result to an already-buffered call.
 
     Only enriches existing entries; a result without a matching decision/name
-    event is ignored so tool counts stay unchanged.
+    event returns False so it can be matched against an already-persisted row.
     """
     if not key or duration_ms is None:
-        return
+        return False
     for entry in buffer.get(key, []):
         if entry["tool_use_id"] == tool_use_id:
             entry["duration_ms"] = duration_ms
-            return
+            return True
+    return False
 
 
 def _pop_buffered_tool(
@@ -534,32 +562,6 @@ def _extract_claude_fields(
     }
 
 
-def _parse_claude_record(
-    record: dict,
-    attrs: list,
-    session_id: str,
-    client_ip: str | None = None,
-    user_id: str | None = None,
-) -> None:
-    fields = _extract_claude_fields(
-        record, attrs, session_id, client_ip, user_id=user_id
-    )
-    tool_calls = fields.pop("_tool_info", [])
-    usage = record_usage(**fields)
-    if usage:
-        for tool_info in tool_calls:
-            record_tool_call(
-                tool_use_id=_scoped_tool_use_id(tool_info["tool_use_id"], user_id),
-                usage_id=usage.id,
-                session_id=usage.session_id,
-                tool_name=tool_info["tool_name"],
-                duration_ms=tool_info.get("duration_ms"),
-                user_id=user_id,
-                client_source="claude-code",
-                ts=tool_info["ts"],
-            )
-
-
 def _extract_opencode_fields(
     record: dict,
     attrs: list,
@@ -678,42 +680,59 @@ def _parse_opencode_record(
             )
 
 
+def _codex_state_for(attrs: list, user_id: str | None) -> dict | None:
+    """Return the mutable per-conversation Codex state, creating it if needed.
+
+    Returns None for events without a conversation id (for example the
+    `/models` api_request that Codex emits alongside a websocket session).
+    """
+    conv_id = _attr(attrs, "conversation.id")
+    state_key = _state_key(conv_id)
+    if not state_key:
+        return None
+    state_key = _scoped_id(state_key, user_id)
+    state = codex_state.get(state_key)
+    if state is None:
+        state = {"ts": time.time_ns() // 1000}
+        codex_state[state_key] = state
+    return state
+
+
 def _handle_codex_state_event(attrs: list, user_id: str | None = None) -> bool:
     """Handle Codex state-only events.
 
     Returns True when the event was consumed without producing a usage row.
+
+    Codex reports no total duration on the token-bearing response.completed
+    event. It does emit the request send (`codex.websocket_request`) and, in
+    HTTP mode, the request end with its own duration (`codex.api_request`).
+    Cache whichever arrives so response.completed can derive per-request latency.
     """
     event_kind = _attr(attrs, "event.kind")
     event_name = _attr(attrs, "event.name")
-    conv_id = _attr(attrs, "conversation.id")
+
+    if event_name == "codex.websocket_request":
+        start_ms = _codex_event_ts_ms(attrs)
+        state = _codex_state_for(attrs, user_id)
+        if state is not None and start_ms is not None:
+            state["start_ms"] = start_ms
+        return True
 
     if event_kind == CODEX_API_REQUEST_EVENT or event_name == CODEX_API_REQUEST_EVENT:
         duration = _attr(attrs, "duration_ms")
-        state_key = _state_key(conv_id)
-        state_key = _scoped_id(state_key, user_id) if state_key else None
-        if state_key and duration is not None:
-            if state_key not in codex_state:
-                codex_state[state_key] = {"ts": time.time_ns() // 1000}
-            codex_state[state_key]["duration_ms"] = int(duration)
+        state = _codex_state_for(attrs, user_id)
+        if state is not None and duration is not None:
+            state["duration_ms"] = int(duration)
         return True
 
     if event_kind == "response.created":
         duration = _attr(attrs, "duration_ms")
-        state_key = _state_key(conv_id)
-        state_key = _scoped_id(state_key, user_id) if state_key else None
-        if state_key and duration is not None:
-            if state_key not in codex_state:
-                codex_state[state_key] = {"ts": time.time_ns() // 1000}
-            codex_state[state_key]["ttft_ms"] = int(duration)
+        state = _codex_state_for(attrs, user_id)
+        if state is not None and duration is not None:
+            state["ttft_ms"] = int(duration)
         return True
 
     return False
-
-
-def _parse_codex_api_request(
-    record: dict, attrs: list, user_id: str | None = None
-) -> None:
-    _handle_codex_state_event(attrs, user_id=user_id)
 
 
 def _extract_codex_fields(
@@ -734,11 +753,17 @@ def _extract_codex_fields(
     if input_tokens is None:
         return None
 
-    time_ns = record.get("timeUnixNano", "0")
-    if time_ns == "0":
-        time_ns = record.get("observedTimeUnixNano", "0")
-
-    ts = int(time_ns) // 1000
+    # Codex ships timeUnixNano=0 and only sets observedTimeUnixNano (batch flush
+    # time), which can land well after the real completion. Prefer the event's
+    # own timestamp so ts agrees with the latency derived below.
+    completed_ms = _codex_event_ts_ms(attrs)
+    if completed_ms is not None:
+        ts = completed_ms * 1000  # ms -> us
+    else:
+        time_ns = record.get("timeUnixNano", "0")
+        if time_ns == "0":
+            time_ns = record.get("observedTimeUnixNano", "0")
+        ts = int(time_ns) // 1000
 
     conv_id = _attr(attrs, "conversation.id")
     usage_session_id = str(conv_id) if conv_id is not None else None
@@ -748,18 +773,22 @@ def _extract_codex_fields(
     tool_tokens = _attr(attrs, "tool_token_count")
     latency_ms = _attr(attrs, "duration_ms")
     status = _attr(attrs, "http.response.status_code")
-    ttft_ms = None
+    # Codex >=0.157 reports time-to-first-token directly on response.completed.
+    ttft_ms = _attr(attrs, "ttft_ms")
 
-    # Try to get better latency and ttft from the state cache
+    # Turn the cached request start/duration into a per-request latency. Codex
+    # never reports total duration on response.completed itself.
     state_key = _state_key(conv_id)
     state_key = _scoped_id(state_key, user_id) if state_key else None
-    if state_key in codex_state:
-        state = codex_state[state_key]
+    state = codex_state.pop(state_key, None) if state_key else None
+    if state is not None:
         if "duration_ms" in state:
             latency_ms = state["duration_ms"]
-        if "ttft_ms" in state:
+        elif "start_ms" in state:
+            if completed_ms is not None and completed_ms >= state["start_ms"]:
+                latency_ms = completed_ms - state["start_ms"]
+        if ttft_ms is None and "ttft_ms" in state:
             ttft_ms = state["ttft_ms"]
-        del codex_state[state_key]
 
     prompt_tokens = int(input_tokens or 0)
     completion_tokens = int(output_tokens or 0)
@@ -804,35 +833,6 @@ def _extract_codex_fields(
         "user_id": user_id,
         "_tool_info": tool_info,
     }
-
-
-def _parse_codex_record(
-    record: dict,
-    attrs: list,
-    service_name: str,
-    client_ip: str | None = None,
-    user_id: str | None = None,
-) -> None:
-    if _handle_codex_state_event(attrs, user_id=user_id):
-        return
-    fields = _extract_codex_fields(
-        record, attrs, service_name, client_ip, user_id=user_id
-    )
-    if fields is not None:
-        tool_calls = fields.pop("_tool_info", [])
-        usage = record_usage(**fields)
-        if usage:
-            for tool_info in tool_calls:
-                record_tool_call(
-                    tool_use_id=_scoped_tool_use_id(tool_info["tool_use_id"], user_id),
-                    usage_id=usage.id,
-                    session_id=usage.session_id,
-                    tool_name=tool_info["tool_name"],
-                    duration_ms=tool_info.get("duration_ms"),
-                    user_id=user_id,
-                    client_source="codex",
-                    ts=tool_info["ts"],
-                )
 
 
 def _parse_log_record(
@@ -907,12 +907,24 @@ def _parse_log_record(
             )
     elif event_name == "codex.tool_result" and service_name in CODEX_SERVICE_NAMES:
         conv_id = _attr(attrs, "conversation.id")
-        _buffer_tool_duration(
+        call_id = _attr(attrs, "call_id") or ""
+        duration_ms = _optional_int(_attr(attrs, "duration_ms"))
+        matched_buffer = _buffer_tool_duration(
             _codex_tool_buffer,
             _scoped_id(conv_id, user_id) if conv_id else None,
-            _attr(attrs, "call_id") or "",
-            _optional_int(_attr(attrs, "duration_ms")),
+            call_id,
+            duration_ms,
         )
+        if not matched_buffer and call_id and duration_ms is not None:
+            # The following response.completed can flush and persist a tool
+            # before Codex's separate tool_result event reaches the collector.
+            # In that case, enrich the existing row instead of dropping timing.
+            update_tool_call_duration(
+                tool_use_id=_scoped_tool_use_id(call_id, user_id),
+                user_id=user_id,
+                client_source="codex",
+                duration_ms=duration_ms,
+            )
     elif (
         service_name in ({"opencode"} | KILO_SERVICE_NAMES)
         and event_name == f"{service_name}.tool_decision"
@@ -984,6 +996,10 @@ def _parse_log_record(
                     )
     elif event_name == CODEX_API_REQUEST_EVENT and service_name in CODEX_SERVICE_NAMES:
         _handle_codex_state_event(attrs, user_id=user_id)
+    elif (
+        event_name == "codex.websocket_request" and service_name in CODEX_SERVICE_NAMES
+    ):
+        _handle_codex_state_event(attrs, user_id=user_id)
     elif event_name == OPENCODE_EVENT and service_name == "opencode":
         _parse_opencode_record(
             record, attrs, usage_session_id or "", client_ip=client_ip, user_id=user_id
@@ -1026,19 +1042,8 @@ async def health():
     return {"status": "ok", "service": app.title}
 
 
-@app.post("/v1/logs")
-async def receive_logs(request: Request):
-    # Auth + rate limit + body cap — all before any record is parsed.
-    client_ip: str | None = request.client.host if request.client else None
-    if _auth_enabled():
-        user_id, token_id = await _resolve_ingest_user_async(request)
-    else:
-        user_id, token_id = None, None
-
-    if token_id is not None:
-        _check_rate_limit(token_id)
-
-    # Body-size cap
+async def _read_capped_json(request: Request) -> dict:
+    """Read the request body enforcing otlp.max_body_bytes then parse as JSON."""
     max_body = CONFIG.get("otlp", {}).get("max_body_bytes", 2_000_000)
     content_length = request.headers.get("content-length")
     try:
@@ -1047,6 +1052,52 @@ async def receive_logs(request: Request):
         declared_length = None
     if declared_length is not None and declared_length > max_body:
         raise HTTPException(status_code=413, detail="request body too large")
+
+    body_bytes = bytearray()
+    async for chunk in request.stream():
+        body_bytes.extend(chunk)
+        if len(body_bytes) > max_body:
+            raise HTTPException(status_code=413, detail="request body too large")
+    return json.loads(body_bytes)
+
+
+async def _resolve_ingest_request(request: Request) -> tuple[str | None, str | None]:
+    """Auth + rate limit; returns (user_id, token_id) with auth disabled as None."""
+    if _auth_enabled():
+        user_id, token_id = await _resolve_ingest_user_async(request)
+    else:
+        user_id, token_id = None, None
+    if token_id is not None:
+        _check_rate_limit(token_id)
+    return user_id, token_id
+
+
+def _iter_log_records(body: dict) -> Iterator[tuple[dict, str, str]]:
+    """Yield (record, service_name, session_id) for each ingestable record."""
+    for resource_log in body.get("resourceLogs", []):
+        resource = resource_log.get("resource", {})
+        service_name = _resource_attr(resource, "service.name") or ""
+        if service_name in RETIRED_SERVICE_NAMES:
+            continue
+        session_id = _resource_attr(resource, "session.id") or ""
+        # Dump first unrecognised resource block to discover service name
+        if service_name not in KNOWN_SERVICE_NAMES and not os.path.exists(
+            CODEX_DEBUG_FILE + ".resource"
+        ):
+            with open(CODEX_DEBUG_FILE + ".resource", "w") as f:
+                json.dump(
+                    {"service_name": service_name, "resource": resource}, f, indent=2
+                )
+        for scope_log in resource_log.get("scopeLogs", []):
+            for record in scope_log.get("logRecords", []):
+                yield record, service_name, session_id
+
+
+@app.post("/v1/logs")
+async def receive_logs(request: Request):
+    # Auth + rate limit + body cap — all before any record is parsed.
+    client_ip: str | None = request.client.host if request.client else None
+    user_id, _ = await _resolve_ingest_request(request)
 
     # Evict stale codex_state entries (older than 10 minutes)
     now = time.time_ns() // 1000
@@ -1074,33 +1125,31 @@ async def receive_logs(request: Request):
 
     PROMPT_LENGTH_TRACKER.evict_stale()
 
-    # Read body with hard cap (handles chunked/lying Content-Length)
-    body_bytes = bytearray()
-    async for chunk in request.stream():
-        body_bytes.extend(chunk)
-        if len(body_bytes) > max_body:
-            raise HTTPException(status_code=413, detail="request body too large")
-    body = json.loads(body_bytes)
+    body = await _read_capped_json(request)
 
-    for resource_log in body.get("resourceLogs", []):
-        resource = resource_log.get("resource", {})
-        service_name = _resource_attr(resource, "service.name") or ""
-        if service_name in RETIRED_SERVICE_NAMES:
-            continue
-        session_id = _resource_attr(resource, "session.id") or ""
-        # Dump first unrecognised resource block to discover service name
-        if service_name not in KNOWN_SERVICE_NAMES and not os.path.exists(
-            CODEX_DEBUG_FILE + ".resource"
-        ):
-            with open(CODEX_DEBUG_FILE + ".resource", "w") as f:
-                json.dump(
-                    {"service_name": service_name, "resource": resource}, f, indent=2
-                )
-        for scope_log in resource_log.get("scopeLogs", []):
-            for record in scope_log.get("logRecords", []):
-                _parse_log_record(
-                    record, service_name, session_id, client_ip, user_id=user_id
-                )
+    max_records = CONFIG.get("otlp", {}).get("max_records_per_request", 1_000)
+    records = list(_iter_log_records(body))
+    rejected = 0
+    if len(records) > max_records:
+        rejected = len(records) - max_records
+        log.warning(
+            "Rejected %d OTLP records past otlp.max_records_per_request=%d",
+            rejected,
+            max_records,
+        )
+        records = records[:max_records]
+
+    for record, service_name, session_id in records:
+        _parse_log_record(record, service_name, session_id, client_ip, user_id=user_id)
+    if rejected:
+        # OTLP partial success: still 200 so the exporter does not retry the same
+        # oversized batch forever, but the dropped count is reported, not hidden.
+        return {
+            "partialSuccess": {
+                "rejectedLogRecords": rejected,
+                "errorMessage": "record count exceeds otlp.max_records_per_request",
+            }
+        }
     return {}
 
 
@@ -1111,4 +1160,5 @@ async def receive_metrics(request: Request):
 
 @app.post("/v1/traces")
 async def receive_traces(request: Request):
+    # Codex latency comes from the log stream; traces are not ingested.
     return {}

@@ -25,7 +25,6 @@ export function useSettingsData() {
     evaluationEvaluators,
     setEvaluationEvaluators,
     showToast,
-    configStatus: _configStatus,
     setConfigStatus,
     setError,
   } = useApp()

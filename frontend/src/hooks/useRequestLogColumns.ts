@@ -88,7 +88,6 @@ export function useRequestLogColumns() {
 
   return {
     columns: REQUEST_LOG_COLUMNS,
-    defaultColumnIds: DEFAULT_REQUEST_LOG_COLUMNS,
     visibleColumnIds,
     setVisibleColumnIds,
     visibleColumns,

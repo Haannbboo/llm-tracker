@@ -158,7 +158,8 @@ export function createPlugin(clientSource: string) {
                 messageId: part.messageID,
                 callId: part.callID,
                 toolName: part.tool,
-                timestampMs: Date.now(),
+                timestampMs:
+                  typeof time?.end === "number" ? time.end : Date.now(),
                 durationMs,
               },
               clientSource,

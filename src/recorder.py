@@ -10,7 +10,7 @@ import logging
 import time
 from datetime import datetime, timezone
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
 
 from .database.base_url import resolve_base_url_id
@@ -163,6 +163,33 @@ def _record_price_snapshot(
 def normalize_tool_name(tool_name: str) -> str:
     """Fold tool name casing so e.g. `Bash`/`bash` aggregate as one tool."""
     return tool_name.lower()
+
+
+def update_tool_call_duration(
+    *,
+    tool_use_id: str,
+    user_id: str | None,
+    client_source: str,
+    duration_ms: int,
+    db_path: str | None = None,
+) -> None:
+    """Update the duration on an already-recorded tool call, if it exists."""
+    from sqlalchemy.orm import Session as SASession
+
+    from .database import get_engine
+
+    engine = get_engine(db_path)
+    with SASession(engine) as session:
+        session.execute(
+            update(ToolCall)
+            .where(
+                ToolCall.tool_use_id == tool_use_id,
+                ToolCall.user_id == user_id,
+                ToolCall.client_source == client_source,
+            )
+            .values(duration_ms=duration_ms)
+        )
+        session.commit()
 
 
 def record_tool_call(

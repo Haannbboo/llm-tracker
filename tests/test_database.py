@@ -1509,6 +1509,87 @@ def test_throughput_keeps_tool_time_for_api_request_sources(fresh_db):
     assert daily[0]["avg_throughput"] == 100.0
 
 
+def test_fetch_tool_calls_derives_row_relative_start(fresh_db):
+    """Tool-inclusive sources get exact start offsets from completion - duration.
+
+    Parallel tools that finish together must still start at different offsets
+    when their durations differ.
+    """
+    from src.recorder import record_tool_call
+
+    database_module = fresh_db.database_module
+    db_path = fresh_db.db_path
+    database_module.init_db(db_path)
+
+    usage = database_module.Usage(
+        ts=TS_2026_04_17_10,
+        provider="anthropic",
+        model="claude-sonnet-4-6",
+        client_source="opencode",
+        endpoint="otlp",
+        prompt_tokens=100,
+        completion_tokens=10,
+        total_tokens=110,
+        latency_ms=1000,
+        status=200,
+        input_cost_usd=0.0,
+        output_cost_usd=0.0,
+        total_cost_usd=0.0,
+    )
+    database_module.log_usage(usage, db_path=db_path)
+
+    completion_ms = usage.ts // 1000 - 100
+    for tool_use_id, duration_ms, expected_start in [
+        ("tool-short", 300, 600),
+        ("tool-long", 800, 100),
+        # A merged proxy row can have a shorter latency than the tool lifetime;
+        # the start may exceed it and the timeline expands its axis.
+        ("tool-late", 1000, 4900),
+    ]:
+        record_tool_call(
+            tool_use_id=tool_use_id,
+            usage_id=usage.id,
+            tool_name="read",
+            duration_ms=duration_ms,
+            ts=completion_ms + (5000 if tool_use_id == "tool-late" else 0),
+            db_path=db_path,
+        )
+
+    calls = database_module.fetch_tool_calls(usage_id=usage.id, db_path=db_path)
+    starts = {call["tool_use_id"]: call["start_ms"] for call in calls}
+    assert starts == {"tool-short": 600, "tool-long": 100, "tool-late": 4900}
+
+    claude_usage = database_module.Usage(
+        ts=TS_2026_04_17_10,
+        provider="anthropic",
+        model="claude-sonnet-4-6",
+        client_source="claude-code",
+        endpoint="otlp",
+        prompt_tokens=100,
+        completion_tokens=10,
+        total_tokens=110,
+        latency_ms=1000,
+        status=200,
+        input_cost_usd=0.0,
+        output_cost_usd=0.0,
+        total_cost_usd=0.0,
+    )
+    database_module.log_usage(claude_usage, db_path=db_path)
+    record_tool_call(
+        tool_use_id="tool-claude-start",
+        usage_id=claude_usage.id,
+        tool_name="read",
+        duration_ms=300,
+        ts=completion_ms,
+        db_path=db_path,
+    )
+
+    claude_calls = database_module.fetch_tool_calls(
+        usage_id=claude_usage.id, db_path=db_path
+    )
+    assert claude_calls[0]["start_ms"] is None
+
+
 def test_get_or_create_base_url_reuses_exact_url_and_updates_metadata(fresh_db):
     database_module = fresh_db.database_module
     db_path = fresh_db.db_path

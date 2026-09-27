@@ -294,6 +294,8 @@ def rebuild_sessions_from_usage(db_path: str | None = None) -> int:
     # calls recorded before their session existed aren't lost on rebuild.
     tool_calls_by_session: dict[str, dict[str, int]] = {}
     for session_id, tool_name in tool_call_rows:
+        if session_id is None:
+            continue
         counts = tool_calls_by_session.setdefault(session_id, {})
         counts[tool_name] = counts.get(tool_name, 0) + 1
 
