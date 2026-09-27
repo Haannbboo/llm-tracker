@@ -197,7 +197,7 @@ export function LogsPage() {
       case 'status':
         return { width: colWidths.status, position: 'relative' }
       case 'tool':
-        return { width: 'max-content', position: 'relative' }
+        return { width: '12%', position: 'relative' }
       default:
         return { position: 'relative' }
     }
