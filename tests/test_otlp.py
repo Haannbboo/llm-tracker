@@ -1155,7 +1155,13 @@ def test_codex_tool_result_duration_flows_to_record(otlp_module, monkeypatch):
 def test_codex_tool_result_without_decision_is_not_recorded(otlp_module, monkeypatch):
     """Enriching by call_id must not add tools the decision stream skipped."""
     captured_tools: list[dict] = []
+    duration_updates: list[dict] = []
     _stub_tool_recording(otlp_module, monkeypatch, captured_tools)
+    monkeypatch.setattr(
+        otlp_module,
+        "update_tool_call_duration",
+        lambda **fields: duration_updates.append(fields),
+    )
 
     otlp_module._parse_log_record(
         {
@@ -1192,6 +1198,14 @@ def test_codex_tool_result_without_decision_is_not_recorded(otlp_module, monkeyp
     )
 
     assert captured_tools == []
+    assert duration_updates == [
+        {
+            "tool_use_id": "call-only-result",
+            "user_id": None,
+            "client_source": "codex",
+            "duration_ms": 12,
+        }
+    ]
 
 
 def test_opencode_tool_decision_duration_flows_to_record(otlp_module, monkeypatch):
