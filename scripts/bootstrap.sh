@@ -73,11 +73,19 @@ except Exception:
 ' "${url}"
 }
 
+# `server start` compares requirements.txt against this stamp and refuses to run
+# when they differ, so installing deps and recording them happen together.
+# shellcheck source=scripts/lib/requirements.sh
+source "${SCRIPTS_DIR}/lib/requirements.sh"
+
 _install_deps() {
   if [[ "${LLM_TRACKER_SKIP_INSTALL:-0}" == "1" ]]; then
     mkdir -p "${HOME}/.local/bin" "${HOME}/.llm-tracker"
     ln -sf "${SCRIPTS_DIR}/llm-tracker" "${HOME}/.local/bin/llm-tracker"
     chmod +x "${SCRIPTS_DIR}/llm-tracker"
+    # `server start` refuses when this stamp is missing or stale, so record it
+    # even on the skip path — the flag asserts deps are current by fiat.
+    record_requirements_stamp "${ROOT_DIR}/.venv" "${ROOT_DIR}/requirements.txt"
     info "Installation skipped (LLM_TRACKER_SKIP_INSTALL=1)"
     return 0
   fi
@@ -107,6 +115,7 @@ _install_deps() {
   # 3. Install initial dependencies
   info "Installing dependencies..."
   uv pip install --python "${venv_dir}/bin/python" -r "${ROOT_DIR}/requirements.txt"
+  record_requirements_stamp "${ROOT_DIR}/.venv" "${ROOT_DIR}/requirements.txt"
 
   # 4. Build frontend
   if command -v node >/dev/null 2>&1 && command -v npm >/dev/null 2>&1; then
@@ -393,6 +402,14 @@ if _wait_for_port "${HOST}" "${OTLP_PORT}" "OTLP"; then
 else
   fail "OTLP listening: ${DISPLAY_SCHEME}://${DISPLAY_HOST}:${OTLP_PORT} (not responding)"
   CHECKS_FAIL=$((CHECKS_FAIL + 1))
+fi
+
+# A freshly built frontend/dist is not served by a process that started before
+# it existed: src/api.py mounts it at import time, under `if dist.is_dir()`.
+# So the only command that builds is also the one that restarts the API.
+if [[ -d "${ROOT_DIR}/frontend/dist" ]]; then
+  info "Restarting the API to serve the new dashboard..."
+  "${ROOT_DIR}/.venv/bin/supervisorctl" -c "${HOME}/.llm-tracker/supervisord.conf" restart llm-tracker-api || true
 fi
 
 # Dashboard reachable (API serves frontend)

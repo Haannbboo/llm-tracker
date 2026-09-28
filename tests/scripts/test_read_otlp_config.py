@@ -90,20 +90,3 @@ server:
 """
 
     assert _run(tmp_path, config) == "4105 tracker.example"
-
-
-def test_start_and_restart_pass_full_endpoint_to_agent_configurators():
-    repo_root = Path(__file__).resolve().parents[2]
-    configurators = (
-        "configure-codex-settings.py",
-        "configure-claude-settings.py",
-        "configure-opencode-plugin.py",
-        "configure-kilo-plugin.py",
-    )
-
-    for script_name in ("start.sh", "restart.sh"):
-        script = (repo_root / "scripts" / script_name).read_text(encoding="utf-8")
-        assert 'read-otlp-config.py" "${CONFIG_PATH}" --endpoint' in script
-        for configurator in configurators:
-            assert f"{configurator}" in script
-        assert script.count('"${OTLP_ENDPOINT}"') == 4

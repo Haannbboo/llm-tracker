@@ -86,6 +86,46 @@ def select_config_path() -> Path:
     return KILO_CONFIG_PATH
 
 
+def _disable(config_path: Path, expected_endpoint: str | None) -> int:
+    """Remove this project's llm-tracker plugin entry.
+
+    Plugin entries are identified by build path, so they can only be ours. The
+    built dist/ is left in place: rebuilding is cheaper than being wrong.
+    """
+    if not config_path.exists():
+        _info(f"No Kilo config at {config_path}")
+        return 0
+    config = load_json(config_path)
+    plugins = config.get("plugin")
+    if not isinstance(plugins, list):
+        _info(f"No llm-tracker plugin in {config_path}")
+        return 0
+    kept = []
+    removed = 0
+    for entry in plugins:
+        entry_path = (
+            entry
+            if isinstance(entry, str)
+            else entry[0]
+            if isinstance(entry, list) and entry
+            else ""
+        )
+        if str(entry_path).replace("\\", "/").endswith("plugins/kilo/dist/index.js"):
+            removed += 1
+            continue
+        kept.append(entry)
+    if not removed:
+        _info(f"No llm-tracker plugin in {config_path}")
+        return 0
+    if kept:
+        config["plugin"] = kept
+    else:
+        config.pop("plugin", None)
+    save_json(config_path, config)
+    _info(f"llm-tracker plugin removed from {config_path}")
+    return 0
+
+
 def main() -> int:
     if len(sys.argv) not in (2, 3, 4, 5, 6):
         print(
@@ -94,34 +134,52 @@ def main() -> int:
         )
         return 1
 
-    project_root = Path(sys.argv[1]).expanduser().resolve()
-    otlp_port = sys.argv[2] if len(sys.argv) >= 3 else "4005"
-    host = sys.argv[3] if len(sys.argv) >= 4 else "localhost"
-    endpoint_arg = sys.argv[4] if len(sys.argv) >= 5 else None
+    argv = sys.argv[1:]
+    disable = False
+    if "--disable" in argv:
+        disable = True
+        argv = [arg for arg in argv if arg != "--disable"]
+    if len(argv) not in (1, 2, 3, 4, 5):
+        print(
+            "usage: configure-kilo-plugin.py PROJECT_ROOT "
+            "[--disable [ENDPOINT]] | [OTLP_PORT] [HOST] [ENDPOINT] [TOKEN]",
+            file=sys.stderr,
+        )
+        return 1
+
+    project_root = Path(argv[0]).expanduser().resolve()
+    config_path = select_config_path()
+    if disable:
+        return _disable(config_path, argv[1] if len(argv) >= 2 else None)
+    otlp_port = argv[1] if len(argv) >= 2 else "4005"
+    host = argv[2] if len(argv) >= 3 else "localhost"
+    endpoint_arg = argv[3] if len(argv) >= 4 else None
     token = (
-        sys.argv[5]
-        if len(sys.argv) >= 6
+        argv[4]
+        if len(argv) >= 5
         else os.environ.get("LLM_TRACKER_INGEST_TOKEN") or load_ingest_token()
     )
     plugin_dir = project_root / "plugins" / "kilo"
-    config_path = select_config_path()
+    dist_dir = plugin_dir / "dist"
     if endpoint_arg and "://" in endpoint_arg:
         endpoint = endpoint_arg
     else:
         endpoint = f"http://{host}:{otlp_port}/v1/logs"
 
-    # Install dependencies
-    node_modules = plugin_dir / "node_modules"
-    if not node_modules.exists():
-        _info(f"Installing Kilo plugin dependencies in {plugin_dir}")
-        result = run_npm(["install", "--package-lock=false"], plugin_dir)
-        if result is None:
-            return warn_skip("npm not found")
-        if result.returncode != 0:
-            return warn_skip(f"npm install failed:\n{result.stderr}")
-
-    # Build
-    if not (plugin_dir / "dist" / "index.js").exists():
+    hosted_client = os.environ.get("LLM_TRACKER_HOSTED_CLIENT") == "1"
+    if not (dist_dir / "index.js").exists():
+        node_modules = plugin_dir / "node_modules"
+        if not node_modules.exists():
+            _info(f"Installing Kilo plugin dependencies in {plugin_dir}")
+            # `npm ci` needs a committed lock file. A checkout without one still
+            # has to build, so fall back rather than skipping the agent.
+            locked = (plugin_dir / "package-lock.json").exists()
+            command = ["ci"] if locked else ["install"]
+            result = run_npm(command, plugin_dir)
+            if result is None:
+                return warn_skip("npm not found")
+            if result.returncode != 0:
+                return warn_skip(f"npm {command[0]} failed:\n{result.stderr}")
         _info(f"Building Kilo plugin from {plugin_dir}")
         result = run_npm(["run", "build"], plugin_dir)
         if result is None:
@@ -156,6 +214,8 @@ def main() -> int:
             else ""
         )
         if str(entry_path).replace("\\", "/").endswith("plugins/kilo/dist/index.js"):
+            if hosted_client:
+                continue
             entry_endpoint = (
                 entry[1].get("endpoint")
                 if isinstance(entry, list)

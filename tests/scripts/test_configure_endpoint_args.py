@@ -135,6 +135,20 @@ def test_codex_token_arg_writes_otlp_header(tmp_path):
     )
 
 
+def test_codex_missing_config_dir_announces_the_skip(tmp_path):
+    # A machine with `codex` on PATH but no ~/.codex yet: the script must say
+    # it skipped, or `llm-tracker login` reports the agent as wired.
+    config = tmp_path / "missing" / "config.toml"
+    result = _run(
+        "configure-codex-settings.py",
+        [str(config), "4002", "localhost", ENDPOINT],
+        home=tmp_path,
+    )
+    assert result.returncode == 0, result.stderr
+    assert "skipping" in result.stderr
+    assert not config.exists()
+
+
 # --------------------------------------------------------- opencode / kilo
 
 

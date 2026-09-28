@@ -59,7 +59,6 @@ from .sessions import (
     upsert_session_from_usage,
 )
 from .usage import (
-    USAGE_COPY_FIELDS,
     CostRecalcResult,
     aggregate_daily_by_dimension,
     aggregate_daily_by_period,
@@ -71,7 +70,6 @@ from .usage import (
     fetch_tool_calls,
     get_usage_high_watermark_ts,
     log_usage,
-    merge_usage_database,
     recalculate_usage_cost,
     reprice_estimated_rows,
     summarize_tool_calls,
@@ -99,7 +97,6 @@ __all__ = [
     "PriceSnapshot",
     "Session",
     "SessionRecord",
-    "USAGE_COPY_FIELDS",
     "Usage",
     "UsageDaily",
     "User",
@@ -145,7 +142,6 @@ __all__ = [
     "recalculate_usage_cost",
     "reprice_estimated_rows",
     "update_queued_evaluation_job_evaluator",
-    "merge_usage_database",
     "metadata",
     "rebuild_sessions_from_usage",
     "record_usage",

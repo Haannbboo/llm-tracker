@@ -150,25 +150,74 @@ def update_existing_otel_config(
     )
 
 
-def main():
-    if len(sys.argv) not in (2, 3, 4, 5, 6):
+def _strip_otel(body: str) -> str:
+    """Drop the [otel] table and everything under it."""
+    cleaned = re.sub(r"(?ms)^\[otel[^\]]*\]\s*.*?(?=^\[|\Z)", "", body)
+    cleaned = re.sub(r"(?m)^otel\.exporter\s*=.*\n?", "", cleaned)
+    cleaned = re.sub(r"(?m)^otel\.environment\s*=.*\n?", "", cleaned)
+    return cleaned
+
+
+def _disable(config_path: Path, expected_endpoint: str | None) -> int:
+    """Remove llm-tracker's OTLP settings from a Codex config.
+
+    A hand-written collector config is left alone: the block is only removed
+    while its endpoint is the one llm-tracker wrote.
+    """
+    if not config_path.exists():
+        _info(f"No Codex config at {config_path}")
+        return 0
+    content = config_path.read_text(encoding="utf-8")
+    found = re.search(r"endpoint\s*=\s*[\"\']([^\"\']+)", content)
+    if found and expected_endpoint and found.group(1) != expected_endpoint:
         print(
-            "usage: configure-codex-settings.py CONFIG_PATH [OTLP_PORT] [HOST] [ENDPOINT] [TOKEN]",
+            f"{config_path} points at another collector ({found.group(1)}); left alone",
+            file=sys.stderr,
+        )
+        return 0
+    new_content = _strip_otel(content)
+    if new_content == content:
+        _info(f"No llm-tracker telemetry in {config_path}")
+        return 0
+    _write_private(config_path, new_content)
+    _info(f"Codex OTLP telemetry removed from {config_path}")
+    return 0
+
+
+def main():
+    argv = sys.argv[1:]
+    disable = False
+    if "--disable" in argv:
+        disable = True
+        argv = [arg for arg in argv if arg != "--disable"]
+    if len(argv) not in (1, 2, 3, 4, 5):
+        print(
+            "usage: configure-codex-settings.py CONFIG_PATH "
+            "[--disable [ENDPOINT]] | [OTLP_PORT] [HOST] [ENDPOINT] [TOKEN]",
             file=sys.stderr,
         )
         return 1
 
-    config_path = Path(sys.argv[1]).expanduser()
-    otlp_port = sys.argv[2] if len(sys.argv) >= 3 else "4002"
-    host = sys.argv[3] if len(sys.argv) >= 4 else "localhost"
-    endpoint = sys.argv[4] if len(sys.argv) >= 5 else None
+    config_path = Path(argv[0]).expanduser()
+    if disable:
+        # ENDPOINT is the one llm-tracker wrote; anything else is the user's.
+        return _disable(config_path, argv[1] if len(argv) >= 2 else None)
+    otlp_port = argv[1] if len(argv) >= 2 else "4002"
+    host = argv[2] if len(argv) >= 3 else "localhost"
+    endpoint = argv[3] if len(argv) >= 4 else None
     token = (
-        sys.argv[5]
-        if len(sys.argv) >= 6
+        argv[4]
+        if len(argv) >= 5
         else os.environ.get("LLM_TRACKER_INGEST_TOKEN") or load_ingest_token()
     )
 
     if not config_path.parent.exists():
+        # Same marker as the plugin scripts' warn_skip(): `llm-tracker login`
+        # reads it to avoid reporting a skipped agent as wired.
+        print(
+            f"WARNING: {config_path.parent} does not exist; skipping Codex configuration",
+            file=sys.stderr,
+        )
         return 0
 
     content = ""

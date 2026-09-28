@@ -58,21 +58,113 @@ def resolve_otlp_logs_endpoint(
     return f"http://{host}:{otlp_port}/v1/logs"
 
 
-def main() -> int:
-    if len(sys.argv) not in (2, 3, 4, 5, 6):
+# Only these keys are ever written by this script, so only these are removed.
+_OWNED_ENV_KEYS = (
+    "CLAUDE_CODE_ENABLE_TELEMETRY",
+    "OTEL_LOGS_EXPORTER",
+    "OTEL_EXPORTER_OTLP_LOGS_PROTOCOL",
+    "OTEL_EXPORTER_OTLP_LOGS_ENDPOINT",
+)
+
+
+def _disable(settings_path: Path, expected_endpoint: str | None) -> int:
+    """Remove llm-tracker's telemetry keys and its tool-call hooks.
+
+    A hand-written collector config is left alone: the OTLP keys are only removed
+    while the endpoint is the one llm-tracker wrote. The hooks are identified by
+    script path, so they can only be ours.
+    """
+    if not settings_path.exists():
+        _info(f"No Claude Code settings at {settings_path}")
+        return 0
+    settings = load_settings(settings_path)
+    env = settings.get("env")
+    env = env if isinstance(env, dict) else {}
+    current = env.get("OTEL_EXPORTER_OTLP_LOGS_ENDPOINT")
+    if current and expected_endpoint and current != expected_endpoint:
         print(
-            "usage: configure-claude-settings.py SETTINGS_PATH [OTLP_PORT] [HOST] [ENDPOINT] [TOKEN]",
+            f"{settings_path} points at another collector ({current}); left alone",
+            file=sys.stderr,
+        )
+        return 0
+
+    changed = False
+    for key in _OWNED_ENV_KEYS:
+        if key in env:
+            del env[key]
+            changed = True
+    headers = env.get("OTEL_EXPORTER_OTLP_HEADERS")
+    if isinstance(headers, str) and headers.startswith("x-llm-tracker-token="):
+        del env["OTEL_EXPORTER_OTLP_HEADERS"]
+        changed = True
+    if env:
+        settings["env"] = env
+    else:
+        settings.pop("env", None)
+
+    hooks = settings.get("hooks")
+    if isinstance(hooks, dict):
+        for event in ("PreToolUse", "PostToolUse"):
+            entries = hooks.get(event)
+            if not isinstance(entries, list):
+                continue
+            kept = [entry for entry in entries if not _is_tracker_hook(entry)]
+            if len(kept) != len(entries):
+                changed = True
+            if kept:
+                hooks[event] = kept
+            else:
+                hooks.pop(event)
+        if hooks:
+            settings["hooks"] = hooks
+        else:
+            settings.pop("hooks", None)
+
+    if not changed:
+        _info(f"No llm-tracker telemetry in {settings_path}")
+        return 0
+    save_settings(settings_path, settings)
+    _info(f"Claude Code telemetry removed from {settings_path}")
+    return 0
+
+
+def _is_tracker_hook(entry: object) -> bool:
+    if not isinstance(entry, dict):
+        return False
+    inner = entry.get("hooks")
+    if not isinstance(inner, list):
+        return False
+    return any(
+        isinstance(hook, dict)
+        and str(hook.get("command", "")).endswith("claude-hook.sh")
+        for hook in inner
+    )
+
+
+def main() -> int:
+    argv = sys.argv[1:]
+    disable = False
+    if "--disable" in argv:
+        disable = True
+        argv = [arg for arg in argv if arg != "--disable"]
+    if len(argv) not in (1, 2, 3, 4, 5):
+        print(
+            "usage: configure-claude-settings.py SETTINGS_PATH "
+            "[--disable [ENDPOINT]] | [OTLP_PORT] [HOST] [ENDPOINT] [TOKEN]",
             file=sys.stderr,
         )
         return 1
 
-    settings_path = Path(sys.argv[1]).expanduser()
-    otlp_port = sys.argv[2] if len(sys.argv) >= 3 else "4002"
-    host = sys.argv[3] if len(sys.argv) >= 4 else "localhost"
-    endpoint = sys.argv[4] if len(sys.argv) >= 5 else None
+    settings_path = Path(argv[0]).expanduser()
+    if disable:
+        # ENDPOINT is the one llm-tracker wrote; anything else is the user's.
+        return _disable(settings_path, argv[1] if len(argv) >= 2 else None)
+    otlp_port = argv[1] if len(argv) >= 2 else "4002"
+    host = argv[2] if len(argv) >= 3 else "localhost"
+    endpoint = argv[3] if len(argv) >= 4 else None
     token = (
-        sys.argv[5]
-        if len(sys.argv) >= 6
+        argv[4]
+        if len(argv) >= 5
         else os.environ.get("LLM_TRACKER_INGEST_TOKEN") or load_ingest_token()
     )
 
@@ -104,6 +196,11 @@ def main() -> int:
         _info(f"Claude Code telemetry configured in {settings_path}")
     else:
         _info(f"Claude Code telemetry already up-to-date in {settings_path}")
+
+    # Hosted tracking uses OTLP directly; the legacy tool-call hook is a no-op
+    # and a versioned source path would add duplicate hooks on every update.
+    if os.environ.get("LLM_TRACKER_HOSTED_CLIENT") == "1":
+        return 0
 
     # Register tool-call hook (PreToolUse + PostToolUse).
     hook_path = Path(__file__).resolve().parent / "claude-hook.sh"

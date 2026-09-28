@@ -35,6 +35,10 @@ _term_width() {
 
 # ── Banner ──────────────────────────────────────────────────────────
 banner() {
+  # The launcher prints the banner and exports LLM_TRACKER_SKIP_BANNER=1, so a
+  # script it called does not print a second one.
+  [[ -n "${LLM_TRACKER_SKIP_BANNER:-}" ]] && return 0
+
   local width
   width="$(_term_width)"
 

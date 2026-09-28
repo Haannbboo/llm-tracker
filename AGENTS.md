@@ -62,11 +62,17 @@ docs: add provider adapter workflow
 
 ## Version management
 
-Version format: `MAJOR.MINOR.PATCH` (e.g. `0.1.180`). Stored in `VERSION` at repo root.
+Version format: `MAJOR.MINOR.PATCH` (e.g. `0.1.180`).
 
-- `MAJOR`: bumped manually for breaking changes — edit first field in `VERSION`.
-- `MINOR`: bumped manually for feature releases — edit second field in `VERSION`.
-- `PATCH`: auto-incremented on PR branches targeting `main` by `.github/workflows/bump-version.yml`; the bump commit becomes part of the PR before squash merge, so `main` gets a single squashed commit.
+- `VERSION` at repo root is the server release.
+- `client/VERSION` is the client release, tracked separately so a hosted client
+  snapshot can move without a server release.
+
+- `MAJOR`: bumped manually for breaking changes — edit first field in the file.
+- `MINOR`: bumped manually for feature releases — edit second field in the file.
+- `PATCH`: auto-incremented on PR branches targeting `main` by `.github/workflows/bump-version.yml`; the bump commit becomes part of the PR before squash merge, so `main` gets a single squashed commit. The workflow raises only the files the diff touched: `client/`, `plugins/` and `scripts/hosted-install.sh` bump the client, `src/`, `frontend/`, `scripts/`, `VERSION` and friends bump the server, and `protocol/` and `scripts/configure-*` bump both.
+
+`llm-tracker --version` prints the client version and commit, and appends `· server <VERSION>` when the server component is installed.
 
 The version is exposed via `GET /version` (both API and proxy apps) and displayed in Settings → Services in the frontend.
 
@@ -94,6 +100,12 @@ Script-specific changes:
 uv run python -m pytest tests/scripts/ -q
 ```
 
+Client changes:
+
+```bash
+uv run python -m pytest tests/client/ -q
+```
+
 Frontend:
 
 ```bash
@@ -111,19 +123,56 @@ Use targeted tests during iteration, but before commit/PR run the relevant full 
 
 ## Bootstrap architecture
 
-Three-script chain:
+There is one installed command: `scripts/llm-tracker`. Both installers write it, and the `# llm-tracker launcher` marker line is how each recognises a launcher it previously wrote. The all-in-one installer symlinks it from the server clone into `~/.local/bin`; the hosted client installer copies it there. It resolves the two components out of `$LLM_TRACKER_HOME` — `current` for the client snapshot, `src` for the server clone — and routes to whichever one the arguments name.
+
+- `client/` — the client: tracking wrapper, agent configuration, sign-in, component report. It must never import `src`.
+- `src/`, `scripts/` — the server component: API, OTLP collector, proxy, dashboard, evaluation worker.
+
+Command surface:
+
+```bash
+llm-tracker status            # installed components, agents, whether things run
+llm-tracker setup             # agent configuration, in both installation modes
+llm-tracker server start      # turn the services on
+llm-tracker server restart    # reload running code
+llm-tracker server bootstrap  # install, build the dashboard, start, verify
+llm-tracker server status     # the service view
+```
+
+`llm-tracker start`, `stop`, `restart`, `bootstrap` and `token` still forward to the matching `server` command with a one-line note on stderr. `llm-tracker status` is not an alias for the service view.
+
+### Testing local changes: set `LLM_TRACKER_ROOT`
+
+`llm-tracker server ...` runs the scripts from `$LLM_TRACKER_HOME/src` — the deployed clone — not the checkout you are editing. Older clones also configure agents from `start.sh`/`restart.sh`, rebuilding the endpoint as `http://localhost:<port>/v1/logs` and dropping the scheme from `server.base_url`, which silently repoints agent settings and fails the `otlp-ready` hook. So prefix server commands in a checkout:
+
+```bash
+LLM_TRACKER_ROOT="$PWD" llm-tracker server restart    # reload THIS checkout's code
+LLM_TRACKER_ROOT="$PWD" llm-tracker server bootstrap  # build THIS checkout's dashboard
+```
+
+It also makes the client import this checkout instead of a snapshot. Repair agent settings with the scheme intact:
+
+```bash
+EP="$(python scripts/read-otlp-config.py ~/.llm-tracker/config.yaml --endpoint)"
+python scripts/configure-claude-settings.py ~/.claude/settings.json 0 localhost "$EP"
+python scripts/configure-codex-settings.py ~/.codex/config.toml      0 localhost "$EP"
+```
+
+The all-in-one install is still a three-script chain:
 
 ```txt
-install.sh (root) → bootstrap.sh → start.sh
+install.sh (root) → scripts/bootstrap.sh → scripts/start.sh
 ```
 
 - `install.sh` — curl-pipe-bash entrypoint at repo root. Checks prerequisites (git, bash, curl), clones/updates repo to `~/.llm-tracker/src`, delegates to `scripts/bootstrap.sh`.
-- `bootstrap.sh` — installs deps (via embedded `_install_deps()`), starts services via `start.sh`, runs post-start verification.
-- `start.sh` — supervisord, port checks, agent config, schema migrations, serves `frontend/dist`.
+- `bootstrap.sh` — installs deps (via embedded `_install_deps()`), builds the dashboard, starts services via `start.sh`, runs post-start verification, then restarts the API so the new `frontend/dist` is served. Only the command that builds restarts the API, because the mount happens at import time.
+- `start.sh` — config, port check, schema migrations, supervisord. Refuses with "run llm-tracker server bootstrap" when `requirements.txt` changed. Never touches agent settings.
+- `scripts/restart.sh` — migrations, then `SIGHUP` to the running services. Nothing else; `--otlp-port N` is its only flag and persists the port.
+- The hosted client install is `scripts/hosted-install.sh`, served from `GET /install.sh`. It writes a client snapshot under `~/.llm-tracker/versions` and flips `~/.llm-tracker/current`.
 
-Quick backend iteration: `llm-tracker restart` (see `scripts/restart.sh`) gracefully restarts the supervisord-managed services to pick up backend changes locally.
+Quick backend iteration: `LLM_TRACKER_ROOT="$PWD" llm-tracker server restart` (see `scripts/restart.sh`) reloads the supervisord-managed services to pick up backend changes locally.
 
-The human views frontend changes through the built version, not Vite dev — after frontend edits, run `llm-tracker bootstrap` to rebuild `frontend/dist` (`npm install && npm run build`) so the changes show up.
+The human views frontend changes through the built version, not Vite dev — after frontend edits, run `LLM_TRACKER_ROOT="$PWD" llm-tracker server bootstrap` to rebuild `frontend/dist` (`npm install && npm run build`) so the changes show up.
 
 Frontend dev:
 
@@ -131,7 +180,7 @@ Frontend dev:
 cd frontend && npm run dev
 ```
 
-Vite dev uses port `5173`. Bootstrap serves built frontend through FastAPI.
+Vite dev uses port `5173`. `llm-tracker server bootstrap` builds and serves the frontend through FastAPI.
 
 ## Worktree dev environment
 
@@ -164,6 +213,7 @@ Key behaviors:
 
 ## Durable repo notes
 
+- `client/` must never import `src`. A client-only install has no server clone, so the dependency would break the whole client; `tests/client/test_no_server_imports.py` enforces it.
 - Runtime API port is config-driven. Do not assume `4001`; read `~/.llm-tracker/config.yaml`. This repo has recently run the API on `4004`.
 - Service control uses `~/.llm-tracker/supervisord.conf`.
 - The configured DB may be remote Postgres/Supabase, not local SQLite. Worker and session-selector changes must tolerate slow or hung DB calls.
@@ -198,3 +248,4 @@ Default labels: `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-huma
 ### Domain docs
 
 Single-context repo. Use root README plus `.agents/commands/llm-tracker.md`; ADRs may live under `docs/adr/` only for durable architecture decisions.
+For the planned hosted client/server split, read `docs/client-server-split-handoff.md` before implementation.

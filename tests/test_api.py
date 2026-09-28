@@ -1988,3 +1988,19 @@ def test_slow_fetch_does_not_block_event_loop(api_module, monkeypatch):
         await asyncio.wait_for(task, timeout=1)
 
     asyncio.run(main())
+
+
+def test_version_publishes_the_collector_for_clients(api_module, monkeypatch):
+    """Clients need to know where to point agents, and only the server knows."""
+    monkeypatch.setattr(
+        api_module,
+        "resolve_server_urls",
+        lambda _config: {
+            "api_url": "https://tracker.example.test:4004",
+            "otlp_url": "https://tracker.example.test:4005",
+        },
+    )
+    client = TestClient(api_module.app)
+    payload = client.get("/version").json()
+
+    assert payload["otlp_logs_endpoint"] == "https://tracker.example.test:4005/v1/logs"

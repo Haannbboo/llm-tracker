@@ -25,6 +25,9 @@ def _make_fake_bootstrap_repo(
     lib_dir = scripts_dir / "lib"
     lib_dir.mkdir(parents=True)
     shutil.copy2(repo_root / "scripts" / "lib" / "terminal.sh", lib_dir / "terminal.sh")
+    shutil.copy2(
+        repo_root / "scripts" / "lib" / "requirements.sh", lib_dir / "requirements.sh"
+    )
 
     # Create CLI wrapper directly (install logic is now inline in bootstrap.sh)
     (scripts_dir / "llm-tracker").write_text(

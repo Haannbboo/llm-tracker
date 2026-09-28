@@ -40,6 +40,9 @@ EVALUATOR_AGENT_CATALOG = {
 }
 VALID_EVALUATOR_AGENTS = set(EVALUATOR_AGENT_CATALOG)
 
+# Routes that would record the evaluation's own LLM call as user usage.
+_UNTRACKED_ENV_KEYS = ("OPENAI_BASE_URL", "ANTHROPIC_BASE_URL")
+
 logger = logging.getLogger(__name__)
 
 
@@ -649,6 +652,20 @@ def _build_claude_evaluator_invocation(prompt: str) -> AgentInvocation:
     )
 
 
+def _evaluator_env(overrides: dict[str, str] | None) -> dict[str, str]:
+    """Environment for the evaluator subprocess.
+
+    The evaluator's own LLM call must never be recorded as the user's usage. The
+    OTLP exporters are switched off by the invocation builders; a proxy base URL
+    inherited from the parent shell is the other recording path, so it is
+    dropped here too.
+    """
+    env = {k: v for k, v in os.environ.items() if k not in _UNTRACKED_ENV_KEYS}
+    if overrides:
+        env.update(overrides)
+    return env
+
+
 def build_evaluator_invocation(
     transcript: str,
     evaluator: str = "codex",
@@ -986,7 +1003,7 @@ def summarize_session_with_llm(
         text=True,
         capture_output=True,
         timeout=EVALUATION_TIMEOUT_SECONDS,
-        env={**os.environ, **invocation.env} if invocation.env else None,
+        env=_evaluator_env(invocation.env),
     )
     if completed.returncode != 0:
         logger.warning(

@@ -26,7 +26,7 @@ from src.config.app import (
     refresh_runtime_config,
     set_evaluation_evaluator,
 )
-from src.config.server_config import load_server_config
+from src.config.server_config import load_server_config, resolve_server_urls
 from src.pricing.models import ResolvedCost
 
 from ._version import get_version
@@ -1533,12 +1533,23 @@ async def get_local_setup_health():
     }
 
 
+def _collector_hint() -> dict[str, str]:
+    """The OTLP logs endpoint for clients, or nothing when it is not configured."""
+    otlp_url = resolve_server_urls(CONFIG).get("otlp_url")
+    return {"otlp_logs_endpoint": f"{otlp_url}/v1/logs"} if otlp_url else {}
+
+
 @app.get("/version")
 async def version():
     """Return API version information."""
     return {
         "name": app.title,
         "version": get_version(),
+        # Where clients should point agents. A property of this server's own
+        # config, and not a secret: ingesting still needs a token. Left out
+        # rather than half-built when the config has no collector URL, because
+        # /version is public and must answer either way.
+        **_collector_hint(),
     }
 
 

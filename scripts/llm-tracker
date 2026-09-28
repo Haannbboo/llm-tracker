@@ -1,27 +1,272 @@
 #!/usr/bin/env bash
+# llm-tracker launcher
+# The one installed command. This marker line lets an installer recognise a
+# launcher it previously wrote, and replace it.
+#
+# The client is mandatory; the server component is optional. This script
+# discovers both from $LLM_TRACKER_HOME and routes to whichever one the
+# arguments call for. It is installed either as a symlink into the server clone
+# (all-in-one) or as a copy in ~/.local/bin (client-only), so it must not depend
+# on its own location for anything but the dev fallback.
 set -euo pipefail
 
-SCRIPT_PATH="${BASH_SOURCE[0]}"
-# resolve symlinks
-while [ -L "$SCRIPT_PATH" ]; do
-  SCRIPT_PATH="$(readlink "$SCRIPT_PATH")"
-done
-ROOT_DIR="$(cd "$(dirname "$SCRIPT_PATH")/.." && pwd)"
-SCRIPTS_DIR="${ROOT_DIR}/scripts"
+TRACKER_HOME="${LLM_TRACKER_HOME:-$HOME/.llm-tracker}"
+BIN_DIR="${LLM_TRACKER_BIN_DIR:-$HOME/.local/bin}"
+REPOSITORY="Haannbooo/llm-tracker"
 
-case "${1:-}" in
-  bootstrap) shift; exec bash "${SCRIPTS_DIR}/bootstrap.sh" "$@" ;;
-  start)   shift; exec bash "${SCRIPTS_DIR}/start.sh" "$@" ;;
-  stop)    shift; exec bash "${SCRIPTS_DIR}/stop.sh" "$@" ;;
-  restart) shift; exec bash "${SCRIPTS_DIR}/restart.sh" "$@" ;;
-  status)  shift; exec bash "${SCRIPTS_DIR}/status.sh" "$@" ;;
-  update)  shift; exec bash "${SCRIPTS_DIR}/update.sh" "$@" ;;
-esac
+# ── Locate the server component ─────────────────────────────────────────────
+# LLM_TRACKER_ROOT wins so a worktree or a test can point at any checkout.
+_self_dir() {
+  local source="${BASH_SOURCE[0]}"
+  while [[ -L "$source" ]]; do source="$(readlink "$source")"; done
+  cd "$(dirname "$source")/.." && pwd
+}
 
-PYTHON="${ROOT_DIR}/.venv/bin/python"
-if [[ ! -x "${PYTHON}" ]]; then
-  PYTHON="python3"
-fi
+server_root() {
+  local candidate
+  for candidate in "${LLM_TRACKER_ROOT:-}" "${TRACKER_HOME}/src" "$(_self_dir)"; do
+    [[ -n "$candidate" && -x "${candidate}/.venv/bin/python" ]] || continue
+    printf '%s' "$candidate"
+    return 0
+  done
+  return 1
+}
 
-export PYTHONPATH="${ROOT_DIR}${PYTHONPATH:+:${PYTHONPATH}}"
-exec "${PYTHON}" -m src.cli "$@"
+# ── Locate the client component ─────────────────────────────────────────────
+client_root() {
+  local link resolved
+  link="${TRACKER_HOME}/current"
+  [[ -L "$link" ]] || return 1
+  resolved="$(readlink "$link")"
+  case "$resolved" in
+    /*) ;;
+    *) resolved="${TRACKER_HOME}/${resolved}" ;;
+  esac
+  [[ -d "${resolved}/client" ]] || return 1
+  printf '%s' "$resolved"
+}
+
+# A client-only install brings its own virtualenv. An all-in-one install reuses
+# the server's, because the client needs nothing the server does not already have.
+client_python() {
+  local snapshot
+  if snapshot="$(client_root)"; then
+    if [[ -x "${snapshot}/.venv/bin/python" ]]; then
+      printf '%s' "${snapshot}/.venv/bin/python"
+      return 0
+    fi
+  fi
+  local root
+  if root="$(server_root)"; then
+    printf '%s' "${root}/.venv/bin/python"
+    return 0
+  fi
+  return 1
+}
+
+missing_client() {
+  cat >&2 <<EOF
+llm-tracker: the client component is not installed on this machine.
+Install it with:
+  curl -fsSL https://${REPOSITORY}/raw/main/scripts/hosted-install.sh | sh
+EOF
+  exit 1
+}
+
+missing_server() {
+  cat >&2 <<EOF
+llm-tracker: the server component is not installed on this machine.
+This machine has the client only, which reports to a remote server.
+To run a local server, install the all-in-one release:
+  curl -fsSL https://raw.githubusercontent.com/${REPOSITORY}/main/install.sh | bash
+EOF
+  exit 1
+}
+
+# ── Banner ──────────────────────────────────────────────────────────────────
+# Printed by the launcher so every command starts the same way, and only once:
+# LLM_TRACKER_SKIP_BANNER keeps the scripts it calls from printing a second one.
+print_banner() {
+  # The banner is decoration: it goes to stderr so a tracked child's stdout is
+  # exactly what the child wrote. A machine-readable flag suppresses it.
+  [[ -t 2 ]] || return 0
+  local arg
+  for arg in "$@"; do
+    case "$arg" in
+      --json|--usage-only|--no-banner) return 0 ;;
+      --summary-dest)
+        return 0
+        ;;
+    esac
+  done
+  local previous=""
+  for arg in "$@"; do
+    [[ "$arg" == "file" || "$arg" == "stdout" ]] && previous="$arg"
+  done
+  [[ "$previous" == "file" || "$previous" == "stdout" ]] && return 0
+  [[ -n "${LLM_TRACKER_SKIP_BANNER:-}" ]] && return 0
+
+  local helpers=""
+  local root
+  if root="$(server_root 2>/dev/null)"; then
+    helpers="${root}/scripts/lib/terminal.sh"
+  fi
+  if [[ ! -f "$helpers" ]]; then
+    local snapshot
+    snapshot="$(client_root 2>/dev/null || true)"
+    [[ -n "$snapshot" ]] && helpers="${snapshot}/scripts/lib/terminal.sh"
+  fi
+  [[ -f "$helpers" ]] || return 0
+  # shellcheck source=/dev/null
+  source "$helpers"
+  banner >&2
+  printf "\n" >&2
+}
+
+# ── Version ─────────────────────────────────────────────────────────────────
+print_version() {
+  local snapshot="" root=""
+  snapshot="$(client_root 2>/dev/null || true)"
+  root="$(server_root 2>/dev/null || true)"
+  local client_dir="${snapshot:-${root}}/client"
+  local line="llm-tracker"
+  [[ -f "${client_dir}/VERSION" ]] && line+=" $(cat "${client_dir}/VERSION")"
+  local commit="${LLM_TRACKER_CLIENT_COMMIT:-}"
+  [[ -z "$commit" && -f "${client_dir}/COMMIT" ]] && commit="$(cat "${client_dir}/COMMIT")"
+  if [[ -z "$commit" && -n "$root" ]]; then
+    commit="$(git -C "$root" rev-parse HEAD 2>/dev/null || true)"
+  fi
+  if [[ -n "$commit" ]]; then
+    line+=" (client ${commit:0:7})"
+  else
+    line+=" (client)"
+  fi
+  if [[ -n "$root" && -f "${root}/VERSION" ]]; then
+    line+=" · server $(cat "${root}/VERSION")"
+  fi
+  printf '%s\n' "$line"
+}
+
+# ── Routes ──────────────────────────────────────────────────────────────────
+run_client() {
+  local python snapshot root paths=""
+  python="$(client_python)" || missing_client
+  snapshot="$(client_root 2>/dev/null || true)"
+  root="$(server_root 2>/dev/null || true)"
+  [[ -n "$root" ]] && export LLM_TRACKER_ROOT="$root"
+  if [[ -n "$snapshot" && -f "${snapshot}/client/COMMIT" ]]; then
+    export LLM_TRACKER_CLIENT_COMMIT="$(cat "${snapshot}/client/COMMIT")"
+  elif [[ -n "$root" ]]; then
+    # An all-in-one install serves the client from the clone, which has no
+    # COMMIT file; the checkout's HEAD is the same fact.
+    _commit="$(git -C "$root" rev-parse HEAD 2>/dev/null || true)"
+    [[ -n "$_commit" ]] && export LLM_TRACKER_CLIENT_COMMIT="$_commit"
+  fi
+  # The client package lives in the checkout LLM_TRACKER_ROOT names, else in the
+  # snapshot, else in the checkout this launcher was taken from, else in the
+  # server clone. The explicit request comes first, or `LLM_TRACKER_ROOT=<other
+  # worktree> llm-tracker setup` would run this worktree's client instead.
+  # `-P` keeps whatever directory the user is in from shadowing all of them.
+  local candidate
+  for candidate in "${LLM_TRACKER_ROOT:-}" "$snapshot" "$(_self_dir)" "$root"; do
+    if [[ -n "$candidate" && -d "${candidate}/client" ]]; then
+      paths="${paths:+${paths}:}${candidate}"
+    fi
+  done
+  [[ -n "$paths" ]] || missing_client
+  export PYTHONPATH="${paths}${PYTHONPATH:+:${PYTHONPATH}}"
+  export LLM_TRACKER_SKIP_BANNER=1
+  exec "$python" -P -m client "$@"
+}
+
+run_server_script() {
+  local name="$1"
+  shift
+  local root
+  root="$(server_root)" || missing_server
+  [[ -f "${root}/scripts/${name}.sh" ]] || missing_server
+  export LLM_TRACKER_SKIP_BANNER="${LLM_TRACKER_SKIP_BANNER:-1}"
+  exec bash "${root}/scripts/${name}.sh" "$@"
+}
+
+# Operator commands that talk to the database run in the server's own Python.
+run_server_python() {
+  local root
+  root="$(server_root)" || missing_server
+  export LLM_TRACKER_SKIP_BANNER="${LLM_TRACKER_SKIP_BANNER:-1}"
+  export PYTHONPATH="${root}${PYTHONPATH:+:${PYTHONPATH}}"
+  # -P so a checkout the user happens to be standing in cannot shadow this one.
+  exec "${root}/.venv/bin/python" -P -m src.cli "$@"
+}
+
+run_server() {
+  local sub="${1:-}"
+  if [[ -z "$sub" || "$sub" == "-h" || "$sub" == "--help" ]]; then
+    cat >&2 <<EOF
+usage: llm-tracker server <command>
+
+  bootstrap              install, build the dashboard, start, verify
+  start                  turn the services on
+  stop [program...]      stop all services, or the named ones
+  restart [program...]   reload running services
+  status [program...]    supervisord table, ports, port check
+  token create ...       mint an operator token
+EOF
+    return 2
+  fi
+  case "$sub" in
+    token) shift; run_server_python token "$@" ;;
+    bootstrap|start|stop|restart|status) shift; run_server_script "$sub" "$@" ;;
+    *)
+      printf 'llm-tracker: unknown server command: %s\n' "$sub" >&2
+      return 2
+      ;;
+  esac
+}
+
+# Legacy spellings, kept until the next major release of the server.
+alias_notice() {
+  printf 'note: "llm-tracker %s" is now "llm-tracker server %s"\n' "$1" "$1" >&2
+}
+
+main() {
+  if [[ $# -eq 0 ]]; then
+    print_banner
+    run_client --help
+    return $?
+  fi
+
+  case "$1" in
+    --version|-V)
+      print_banner "$@"
+      print_version
+      return 0
+      ;;
+    -h|--help|help)
+      print_banner "$@"
+      run_client --help
+      return $?
+      ;;
+    server)
+      shift
+      print_banner "$@"
+      run_server "$@"
+      return $?
+      ;;
+    bootstrap|start|stop|restart|token)
+      # `status` is deliberately not here: it is the component report now, not an
+      # alias. The old service view is `llm-tracker server status`.
+      alias_notice "$1"
+      print_banner "$@"
+      run_server "$@"
+      return $?
+      ;;
+    *)
+      print_banner "$@"
+      run_client "$@"
+      return $?
+      ;;
+  esac
+}
+
+main "$@"
