@@ -1,4 +1,5 @@
 import asyncio
+import json
 
 import pytest
 from fastapi.testclient import TestClient
@@ -2004,3 +2005,160 @@ def test_version_publishes_the_collector_for_clients(api_module, monkeypatch):
     payload = client.get("/version").json()
 
     assert payload["otlp_logs_endpoint"] == "https://tracker.example.test:4005/v1/logs"
+
+
+@pytest.mark.parametrize(
+    "endpoint,expected",
+    [
+        ("http://localhost:9205/v1/logs", "http://localhost:9205/v1/logs"),
+        ("https://[::1]:9205/v1/logs", "https://[::1]:9205/v1/logs"),
+        ("http://0.0.0.0:9205", "http://localhost:9205/v1/logs"),
+    ],
+)
+def test_version_collector_hint_honors_runtime_endpoint_override(
+    api_module, monkeypatch, endpoint, expected
+):
+    monkeypatch.setenv("OTEL_EXPORTER_OTLP_LOGS_ENDPOINT", endpoint)
+    monkeypatch.setattr(api_module, "CONFIG", {"server": {"otlp_port": 4002}})
+    assert (
+        TestClient(api_module.app).get("/version").json()["otlp_logs_endpoint"]
+        == expected
+    )
+
+
+@pytest.mark.parametrize(
+    "override",
+    [
+        "not-a-url",
+        "http://localhost:bad/v1/logs",
+        "https://user:secret@localhost:9205/v1/logs",
+        "https://localhost:9205/v1/logs?token=secret",
+    ],
+)
+def test_version_collector_hint_does_not_publish_unsafe_overrides(
+    api_module, monkeypatch, override
+):
+    monkeypatch.setenv("OTEL_EXPORTER_OTLP_LOGS_ENDPOINT", override)
+    payload = TestClient(api_module.app).get("/version").json()
+    assert "secret" not in json.dumps(payload)
+    if "secret" in override:
+        assert "otlp_logs_endpoint" not in payload
+        assert payload["collector_bind"] == {"host": "localhost", "port": 9205}
+    else:
+        assert payload["otlp_logs_endpoint"].endswith("/v1/logs")
+
+
+def test_version_preserves_safe_custom_collector_path(api_module, monkeypatch):
+    endpoint = "https://collector.example:9443/custom/v1/logs"
+    monkeypatch.setenv("OTEL_EXPORTER_OTLP_LOGS_ENDPOINT", endpoint)
+    assert (
+        TestClient(api_module.app).get("/version").json()["otlp_logs_endpoint"]
+        == endpoint
+    )
+
+
+@pytest.mark.parametrize("host", ["0.0.0.0", "[::]"])
+def test_version_wildcard_collector_uses_configured_public_origin(
+    api_module, monkeypatch, host
+):
+    monkeypatch.setattr(
+        api_module,
+        "CONFIG",
+        {
+            "server": {
+                "host": "0.0.0.0",
+                "base_url": "https://tracker.example",
+                "otlp_port": 4002,
+            }
+        },
+    )
+    monkeypatch.setenv(
+        "OTEL_EXPORTER_OTLP_LOGS_ENDPOINT", f"http://{host}:9205/v1/logs"
+    )
+    payload = TestClient(api_module.app).get("/version").json()
+    assert payload["otlp_logs_endpoint"] == "https://tracker.example:9205/v1/logs"
+    assert payload["collector_bind"] == {"host": host.strip("[]"), "port": 9205}
+
+
+@pytest.mark.parametrize("host", ["localhost", "127.0.0.1", "[::1]"])
+def test_version_does_not_publish_server_loopback_to_remote_clients(
+    api_module, monkeypatch, host
+):
+    monkeypatch.setattr(
+        api_module, "CONFIG", {"server": {"base_url": "https://tracker.example"}}
+    )
+    monkeypatch.setenv(
+        "OTEL_EXPORTER_OTLP_LOGS_ENDPOINT", f"http://{host}:9205/v1/logs"
+    )
+    assert "otlp_logs_endpoint" not in TestClient(api_module.app).get("/version").json()
+
+
+def test_version_publishes_supported_protocol(api_module):
+    from protocol import MAX_SUPPORTED_GENERATION, MIN_SUPPORTED_GENERATION
+
+    payload = TestClient(api_module.app).get("/version").json()
+    assert payload["protocol_min"] == MIN_SUPPORTED_GENERATION
+    assert payload["protocol_max"] == MAX_SUPPORTED_GENERATION
+
+
+def test_client_accepts_real_api_version_contract(api_module, monkeypatch, capsys):
+    from client import auth
+
+    api_client = TestClient(api_module.app)
+    monkeypatch.setattr(api_module, "_auth_enabled", lambda: True)
+    monkeypatch.setattr(auth.httpx, "get", api_client.get)
+
+    assert auth.check_server("http://testserver") == 0
+    assert capsys.readouterr().err == ""
+
+
+@pytest.mark.parametrize(
+    "server_url",
+    ["https://tracker.example.test:4004", "http://localhost:4001", "http://[::1]:4001"],
+)
+def test_hosted_installer_uses_configured_origin_and_is_public(
+    api_module, monkeypatch, server_url
+):
+    import shlex
+    import subprocess
+
+    monkeypatch.setattr(
+        api_module, "resolve_server_urls", lambda _config: {"api_url": server_url}
+    )
+    monkeypatch.setattr(api_module, "_auth_enabled", lambda: True)
+    response = TestClient(api_module.app).get(
+        "/install.sh", headers={"host": "attacker.example"}
+    )
+    assert response.status_code == 200
+    assert "text/x-shellscript" in response.headers["content-type"]
+    assert f"LLM_TRACKER_INSTALL_SERVER={shlex.quote(server_url)}" in response.text
+    assert "LLM_TRACKER_INSTALL_COMMIT=''" in response.text
+    assert "__LLM_TRACKER_SERVER_URL__" not in response.text
+    assert "__LLM_TRACKER_INSTALL_COMMIT__" not in response.text
+    assert (
+        subprocess.run(
+            ["sh", "-n"], input=response.text, text=True, capture_output=True
+        ).returncode
+        == 0
+    )
+
+
+@pytest.mark.parametrize(
+    "server_url",
+    [
+        "http://public.example.test:4004",
+        "https://tracker.example.test:bad",
+        "https://tracker.example.test/path",
+        "https://name:pass@tracker.example.test",
+        "https://tracker.example.test?foo=bar",
+        "https://tracker.example.test\n",
+    ],
+)
+def test_hosted_installer_rejects_invalid_api_origins(
+    api_module, monkeypatch, server_url
+):
+    monkeypatch.setattr(
+        api_module, "resolve_server_urls", lambda _config: {"api_url": server_url}
+    )
+    response = TestClient(api_module.app).get("/install.sh")
+    assert response.status_code == 503

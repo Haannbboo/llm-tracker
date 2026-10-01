@@ -17,6 +17,7 @@ import os
 import re
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 import yaml
 
@@ -32,8 +33,6 @@ COMMIT_FILE = Path(__file__).resolve().parent / "COMMIT"
 _COMMIT_RE = re.compile(r"[0-9a-f]{40}")
 
 DEFAULT_PROXY_PORT = 4000
-DEFAULT_API_PORT = 4001
-DEFAULT_OTLP_PORT = 4002
 
 
 def tracker_home() -> Path:
@@ -42,10 +41,6 @@ def tracker_home() -> Path:
 
 def credentials_path() -> Path:
     return tracker_home() / "credentials.json"
-
-
-def installation_path() -> Path:
-    return tracker_home() / "installation.json"
 
 
 def config_path() -> Path:
@@ -61,10 +56,38 @@ def read_object(path: Path) -> dict[str, Any] | None:
     except FileNotFoundError:
         return None
     except (OSError, UnicodeError, json.JSONDecodeError) as exc:
-        raise ValueError(f"cannot read {path}: {exc}") from exc
+        raise ValueError(
+            f"cannot read JSON object in {path}; repair or remove the file"
+        ) from exc
     if not isinstance(data, dict):
         raise ValueError(f"invalid JSON object in {path}")
     return data
+
+
+def display_endpoint(raw: str | None) -> str | None:
+    """Display collector locations without URL credentials or private paths."""
+    if raw is None:
+        return None
+    if not isinstance(raw, str):
+        return "[redacted endpoint]"
+    try:
+        parsed = urlparse(raw)
+        host, port = parsed.hostname, parsed.port
+        if not host or parsed.scheme not in {"http", "https"}:
+            return "[redacted endpoint]"
+    except ValueError:
+        return "[redacted endpoint]"
+    authority = f"[{host}]" if ":" in host else host
+    if port is not None:
+        authority += f":{port}"
+    path = (
+        "/v1/logs"
+        if parsed.path == "/v1/logs"
+        else "/[redacted path]"
+        if parsed.path not in {"", "/"}
+        else ""
+    )
+    return f"{parsed.scheme}://{authority}{path}"
 
 
 def client_version() -> str:
@@ -98,23 +121,13 @@ def server_root() -> Path | None:
     override = os.environ.get("LLM_TRACKER_ROOT")
     if override:
         candidates.append(Path(override).expanduser())
+    discovered = os.environ.get("LLM_TRACKER_SERVER_ROOT")
+    if discovered:
+        candidates.append(Path(discovered).expanduser())
     candidates.append(tracker_home() / "src")
     for candidate in candidates:
         if (candidate / ".venv" / "bin" / "python").is_file():
             return candidate
-    return None
-
-
-def client_python() -> Path | None:
-    """Interpreter to run this client with, or None when it is not installed."""
-    root = client_root()
-    if root is not None:
-        candidate = root / ".venv" / "bin" / "python"
-        if candidate.is_file():
-            return candidate
-    server = server_root()
-    if server is not None:
-        return server / ".venv" / "bin" / "python"
     return None
 
 
@@ -146,26 +159,30 @@ def _port(section: dict[str, Any], key: str, default: int) -> int:
 def local_server_info() -> dict[str, Any]:
     """Ports and URLs for the local server, from config plus the usual defaults.
 
-    Mirrors ``src.config.server_config.resolve_server_urls`` closely enough for
-    the CLI's needs. The one place they can disagree is the OpenCode/Kilo
-    plugin default endpoint, which the server hardcodes to port 4005; the client
-    uses the configured OTLP port instead.
+    Uses the server's port derivation and URL rules without importing its package.
     """
     section = local_config()
     proxy_port = _port(section, "port", DEFAULT_PROXY_PORT)
-    api_port = _port(section, "api_port", DEFAULT_API_PORT)
-    otlp_port = _port(section, "otlp_port", DEFAULT_OTLP_PORT)
+    api_port = _port(section, "api_port", proxy_port + 1)
+    otlp_port = _port(section, "otlp_port", api_port + 1)
 
     base = str(section.get("base_url") or "").strip().rstrip("/")
     host = str(section.get("host") or "127.0.0.1")
+    scheme = "http"
+    parsed_host = None
     if base:
-        scheme, _, authority = base.partition("://")
-        host = authority.split("/")[0].split(":")[0] or host
-    else:
-        scheme = "http"
-    if host in {"0.0.0.0", "127.0.0.1", "::", ""}:
+        try:
+            parsed = urlparse(base if "://" in base else f"//{base}")
+            parsed_host = parsed.hostname
+        except ValueError:
+            parsed_host = None
+        if parsed_host:
+            host = parsed_host
+            scheme = parsed.scheme or "http"
+    if not parsed_host and host in {"0.0.0.0", "127.0.0.1", "::", ""}:
         host = "localhost"
-    origin = f"{scheme}://{host}"
+    authority = f"[{host}]" if ":" in host and not host.startswith("[") else host
+    origin = f"{scheme}://{authority}"
 
     return {
         "host": host,

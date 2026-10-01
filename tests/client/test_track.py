@@ -179,7 +179,7 @@ def test_build_child_env_returns_none_without_proxy_env(monkeypatch):
     assert env is None
 
 
-def test_build_child_env_points_at_the_local_proxy_without_overwriting(
+def test_build_child_env_points_at_the_local_proxy_overriding_stale_values(
     monkeypatch,
 ):
     monkeypatch.setattr(
@@ -187,10 +187,15 @@ def test_build_child_env_points_at_the_local_proxy_without_overwriting(
     )
     monkeypatch.setenv("OPENAI_BASE_URL", "https://existing.example/v1")
     monkeypatch.delenv("ANTHROPIC_BASE_URL", raising=False)
+    from contextlib import nullcontext
+
+    monkeypatch.setattr(
+        track.socket, "create_connection", lambda *a, **k: nullcontext()
+    )
 
     env = track.build_child_env(track.RunOptions(proxy_env=True))
 
-    assert env["OPENAI_BASE_URL"] == "https://existing.example/v1"
+    assert env["OPENAI_BASE_URL"] == "http://localhost:4999/v1"
     assert env["ANTHROPIC_BASE_URL"] == "http://localhost:4999"
     assert "OTEL_RESOURCE_ATTRIBUTES" not in env
 
@@ -200,12 +205,33 @@ def test_build_child_env_does_not_leak_the_db_override(monkeypatch):
         track, "local_server_info", lambda: {"proxy_url": "http://localhost:49152"}
     )
     monkeypatch.setenv("LLM_TRACKER_DB_URL", "sqlite:///main-should-not-leak.db")
+    from contextlib import nullcontext
+
+    monkeypatch.setattr(
+        track.socket, "create_connection", lambda *a, **k: nullcontext()
+    )
 
     env = track.build_child_env(track.RunOptions(proxy_env=True))
 
     assert env["OPENAI_BASE_URL"] == "http://localhost:49152/v1"
     assert env["ANTHROPIC_BASE_URL"] == "http://localhost:49152"
     assert "LLM_TRACKER_DB_URL" not in env
+
+
+def test_proxy_env_fails_before_launch_when_proxy_is_unavailable(monkeypatch, capsys):
+    monkeypatch.setattr(
+        track, "local_server_info", lambda: {"proxy_url": "http://localhost:4999"}
+    )
+
+    def unavailable(*args, **kwargs):
+        raise ConnectionRefusedError("no proxy")
+
+    monkeypatch.setattr(track.socket, "create_connection", unavailable)
+    monkeypatch.setattr(
+        track.subprocess, "run", lambda *a, **k: pytest.fail("must not run the child")
+    )
+    assert client_cli.main(["--proxy-env", "--", "agent"]) == 1
+    assert "requires a running proxy" in capsys.readouterr().err
 
 
 # ----------------------------------------------------------------- api client
@@ -425,6 +451,12 @@ def test_json_summary_defaults_to_stderr(fake_client, no_sleep, monkeypatch, cap
     assert code == 0
     assert captured.out == "child stdout\n"
     parsed = json.loads(captured.err)
+    assert parsed["attribution"] == {
+        "scope": "account_activity_window",
+        "exclusive_to_command": False,
+        "concurrent_runs_included": True,
+        "delayed_events_may_be_omitted": True,
+    }
     assert parsed["summary"]["requests"] == 1
 
 
@@ -588,7 +620,8 @@ def test_write_json_summary_to_file(tmp_path):
 def test_format_human_summary_reports_nothing_recorded():
     assert (
         track.format_human_summary({"summary": {"requests": 0}})
-        == "No llm-tracker usage recorded for this command.\n"
+        == "No llm-tracker usage recorded after the starting watermark.\n"
+        "Concurrent runs are included; delayed events may fall outside this window.\n"
     )
 
 

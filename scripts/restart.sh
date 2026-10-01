@@ -64,6 +64,33 @@ step_header "Applying schema migrations"
 "${PYTHON}" "${ROOT_DIR}/scripts/migrate_schema.py"
 pass "Migrations applied"
 
+# Keep the configured collector endpoint in sync with the port baked into the
+# OTLP process. Pass paths and values as argv instead of interpolating them into
+# Python source.
+if [[ -n "$OTLP_PORT" ]]; then
+  step_header "Persisting OTLP port"
+  "${PYTHON}" - "${CONFIG_PATH}" "${OTLP_PORT}" <<'PY'
+import sys
+from pathlib import Path
+
+import yaml
+
+config_path = Path(sys.argv[1]).expanduser()
+port = int(sys.argv[2])
+config = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
+if not isinstance(config, dict):
+    raise SystemExit("config.yaml must contain a mapping")
+server = config.setdefault("server", {})
+if not isinstance(server, dict):
+    raise SystemExit("config.yaml server section must be a mapping")
+server["otlp_port"] = port
+config_path.write_text(
+    yaml.safe_dump(config, sort_keys=False, allow_unicode=True), encoding="utf-8"
+)
+PY
+  pass "OTLP port saved as ${OTLP_PORT}"
+fi
+
 # ── Reload services ─────────────────────────────────────────────────
 step_header "Reloading services"
 
@@ -97,6 +124,6 @@ fi
 # ── Final status ────────────────────────────────────────────────────
 _otlp_line="$("${PYTHON}" "${ROOT_DIR}/scripts/read-otlp-config.py" "${CONFIG_PATH}" 2>/dev/null || echo "4002 localhost")"
 OTLP_HOST="${_otlp_line#* }"
-API_PORT="$("${PYTHON}" -c "import yaml; from pathlib import Path; p = Path('${CONFIG_PATH}'); c = yaml.safe_load(p.read_text()) or {}; s = c.get('server', {}); print(s.get('api_port', s.get('port', 4000) + 1))" 2>/dev/null || echo "4001")"
+API_PORT="$("${PYTHON}" -c 'import sys, yaml; from pathlib import Path; p = Path(sys.argv[1]); c = yaml.safe_load(p.read_text()) or {}; s = c.get("server", {}); print(s.get("api_port", s.get("port", 4000) + 1))' "${CONFIG_PATH}" 2>/dev/null || echo "4001")"
 
 final_status_ok "http://${OTLP_HOST}:${API_PORT}"

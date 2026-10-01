@@ -8,8 +8,6 @@ import sys
 import textwrap
 from pathlib import Path
 
-import pytest
-
 
 def _make_fake_bootstrap_repo(
     tmp_path: Path, home: Path, ports: tuple[int, int, int]
@@ -319,7 +317,6 @@ def test_bootstrap_fails_when_detected_agent_setup_health_is_not_ready(tmp_path)
     assert secret_endpoint not in output
 
 
-@pytest.mark.slow
 def test_bootstrap_exits_nonzero_when_post_start_checks_fail(tmp_path):
     home = tmp_path / "home"
     home.mkdir()
@@ -331,13 +328,33 @@ def test_bootstrap_exits_nonzero_when_post_start_checks_fail(tmp_path):
         ports=ports,
     )
     bin_dir = _make_fake_curl(tmp_path, open_ports=set())
+    sleep_log = tmp_path / "sleep-calls.txt"
+    fake_sleep = bin_dir / "sleep"
+    fake_sleep.write_text(
+        "#!/usr/bin/env sh\n"
+        'if [ "$#" -eq 1 ] && [ "$1" = "1" ]; then\n'
+        '  printf "%s\\n" "$1" >> "$LLM_TRACKER_TEST_SLEEP_LOG"\n'
+        "  exit 0\n"
+        "fi\n"
+        'exec /bin/sleep "$@"\n',
+        encoding="utf-8",
+    )
+    fake_sleep.chmod(0o755)
 
-    result = _run_bootstrap(fake_repo, home, bin_dir)
+    result = _run_bootstrap(
+        fake_repo,
+        home,
+        bin_dir,
+        extra_env={"LLM_TRACKER_TEST_SLEEP_LOG": str(sleep_log)},
+    )
 
     output = result.stdout + result.stderr
     assert result.returncode != 0, output
     assert "llm-tracker started with" in output
-    assert "not responding" in output
+    assert "API reachable: http://127.0.0.1:4401 (not responding)" in output
+    assert "Proxy listening: http://127.0.0.1:4400 (not responding)" in output
+    assert "OTLP listening: http://127.0.0.1:4402 (not responding)" in output
+    assert sleep_log.read_text(encoding="utf-8").splitlines() == ["1"] * 30
 
 
 def test_bootstrap_skips_undetected_agent_even_when_setup_health_is_ready(tmp_path):

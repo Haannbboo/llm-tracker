@@ -3,10 +3,12 @@ import json
 import logging
 import os
 import re
+import shlex
 import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Literal
+from urllib.parse import urlparse, urlsplit
 
 import httpx
 import tomllib
@@ -18,6 +20,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, model_validator
 from starlette.middleware.base import BaseHTTPMiddleware
 
+from protocol import MAX_SUPPORTED_GENERATION, MIN_SUPPORTED_GENERATION
 from src.config.app import (
     CONFIG,
     CONFIG_PATH,
@@ -26,7 +29,11 @@ from src.config.app import (
     refresh_runtime_config,
     set_evaluation_evaluator,
 )
-from src.config.server_config import load_server_config, resolve_server_urls
+from src.config.server_config import (
+    load_server_config,
+    resolve_otlp_host_port,
+    resolve_server_urls,
+)
 from src.pricing.models import ResolvedCost
 
 from ._version import get_version
@@ -95,12 +102,13 @@ _SPA_API_PREFIXES = (
     "/local/",
     "/test-connectivity",
     "/version",
+    "/install.sh",
 )
 
 # Public when auth is enabled: Google OAuth endpoints, /auth/me (the frontend
 # probes it before login), and /version. Everything else API-shaped requires
 # a valid session once auth is enabled.
-AUTH_GATE_PUBLIC_PATHS = ("/auth/me", "/version")
+AUTH_GATE_PUBLIC_PATHS = ("/auth/me", "/version", "/install.sh")
 
 # FastAPI's interactive docs and schema are not in the public allowlist, so
 # they are gated like any other API surface when auth is enabled.
@@ -1535,6 +1543,52 @@ async def get_local_setup_health():
 
 def _collector_hint() -> dict[str, str]:
     """The OTLP logs endpoint for clients, or nothing when it is not configured."""
+    override = os.environ.get("OTEL_EXPORTER_OTLP_LOGS_ENDPOINT")
+    if override:
+        try:
+            parsed = urlparse(override)
+            if (
+                parsed.hostname
+                and parsed.port
+                and parsed.scheme in {"http", "https"}
+                and not parsed.username
+                and not parsed.password
+                and not parsed.query
+                and not parsed.fragment
+            ):
+                host = parsed.hostname
+                scheme = parsed.scheme
+                public = urlparse(resolve_server_urls(CONFIG)["otlp_url"])
+                if host in {"0.0.0.0", "::"}:
+                    host = public.hostname or "localhost"
+                    scheme = public.scheme
+                elif host in {
+                    "localhost",
+                    "127.0.0.1",
+                    "::1",
+                } and public.hostname not in {
+                    "localhost",
+                    "127.0.0.1",
+                    "::1",
+                    "0.0.0.0",
+                    "::",
+                }:
+                    # A loopback-only listener is not reachable by clients of a
+                    # remotely published API. Do not point them at themselves.
+                    return {}
+                authority = f"[{host}]" if ":" in host else host
+                path = parsed.path or "/v1/logs"
+                if not path.endswith("/v1/logs"):
+                    return {}
+                return {
+                    "otlp_logs_endpoint": f"{scheme}://{authority}:{parsed.port}{path}"
+                }
+            # Do not advertise a different collector when the runtime override
+            # has a bind address but cannot safely be shared with clients.
+            if parsed.hostname and parsed.port:
+                return {}
+        except ValueError:
+            pass
     otlp_url = resolve_server_urls(CONFIG).get("otlp_url")
     return {"otlp_logs_endpoint": f"{otlp_url}/v1/logs"} if otlp_url else {}
 
@@ -1542,15 +1596,59 @@ def _collector_hint() -> dict[str, str]:
 @app.get("/version")
 async def version():
     """Return API version information."""
+    bind_host, bind_port = resolve_otlp_host_port(CONFIG)
     return {
         "name": app.title,
         "version": get_version(),
+        "protocol_min": MIN_SUPPORTED_GENERATION,
+        "protocol_max": MAX_SUPPORTED_GENERATION,
+        # Bind metadata is separate from the externally published client URL.
+        # The resolver emits only host/port, never URL credentials or paths.
+        "collector_bind": {"host": bind_host, "port": bind_port},
         # Where clients should point agents. A property of this server's own
         # config, and not a secret: ingesting still needs a token. Left out
         # rather than half-built when the config has no collector URL, because
         # /version is public and must answer either way.
         **_collector_hint(),
     }
+
+
+@app.get("/install.sh")
+async def hosted_installer():
+    """Publish the client installer pointed at this server's configured API."""
+    server_url = resolve_server_urls(CONFIG)["api_url"]
+    try:
+        parsed = urlsplit(server_url)
+        _ = parsed.port
+        valid = (
+            bool(parsed.hostname)
+            and not parsed.username
+            and not parsed.password
+            and not parsed.path
+            and not parsed.query
+            and not parsed.fragment
+            and not any(char.isspace() for char in server_url)
+            and (
+                parsed.scheme == "https"
+                or (
+                    parsed.scheme == "http"
+                    and parsed.hostname in {"localhost", "127.0.0.1", "::1"}
+                )
+            )
+        )
+    except ValueError:
+        valid = False
+    if not valid:
+        raise HTTPException(
+            503, "configure an HTTPS API origin before client installation"
+        )
+    installer_path = (
+        Path(__file__).resolve().parent.parent / "scripts" / "hosted-install.sh"
+    )
+    script = installer_path.read_text(encoding="utf-8")
+    script = script.replace("__LLM_TRACKER_SERVER_URL__", shlex.quote(server_url))
+    script = script.replace("__LLM_TRACKER_INSTALL_COMMIT__", shlex.quote(""))
+    return Response(script, media_type="text/x-shellscript")
 
 
 # Serve built frontend if available (must come after all API routes)

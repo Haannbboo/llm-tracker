@@ -1,16 +1,13 @@
 """Sign-in, credentials, and sign-out for this machine.
 
-Credentials live in ``$LLM_TRACKER_HOME/credentials.json`` with mode 0600. The
-device keeps its own CLI and ingestion tokens; re-logging in to the same server
-presents the previous tokens so the server can hold the device identity steady
-across rotation.
+Credentials live in ``$LLM_TRACKER_HOME/credentials.json`` with mode 0600.
+The client stores separate CLI and ingestion tokens returned by the server.
 """
 
 from __future__ import annotations
 
 import base64
 import hashlib
-import hmac
 import json
 import os
 import secrets
@@ -24,13 +21,7 @@ from urllib.parse import urlencode, urlparse
 
 import httpx
 
-from client.paths import (
-    client_commit,
-    client_version,
-    credentials_path,
-    installation_path,
-    read_object,
-)
+from client.paths import credentials_path, display_endpoint, read_object
 from protocol import CURRENT_GENERATION
 
 
@@ -64,37 +55,6 @@ def clear_credentials() -> bool:
     return True
 
 
-def installation_key(server: str) -> str:
-    """Derive a stable, server-specific installation proof."""
-    path = installation_path()
-    path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-    if not path.exists():
-        temporary = path.with_name(f".{path.name}.{secrets.token_hex(8)}.tmp")
-        fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-        try:
-            with os.fdopen(fd, "w", encoding="utf-8") as handle:
-                json.dump({"installation_key": secrets.token_urlsafe(32)}, handle)
-                handle.write("\n")
-                handle.flush()
-                os.fsync(handle.fileno())
-            try:
-                os.link(temporary, path)
-            except FileExistsError:
-                pass
-        finally:
-            temporary.unlink(missing_ok=True)
-    data = read_object(path)
-    key = data.get("installation_key") if data else None
-    if not isinstance(key, str) or len(key) < 43:
-        raise ValueError(f"invalid installation key in {path}")
-    path.chmod(0o600)
-    # The master never leaves this machine. Different hosted servers receive
-    # unrelated proofs even if the same client logs in to both.
-    return hmac.new(
-        key.encode("utf-8"), server.encode("utf-8"), hashlib.sha256
-    ).hexdigest()
-
-
 def _pkce_pair() -> tuple[str, str]:
     verifier = secrets.token_urlsafe(48)
     digest = hashlib.sha256(verifier.encode("ascii")).digest()
@@ -118,7 +78,7 @@ def normalize_server_url(raw: str) -> str:
         or parsed.query
         or parsed.fragment
         or parsed.scheme not in ("https", "http")
-        or (parsed.scheme == "http" and host not in {"localhost", "127.0.0.1"})
+        or (parsed.scheme == "http" and host not in {"localhost", "127.0.0.1", "::1"})
     ):
         raise ValueError(
             "server URL must be an HTTPS origin (HTTP is allowed for localhost)"
@@ -144,7 +104,7 @@ def valid_logs_endpoint(raw: str) -> bool:
             parsed.scheme == "https"
             or (
                 parsed.scheme == "http"
-                and parsed.hostname in {"localhost", "127.0.0.1"}
+                and parsed.hostname in {"localhost", "127.0.0.1", "::1"}
             )
         )
         and parsed.path.endswith("/v1/logs")
@@ -235,10 +195,9 @@ def discover_collector() -> str | None:
 def login(
     server_arg: str | None, *, device_name_arg: str | None, no_browser: bool
 ) -> int:
-    from client.setup import wire_agents
+    from client.setup import installed_agents, wire_agents
 
     try:
-        previous = load_credentials() or {}
         raw_server = resolve_server(server_arg)
         if not raw_server:
             print("server URL required: use login --server URL", file=sys.stderr)
@@ -262,24 +221,7 @@ def login(
     ):
         webbrowser.open(login_url)
 
-    try:
-        key = installation_key(server)
-    except (OSError, ValueError) as exc:
-        print(f"cannot prepare installation identity: {exc}", file=sys.stderr)
-        return 1
-    body: dict[str, str] = {
-        "code_verifier": verifier,
-        "installation_key": key,
-        "client_version": client_version(),
-    }
-    commit = client_commit()
-    if commit:
-        body["client_commit"] = commit
-    if previous.get("server_url") == server:
-        for kind in ("cli", "ingest"):
-            old_token = previous.get(f"{kind}_token")
-            if isinstance(old_token, str) and old_token:
-                body[f"prior_{kind}_token"] = old_token
+    body = {"code_verifier": verifier}
 
     for attempt in range(3):
         try:
@@ -305,7 +247,7 @@ def login(
             print("invalid or expired code — paste it again", file=sys.stderr)
             continue
         # 400 after the last attempt, or a non-code rejection (422 on a
-        # malformed client_version/commit) — show why rather than the bare code.
+        # malformed exchange request) — show why rather than the bare code.
         try:
             detail = response.json().get("detail")
         except ValueError:
@@ -318,10 +260,7 @@ def login(
         user = payload["user"]
         token = payload["ingest_token"]
         endpoint = payload["otlp"]["logs_endpoint"]
-        device_id = payload["device_id"]
-        if not all(
-            isinstance(value, str) and value for value in (token, endpoint, device_id)
-        ):
+        if not all(isinstance(value, str) and value for value in (token, endpoint)):
             raise ValueError("missing device credentials")
         if not valid_logs_endpoint(endpoint):
             raise ValueError("invalid OTLP endpoint")
@@ -334,7 +273,6 @@ def login(
                 "server_url": server,
                 "user_id": user.get("id"),
                 "email": user["email"],
-                "device_id": device_id,
                 "device_name": payload.get("device_name"),
                 "cli_token": payload["cli_token"],
                 "ingest_token": token,
@@ -353,11 +291,18 @@ def login(
     print(f"Logged in as {user['email']} (device: {payload.get('device_name')})")
     print(f"Credentials saved to {credentials_path()}")
     print(f"Dashboard: {server}")
-    wired = wire_agents(logs_endpoint=endpoint, token=token)
+    detected = installed_agents()
+    wired = wire_agents(logs_endpoint=endpoint, token=token, agents=detected)
     if wired:
         print("Wired agents: " + ", ".join(wired))
-    else:
+    elif not detected:
         print("No tracked agents detected; nothing to wire.")
+    else:
+        print(
+            "Signed in, but no detected agents could be wired; run llm-tracker setup.",
+            file=sys.stderr,
+        )
+        return 1
     return 0
 
 
@@ -373,19 +318,29 @@ def logout(*, keep_agents: bool) -> int:
         return 1
     print(f"  removed   {credentials_path()}")
     if keep_agents:
-        endpoint = previous.get("server_url")
+        endpoint = (
+            collector
+            if isinstance(collector, str) and valid_logs_endpoint(collector)
+            else None
+        )
         print(
             "  warning   agents still point at the last configured collector"
-            + (f" ({endpoint})" if endpoint else "")
+            + (f" ({display_endpoint(endpoint)})" if endpoint else "")
             + " and will be rejected",
             file=sys.stderr,
         )
     else:
-        removed = disable_agents(
+        outcome = disable_agents(
             expected_endpoint=collector if isinstance(collector, str) else None
         )
-        if removed:
-            print("  un-wired  " + ", ".join(removed))
+        if outcome.removed:
+            print("  un-wired  " + ", ".join(outcome.removed))
+        if outcome.failed:
+            print(
+                "Signed out, but agent cleanup failed: " + ", ".join(outcome.failed),
+                file=sys.stderr,
+            )
+            return 1
     print(
         "Signed out. The device stays listed in Settings → Devices until you remove it."
     )

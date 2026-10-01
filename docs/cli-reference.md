@@ -44,7 +44,7 @@ as a wrapper option.
 | `llm-tracker logout [--keep-agents]` | client | Delete this machine's credentials, then un-wire the agents. |
 | `llm-tracker setup [--disable]` | client | Point detected agents at a collector, or take llm-tracker's telemetry keys back off. |
 | `llm-tracker status [--json]` | either | Report installed components, whether they run, and where agents point. |
-| `llm-tracker update [--check\|--dry-run] [--scope all\|client\|server] [--rebuild-plugins]` | either | Update whichever components are installed. |
+| `llm-tracker update [--check\|--dry-run] [--scope all\|client\|server]` | either | Update installed components; `--check` checks server availability, while client availability is not published. |
 | `llm-tracker check-server --server URL` | client | Internal: verify reachability and wire protocol. Writes nothing. |
 | `llm-tracker <command> [args...]` | client | Run any command with usage tracking. |
 | `llm-tracker server bootstrap` | server | Install, build the dashboard, start, verify, restart the API. |
@@ -100,6 +100,12 @@ llm-tracker setup
 llm-tracker setup --disable
 ```
 
+Status redacts credentials and private paths from displayed endpoints. When the
+running API cannot provide collector bind metadata, the OTLP service has state
+`unknown` and a null port in JSON; the text view shows `:? unknown` and asks you
+to check the collector configuration.
+An unknown address alone does not mark the service as down.
+
 ## Tracking Flags
 
 All tracking flags go before the child command; use `--` when they do.
@@ -112,7 +118,7 @@ All tracking flags go before the child command; use `--` when they do.
 | `--summary-file` | (none) | Path for `--summary-dest file`. Required when using that mode. |
 | `--wait-ms` | `3000` | Milliseconds to poll for usage data after the child exits. |
 | `--poll-ms` | `250` | Milliseconds between poll attempts. |
-| `--proxy-env` | off | Set `OPENAI_BASE_URL` and `ANTHROPIC_BASE_URL` for the child, pointing at the long-running local proxy. |
+| `--proxy-env` | off | Replace `OPENAI_BASE_URL` and `ANTHROPIC_BASE_URL` for the child with the configured proxy. Refuse to launch if the proxy port is unreachable. |
 | `--no-summary` | off | Skip the summary; just run the command and return its exit code. |
 | `--no-banner` | off | Do not print the llm-tracker banner. Accepted by every subcommand too. |
 | `--version` | — | Print the client version, and the server release when the server component is installed. |
@@ -130,9 +136,20 @@ One path, in both installation modes:
    run that recorded usage just after the deadline is not reported as empty.
 4. Print the summary, or the JSON, to `--summary-dest`.
 
+The summary covers all usage visible to the account after the starting
+watermark. Concurrent commands and devices are included, and delayed events
+outside the timestamp window can be omitted. It does not attribute cost
+exclusively to the child command; use dashboard session views for that.
+JSON summaries include an `attribution` object with scope
+`account_activity_window`, `exclusive_to_command: false`,
+`concurrent_runs_included: true`, and `delayed_events_may_be_omitted: true`.
+
 The API being unreachable is not an error: the child runs, the exit code is the
 child's, and the wrapper says so on stderr before the child starts and once more
 after it.
+
+`--proxy-env` requires a running proxy configured locally. Installing the hosted
+client alone does not provide a proxy.
 
 ## Service Management
 
@@ -211,7 +228,6 @@ Client state, all under `$LLM_TRACKER_HOME` (default `~/.llm-tracker`):
 | `current` | client | Symlink to the active client source snapshot. |
 | `versions/` | client | Previous client snapshots. |
 | `credentials.json` | client | Signed-in identity, CLI and ingest tokens, `otlp_logs_endpoint`. Mode `0600`. |
-| `installation.json` | client | Machine identity used to keep a device stable across token rotation. Mode `0600`. |
 | `config.yaml` | server | Server config. |
 | `supervisord.conf` | server | Written by `server start`. |
 | `run/` | server | supervisord pid and socket. |
@@ -229,7 +245,6 @@ Client state, all under `$LLM_TRACKER_HOME` (default `~/.llm-tracker`):
 | `LLM_TRACKER_SKIP_INSTALL` | `1` makes `bootstrap` skip dependency installation and record the requirements stamp anyway. |
 | `LLM_TRACKER_SERVER` | Server URL `llm-tracker update` passes to the hosted installer, and the default the hosted installer reads instead of its baked-in server URL. |
 | `LLMTRACKER_SERVER` | Fallback server URL for `llm-tracker login` when `--server` is absent. |
-| `LLM_TRACKER_HOSTED_CLIENT` | Set by `llm-tracker setup` on the agent configure scripts. `1` means the client is doing the wiring, so no tool-call hook is registered. |
 | `LLM_TRACKER_INGEST_TOKEN` | Set by `llm-tracker setup` on the agent configure scripts when signed in, so agents send the device ingest token. |
 | `LLM_TRACKER_DB_URL` | Override the database URL at runtime (server side; removed from the child's env by `--proxy-env`). |
 | `LLM_TRACKER_API_URL` | Frontend-only: override the API base URL used by the Vite dev server. |
@@ -256,9 +271,13 @@ curl http://127.0.0.1:4001/version
 
 `/version` is public when auth is enabled, and carries the wire protocol range,
 the server release, and `otlp_logs_endpoint` — the collector clients point agents
-at. It is not a secret: ingesting still needs a device token. A client that
-signed in before the endpoint was published reads it once from here and stores it
-in `credentials.json`, so `status` and `setup` need no network afterwards.
+at. Its `collector_bind` host/port fields describe server-local listener
+addresses for status diagnostics; they are not hosted client wiring targets.
+No URL credentials or paths are included in those bind fields. Authenticated
+ingestion still requires its token. A client that signed in before the endpoint
+was published reads it once from here and stores it in `credentials.json` for
+later agent endpoint checks. Status also queries the local API for bind metadata
+when the server component is installed.
 
 Query params for `/usage`: `limit`, `offset`, `provider`, `model`, `since`, `until`.
 

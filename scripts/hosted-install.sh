@@ -140,7 +140,7 @@ if [ ! -f "$VERSION_DIR/client/COMMIT" ]; then
   printf '%s\n' "$COMMIT" > "$VERSION_DIR/client/COMMIT"
 fi
 LLM_TRACKER_CLIENT_COMMIT=$COMMIT PYTHONPATH=$VERSION_DIR \
-  "$VERSION_DIR/.venv/bin/python" -m client check-server --server "$SERVER_URL"
+  "$VERSION_DIR/.venv/bin/python" -P -m client check-server --server "$SERVER_URL"
 
 # Install the shared launcher. It is the same scripts/llm-tracker the all-in-one
 # install symlinks, and resolves the client (and the server, when one is
@@ -157,12 +157,21 @@ ln -s "versions/$COMMIT" "$CURRENT_TMP"
 "$VERSION_DIR/.venv/bin/python" -c 'import os, sys; os.replace(sys.argv[1], sys.argv[2])' \
   "$CURRENT_TMP" "$TRACKER_HOME/current"
 
-say "Installed llm-tracker $COMMIT. Starting sign-in..."
-if ( : </dev/tty ) >/dev/null 2>&1; then
-  LLM_TRACKER_CLIENT_COMMIT=$COMMIT PYTHONPATH=$VERSION_DIR \
-    "$VERSION_DIR/.venv/bin/python" -m client login --server "$SERVER_URL" </dev/tty
+if [ "${LLM_TRACKER_SKIP_LOGIN:-0}" = 1 ]; then
+  say "Refreshing agent configuration with the updated client..."
+  if ! LLM_TRACKER_CLIENT_COMMIT=$COMMIT PYTHONPATH=$VERSION_DIR \
+    "$VERSION_DIR/.venv/bin/python" -P -m client setup; then
+    fail 'client update installed, but agent configuration refresh failed'
+  fi
+  say "Installed llm-tracker $COMMIT. Existing credentials were preserved; sign-in skipped."
 else
-  say "No interactive terminal is available. Finish setup with: $BIN_DIR/llm-tracker login --server $SERVER_URL"
+  say "Installed llm-tracker $COMMIT. Starting sign-in..."
+  if ( : </dev/tty ) >/dev/null 2>&1; then
+    LLM_TRACKER_CLIENT_COMMIT=$COMMIT PYTHONPATH=$VERSION_DIR \
+      "$VERSION_DIR/.venv/bin/python" -P -m client login --server "$SERVER_URL" </dev/tty
+  else
+    say "No interactive terminal is available. Finish setup with: $BIN_DIR/llm-tracker login --server $SERVER_URL"
+  fi
 fi
 
 # Compare with the user's original PATH, before adding uv's installation directory.

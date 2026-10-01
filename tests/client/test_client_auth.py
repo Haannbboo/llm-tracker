@@ -1,4 +1,4 @@
-"""Sign-in, credentials, and the installation proof.
+"""Sign-in and credentials.
 
 The server is a fake httpx (interface-compatible: .get for pre-flight, .post
 for the exchange); stdin is fed via monkeypatched builtins.input. Agent wiring
@@ -15,11 +15,11 @@ import httpx
 import pytest
 
 from client import auth, paths, setup, track
+from client import cli as client_cli
 from protocol import CURRENT_GENERATION
 
 EXCHANGE_PAYLOAD = {
     "user": {"id": "u1", "email": "a@example.com", "name": "Alice"},
-    "device_id": "c0e1b327-5930-4457-a594-0fa8929a903b",
     "device_name": "testhost",
     "cli_token": "llmt_cli abcdef",
     "ingest_token": "llmt_ingest abcdef",
@@ -30,9 +30,32 @@ EXCHANGE_PAYLOAD = {
 }
 
 
+@pytest.mark.parametrize(
+    "command",
+    [["status"], ["logout"], ["login"], ["setup"], ["update"], ["echo", "hi"]],
+)
+@pytest.mark.parametrize("content", ["{secret-token", "[]", "null"])
+def test_corrupt_credentials_are_reported_without_a_traceback(
+    command, content, capsys, monkeypatch
+):
+    monkeypatch.delenv("LLMTRACKER_SERVER", raising=False)
+    monkeypatch.setattr(setup, "installed_agents", lambda: ["codex"])
+    monkeypatch.setattr(client_cli.update, "client_root", lambda: paths.tracker_home())
+    monkeypatch.setattr(client_cli.update, "server_root", lambda: None)
+    path = paths.credentials_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(content)
+    assert client_cli.main(command) == (2 if command == ["login"] else 1)
+    output = capsys.readouterr()
+    assert "JSON object" in output.err
+    assert "Traceback" not in output.err
+    assert "secret-token" not in output.err
+    assert path.read_text() == content
+
+
 @pytest.fixture(autouse=True)
 def client_home(tmp_path, monkeypatch):
-    """Credentials, the installation proof, and agent config never touch real $HOME."""
+    """Credentials and agent config never touch real $HOME."""
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setenv("LLM_TRACKER_HOME", str(tmp_path / "tracker"))
 
@@ -95,6 +118,7 @@ def _run_login(
     ssh_env=False,
     exchange_status=200,
     extra_args=(),
+    agents=(),
 ):
     fake = FakeHttpx(exchange_status=exchange_status)
     _install_fake_httpx(monkeypatch, fake)
@@ -103,7 +127,11 @@ def _run_login(
         monkeypatch.delenv(key, raising=False)
     if ssh_env:
         monkeypatch.setenv("SSH_CONNECTION", "10.0.0.1 1234 10.0.0.2 22")
-    monkeypatch.setattr(setup.shutil, "which", lambda name: None)
+    monkeypatch.setattr(
+        setup.shutil,
+        "which",
+        lambda name: f"/usr/bin/{name}" if name in agents else None,
+    )
     opened = []
     monkeypatch.setattr(auth.webbrowser, "open", lambda url: opened.append(url))
 
@@ -128,6 +156,34 @@ def _run_login(
 # ------------------------------------------------------------------- login
 
 
+@pytest.mark.parametrize("invalid_config", [False, True])
+def test_login_reports_detected_agents_that_could_not_be_wired(
+    monkeypatch, capsys, invalid_config
+):
+    if invalid_config:
+        path = paths.credentials_path().parent.parent / ".codex" / "config.toml"
+        path.parent.mkdir()
+        path.write_text("[invalid")
+    code, _, _ = _run_login(monkeypatch, inputs=["the-code"], agents=["codex"])
+    assert code == 1
+    assert auth.load_credentials()["cli_token"] == EXCHANGE_PAYLOAD["cli_token"]
+    output = capsys.readouterr()
+    assert "no detected agents could be wired" in output.err
+    assert "No tracked agents detected" not in output.out
+
+
+def test_logout_keep_agents_does_not_echo_unsafe_stored_collector(capsys):
+    auth.save_credentials(
+        {
+            "server_url": "https://srv.example",
+            "otlp_logs_endpoint": "https://user:secret@collector.example/v1/logs?token=secret",
+        }
+    )
+    assert auth.logout(keep_agents=True) == 0
+    output = capsys.readouterr()
+    assert "secret" not in output.out + output.err
+
+
 def test_login_writes_credentials_0600(monkeypatch, capsys):
     code, fake, opened = _run_login(monkeypatch, inputs=["the-one-time-code"])
     assert code == 0
@@ -144,6 +200,7 @@ def test_login_writes_credentials_0600(monkeypatch, capsys):
     assert len(exchange_calls) == 1
     assert exchange_calls[0][1] == "https://srv.example/auth/cli/exchange"
     assert exchange_calls[0][2]["code"] == "THEONETIMECODE"
+    assert set(exchange_calls[0][2]) == {"code", "code_verifier"}
 
     path = auth.credentials_path()
     data = json.loads(path.read_text(encoding="utf-8"))
@@ -254,6 +311,7 @@ def test_login_non_json_200_exits_clean(monkeypatch):
         ("HTTP://srv.example", 2),
         ("http://localhost:4004", 0),
         ("http://127.0.0.1", 0),
+        ("http://[::1]:4004", 0),
         ("http://localhost.attacker.example", 2),
     ],
 )
@@ -292,16 +350,6 @@ def test_clear_credentials_reports_whether_there_were_any():
     assert auth.load_credentials() is None
 
 
-def test_installation_key_is_server_scoped():
-    first = auth.installation_key("https://one.example.test")
-    second = auth.installation_key("https://two.example.test")
-
-    assert len(first) == 64
-    assert first != second
-    assert auth.installation_key("https://one.example.test") == first
-    assert stat.S_IMODE(auth.installation_path().stat().st_mode) == 0o600
-
-
 def test_logout_removes_credentials(monkeypatch, capsys):
     auth.save_credentials(
         {
@@ -314,7 +362,9 @@ def test_logout_removes_credentials(monkeypatch, capsys):
     monkeypatch.setattr(
         setup,
         "disable_agents",
-        lambda *, expected_endpoint: seen.append(expected_endpoint) or ["codex"],
+        lambda *, expected_endpoint: (
+            seen.append(expected_endpoint) or setup.DisableResult(removed=["codex"])
+        ),
     )
 
     assert auth.logout(keep_agents=False) == 0
@@ -326,6 +376,20 @@ def test_logout_removes_credentials(monkeypatch, capsys):
     assert "Not signed in" in capsys.readouterr().err
 
 
+def test_logout_keep_agents_names_the_collector_not_the_api(capsys):
+    auth.save_credentials(
+        {
+            "server_url": "https://api.example",
+            "otlp_logs_endpoint": "https://collector.example/v1/logs",
+        }
+    )
+
+    assert auth.logout(keep_agents=True) == 0
+    warning = capsys.readouterr().err
+    assert "https://collector.example/v1/logs" in warning
+    assert "https://api.example" not in warning
+
+
 # --------------------------------------------------------- endpoint checking
 
 
@@ -335,6 +399,7 @@ def test_logout_removes_credentials(monkeypatch, capsys):
         "https://api.example.com:4005/v1/logs",
         "http://localhost:4005/v1/logs",
         "http://127.0.0.1:4002/v1/logs",
+        "http://[::1]:4002/v1/logs",
     ],
 )
 def test_valid_logs_endpoint_accepts_https_and_loopback(raw):
@@ -408,11 +473,8 @@ def test_wire_agents_for_hosted_invokes_scripts(monkeypatch):
     )
     assert wired == ["codex", "claude"]
     assert len(calls) == 2
-    # Trailing argv matches the scripts' documented [PREFIX... PORT HOST
-    # ENDPOINT] shape — the endpoint must land AFTER the port/host slot,
-    # not in it.
-    assert calls[0][-3:] == ["0", "localhost", "https://api.example.com:4005/v1/logs"]
-    assert calls[1][-3:] == ["0", "localhost", "https://api.example.com:4005/v1/logs"]
+    assert calls[0][-1] == "https://api.example.com:4005/v1/logs"
+    assert calls[1][-1] == "https://api.example.com:4005/v1/logs"
     for cmd in calls:
         assert cmd[1].endswith("configure-codex-settings.py") or cmd[1].endswith(
             "configure-claude-settings.py"

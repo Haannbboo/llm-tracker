@@ -172,11 +172,6 @@ def _build_subcommand(name: str) -> argparse.ArgumentParser:
         parser.add_argument(
             "--scope", choices=("all", "client", "server"), default="all"
         )
-        parser.add_argument(
-            "--rebuild-plugins",
-            action="store_true",
-            help="rebuild agent plugins after updating",
-        )
         _add_banner_flag(parser)
         return parser
     # check-server is internal: the installer uses it to refuse an incompatible box.
@@ -232,7 +227,6 @@ def _run_subcommand(name: str, argv: list[str]) -> int:
             check=args.check,
             dry_run=args.dry_run,
             scope=args.scope,
-            rebuild_plugins=args.rebuild_plugins,
         )
     try:
         server = auth.normalize_server_url(args.server)
@@ -249,9 +243,13 @@ def main(argv: list[str] | None = None) -> int:
     if first in REMOVED:
         print(REMOVED[first], file=sys.stderr)
         return 2
-    if first in SUBCOMMANDS:
-        return _run_subcommand(first, raw)
-    return _run_tracking(raw)
+    try:
+        if first in SUBCOMMANDS:
+            return _run_subcommand(first, raw)
+        return _run_tracking(raw)
+    except ValueError as exc:
+        print(f"llm-tracker: {exc}", file=sys.stderr)
+        return 1
 
 
 if __name__ == "__main__":

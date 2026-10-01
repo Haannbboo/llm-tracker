@@ -28,8 +28,8 @@ It writes nothing.
 Two components, one command:
 
 - **Client** (`client/`) — the tracking wrapper, agent configuration, sign-in and
-  the component report. Owns `$LLM_TRACKER_HOME/credentials.json` and
-  `installation.json`, both mode `0600`. Depends only on `httpx` and `pyyaml`,
+  the component report. Owns `$LLM_TRACKER_HOME/credentials.json`, mode `0600`.
+  Depends only on `httpx` and `pyyaml`,
   and never imports `src`.
 - **Server** (`src/`, `scripts/`) — the API, the OTLP collector, the proxy, the
   dashboard, pricing, storage and the evaluation worker. Owns
@@ -42,8 +42,11 @@ installed instead of failing obscurely.
 The launcher `scripts/llm-tracker` is the single entry point both installers
 write. It resolves the two components separately: the client from
 `$LLM_TRACKER_HOME/current` (a source snapshot with its own virtualenv) and the
-server from `$LLM_TRACKER_ROOT` or `$LLM_TRACKER_HOME/src` (a git clone). When
-the snapshot has no virtualenv of its own, the client runs under the server's.
+server from `$LLM_TRACKER_ROOT` or `$LLM_TRACKER_HOME/src` (a git clone).
+An explicit `$LLM_TRACKER_ROOT` selects that checkout's client; otherwise the
+snapshot wins, followed by the server checkout. Client code, its interpreter,
+and version metadata all come from the selected source. An incomplete snapshot
+must be repaired by reinstalling it.
 
 Server startup no longer edits user agent settings. The client owns agent
 configuration in both installation modes, via `setup` and `login`.
@@ -487,16 +490,17 @@ Dashboard: https://app.example.com
 Wired agents: codex, claude, opencode
 ```
 
-- Refuses non-HTTPS servers, except `http://localhost` and `http://127.0.0.1`,
+- Refuses non-HTTPS servers, except HTTP loopback origins (`localhost`, `127.0.0.1`, and `[::1]`),
   and reduces the URL to a bare origin. Without `--server` and without
   `$LLMTRACKER_SERVER` or a previous sign-in, it exits 2 with
   `server URL required: use login --server URL`.
 - Checks `GET /version` and the protocol generation first, and prints nothing
   when that succeeds; a client the server cannot talk to exits 1 before any
   credential is touched.
-- Re-logs in to the same server safely: the previous tokens are presented so the
-  server can keep the same device identity across rotation, and a failed
-  exchange leaves the old credentials in place.
+- Sends the one-time code and PKCE verifier to the existing server exchange.
+  A failed exchange leaves the old credentials file in place; the server may
+  already have rotated its tokens. Stable device IDs and client version
+  reporting are deferred until the server implements those contracts.
 - No browser is opened under `SSH_CONNECTION`/`SSH_TTY`, or with
   `--no-browser`. The URL is always printed.
 - Agent wiring failures are warnings, not failures, and the exit code stays 0:
@@ -563,6 +567,9 @@ No collector to wire agents to. Sign in with llm-tracker login, or install the s
 With no tracked agent on `PATH` it prints
 `No tracked agents detected; nothing to wire.` and exits 0. When agents are found
 but none could be wired, it prints `no agents could be wired` and exits 1.
+Login also exits 1 if agents were detected but none could be wired; credentials
+remain saved and the diagnostic directs the user to run setup after repairing
+the agent configuration.
 
 Flags: `--disable`, `--no-banner`.
 
@@ -574,11 +581,12 @@ $ llm-tracker setup --disable
   un-wired  codex, claude
 ```
 
-or `Nothing to un-wire.` when there was nothing to remove. Only the keys
-llm-tracker writes are touched. Plugin entries and tool-call hooks are
-identified by path, so they are removed unconditionally; the OTLP endpoint keys
-are removed only while they still point where this install expects. Otherwise
-the agent is reported and nothing is changed:
+or `No matching telemetry removed; agent settings left unchanged.` when there
+was nothing to remove. Only settings for the known collector are touched;
+plugin entries must match both their tracker path and collector endpoint.
+If the collector is unknown, settings are left unchanged and setup exits 1.
+Helper failures also cause exit 1, even if another agent was removed successfully.
+Otherwise the agent is reported and nothing is changed:
 
 ```
   claude     points at another collector, left alone
@@ -587,7 +595,7 @@ the agent is reported and nothing is changed:
 ## `llm-tracker logout`
 
 Removes this machine's credentials and un-wires the agents. The previous server
-URL is read out of the credentials *before* they are deleted, so the
+collector is read out of the credentials *before* they are deleted, so the
 `--keep-agents` warning can still name what this machine was pointed at.
 
 ```
@@ -600,13 +608,17 @@ Signed out. The device stays listed in Settings → Devices until you remove it.
 Nothing is sent to the server: `logout` only removes the local credentials file
 and the agent configuration.
 
+If older credentials have no recorded collector, logout removes the credentials
+and warns that agent settings were left unchanged. Cleanup failures cause exit 1
+after sign-out, with a diagnostic naming the affected agents.
+
 With `--keep-agents`, credentials are removed and the agent configs are left
 alone; a warning on stderr says telemetry will be rejected, naming the server it
 was pointed at:
 
 ```
   removed   /home/you/.llm-tracker/credentials.json
-  warning   agents still point at the last configured collector (https://app.example.com) and will be rejected
+  warning   agents still point at the last configured collector (https://app.example.com/v1/logs) and will be rejected
 ```
 
 With nothing to remove it prints `Not signed in; nothing to remove.` and exits
@@ -624,18 +636,19 @@ failure.
   installer from the signed-in server's `GET /install.sh` and running it with
   `LLM_TRACKER_SERVER` and `LLM_TRACKER_BIN_DIR` set. That is the only way to
   install a new snapshot, so there is no separate release resolution here.
-  Credentials are not touched. Without a signed-in server there is nothing to
-  fetch the installer from and the command exits 1:
+  The updater skips sign-in and runs `llm-tracker setup` with the existing
+  credentials so agent configuration points at the updated snapshot. Without a
+  signed-in server there is nothing to fetch the installer from and the command exits 1:
   `llm-tracker: cannot update the client without a server; run llm-tracker login --server <url> first.`
 
 ```
 $ llm-tracker update
-  ▶ Checking updates
-  ✓ server  0.2.19  (/home/you/.llm-tracker/src)
-  ✓ client  0.1.0  (commit 89075ce1f4b7d2e6a9c0b3d8e5f2a7c1b4d90e33)
+  ▶ Installed components
+  Installed server  0.2.19  (/home/you/.llm-tracker/src)
+  Installed client  0.1.0  (commit 89075ce1f4b7d2e6a9c0b3d8e5f2a7c1b4d90e33)
 
   ▶ Updating client
-  ✓ client  0.1.0
+  ✓ client updated
   ✓ credentials preserved
 
   ▶ Updating server
@@ -648,8 +661,8 @@ Client-only install:
 
 ```
 $ llm-tracker update
-  ▶ Checking updates
-  ✓ client  0.1.0  (commit 89075ce1f4b7d2e6a9c0b3d8e5f2a7c1b4d90e33)
+  ▶ Installed components
+  Installed client  0.1.0  (commit 89075ce1f4b7d2e6a9c0b3d8e5f2a7c1b4d90e33)
 
   ▶ Updating client
   ...
@@ -658,16 +671,18 @@ $ llm-tracker update
 With neither component installed it prints
 `llm-tracker: nothing to update on this machine.` and exits 0.
 
-Flags: `--check` reports the installed versions and changes nothing, `--dry-run`
-additionally prints the planned commands, `--scope all|client|server` limits the
-work (default `all`), `--rebuild-plugins` re-runs `llm-tracker setup` at the end
-to rebuild the OpenCode and Kilo plugins.
+Flags: `--check` runs the server's real update check when the server is
+installed. The hosted installer does not publish a client version, so the
+client's update availability cannot be checked and is reported as unknown;
+`--check` does not claim the client is up to date. `--dry-run` prints the
+planned commands, and `--scope all|client|server` limits the work (default
+`all`).
 
 ```
 $ llm-tracker update --dry-run
-  ▶ Checking updates
-  ✓ server  0.2.19  (/home/you/.llm-tracker/src)
-  ✓ client  0.1.0  (commit 89075ce1f4b7d2e6a9c0b3d8e5f2a7c1b4d90e33)
+  ▶ Installed components
+  Installed server  0.2.19  (/home/you/.llm-tracker/src)
+  Installed client  0.1.0  (commit 89075ce1f4b7d2e6a9c0b3d8e5f2a7c1b4d90e33)
 
   Planned commands:
   bash /home/you/.llm-tracker/src/scripts/update.sh
@@ -689,7 +704,8 @@ the local server otherwise.
 ```
 $ llm-tracker codex exec "say hello in one sentence"
 ...child output...
-llm-tracker usage summary
+llm-tracker usage summary (account window)
+Concurrent runs are included; delayed events may fall outside this window.
 requests: 1, total tokens: 12,431, cached: 11,904 (96%)
 latency avg: 1.42s, ttft avg: 380ms, cost: $0.0187
 
@@ -700,7 +716,8 @@ sessions:
 A run that recorded nothing:
 
 ```
-No llm-tracker usage recorded for this command.
+No llm-tracker usage recorded after the starting watermark.
+Concurrent runs are included; delayed events may fall outside this window.
 ```
 
 **If the API is not reachable, the command still runs, untracked.** It never
@@ -723,8 +740,17 @@ Flags: `--json`, `--usage-only`, `--summary-dest stdout|stderr|file`,
 first. `--summary-dest file` without `--summary-file`, and `--usage-only`
 together with `--no-summary`, are argument errors and exit 2.
 
-`--proxy-env` points at the long-running proxy from `~/.llm-tracker/config.yaml`.
-A client-only machine has no local proxy, so there is nothing there to point at.
+This is an account usage window, not exclusive attribution to the child command.
+Concurrent runs under the same account are included. Event timestamps bound the
+query, so delayed events outside the watermark window can be omitted. Use the
+dashboard's session views for individual sessions.
+
+`--proxy-env` points at the long-running proxy from `~/.llm-tracker/config.yaml`
+and requires its port to be reachable before launching the child. It replaces
+both provider base URL variables for that child, including stale inherited
+values. Installing the hosted client alone does not provide a local proxy.
+JSON summaries carry an `attribution` object identifying this account activity
+window and its concurrency and delayed-event limitations.
 
 ## `llm-tracker --version` / `--help`
 
@@ -810,7 +836,7 @@ The mirror image, for a launcher with no client to run:
 $ llm-tracker status
 llm-tracker: the client component is not installed on this machine.
 Install it with:
-  curl -fsSL https://Haannbboo/llm-tracker/raw/main/scripts/hosted-install.sh | sh
+  curl -fsSL https://YOUR_SERVER/install.sh | sh
 ```
 
 ## Exit codes

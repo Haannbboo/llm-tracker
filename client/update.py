@@ -54,7 +54,7 @@ def update_server(*, check: bool, dry_run: bool) -> int:
 
 
 def update_client() -> int:
-    """Install the newest client snapshot by re-running the server's installer."""
+    """Install the newest client snapshot without starting a new login."""
     from client.auth import load_credentials
 
     server_url = (load_credentials() or {}).get("server_url")
@@ -83,13 +83,14 @@ def update_client() -> int:
         env = os.environ.copy()
         env["LLM_TRACKER_SERVER"] = str(server_url)
         env["LLM_TRACKER_BIN_DIR"] = str(_bin_dir())
+        env["LLM_TRACKER_SKIP_LOGIN"] = "1"
         if _run(["sh", str(installer)], env=env):
             print("llm-tracker: client update failed.", file=sys.stderr)
             return 1
     return 0
 
 
-def run_update(*, check: bool, dry_run: bool, scope: str, rebuild_plugins: bool) -> int:
+def run_update(*, check: bool, dry_run: bool, scope: str) -> int:
     if scope not in ("all", "client", "server"):
         print("llm-tracker: --scope must be all, client or server.", file=sys.stderr)
         return 2
@@ -99,25 +100,36 @@ def run_update(*, check: bool, dry_run: bool, scope: str, rebuild_plugins: bool)
     has_server = root is not None and scope in ("all", "server")
     has_client = snapshot is not None and scope in ("all", "client")
 
-    print("  ▶ Checking updates")
+    print("  ▶ Installed components")
     if has_server and root is not None:
-        print(f"  ✓ server  {_server_version(root) or 'unknown'}  ({root})")
-    if has_client or scope == "client":
+        print(f"  Installed server  {_server_version(root) or 'unknown'}  ({root})")
+    if has_client:
         print(
-            f"  ✓ client  {client_version()}  (commit {client_commit() or 'unknown'})"
+            f"  Installed client  {client_version()}  "
+            f"(commit {client_commit() or 'unknown'})"
         )
     if not has_server and not has_client:
         print("llm-tracker: nothing to update on this machine.")
         return 0
 
-    if check or dry_run:
+    if check:
         print("")
-        if dry_run:
-            print("  Planned commands:")
-            if has_server and root is not None:
-                print(f"  bash {root / 'scripts' / 'update.sh'}")
-            if has_client:
-                print(f"  sh <{INSTALLER_PATH} from the signed-in server>")
+        result = 0
+        if has_server:
+            result = update_server(check=True, dry_run=False)
+        if has_client:
+            print(
+                "  Client update availability cannot be checked: the hosted "
+                "installer does not publish a client version."
+            )
+        return result
+
+    if dry_run:
+        print("\n  Planned commands:")
+        if has_server and root is not None:
+            print(f"  bash {root / 'scripts' / 'update.sh'}")
+        if has_client:
+            print(f"  sh <{INSTALLER_PATH} from the signed-in server>")
         return 0
 
     print("")
@@ -125,18 +137,12 @@ def run_update(*, check: bool, dry_run: bool, scope: str, rebuild_plugins: bool)
         print("  ▶ Updating client")
         if update_client():
             return 1
-        print(f"  ✓ client  {client_version()}")
+        print("  ✓ client updated")
         print("  ✓ credentials preserved")
     if has_server and root is not None:
         print("  ▶ Updating server")
         if update_server(check=False, dry_run=False):
             return 1
-
-    if rebuild_plugins:
-        from client.setup import run_setup
-
-        print("")
-        run_setup(disable=False)
 
     print("")
     print("  ✓ llm-tracker is up to date")

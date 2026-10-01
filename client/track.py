@@ -1,4 +1,4 @@
-"""Run any command with usage tracking and report what it cost.
+"""Run any command and report usage visible after its starting watermark.
 
 One path: read the usage high-watermark, run the child against the collector
 that is already running, then ask for the summary of everything recorded after
@@ -13,12 +13,14 @@ from __future__ import annotations
 
 import json
 import os
+import socket
 import subprocess
 import sys
 import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 import httpx
 
@@ -137,10 +139,24 @@ def build_child_env(options: RunOptions) -> dict[str, str] | None:
     if not options.proxy_env:
         return None
     info = local_server_info()
+    parsed = urlparse(info["proxy_url"])
+    try:
+        with socket.create_connection(
+            (
+                parsed.hostname or "localhost",
+                parsed.port or (443 if parsed.scheme == "https" else 80),
+            ),
+            timeout=1,
+        ):
+            pass
+    except OSError as exc:
+        raise ValueError(
+            "--proxy-env requires a running proxy at the configured address"
+        ) from exc
     env = os.environ.copy()
     env.pop("LLM_TRACKER_DB_URL", None)
-    env.setdefault("OPENAI_BASE_URL", f"{info['proxy_url']}/v1")
-    env.setdefault("ANTHROPIC_BASE_URL", info["proxy_url"])
+    env["OPENAI_BASE_URL"] = f"{info['proxy_url']}/v1"
+    env["ANTHROPIC_BASE_URL"] = info["proxy_url"]
     return env
 
 
@@ -188,6 +204,7 @@ def poll_summary(
 
 
 def run_with_tracking(*, command: list[str], options: RunOptions) -> int:
+    env = build_child_env(options)
     client = UsageApiClient()
     before_ts: int | None
     try:
@@ -201,7 +218,7 @@ def run_with_tracking(*, command: list[str], options: RunOptions) -> int:
 
     completed = subprocess.run(
         command,
-        env=build_child_env(options),
+        env=env,
         **child_output_kwargs(options),
     )
     child_code = _normalize_return_code(int(completed.returncode))
@@ -228,6 +245,16 @@ def run_with_tracking(*, command: list[str], options: RunOptions) -> int:
 
 
 def write_summary(summary: dict[str, Any], options: RunOptions) -> None:
+    if options.json_output:
+        summary = {
+            **summary,
+            "attribution": {
+                "scope": "account_activity_window",
+                "exclusive_to_command": False,
+                "concurrent_runs_included": True,
+                "delayed_events_may_be_omitted": True,
+            },
+        }
     content = (
         json.dumps(summary, separators=(",", ":"))
         if options.json_output
@@ -258,7 +285,10 @@ def format_human_summary(summary: dict[str, Any]) -> str:
     totals = summary.get("summary", {})
     requests = int(totals.get("requests", 0) or 0)
     if requests == 0:
-        return "No llm-tracker usage recorded for this command.\n"
+        return (
+            "No llm-tracker usage recorded after the starting watermark.\n"
+            "Concurrent runs are included; delayed events may fall outside this window.\n"
+        )
 
     total_tokens = int(totals.get("total_tokens", 0) or 0)
     cached_tokens = int(totals.get("cached_tokens", 0) or 0)
@@ -266,7 +296,8 @@ def format_human_summary(summary: dict[str, Any]) -> str:
     total_cost = float(totals.get("total_cost_usd", 0) or 0)
 
     lines = [
-        "llm-tracker usage summary",
+        "llm-tracker usage summary (account window)",
+        "Concurrent runs are included; delayed events may fall outside this window.",
         (
             f"requests: {requests}, total tokens: {total_tokens:,}, "
             f"cached: {cached_tokens:,} ({cache_hit_rate:.0%})"

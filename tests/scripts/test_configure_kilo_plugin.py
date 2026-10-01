@@ -127,7 +127,7 @@ def test_configure_kilo_plugin_preserves_token_and_removes_other_builds(tmp_path
     ]
 
 
-def test_configure_kilo_plugin_ignores_non_object_json_config(tmp_path):
+def test_configure_kilo_plugin_preserves_non_object_json_config(tmp_path):
     home = tmp_path / "home"
     config_path = home / ".config" / "kilo" / "opencode.json"
     config_path.parent.mkdir(parents=True)
@@ -136,16 +136,9 @@ def test_configure_kilo_plugin_ignores_non_object_json_config(tmp_path):
 
     result = _run_configure(project_root, home, "4102")
 
-    assert result.returncode == 0, result.stderr
-    config = json.loads(config_path.read_text(encoding="utf-8"))
-    assert config == {
-        "plugin": [
-            [
-                str(project_root / "plugins" / "kilo" / "dist" / "index.js"),
-                {"endpoint": "http://localhost:4102/v1/logs"},
-            ]
-        ]
-    }
+    assert result.returncode == 1, result.stderr
+    assert "left unchanged" in result.stderr
+    assert config_path.read_text(encoding="utf-8") == "[]\n"
 
 
 def test_configure_kilo_plugin_skips_without_npm(tmp_path):
@@ -157,6 +150,6 @@ def test_configure_kilo_plugin_skips_without_npm(tmp_path):
 
     result = _run_configure(project_root, home, "4102", {"PATH": str(empty_bin)})
 
-    assert result.returncode == 0, result.stderr
+    assert result.returncode == 2, result.stderr
     output = result.stdout + result.stderr
     assert "WARNING: npm not found; skipping Kilo plugin configuration" in output

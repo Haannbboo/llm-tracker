@@ -278,6 +278,77 @@ def test_start_and_restart_never_configure_agents():
         assert "gemini" not in script
 
 
+def test_restart_persists_otlp_port_before_restarting_collector(tmp_path):
+    import os
+    import shutil
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    import yaml
+
+    repo_root = Path(__file__).resolve().parents[2]
+    root = tmp_path / "checkout"
+    scripts = root / "scripts"
+    (scripts / "lib").mkdir(parents=True)
+    shutil.copy(repo_root / "scripts" / "restart.sh", scripts / "restart.sh")
+    shutil.copy(
+        repo_root / "scripts" / "lib" / "terminal.sh", scripts / "lib" / "terminal.sh"
+    )
+    (scripts / "migrate_schema.py").write_text("pass\n")
+    (scripts / "read-otlp-config.py").write_text("print('5505 localhost')\n")
+
+    venv_bin = root / ".venv" / "bin"
+    venv_bin.mkdir(parents=True)
+    python = venv_bin / "python"
+    python.write_text(f'#!/bin/sh\nexec "{sys.executable}" "$@"\n')
+    python.chmod(0o755)
+    supervisorctl = venv_bin / "supervisorctl"
+    supervisorctl.write_text(
+        "#!/bin/sh\n"
+        'printf \'%s\\n\' "$*" >> "$SUPERVISOR_LOG"\n'
+        'if [ "$3" = status ]; then printf \'%s\\n\' "$4 RUNNING pid 123, uptime 0:00:01"; fi\n'
+    )
+    supervisorctl.chmod(0o755)
+
+    home = tmp_path / "home with spaces"
+    config_dir = home / ".llm-tracker"
+    config_dir.mkdir(parents=True)
+    (config_dir / "supervisord.conf").write_text("[supervisord]\n")
+    config_path = config_dir / "config.yaml"
+    config_path.write_text(
+        "server:\n  host: 127.0.0.1\n  port: 4100\n  otlp_port: 4002\n"
+        "db:\n  path: keep.db\n",
+        encoding="utf-8",
+    )
+    config_path.chmod(0o600)
+    supervisor_log = tmp_path / "supervisor.log"
+
+    result = subprocess.run(
+        ["bash", str(scripts / "restart.sh"), "--otlp-port", "5505"],
+        text=True,
+        capture_output=True,
+        env={
+            **os.environ,
+            "HOME": str(home),
+            "SUPERVISOR_LOG": str(supervisor_log),
+            "NO_COLOR": "1",
+        },
+        timeout=30,
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    assert config["server"]["otlp_port"] == 5505
+    assert config["server"]["port"] == 4100
+    assert config["db"]["path"] == "keep.db"
+    assert config_path.stat().st_mode & 0o777 == 0o600
+    calls = supervisor_log.read_text(encoding="utf-8").splitlines()
+    assert any(call.endswith("restart llm-tracker-otlp") for call in calls)
+    assert any(call.endswith("signal HUP llm-tracker-api") for call in calls)
+    assert "OTLP port saved as 5505" in result.stdout
+
+
 def test_start_checks_port_conflicts_before_migrations():
     repo_root = __import__("pathlib").Path(__file__).resolve().parents[2]
     start_script = (repo_root / "scripts" / "start.sh").read_text(encoding="utf-8")

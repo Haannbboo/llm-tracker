@@ -12,12 +12,19 @@ import os
 import shutil
 import subprocess
 import sys
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 import tomllib
 
-from client.paths import PACKAGE_ROOT, SCRIPTS_DIR, local_server_info, server_root
+from client.paths import (
+    PACKAGE_ROOT,
+    SCRIPTS_DIR,
+    display_endpoint,
+    local_server_info,
+    server_root,
+)
 
 AGENT_SCRIPTS: dict[str, str] = {
     "codex": "configure-codex-settings.py",
@@ -139,6 +146,7 @@ def _health(configured: bool, endpoint: str | None, expected: str | None) -> dic
     matches: bool | None = None
     if not configured:
         status = "missing_config"
+        matches = False if expected else None
     elif not expected:
         status = "configured"
     else:
@@ -179,8 +187,8 @@ def read_agent_states(expected_endpoint: str | None) -> dict[str, dict[str, Any]
         codex_otel.get("enabled") is False or codex_http.get("enabled") is False
     ) and isinstance(codex_endpoint, str)
 
-    info = local_server_info()
-    fallback = f"http://{info['host']}:{info['otlp_port']}/v1/logs"
+    # Match the plugin runtime default for legacy entries with no options.
+    fallback = "http://localhost:4005/v1/logs"
     states = {
         "claude": _health(
             claude_configured,
@@ -214,7 +222,6 @@ def _child_env(*, token: str | None, disable: bool) -> dict[str, str]:
     # A pre-existing local OTLP override would silently beat the endpoint we are
     # wiring, so it is always stripped.
     env.pop("OTEL_EXPORTER_OTLP_LOGS_ENDPOINT", None)
-    env["LLM_TRACKER_HOSTED_CLIENT"] = "1"
     if not disable and token:
         env["LLM_TRACKER_INGEST_TOKEN"] = token
     else:
@@ -222,54 +229,66 @@ def _child_env(*, token: str | None, disable: bool) -> dict[str, str]:
     return env
 
 
-def wire_agents(*, logs_endpoint: str, token: str | None) -> list[str]:
+def wire_agents(
+    *, logs_endpoint: str, token: str | None, agents: list[str] | None = None
+) -> list[str]:
     """Point detected agents at a collector. Returns the agents that were wired."""
     if not logs_endpoint:
         return []
     env = _child_env(token=token, disable=False)
     wired: list[str] = []
-    for name in installed_agents():
+    for name in agents if agents is not None else installed_agents():
         script, target = AGENT_SCRIPTS[name], agent_targets()[name]
         try:
             result = _run(
                 script,
-                [target, "0", "localhost", logs_endpoint],
+                [target, logs_endpoint],
                 env,
                 BUILD_TIMEOUT if name in PLUGIN_SUFFIX else SIMPLE_TIMEOUT,
             )
         except (OSError, subprocess.TimeoutExpired) as exc:
-            print(f"warning: wiring {name} failed: {exc}", file=sys.stderr)
+            reason = (
+                "helper timed out"
+                if isinstance(exc, subprocess.TimeoutExpired)
+                else "helper could not start"
+            )
+            print(f"warning: wiring {name} failed: {reason}", file=sys.stderr)
             continue
-        output = result.stdout + result.stderr
-        if result.returncode == 0 and "skipping " not in output:
+        # Script exit statuses: 0 configured, 2 skipped, 1 failed.
+        if result.returncode == 0:
             wired.append(name)
         else:
             detail = result.stderr.strip() or result.stdout.strip()
-            print(f"warning: wiring {name} failed: {detail}", file=sys.stderr)
+            status = "skipped" if result.returncode == 2 else "failed"
+            print(f"warning: wiring {name} {status}: {detail}", file=sys.stderr)
     return wired
 
 
-def disable_agents(*, expected_endpoint: str | None = None) -> list[str]:
+@dataclass
+class DisableResult:
+    removed: list[str] = field(default_factory=list)
+    skipped: list[str] = field(default_factory=list)
+    failed: list[str] = field(default_factory=list)
+
+
+def disable_agents(*, expected_endpoint: str | None = None) -> DisableResult:
     """Remove llm-tracker's telemetry settings from the agents it manages.
 
-    Plugin entries and tool-call hooks are identified by path, so they are only
-    ever ours and are removed unconditionally. The OTLP endpoint keys are removed
-    only while they still point where this install expects, so a hand-written
-    collector config is reported rather than deleted.
+    Remove settings only when their collector matches this installation's known
+    endpoint. Unknown ownership leaves the configuration untouched.
     """
     env = _child_env(token=None, disable=True)
-    states = read_agent_states(expected_endpoint)
-    removed: list[str] = []
-    for name in installed_agents():
-        state = states.get(name) or {}
-        if not state.get("configured"):
-            continue
-        endpoint = state.get("configured_endpoint")
-        if endpoint and expected_endpoint and endpoint != expected_endpoint:
+    outcome = DisableResult()
+    agents = installed_agents()
+    if not expected_endpoint:
+        outcome.skipped.extend(agents)
+        if agents:
             print(
-                f"  {name:<10} points at another collector, left alone", file=sys.stderr
+                "warning: collector unknown; agent settings left unchanged",
+                file=sys.stderr,
             )
-            continue
+        return outcome
+    for name in agents:
         script, target = AGENT_SCRIPTS[name], agent_targets()[name]
         args = [target, "--disable"]
         if expected_endpoint:
@@ -277,16 +296,25 @@ def disable_agents(*, expected_endpoint: str | None = None) -> list[str]:
         try:
             result = _run(script, args, env, SIMPLE_TIMEOUT)
         except (OSError, subprocess.TimeoutExpired) as exc:
-            print(f"warning: un-wiring {name} failed: {exc}", file=sys.stderr)
+            reason = (
+                "helper timed out"
+                if isinstance(exc, subprocess.TimeoutExpired)
+                else "helper could not start"
+            )
+            print(f"warning: un-wiring {name} failed: {reason}", file=sys.stderr)
+            outcome.failed.append(name)
             continue
         if result.returncode == 0:
-            removed.append(name)
+            outcome.removed.append(name)
         else:
+            (outcome.skipped if result.returncode == 2 else outcome.failed).append(name)
             print(
-                f"warning: un-wiring {name} failed: {result.stderr.strip()}",
+                f"warning: un-wiring {name} "
+                f"{'skipped' if result.returncode == 2 else 'failed'}: "
+                f"{result.stderr.strip() or result.stdout.strip()}",
                 file=sys.stderr,
             )
-    return removed
+    return outcome
 
 
 def run_setup(*, disable: bool) -> int:
@@ -297,9 +325,14 @@ def run_setup(*, disable: bool) -> int:
         return 0
     expected = intended_endpoint()
     if disable:
-        removed = disable_agents(expected_endpoint=expected)
-        print("  un-wired  " + ", ".join(removed) if removed else "Nothing to un-wire.")
-        return 0
+        outcome = disable_agents(expected_endpoint=expected)
+        if outcome.removed:
+            print("  un-wired  " + ", ".join(outcome.removed))
+        elif not outcome.failed:
+            print("No matching telemetry removed; agent settings left unchanged.")
+        if outcome.failed:
+            print("  un-wiring failed: " + ", ".join(outcome.failed), file=sys.stderr)
+        return 1 if outcome.failed or not expected else 0
 
     # A login made before the client recorded the collector needs one lookup
     # against the server; the answer is then remembered for later commands.
@@ -311,7 +344,7 @@ def run_setup(*, disable: bool) -> int:
             file=sys.stderr,
         )
         return 1
-    print(f"  collector   {endpoint}")
+    print(f"  collector   {display_endpoint(endpoint)}")
     wired = wire_agents(logs_endpoint=endpoint, token=ingest_token())
     if not wired:
         print("  no agents could be wired")

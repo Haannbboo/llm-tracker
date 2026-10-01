@@ -12,9 +12,13 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
+import httpx
+
 from client.paths import (
     client_commit,
     client_version,
+    display_endpoint,
+    local_config,
     local_server_info,
     server_root,
     tracker_home,
@@ -76,6 +80,33 @@ def _server_version(root: Path) -> str | None:
         return None
 
 
+def _collector_address(info: dict[str, Any], bind_host: str) -> tuple[str, int] | None:
+    """Ask the running API about its collector, not the caller's environment."""
+    api_host = {"0.0.0.0": "127.0.0.1", "::": "::1"}.get(bind_host, bind_host)
+    authority = f"[{api_host}]" if ":" in api_host else api_host
+    try:
+        response = httpx.get(
+            f"http://{authority}:{info['api_port']}/version", timeout=1
+        )
+        response.raise_for_status()
+        payload = response.json()
+        bind = payload.get("collector_bind") if isinstance(payload, dict) else None
+        if isinstance(bind, dict):
+            host, port = bind.get("host"), bind.get("port")
+            if (
+                isinstance(host, str)
+                and host
+                and isinstance(port, int)
+                and 1 <= port <= 65535
+            ):
+                return host, port
+    except (httpx.HTTPError, ValueError, TypeError):
+        pass
+    # Old/unreachable APIs cannot prove the running collector's bind address.
+    # A public client URL or caller-side YAML port is not operational evidence.
+    return None
+
+
 def collect() -> dict[str, Any]:
     from client.auth import load_credentials
 
@@ -85,14 +116,26 @@ def collect() -> dict[str, Any]:
 
     services: list[dict[str, Any]] = []
     if info is not None:
+        bind_host = str(local_config().get("host") or "127.0.0.1")
+        collector_address = _collector_address(info, bind_host)
+        otlp_host, otlp_port = collector_address or (bind_host, None)
         for name, program, port_key in SERVICES:
             managed = _supervisor_running(program, root) if root else None
-            listening = _port_listening("127.0.0.1", int(info[port_key]))
-            state = "up" if managed and listening else "down"
+            host = otlp_host if name == "otlp" else bind_host
+            host = {"0.0.0.0": "127.0.0.1", "::": "::1"}.get(host, host)
+            port = otlp_port if name == "otlp" else int(info[port_key])
+            listening = _port_listening(host, port) if port is not None else None
+            state = (
+                "unknown"
+                if port is None and managed is not False
+                else "up"
+                if managed and listening
+                else "down"
+            )
             services.append(
                 {
                     "name": name,
-                    "port": int(info[port_key]),
+                    "port": port,
                     "state": state,
                     "supervised": managed,
                 }
@@ -107,7 +150,9 @@ def collect() -> dict[str, Any]:
             "detected": name in installed_agents(),
             "configured": states.get(name, {}).get("configured", False),
             "endpoint_matches": states.get(name, {}).get("endpoint_matches", False),
-            "endpoint": states.get(name, {}).get("configured_endpoint"),
+            "endpoint": display_endpoint(
+                states.get(name, {}).get("configured_endpoint")
+            ),
         }
         for name in AGENT_SCRIPTS
     ]
@@ -122,7 +167,7 @@ def collect() -> dict[str, Any]:
     account: dict[str, Any] = {
         "signed_in": signed_in,
         "email": credentials.get("email"),
-        "server_url": credentials.get("server_url"),
+        "server_url": display_endpoint(credentials.get("server_url")),
     }
     if credentials.get("device_name"):
         account["device_name"] = credentials["device_name"]
@@ -140,7 +185,7 @@ def is_healthy(data: dict[str, Any]) -> bool:
     """Exit code is 1 when something installed is broken, never merely absent."""
     server = data["server"]
     if server["installed"] and any(
-        service["state"] != "up" for service in server["services"]
+        service["state"] == "down" for service in server["services"]
     ):
         return False
     return not any(
@@ -156,9 +201,13 @@ def _fix_hint(data: dict[str, Any]) -> str | None:
     ):
         return "run llm-tracker setup"
     if data["server"]["installed"] and any(
-        service["state"] != "up" for service in data["server"]["services"]
+        service["state"] == "down" for service in data["server"]["services"]
     ):
         return "run llm-tracker server start"
+    if data["server"]["installed"] and any(
+        service["state"] == "unknown" for service in data["server"]["services"]
+    ):
+        return "check the server collector configuration; its address is unknown"
     if not data["server"]["installed"] and not data["account"]["signed_in"]:
         return "run llm-tracker login --server <url>"
     return None
@@ -179,7 +228,7 @@ def render(data: dict[str, Any]) -> str:
 
     if data["server"]["installed"]:
         services = " · ".join(
-            f"{service['name']} :{service['port']} {service['state']}"
+            f"{service['name']} :{service['port'] if service['port'] is not None else '?'} {service['state']}"
             for service in data["server"]["services"]
         )
         row("services", services)
@@ -207,9 +256,13 @@ def render(data: dict[str, Any]) -> str:
         endpoint = ready[0].get("endpoint") or ""
         suffix = ""
         if data["server"]["installed"] and any(
-            service["state"] != "up" for service in data["server"]["services"]
+            service["state"] == "down" for service in data["server"]["services"]
         ):
             suffix = " (not reachable)"
+        elif data["server"]["installed"] and any(
+            service["state"] == "unknown" for service in data["server"]["services"]
+        ):
+            suffix = " (collector address unknown)"
         row(
             "agents",
             ", ".join(agent["name"] for agent in ready) + f" → {endpoint}{suffix}",
@@ -223,11 +276,13 @@ def render(data: dict[str, Any]) -> str:
             + f" → {unknown[0].get('endpoint') or '?'} (target unknown)",
         )
     if wrong:
-        row(
-            "agents",
-            ", ".join(agent["name"] for agent in wrong)
-            + f" → {wrong[0].get('endpoint') or '?'} (wrong collector)",
-        )
+        for agent in wrong:
+            detail = (
+                f"→ {agent['endpoint']} (wrong collector)"
+                if agent["configured"]
+                else "needs configuration; run setup to check the file"
+            )
+            row("agents", f"{agent['name']} {detail}")
 
     if data["dashboard"]:
         row("dashboard", data["dashboard"])

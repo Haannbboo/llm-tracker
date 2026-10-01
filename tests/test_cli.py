@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+import sys
 import time
 from pathlib import Path
 
@@ -202,3 +203,165 @@ def _read_available(fd: str | int, limit: float = 5.0) -> str:
             break
         chunks.append(data.decode("utf-8", "replace"))
     return "".join(chunks)
+
+
+def _client_install(root: Path, label: str, version: str, commit: str) -> None:
+    package = root / "client"
+    package.mkdir(parents=True)
+    (package / "__init__.py").write_text("")
+    (package / "VERSION").write_text(version)
+    (package / "COMMIT").write_text(commit)
+    (package / "__main__.py").write_text(
+        "import json, os\n"
+        "from pathlib import Path\n"
+        "print(json.dumps({'root': str(Path(__file__).parent.parent), "
+        "'interpreter': os.environ['TEST_CLIENT_INTERPRETER'], "
+        "'commit': os.environ['LLM_TRACKER_CLIENT_COMMIT']}))\n"
+    )
+    interpreter = root / ".venv" / "bin" / "python"
+    interpreter.parent.mkdir(parents=True)
+    import shlex
+
+    interpreter.write_text(
+        f"#!/bin/sh\nexport TEST_CLIENT_INTERPRETER={shlex.quote(label)}\n"
+        f'exec {shlex.quote(sys.executable)} "$@"\n'
+    )
+    interpreter.chmod(0o755)
+
+
+def test_snapshot_source_interpreter_and_version_agree_with_server_present(tmp_path):
+    home = tmp_path / "tracker"
+    snapshot = home / "versions" / "snapshot"
+    server = home / "src"
+    _client_install(snapshot, "snapshot", "1.2.3", "a" * 40)
+    _client_install(server, "server", "4.5.6", "b" * 40)
+    (server / "VERSION").write_text("7.8.9")
+    (home / "current").symlink_to("versions/snapshot")
+    launcher = tmp_path / "bin" / "llm-tracker"
+    launcher.parent.mkdir()
+    launcher.write_text(LAUNCHER.read_text())
+    launcher.chmod(0o755)
+    env = {**os.environ, "LLM_TRACKER_HOME": str(home)}
+    env.pop("LLM_TRACKER_ROOT", None)
+    env["LLM_TRACKER_CLIENT_COMMIT"] = "c" * 40
+
+    result = subprocess.run(
+        [str(launcher), "status"], env=env, capture_output=True, text=True
+    )
+    assert result.returncode == 0, result.stderr
+    data = json.loads(result.stdout)
+    assert data == {
+        "root": str(snapshot),
+        "interpreter": "snapshot",
+        "commit": "a" * 40,
+    }
+    version = subprocess.run(
+        [str(launcher), "--version"], env=env, capture_output=True, text=True
+    )
+    assert version.returncode == 0, version.stderr
+    assert version.stdout.strip() == "llm-tracker 1.2.3 (client aaaaaaa) · server 7.8.9"
+
+    env["LLM_TRACKER_ROOT"] = str(server)
+    override = subprocess.run(
+        [str(launcher), "status"], env=env, capture_output=True, text=True
+    )
+    assert override.returncode == 0, override.stderr
+    assert json.loads(override.stdout) == {
+        "root": str(server),
+        "interpreter": "server",
+        "commit": "b" * 40,
+    }
+    version = subprocess.run(
+        [str(launcher), "--version"], env=env, capture_output=True, text=True
+    )
+    assert "4.5.6 (client bbbbbbb)" in version.stdout
+
+
+def test_relative_launcher_symlink_uses_its_checkout(tmp_path):
+    checkout = tmp_path / "checkout"
+    _client_install(checkout, "checkout", "1.2.3", "a" * 40)
+    scripts = checkout / "scripts"
+    scripts.mkdir()
+    (checkout / "src").mkdir()
+    launcher = scripts / "llm-tracker"
+    launcher.write_text(LAUNCHER.read_text())
+    launcher.chmod(0o755)
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    linked = bin_dir / "llm-tracker"
+    linked.symlink_to("../checkout/scripts/llm-tracker")
+    unrelated_cwd = tmp_path / "other"
+    unrelated_cwd.mkdir()
+    env = {**os.environ, "LLM_TRACKER_HOME": str(tmp_path / "empty-home")}
+    env.pop("LLM_TRACKER_ROOT", None)
+
+    result = subprocess.run(
+        [str(linked), "status"],
+        cwd=unrelated_cwd,
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout)["root"] == str(checkout)
+
+
+def test_hosted_launcher_does_not_use_unrelated_home_virtualenv_as_server(tmp_path):
+    home = tmp_path / "home"
+    tracker = home / ".llm-tracker"
+    snapshot = tracker / "versions" / "client"
+    _client_install(snapshot, "snapshot", "1.2.3", "a" * 40)
+    (tracker / "current").symlink_to("versions/client")
+    python = home / ".local" / ".venv" / "bin" / "python"
+    python.parent.mkdir(parents=True)
+    python.write_text("#!/bin/sh\nexit 0\n")
+    python.chmod(0o755)
+    launcher = home / ".local" / "bin" / "llm-tracker"
+    launcher.parent.mkdir()
+    launcher.write_text(LAUNCHER.read_text())
+    launcher.chmod(0o755)
+    env = {**os.environ, "HOME": str(home), "LLM_TRACKER_HOME": str(tracker)}
+    env.pop("LLM_TRACKER_ROOT", None)
+    result = subprocess.run(
+        [str(launcher), "--version"], env=env, capture_output=True, text=True
+    )
+    assert result.returncode == 0, result.stderr
+    assert "server" not in result.stdout
+    result = subprocess.run(
+        [str(launcher), "server", "status"], env=env, capture_output=True, text=True
+    )
+    assert result.returncode == 1
+    assert "server component is not installed" in result.stderr
+
+
+def test_server_dispatch_consumes_no_banner_without_changing_other_arguments(tmp_path):
+    root = tmp_path / "checkout"
+    _client_install(root, "checkout", "1.2.3", "a" * 40)
+    scripts = root / "scripts"
+    scripts.mkdir()
+    (scripts / "restart.sh").write_text('#!/bin/bash\nprintf "%s\\n" "$@"\n')
+    src = root / "src"
+    src.mkdir()
+    (src / "__init__.py").write_text("")
+    (src / "cli.py").write_text("import json, sys\nprint(json.dumps(sys.argv[1:]))\n")
+    env = {
+        **os.environ,
+        "LLM_TRACKER_ROOT": str(root),
+        "LLM_TRACKER_HOME": str(tmp_path / "tracker"),
+    }
+    for args, expected in [
+        (
+            ["server", "restart", "--no-banner", "--otlp-port", "4202"],
+            "--otlp-port\n4202\n",
+        ),
+        (["restart", "--no-banner"], "\n"),
+        (
+            ["server", "--no-banner", "token", "create", "--email", "ops@example.com"],
+            json.dumps(["token", "create", "--email", "ops@example.com"]) + "\n",
+        ),
+    ]:
+        result = subprocess.run(
+            [str(LAUNCHER), *args], env=env, capture_output=True, text=True
+        )
+        assert result.returncode == 0, result.stderr
+        assert result.stdout == expected

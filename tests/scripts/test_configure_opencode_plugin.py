@@ -166,7 +166,7 @@ def test_configure_opencode_plugin_removes_other_tracker_builds(tmp_path):
     ]
 
 
-def test_configure_opencode_plugin_keeps_other_endpoint_before_current_entry(
+def test_configure_opencode_plugin_replaces_prior_collector_entry(
     tmp_path,
 ):
     home = tmp_path / "home"
@@ -203,7 +203,6 @@ def test_configure_opencode_plugin_keeps_other_endpoint_before_current_entry(
     assert result.returncode == 0, result.stderr
     config = json.loads(config_path.read_text(encoding="utf-8"))
     assert config["plugin"] == [
-        [other_path, {"endpoint": "http://localhost:4005/v1/logs"}],
         [
             plugin_path,
             {
@@ -223,7 +222,7 @@ def test_configure_opencode_plugin_skips_without_npm(tmp_path):
 
     result = _run_configure(project_root, home, "4102", {"PATH": str(empty_bin)})
 
-    assert result.returncode == 0, result.stderr
+    assert result.returncode == 2, result.stderr
     output = result.stdout + result.stderr
     assert "WARNING: npm not found; skipping OpenCode plugin configuration" in output
     assert not (home / ".config" / "opencode" / "opencode.json").exists()

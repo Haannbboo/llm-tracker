@@ -262,3 +262,125 @@ def test_logout_unwires_with_the_collector_it_recorded(
     assert auth.logout(keep_agents=False) == 0
     assert "OTEL_EXPORTER_OTLP_LOGS_ENDPOINT" not in settings.read_text()
     assert not (machine / ".llm-tracker" / "credentials.json").exists()
+
+
+def test_setup_uses_explicit_script_status(machine, monkeypatch):
+    import subprocess
+
+    monkeypatch.setattr(
+        setup,
+        "_run",
+        lambda *args: subprocess.CompletedProcess(
+            args,
+            0,
+            stdout="a diagnostic mentioning skipping something unrelated",
+            stderr="",
+        ),
+    )
+    assert setup.wire_agents(logs_endpoint=ENDPOINT, token=None) == ["codex", "claude"]
+    monkeypatch.setattr(
+        setup,
+        "_run",
+        lambda *args: subprocess.CompletedProcess(
+            args, 2, stdout="agent configuration unavailable", stderr=""
+        ),
+    )
+    assert setup.wire_agents(logs_endpoint=ENDPOINT, token=None) == []
+
+
+def test_setup_can_wire_again_after_disable(machine):
+    _sign_in(machine)
+    assert setup.run_setup(disable=False) == 0
+    assert setup.run_setup(disable=True) == 0
+    assert setup.run_setup(disable=False) == 0
+    assert setup.read_agent_states(ENDPOINT)["codex"]["status"] == "ready"
+
+
+def test_bare_plugin_entry_reports_its_actual_runtime_default(machine):
+    path = machine / ".config" / "opencode" / "opencode.json"
+    path.parent.mkdir(parents=True)
+    path.write_text(
+        json.dumps({"plugin": ["/old/tracker/plugins/opencode/dist/index.js"]})
+    )
+    state = setup.read_agent_states("http://localhost:4002/v1/logs")["opencode"]
+    assert state["configured_endpoint"] == "http://localhost:4005/v1/logs"
+    assert state["status"] == "wrong_endpoint"
+
+
+@pytest.mark.parametrize("legacy_login", [False, True])
+def test_disable_unknown_collector_preserves_existing_settings(
+    machine, legacy_login, capsys
+):
+    if legacy_login:
+        _sign_in_without_collector(machine)
+    claude = machine / ".claude" / "settings.json"
+    codex = machine / ".codex" / "config.toml"
+    claude.write_text(
+        json.dumps({"env": {"OTEL_EXPORTER_OTLP_LOGS_ENDPOINT": ENDPOINT}})
+    )
+    codex.write_text(f'[otel.exporter.otlp-http]\nendpoint = "{ENDPOINT}"\n')
+    before = [path.read_bytes() for path in (claude, codex)]
+    assert setup.run_setup(disable=True) == 1
+    assert "collector unknown" in capsys.readouterr().err
+    assert [path.read_bytes() for path in (claude, codex)] == before
+    if legacy_login:
+        assert auth.logout(keep_agents=False) == 0
+        assert [path.read_bytes() for path in (claude, codex)] == before
+        assert not (machine / ".llm-tracker" / "credentials.json").exists()
+
+
+@pytest.mark.parametrize("failure", ["invalid", "timeout", "write"])
+def test_disable_reports_helper_failures(machine, monkeypatch, capsys, failure):
+    import subprocess
+
+    _sign_in(machine)
+    if failure == "invalid":
+        (machine / ".codex" / "config.toml").write_text("[invalid")
+        (machine / ".claude" / "settings.json").write_text("{invalid")
+    else:
+
+        def fail(*args):
+            if failure == "timeout":
+                raise subprocess.TimeoutExpired("configure", 30)
+            raise OSError("write denied")
+
+        monkeypatch.setattr(setup, "_run", fail)
+    assert setup.run_setup(disable=True) == 1
+    output = capsys.readouterr()
+    assert "un-wiring failed: codex, claude" in output.err
+    assert "Nothing to un-wire" not in output.out
+
+
+def test_logout_reports_cleanup_failure_after_removing_credentials(machine, capsys):
+    _sign_in(machine)
+    (machine / ".codex" / "config.toml").write_text("[invalid")
+    assert auth.logout(keep_agents=False) == 1
+    assert "Signed out, but agent cleanup failed" in capsys.readouterr().err
+    assert not (machine / ".llm-tracker" / "credentials.json").exists()
+
+
+@pytest.mark.parametrize("disable", [False, True])
+@pytest.mark.parametrize("failure", ["timeout", "oserror"])
+def test_helper_exceptions_never_echo_collector_arguments(
+    machine, monkeypatch, capsys, disable, failure
+):
+    import subprocess
+
+    endpoint = "https://user:secret@collector.example/secret/v1/logs?token=secret"
+    _sign_in(machine, endpoint)
+
+    def fail(script, args, env, timeout):
+        command = [script, *args]
+        if failure == "timeout":
+            raise subprocess.TimeoutExpired(command, timeout)
+        raise OSError(f"failed command: {command}")
+
+    monkeypatch.setattr(setup, "_run", fail)
+    assert setup.run_setup(disable=disable) == 1
+    output = capsys.readouterr()
+    assert "secret" not in output.out + output.err
+    assert (
+        "helper timed out" in output.err
+        if failure == "timeout"
+        else "helper could not start" in output.err
+    )

@@ -35,6 +35,8 @@ with open(os.environ['LLM_TRACKER_FAKE_PYTHON_LOG'], 'a') as log:
         log.write(f"login-input={sys.stdin.readline().strip()}\\n")
 if 'check-server' in args and os.environ.get('LLM_TRACKER_FAKE_PROTOCOL_FAIL') == '1':
     raise SystemExit(1)
+if 'setup' in args and os.environ.get('LLM_TRACKER_FAKE_SETUP_FAIL') == '1':
+    raise SystemExit(1)
 """
 
 
@@ -150,7 +152,9 @@ def test_installs_sha_snapshot_and_preserves_user_state(tmp_path: Path) -> None:
     pip = next(line for line in uv_log.splitlines() if line.startswith("pip install"))
     assert pip.endswith("/client/requirements.txt")
     check_server = (tmp_path / "python.log").read_text()
-    assert "-m client check-server --server https://host.example tty=no" in check_server
+    assert (
+        "-P -m client check-server --server https://host.example tty=no" in check_server
+    )
     assert "No interactive terminal is available" in result.stdout
     assert "LLM_TRACKER_CLIENT_COMMIT" in INSTALLER.read_text()
 
@@ -392,6 +396,73 @@ def test_login_reads_code_from_tty_when_installer_runs_from_pipe(
     assert "-m client login --server https://host.example tty=yes" in log
     assert "login-input=browser-code-1234" in log
     assert b"No interactive terminal is available" not in output
+
+
+def test_updater_skip_login_mode_preserves_existing_credentials(
+    tmp_path: Path,
+) -> None:
+    home, fake_bin, archive = _fixture(tmp_path)
+    script = tmp_path / "hosted-install.sh"
+    script.write_text(_render_installer())
+    env = {
+        **os.environ,
+        "HOME": str(home),
+        "PATH": f"{fake_bin}:/usr/bin:/bin",
+        "LLM_TRACKER_FIXTURE_ARCHIVE": str(archive),
+        "LLM_TRACKER_FAKE_UV_LOG": str(tmp_path / "uv.log"),
+        "LLM_TRACKER_FAKE_PYTHON_LOG": str(tmp_path / "python.log"),
+        "LLM_TRACKER_SKIP_LOGIN": "1",
+    }
+
+    result = subprocess.run(
+        ["/bin/sh", str(script)],
+        text=True,
+        capture_output=True,
+        env=env,
+        timeout=30,
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    log = (tmp_path / "python.log").read_text()
+    assert "-m client check-server --server https://host.example" in log
+    assert "-P -m client setup" in log
+    assert "login" not in log
+    assert "Existing credentials were preserved; sign-in skipped." in result.stdout
+    assert (home / ".llm-tracker" / "credentials.json").read_text() == (
+        '{"token":"keep"}\n'
+    )
+
+
+def test_updater_reports_agent_configuration_refresh_failure(tmp_path: Path) -> None:
+    home, fake_bin, archive = _fixture(tmp_path)
+    script = tmp_path / "hosted-install.sh"
+    script.write_text(_render_installer())
+
+    result = subprocess.run(
+        ["/bin/sh", str(script)],
+        text=True,
+        capture_output=True,
+        env={
+            **os.environ,
+            "HOME": str(home),
+            "PATH": f"{fake_bin}:/usr/bin:/bin",
+            "LLM_TRACKER_FIXTURE_ARCHIVE": str(archive),
+            "LLM_TRACKER_FAKE_UV_LOG": str(tmp_path / "uv.log"),
+            "LLM_TRACKER_FAKE_PYTHON_LOG": str(tmp_path / "python.log"),
+            "LLM_TRACKER_SKIP_LOGIN": "1",
+            "LLM_TRACKER_FAKE_SETUP_FAIL": "1",
+        },
+        timeout=30,
+    )
+
+    assert result.returncode != 0
+    assert "agent configuration refresh failed" in result.stderr
+    log = (tmp_path / "python.log").read_text()
+    assert "-P -m client setup" in log
+    assert "login" not in log
+    assert (home / ".llm-tracker" / "credentials.json").read_text() == (
+        '{"token":"keep"}\n'
+    )
 
 
 def test_rejects_unrendered_or_insecure_server_url_before_install(
