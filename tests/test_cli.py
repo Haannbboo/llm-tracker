@@ -10,19 +10,43 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
 import sys
 import time
 from pathlib import Path
 
 LAUNCHER = Path(__file__).resolve().parents[1] / "scripts" / "llm-tracker"
+CLIENT = Path(__file__).resolve().parents[1] / "client"
+
+
+def _scrubbed_env(tmp_path):
+    """Launcher test env: no machine home, no machine shell state.
+
+    `LLM_TRACKER_ROOT` and `LLM_TRACKER_SKIP_BANNER` are exactly the exports a
+    developer's shell may carry, and they change which component the launcher
+    resolves and whether the banner prints at all.
+    """
+    env = os.environ.copy()
+    for key in (
+        "LLM_TRACKER_ROOT",
+        "LLM_TRACKER_SKIP_BANNER",
+        "LLM_TRACKER_CLIENT_COMMIT",
+        "LLM_TRACKER_SERVER_ROOT",
+        "NO_COLOR",
+    ):
+        env.pop(key, None)
+    env["HOME"] = str(tmp_path / "os-home")
+    env["PYTHONDONTWRITEBYTECODE"] = "1"
+    return env
 
 
 def _run_launcher(tmp_path, *args):
-    env = os.environ.copy()
-    # A scrubbed home keeps the launcher's discovery off this machine, and no tty
-    # plus a fixed width keeps the banner out of the captured output.
-    env["LLM_TRACKER_HOME"] = str(tmp_path / "tracker-home")
+    env = _scrubbed_env(tmp_path)
+    # A test-owned client snapshot keeps the launcher's discovery off this
+    # machine, and no tty plus a fixed width keeps the banner out of captured
+    # output.
+    env["LLM_TRACKER_HOME"] = str(_client_snapshot(tmp_path / "tracker-home"))
     env["PYTHONDONTWRITEBYTECODE"] = "1"
     env["COLUMNS"] = "100"
     return subprocess.run(
@@ -111,9 +135,11 @@ def test_status_is_not_a_legacy_alias(tmp_path):
     """`llm-tracker status` reports components; the service view is `server status`."""
     result = _run_launcher(tmp_path, "status")
 
-    assert result.returncode != 2 or "is now" not in result.stderr
+    assert result.returncode in (0, 1)
     assert "is now" not in result.stderr
     assert "Service Status" not in result.stdout
+    # It is the component report, not just an exit code.
+    assert "account" in result.stdout
 
 
 def test_server_command_without_the_server_component_says_so(tmp_path):
@@ -121,10 +147,9 @@ def test_server_command_without_the_server_component_says_so(tmp_path):
     launcher = tmp_path / "llm-tracker"
     launcher.write_text(LAUNCHER.read_text(encoding="utf-8"), encoding="utf-8")
     launcher.chmod(0o755)
-    env = os.environ.copy()
+    env = _scrubbed_env(tmp_path)
     env["LLM_TRACKER_HOME"] = str(tmp_path / "tracker-home")
     env["LLM_TRACKER_BIN_DIR"] = str(tmp_path / "bin")
-    env["PYTHONDONTWRITEBYTECODE"] = "1"
     result = subprocess.run(
         [str(launcher), "server", "status"],
         cwd=tmp_path,
@@ -139,6 +164,39 @@ def test_server_command_without_the_server_component_says_so(tmp_path):
     assert "install.sh" in result.stderr
 
 
+def _client_snapshot(home: Path) -> Path:
+    """A snapshot install of this repo's real client with its protocol module.
+
+    The launcher accepts the dev checkout as a client only when its bootstrap-
+    made `.venv/bin/python` exists — true on a developer machine, not in CI —
+    so shipping the snapshot keeps these tests off that ambient state. Both
+    banner sources exercised: locally print_banner still prefers the checkout
+    server clone, while CI exercises the snapshot fallback.
+    """
+    snapshot = home / "versions" / "test"
+    if (home / "current").is_symlink():
+        return home
+    snapshot.parent.mkdir(parents=True)
+    shutil.copytree(CLIENT, snapshot / "client")
+    # The real installer always records a commit for the installed snapshot.
+    (snapshot / "client" / "COMMIT").write_text("t" * 40)
+    shutil.copytree(CLIENT.parent / "protocol", snapshot / "protocol")
+    # The launcher sources scripts/lib/terminal.sh from its snapshot when no
+    # server component exists, so the banner lives there too.
+    lib = snapshot / "scripts" / "lib"
+    lib.mkdir(parents=True)
+    shutil.copytree(CLIENT.parent / "scripts" / "lib", lib, dirs_exist_ok=True)
+    stub_bin = snapshot / ".venv" / "bin"
+    stub_bin.mkdir(parents=True)
+    python = stub_bin / "python"
+    import shlex
+
+    python.write_text(f'#!/bin/sh\nexec {shlex.quote(sys.executable)} "$@"')
+    python.chmod(0o755)
+    (home / "current").symlink_to("versions/test")
+    return home
+
+
 def test_banner_is_suppressed_for_machine_readable_output(tmp_path):
     """`--json` output must stay parseable, so nothing decorates it."""
     result = _run_launcher(tmp_path, "status", "--json")
@@ -151,20 +209,16 @@ def test_banner_is_suppressed_for_machine_readable_output(tmp_path):
     assert json.loads(result.stdout)["account"]["signed_in"] is False
 
 
-def test_banner_prints_on_a_terminal(tmp_path):
-    """Every human-facing command starts with the banner, on a real tty."""
+def _run_on_pty(tmp_path, *args):
+    """Run the launcher on a real pty; the banner speech lands on stderr."""
     import pty
 
-    env = os.environ.copy()
-    env["LLM_TRACKER_HOME"] = str(tmp_path / "tracker-home")
-    env["PYTHONDONTWRITEBYTECODE"] = "1"
-    env["COLUMNS"] = "100"
-    env.pop("NO_COLOR", None)
-
+    env = _scrubbed_env(tmp_path)
+    env["LLM_TRACKER_HOME"] = str(_client_snapshot(tmp_path / "tracker-home"))
     controller, follower = pty.openpty()
     try:
         process = subprocess.Popen(
-            [str(LAUNCHER), "--help"],
+            [str(LAUNCHER), *args],
             cwd=tmp_path,
             env=env,
             stdout=subprocess.PIPE,
@@ -179,14 +233,28 @@ def test_banner_prints_on_a_terminal(tmp_path):
         if follower is not None:
             os.close(follower)
         os.close(controller)
+    return process, captured
+
+
+def test_banner_prints_on_a_terminal(tmp_path):
+    """Every human-facing command starts with the banner, on a real tty."""
+    process, captured = _run_on_pty(tmp_path, "--help")
 
     assert process.returncode == 0
     assert "\u2588" in captured  # the banner's block character
     # And it did not contaminate the child's stdout channel.
     assert "usage: llm-tracker" in process.stdout.read()
 
+    # The same holds under --json: the banner is suppressed on a tty too.
+    process, captured = _run_on_pty(tmp_path, "status", "--json")
+    assert process.returncode in (0, 1)
+    assert "\u2588" not in captured
+    stdout = process.stdout.read()
+    assert len(stdout.strip().splitlines()) == 1
+    assert json.loads(stdout)["account"]["signed_in"] is False
 
-def _read_available(fd: str | int, limit: float = 5.0) -> str:
+
+def _read_available(fd: str | int, limit: float = 45.0) -> str:
     import select
 
     chunks = []

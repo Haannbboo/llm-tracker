@@ -69,9 +69,17 @@ Those findings are covered by the fixes above. All three fresh landing reviewers
 completed successfully and found no remaining must-fix issue.
 
 - Full Python suite: **1197 passed, 6 skipped**, seven deprecation warnings.
+  Green in CI after one fix: launcher contract tests ship their own client
+  snapshot instead of requiring the checkout's bootstrap venv.
 - Full pre-commit checks: passed, including formatting, lint, typing, OTLP
   readiness, and the test hook.
 - Public endpoint and operational bind metadata have separate regression
   coverage, including IPv6, wildcard binds, unavailable APIs, and unsafe URLs.
 - Helper timeout/start failures are covered for wiring and disabling, proving
   that exception command arguments do not escape into diagnostics.
+- CI caught the launcher contract tests leaning on the developer checkout's
+  bootstrap venv: they now ship their own client snapshot (client, protocol,
+  scripts/lib, commit stamp) and scrub `HOME`, `LLM_TRACKER_ROOT`, and
+  `LLM_TRACKER_SKIP_BANNER` from the inherited environment, so the same tests
+  exercise identical launcher routing on every machine. The banner-suppression
+  case that CI caught is also covered on a real tty now, not just under pipes.
