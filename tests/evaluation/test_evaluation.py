@@ -1855,6 +1855,36 @@ def test_evaluator_env_drops_only_proxy_pointing_base_urls(
     assert env["EXTRA"] == "1"
 
 
+def test_evaluator_env_matches_loopback_aliases(evaluation_module, monkeypatch):
+    import src.config.app
+
+    monkeypatch.setattr(
+        src.config.app,
+        "load_config",
+        lambda: {"server": {"port": 4321}},
+    )
+    monkeypatch.setenv("OPENAI_BASE_URL", "http://127.0.0.1:4321/v1")
+
+    env = evaluation_module._evaluator_env(None)
+
+    assert "OPENAI_BASE_URL" not in env
+
+
+def test_evaluator_env_keeps_base_url_with_invalid_port(evaluation_module, monkeypatch):
+    import src.config.app
+
+    monkeypatch.setattr(
+        src.config.app,
+        "load_config",
+        lambda: {"server": {"port": 4321}},
+    )
+    monkeypatch.setenv("OPENAI_BASE_URL", "http://gateway.internal:bad/v1")
+
+    env = evaluation_module._evaluator_env(None)
+
+    assert env["OPENAI_BASE_URL"] == "http://gateway.internal:bad/v1"
+
+
 def test_evaluator_env_drops_base_urls_when_config_unreadable(
     evaluation_module, monkeypatch
 ):

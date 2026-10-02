@@ -653,6 +653,16 @@ def _build_claude_evaluator_invocation(prompt: str) -> AgentInvocation:
     )
 
 
+_LOOPBACK_HOSTS = {"localhost", "127.0.0.1", "::1"}
+
+
+def _canonical_host(host: str | None) -> str | None:
+    """Fold loopback aliases together so localhost and 127.0.0.1 compare equal."""
+    if host in _LOOPBACK_HOSTS:
+        return "localhost"
+    return host
+
+
 def _tracker_proxy_origins() -> set[tuple[str, str, int]]:
     """Origins of this server's own proxy, matched against base-URL env vars."""
     try:
@@ -660,24 +670,28 @@ def _tracker_proxy_origins() -> set[tuple[str, str, int]]:
         from src.config.server_config import resolve_server_urls
 
         proxy = urlparse(resolve_server_urls(load_config())["proxy_url"])
+        host = _canonical_host(proxy.hostname)
+        if not host or proxy.port is None:
+            return set()
+        return {(proxy.scheme, host, proxy.port)}
     except Exception:
         return set()
-    if not proxy.hostname or proxy.port is None:
-        return set()
-    return {(proxy.scheme, proxy.hostname, proxy.port)}
 
 
 def _points_at_tracker_proxy(value: str, origins: set[tuple[str, str, int]]) -> bool:
     try:
+        # .port raises ValueError for an invalid port, not urlparse().
         parsed = urlparse(value)
+        port = parsed.port or (443 if parsed.scheme == "https" else 80)
+        host = _canonical_host(parsed.hostname)
+        scheme = parsed.scheme
     except ValueError:
         return False
-    if not parsed.hostname or parsed.scheme not in ("http", "https"):
+    if not host or scheme not in ("http", "https"):
         return False
-    port = parsed.port or (443 if parsed.scheme == "https" else 80)
     return any(
-        parsed.scheme == scheme and parsed.hostname == host and port == proxy_port
-        for scheme, host, proxy_port in origins
+        scheme == origin_scheme and host == origin_host and port == origin_port
+        for origin_scheme, origin_host, origin_port in origins
     )
 
 
