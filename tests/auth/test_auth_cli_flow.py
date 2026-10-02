@@ -324,15 +324,14 @@ def test_exchange_unknown_code_fails(api_module, monkeypatch, fresh_db):
 def test_exchange_missing_fields_rejected(api_module, monkeypatch, fresh_db):
     _enable_auth(monkeypatch)
     client = TestClient(api_module.app)
-    # installation_key is a required request field.
-    assert client.post("/auth/cli/exchange", json={}).status_code == 422
-    assert (
-        client.post(
-            "/auth/cli/exchange",
-            json={"code": "ABC", "code_verifier": ""},
-        ).status_code
-        == 422
+    # installation_key is required, and the rejection never echoes the secret.
+    missing = client.post(
+        "/auth/cli/exchange",
+        json={"code": "ABC", "code_verifier": "xyz"},
     )
+    assert missing.status_code == 422
+    assert "installation_key" in missing.text
+    assert "ABC" not in missing.text
     # Present but empty code fields are the handler's 400.
     assert (
         client.post(

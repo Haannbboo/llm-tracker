@@ -255,6 +255,9 @@ def mint_device_tokens(
                         Device.user_id == user_id,
                         Device.installation_hash == installation_hash,
                     )
+                    # Row lock on servers that honor it (PostgreSQL). SQLite
+                    # drops it; there the unique index plus the IntegrityError
+                    # retry below is what keeps two first logins from racing.
                     .with_for_update()
                 ).scalar_one_or_none()
                 if device is None:
@@ -274,6 +277,9 @@ def mint_device_tokens(
                     session.flush()
                 else:
                     device.device_name = device_name
+                    # A revoked machine comes back only through a fresh browser
+                    # approval: the installation key is not a credential, so the
+                    # code + PKCE exchange is what re-authorizes it.
                     device.revoked_at = None
                     device.last_seen_at = now
                     if client_version is not None:

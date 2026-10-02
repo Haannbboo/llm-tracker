@@ -459,7 +459,6 @@ export const zh: Record<string, string> = {
   'Machine': '设备',
   'Installed version': '已安装版本',
   'Authorized': '已授权',
-  'Sessions that hold a login token. Revoking a device signs it out immediately.': '保存登录令牌的会话。撤销设备会立即将其登出。',
   'Device': '设备',
   'Kind': '类型',
   'Last used': '最后使用',

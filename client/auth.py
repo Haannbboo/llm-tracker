@@ -72,11 +72,26 @@ def _pkce_pair() -> tuple[str, str]:
     return verifier, challenge
 
 
+def _write_private_text(path: Path, text: str) -> None:
+    """Write 0600 text atomically, so a crash never leaves a partial file."""
+    path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    temporary = path.with_name(f".{path.name}.{secrets.token_hex(8)}.tmp")
+    fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(text)
+        temporary.replace(path)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
 def _load_or_create_installation_key() -> str:
     """This machine's stable secret. Re-login rotates tokens; the key stays.
 
-    An unreadable or malformed file is regenerated, so a broken file can never
-    wedge login — it only costs the machine its device history.
+    A missing or malformed file is regenerated, so a broken file can never wedge
+    login — it only costs the machine its device history. Any other read error
+    (permissions, a directory in the way) reaches the caller and fails the
+    login rather than silently minting a second identity for this machine.
     """
     path = installation_key_path()
     try:
@@ -85,10 +100,7 @@ def _load_or_create_installation_key() -> str:
         key = ""
     if not re.fullmatch(r"[A-Za-z0-9_-]{43,128}", key):
         key = secrets.token_urlsafe(32)
-        path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-        with os.fdopen(fd, "w", encoding="utf-8") as handle:
-            handle.write(key + "\n")
+        _write_private_text(path, f"{key}\n")
     return key
 
 
@@ -260,8 +272,12 @@ def login(
     body: dict[str, str] = {
         "code_verifier": verifier,
         "installation_key": installation_key,
-        "client_version": client_version(),
     }
+    # The server validates both fields strictly; a malformed one would fail the
+    # exchange permanently, so an unrecognized value is simply not sent.
+    version = client_version()
+    if re.fullmatch(r"\d+\.\d+\.\d+", version):
+        body["client_version"] = version
     commit = client_commit()
     if commit:
         body["client_commit"] = commit

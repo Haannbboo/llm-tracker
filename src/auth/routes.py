@@ -358,9 +358,11 @@ _CLI_CODE_ALPHABET = "BCDFGHJKLMNPQRSTVWXZ"
 
 class CliExchangeRequest(BaseModel):
     # Capped: this is a public (auth-gated) endpoint taking unbounded strings.
+    # installation_key stays optional here so pydantic's 422 never echoes the
+    # secret in its error body; the handler checks it and returns a static 422.
     code: str | None = Field(default=None, max_length=256)
     code_verifier: str | None = Field(default=None, max_length=256)
-    installation_key: str = Field(min_length=43, max_length=128)
+    installation_key: str | None = Field(default=None, max_length=128)
     client_version: str | None = Field(default=None, max_length=64)
     client_commit: str | None = Field(default=None, max_length=40)
 
@@ -526,7 +528,9 @@ def auth_cli_exchange(body: CliExchangeRequest):
     # client_version/client_commit would otherwise burn a one-time code the
     # user then has to re-request. 422 (not 400) so the CLI's "wrong code,
     # paste again" retry loop stops instead of re-sending an identical body.
-    if not re.fullmatch(r"[A-Za-z0-9_-]{43,128}", body.installation_key):
+    if not body.installation_key or not re.fullmatch(
+        r"[A-Za-z0-9_-]{43,128}", body.installation_key
+    ):
         raise HTTPException(status_code=422, detail="invalid installation_key")
     if body.client_version is not None and not re.fullmatch(
         r"\d+\.\d+\.\d+", body.client_version
