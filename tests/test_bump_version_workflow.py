@@ -36,7 +36,7 @@ def test_bump_version_workflow_skips_its_own_bump_commit():
     )
 
 
-def test_bump_version_workflow_bumps_pr_branch_from_base_version():
+def test_bump_version_workflow_bumps_only_changed_packages_from_base_version():
     workflow = load_workflow()
 
     checkout_step = workflow["jobs"]["bump"]["steps"][0]
@@ -46,9 +46,15 @@ def test_bump_version_workflow_bumps_pr_branch_from_base_version():
     assert checkout_step["with"]["fetch-depth"] == 0
     assert 'git fetch origin "${{ github.base_ref }}" --depth=1' in bump_step["run"]
     assert (
-        'BASE_VERSION=$(git show "origin/${{ github.base_ref }}:VERSION" 2>/dev/null '
-        '|| echo "0.0.0")'
-    ) in bump_step["run"]
+        'git diff --name-only "origin/${{ github.base_ref }}...HEAD"'
+        in bump_step["run"]
+    )
+    assert "client/*|plugins/*|scripts/hosted-install.sh)" in bump_step["run"]
+    assert "server/*|src/*|frontend/*" in bump_step["run"]
+    assert "protocol/*|scripts/configure-*)" in bump_step["run"]
+    assert 'git show "origin/${{ github.base_ref }}:$FILE"' in bump_step["run"]
+    assert "bump_file VERSION" in bump_step["run"]
+    assert "bump_file client/VERSION" in bump_step["run"]
     assert "BASE_PATCH + 1" in bump_step["run"]
 
 
@@ -66,6 +72,8 @@ def test_bump_version_workflow_includes_version_in_bump_commit_message():
         auto_commit_step["with"]["commit_message"]
         == "chore: bump version to ${{ steps.bump.outputs.new_version }}"
     )
+    assert auto_commit_step["if"] == "steps.bump.outputs.changed == 'true'"
+    assert auto_commit_step["with"]["file_pattern"] == "VERSION client/VERSION"
     assert not any(
         step.get("name") == "Append version to PR title"
         for step in workflow["jobs"]["bump"]["steps"]

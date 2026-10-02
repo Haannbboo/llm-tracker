@@ -37,7 +37,7 @@ def _copy_clean_plugin_workspace(tmp_path: Path) -> Path:
 
 
 def _npm_install(plugin_dir: Path) -> None:
-    """Run npm install for the copied plugin workspace.
+    """Install locked dependencies for the copied plugin workspace.
 
     A timeout is treated as a skip, not a failure: cold-cache or congested npm
     on slow CI runners can exceed the budget, and that is an environment
@@ -45,14 +45,14 @@ def _npm_install(plugin_dir: Path) -> None:
     """
     try:
         install = subprocess.run(
-            ["npm", "install", "--no-package-lock"],
+            ["npm", "ci"],
             cwd=plugin_dir,
             text=True,
             capture_output=True,
             timeout=60,
         )
     except subprocess.TimeoutExpired:
-        pytest.skip("npm install timed out; npm registry too slow on this runner")
+        pytest.skip("npm ci timed out; npm registry too slow on this runner")
     assert install.returncode == 0, install.stderr
 
 
