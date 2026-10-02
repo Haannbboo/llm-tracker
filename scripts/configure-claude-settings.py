@@ -16,12 +16,17 @@ def _info(msg: str) -> None:
 
 
 def load_settings(path: Path) -> dict[str, Any]:
-    if not path.exists():
-        return {}
     try:
-        return json.loads(path.read_text(encoding="utf-8"))
-    except Exception:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
         return {}
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        raise ValueError("cannot read Claude configuration; left unchanged") from exc
+    if not isinstance(data, dict) or (
+        "env" in data and not isinstance(data["env"], dict)
+    ):
+        raise ValueError("invalid Claude configuration; left unchanged")
+    return data
 
 
 def load_ingest_token() -> str | None:
@@ -58,21 +63,150 @@ def resolve_otlp_logs_endpoint(
     return f"http://{host}:{otlp_port}/v1/logs"
 
 
-def main() -> int:
-    if len(sys.argv) not in (2, 3, 4, 5, 6):
+# Only these keys are ever written by this script, so only these are removed.
+_OWNED_ENV_KEYS = (
+    "CLAUDE_CODE_ENABLE_TELEMETRY",
+    "OTEL_LOGS_EXPORTER",
+    "OTEL_EXPORTER_OTLP_LOGS_PROTOCOL",
+    "OTEL_EXPORTER_OTLP_LOGS_ENDPOINT",
+)
+
+
+def _disable(settings_path: Path, expected_endpoint: str | None) -> int:
+    """Remove llm-tracker's telemetry keys and its tool-call hooks.
+
+    A hand-written collector config is left alone: the OTLP keys are only removed
+    while the endpoint is the one llm-tracker wrote. The hooks are identified by
+    script path, so they can only be ours.
+    """
+    if not expected_endpoint:
+        print("collector unknown; Claude configuration left unchanged", file=sys.stderr)
+        return 2
+    if not settings_path.exists():
+        _info(f"No Claude Code settings at {settings_path}")
+        return 2
+    settings = load_settings(settings_path)
+    env = settings.get("env")
+    env = env if isinstance(env, dict) else {}
+    current = env.get("OTEL_EXPORTER_OTLP_LOGS_ENDPOINT")
+    if current != expected_endpoint:
         print(
-            "usage: configure-claude-settings.py SETTINGS_PATH [OTLP_PORT] [HOST] [ENDPOINT] [TOKEN]",
+            f"{settings_path} has no matching collector; left alone",
+            file=sys.stderr,
+        )
+        return 2
+
+    changed = False
+    for key in _OWNED_ENV_KEYS:
+        if key in env:
+            del env[key]
+            changed = True
+    headers = env.get("OTEL_EXPORTER_OTLP_HEADERS")
+    if isinstance(headers, str):
+        remaining = [
+            part
+            for part in headers.split(",")
+            if part.strip().partition("=")[0] != "x-llm-tracker-token"
+        ]
+        if len(remaining) != len(headers.split(",")):
+            if remaining:
+                env["OTEL_EXPORTER_OTLP_HEADERS"] = ",".join(remaining)
+            else:
+                del env["OTEL_EXPORTER_OTLP_HEADERS"]
+            changed = True
+    if env:
+        settings["env"] = env
+    else:
+        settings.pop("env", None)
+
+    hooks = settings.get("hooks")
+    if isinstance(hooks, dict):
+        for event in ("PreToolUse", "PostToolUse"):
+            entries = hooks.get(event)
+            if not isinstance(entries, list):
+                continue
+            kept = []
+            for entry in entries:
+                if not isinstance(entry, dict) or not isinstance(
+                    entry.get("hooks"), list
+                ):
+                    kept.append(entry)
+                    continue
+                remaining = [
+                    hook for hook in entry["hooks"] if not _is_tracker_hook(hook)
+                ]
+                if len(remaining) != len(entry["hooks"]):
+                    changed = True
+                    if remaining:
+                        kept.append({**entry, "hooks": remaining})
+                else:
+                    kept.append(entry)
+            if kept:
+                hooks[event] = kept
+            else:
+                hooks.pop(event)
+        if hooks:
+            settings["hooks"] = hooks
+        else:
+            settings.pop("hooks", None)
+
+    if not changed:
+        _info(f"No llm-tracker telemetry in {settings_path}")
+        return 2
+    save_settings(settings_path, settings)
+    _info(f"Claude Code telemetry removed from {settings_path}")
+    return 0
+
+
+def _is_tracker_hook(hook: object) -> bool:
+    if not isinstance(hook, dict) or hook.get("type") != "command":
+        return False
+    # Historical registration used an absolute scripts/claude-hook.sh path.
+    # A user's similarly named command is not ours.
+    command = hook.get("command")
+    if not isinstance(command, str):
+        return False
+    path = Path(command)
+    if not path.is_absolute() or path.parts[-2:] != ("scripts", "claude-hook.sh"):
+        return False
+    root = path.parent.parent
+    try:
+        launcher = (root / "scripts" / "llm-tracker").read_text(encoding="utf-8")
+    except (OSError, UnicodeError):
+        return False
+    return "# llm-tracker launcher" in launcher.splitlines() and (
+        (root / "client").is_dir() or (root / "src").is_dir()
+    )
+
+
+# Exit status contract: 0 configured/removed, 2 skipped, 1 failed.
+def _main() -> int:
+    argv = sys.argv[1:]
+    # Compact client API; retain PORT/HOST positional inputs for direct callers.
+    if len(argv) == 2 and "://" in argv[1]:
+        argv = [argv[0], "", "", argv[1]]
+    disable = False
+    if "--disable" in argv:
+        disable = True
+        argv = [arg for arg in argv if arg != "--disable"]
+    if len(argv) not in (1, 2, 3, 4, 5):
+        print(
+            "usage: configure-claude-settings.py SETTINGS_PATH "
+            "[--disable [ENDPOINT]] | ENDPOINT | [OTLP_PORT] [HOST] [ENDPOINT] [TOKEN]",
             file=sys.stderr,
         )
         return 1
 
-    settings_path = Path(sys.argv[1]).expanduser()
-    otlp_port = sys.argv[2] if len(sys.argv) >= 3 else "4002"
-    host = sys.argv[3] if len(sys.argv) >= 4 else "localhost"
-    endpoint = sys.argv[4] if len(sys.argv) >= 5 else None
+    settings_path = Path(argv[0]).expanduser()
+    if disable:
+        # ENDPOINT is the one llm-tracker wrote; anything else is the user's.
+        return _disable(settings_path, argv[1] if len(argv) >= 2 else None)
+    otlp_port = argv[1] if len(argv) >= 2 else "4002"
+    host = argv[2] if len(argv) >= 3 else "localhost"
+    endpoint = argv[3] if len(argv) >= 4 else None
     token = (
-        sys.argv[5]
-        if len(sys.argv) >= 6
+        argv[4]
+        if len(argv) >= 5
         else os.environ.get("LLM_TRACKER_INGEST_TOKEN") or load_ingest_token()
     )
 
@@ -105,43 +239,15 @@ def main() -> int:
     else:
         _info(f"Claude Code telemetry already up-to-date in {settings_path}")
 
-    # Register tool-call hook (PreToolUse + PostToolUse).
-    hook_path = Path(__file__).resolve().parent / "claude-hook.sh"
-    parts = hook_path.parts
-    if ".claude" in parts:
-        wt_idx = parts.index(".claude") + 1
-        if wt_idx < len(parts) and parts[wt_idx] == "worktrees":
-            main_hook = Path(*parts[: wt_idx - 1]) / "scripts" / "claude-hook.sh"
-            if main_hook.exists():
-                hook_path = main_hook
-    hook_script = str(hook_path)
-    hooks = settings.setdefault("hooks", {})
-    hook_changed = False
-    for event in ("PreToolUse", "PostToolUse"):
-        event_hooks = hooks.setdefault(event, [])
-        # Only add if not already registered.
-        if not any(
-            h.get("matcher") == ".*"
-            and any(
-                hh.get("type") == "command" and hh.get("command") == hook_script
-                for hh in h.get("hooks", [])
-            )
-            for h in event_hooks
-        ):
-            event_hooks.append(
-                {
-                    "matcher": ".*",
-                    "hooks": [{"type": "command", "command": hook_script}],
-                }
-            )
-            hook_changed = True
-    if hook_changed:
-        save_settings(settings_path, settings)
-        _info(f"Tool-call hook registered in {settings_path}")
-    else:
-        _info(f"Tool-call hook already registered in {settings_path}")
-
     return 0
+
+
+def main() -> int:
+    try:
+        return _main()
+    except (OSError, UnicodeError, ValueError):
+        print("cannot update Claude configuration; left unchanged", file=sys.stderr)
+        return 1
 
 
 if __name__ == "__main__":

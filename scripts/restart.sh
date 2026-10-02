@@ -1,6 +1,12 @@
 #!/usr/bin/env bash
 # scripts/restart.sh
-# Graceful restart of llm-tracker services.
+# Reload the running llm-tracker services so new backend code takes effect.
+#
+# Deliberately narrow: no dependency install, no frontend build, no config sync,
+# no port check, and it never starts a service that is already down. Use
+# scripts/start.sh to turn services on and scripts/bootstrap.sh to install or
+# build. Migrations do run here, because `git pull && restart` against an old
+# schema would serve broken code.
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -9,7 +15,6 @@ CONFIG_PATH="${CONFIG_DIR}/config.yaml"
 SUPERVISORD_CONF="${CONFIG_DIR}/supervisord.conf"
 SUPERVISORCTL="${ROOT_DIR}/.venv/bin/supervisorctl"
 PYTHON="${ROOT_DIR}/.venv/bin/python"
-PORT_CHECKER="${ROOT_DIR}/scripts/check-service-ports.py"
 
 # ── Load terminal helpers ───────────────────────────────────────────
 source "${ROOT_DIR}/scripts/lib/terminal.sh"
@@ -21,25 +26,14 @@ banner
 step_header "Pre-flight checks"
 
 if [[ ! -x "${PYTHON}" ]]; then
-  fail "Virtual environment not found — run scripts/bootstrap.sh first"
+  fail "Virtual environment not found — run llm-tracker server bootstrap"
   exit 1
-fi
-pass "Python: ${PYTHON}"
-
-if [[ ! -L "${HOME}/.local/bin/llm-tracker" ]]; then
-  info "NOTE: CLI symlink missing — run scripts/bootstrap.sh to set it up"
 fi
 
 if [[ ! -f "${SUPERVISORD_CONF}" ]]; then
-  fail "Not running — run scripts/start.sh first"
+  fail "Not running — run llm-tracker server start"
   exit 1
 fi
-pass "Supervisord config: ${SUPERVISORD_CONF}"
-
-# ── Sync config ─────────────────────────────────────────────────────
-step_header "Syncing config"
-"${PYTHON}" "${ROOT_DIR}/scripts/sync-config.py" "${CONFIG_PATH}" "${ROOT_DIR}/config.example.yaml"
-pass "Config synced"
 
 # ── Parse args ──────────────────────────────────────────────────────
 OTLP_PORT=""
@@ -50,7 +44,7 @@ while [[ $# -gt 0 ]]; do
         fail "Missing value for --otlp-port"
         exit 1
       fi
-      if [[ ! "$2" =~ ^[0-9]+$ ]] || (( $2 < 1 || $2 > 65535 )); then
+      if ! [[ "$2" =~ ^[0-9]+$ ]] || (( $2 < 1 || $2 > 65535 )); then
         fail "Invalid --otlp-port: $2 (expected 1-65535)"
         exit 1
       fi
@@ -64,105 +58,88 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-PORT_CHANGED=false
-if [[ -n "${OTLP_PORT}" ]]; then
-  PORT_CHANGED=true
-  info "Updating OTLP port to ${OTLP_PORT}..."
-  "${PYTHON}" -c "
-import yaml
-from pathlib import Path
-p = Path('${CONFIG_PATH}')
-c = yaml.safe_load(p.read_text()) or {}
-server = c.setdefault('server', {})
-server['otlp_port'] = int('${OTLP_PORT}')
-p.write_text(yaml.dump(c, sort_keys=False))
-"
-  pass "OTLP port updated: ${OTLP_PORT}"
-else
-  OTLP_PORT=$("${PYTHON}" -c "import yaml; from pathlib import Path; p = Path('${CONFIG_PATH}'); c = yaml.safe_load(p.read_text()) or {}; print(c.get('server', {}).get('otlp_port', 4002))" 2>/dev/null || echo "4002")
-  info "OTLP port: ${OTLP_PORT}"
-fi
+# An OTEL endpoint override wins over server.otlp_port at bind time
+# (resolve_otlp_host_port), so --otlp-port would be saved but never take effect.
+if [[ -n "${OTLP_PORT}" && -n "${OTEL_EXPORTER_OTLP_LOGS_ENDPOINT:-}" ]]; then
+  if "${PYTHON}" - "${OTEL_EXPORTER_OTLP_LOGS_ENDPOINT}" <<'PY'
+import sys
+from urllib.parse import urlparse
 
-# ── Resolve OTLP host from server.base_url ──────────────────────────
-_otlp_line=$("${PYTHON}" "${ROOT_DIR}/scripts/read-otlp-config.py" "${CONFIG_PATH}" 2>/dev/null || echo "4002 localhost")
-OTLP_HOST="${_otlp_line#* }"
-OTLP_ENDPOINT=$("${PYTHON}" "${ROOT_DIR}/scripts/read-otlp-config.py" "${CONFIG_PATH}" --endpoint 2>/dev/null || echo "http://${OTLP_HOST}:${OTLP_PORT}/v1/logs")
-info "OTLP host: ${OTLP_HOST}"
-
-# ── Port check ──────────────────────────────────────────────────────
-step_header "Checking ports"
-if "${PYTHON}" "${PORT_CHECKER}" \
-  --strict \
-  --config "${CONFIG_PATH}" \
-  --supervisorctl "${SUPERVISORCTL}" \
-  --supervisord-conf "${SUPERVISORD_CONF}"; then
-  pass "Port check passed"
-else
-  fail "Port check failed"
-  exit 1
-fi
-
-# ── Configure agent OTLP telemetry ──────────────────────────────────
-step_header "Configuring agent telemetry"
-
-if command -v codex >/dev/null 2>&1; then
-  CODEX_CONFIG="${HOME}/.codex/config.toml"
-  "${PYTHON}" "${ROOT_DIR}/scripts/configure-codex-settings.py" "${CODEX_CONFIG}" "${OTLP_PORT}" "${OTLP_HOST}" "${OTLP_ENDPOINT}"
-  pass "Codex configured"
-else
-  info "Codex: not installed, skipped"
-fi
-
-if command -v claude >/dev/null 2>&1; then
-  "${PYTHON}" "${ROOT_DIR}/scripts/configure-claude-settings.py" "${HOME}/.claude/settings.json" "${OTLP_PORT}" "${OTLP_HOST}" "${OTLP_ENDPOINT}"
-  pass "Claude configured"
-else
-  info "Claude: not installed, skipped"
-fi
-
-if command -v opencode >/dev/null 2>&1; then
-  "${PYTHON}" "${ROOT_DIR}/scripts/configure-opencode-plugin.py" "${ROOT_DIR}" "${OTLP_PORT}" "${OTLP_HOST}" "${OTLP_ENDPOINT}"
-  pass "OpenCode configured"
-else
-  info "OpenCode: not installed, skipped"
-fi
-
-if command -v kilo >/dev/null 2>&1; then
-  "${PYTHON}" "${ROOT_DIR}/scripts/configure-kilo-plugin.py" "${ROOT_DIR}" "${OTLP_PORT}" "${OTLP_HOST}" "${OTLP_ENDPOINT}"
-  pass "Kilo Code configured"
-else
-  info "Kilo Code: not installed, skipped"
+parsed = urlparse(sys.argv[1])
+raise SystemExit(0 if parsed.hostname and parsed.port else 1)
+PY
+  then
+    fail "OTEL_EXPORTER_OTLP_LOGS_ENDPOINT is set, so the collector keeps binding to it and --otlp-port would not take effect. Unset the endpoint (and restart supervisord) or bake the port into the endpoint."
+    exit 1
+  fi
 fi
 
 # ── Schema migrations ───────────────────────────────────────────────
+# The one thing a reload must not skip: new code against an old schema.
 step_header "Applying schema migrations"
 "${PYTHON}" "${ROOT_DIR}/scripts/migrate_schema.py"
 pass "Migrations applied"
 
-# ── Restart services ────────────────────────────────────────────────
-step_header "Restarting services"
+# Keep the configured collector endpoint in sync with the port baked into the
+# OTLP process. Pass paths and values as argv instead of interpolating them into
+# Python source.
+if [[ -n "$OTLP_PORT" ]]; then
+  step_header "Persisting OTLP port"
+  "${PYTHON}" - "${CONFIG_PATH}" "${OTLP_PORT}" <<'PY'
+import sys
+from pathlib import Path
 
+import yaml
+
+config_path = Path(sys.argv[1]).expanduser()
+port = int(sys.argv[2])
+config = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
+if not isinstance(config, dict):
+    raise SystemExit("config.yaml must contain a mapping")
+server = config.setdefault("server", {})
+if not isinstance(server, dict):
+    raise SystemExit("config.yaml server section must be a mapping")
+server["otlp_port"] = port
+config_path.write_text(
+    yaml.safe_dump(config, sort_keys=False, allow_unicode=True), encoding="utf-8"
+)
+PY
+  pass "OTLP port saved as ${OTLP_PORT}"
+fi
+
+# ── Reload services ─────────────────────────────────────────────────
+step_header "Reloading services"
+
+STOPPED=()
 for prog in llm-tracker-proxy llm-tracker-api llm-tracker-otlp; do
   status="$("${SUPERVISORCTL}" -c "${SUPERVISORD_CONF}" status "${prog}" 2>/dev/null | awk '{print $2}' || true)"
-  if [[ "${status}" == "RUNNING" ]]; then
-    if [[ "${prog}" == "llm-tracker-otlp" && "${PORT_CHANGED}" == "true" ]]; then
-      info "Restarting ${prog} (port changed)..."
-      "${SUPERVISORCTL}" -c "${SUPERVISORD_CONF}" restart "${prog}"
-      pass "${prog}: restarted"
-    else
-      info "Sending SIGHUP to ${prog}..."
-      "${SUPERVISORCTL}" -c "${SUPERVISORD_CONF}" signal HUP "${prog}"
-      pass "${prog}: reloaded"
-    fi
+  if [[ "$status" != "RUNNING" ]]; then
+    STOPPED+=("$prog")
+    continue
+  fi
+  if [[ "$prog" == "llm-tracker-otlp" && -n "$OTLP_PORT" ]]; then
+    # The port is baked into the process, so a port change is a restart.
+    info "Restarting ${prog} (port changed to ${OTLP_PORT})..."
+    "${SUPERVISORCTL}" -c "${SUPERVISORD_CONF}" restart "${prog}"
+    pass "${prog}: restarted"
   else
-    info "Starting ${prog} (was not running)..."
-    "${SUPERVISORCTL}" -c "${SUPERVISORD_CONF}" start "${prog}"
-    pass "${prog}: started"
+    info "Sending SIGHUP to ${prog}..."
+    "${SUPERVISORCTL}" -c "${SUPERVISORD_CONF}" signal HUP "${prog}"
+    pass "${prog}: reloaded"
   fi
 done
 
-# ── Read API port for final status ──────────────────────────────────
-API_PORT=$("${PYTHON}" -c "import yaml; from pathlib import Path; p = Path('${CONFIG_PATH}'); c = yaml.safe_load(p.read_text()) or {}; print(c.get('server', {}).get('api_port', c.get('server', {}).get('port', 4000) + 1))" 2>/dev/null || echo "4001")
+if [[ ${#STOPPED[@]} -gt 0 ]]; then
+  # Restart does not turn services on. Say which ones, and how.
+  for prog in "${STOPPED[@]}"; do
+    info "${prog}: not running, left stopped"
+  done
+  info "run llm-tracker server start to bring them up"
+fi
 
 # ── Final status ────────────────────────────────────────────────────
+_otlp_line="$("${PYTHON}" "${ROOT_DIR}/scripts/read-otlp-config.py" "${CONFIG_PATH}" 2>/dev/null || echo "4002 localhost")"
+OTLP_HOST="${_otlp_line#* }"
+API_PORT="$("${PYTHON}" -c 'import sys, yaml; from pathlib import Path; p = Path(sys.argv[1]); c = yaml.safe_load(p.read_text()) or {}; s = c.get("server", {}); print(s.get("api_port", s.get("port", 4000) + 1))' "${CONFIG_PATH}" 2>/dev/null || echo "4001")"
+
 final_status_ok "http://${OTLP_HOST}:${API_PORT}"

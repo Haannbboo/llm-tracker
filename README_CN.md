@@ -68,11 +68,11 @@ Bootstrap 会帮你处理这些烦人的东西：
 
 1. 把 Python 依赖安装到 `.venv`
 2. Node/npm 可用时构建 Dashboard
-3. 按需创建 `~/.llm-tracker/config.yaml`
-4. 为检测到的 Agent 配置本地 OTLP tracking
+3. 在 `~/.local/bin/llm-tracker` 创建 CLI symlink
+4. 按需创建 `~/.llm-tracker/config.yaml`
 5. 用 Supervisor 启动 proxy、API 和 OTLP 服务
-6. 检查服务端口和 Agent setup health
-7. 在 `~/.local/bin/llm-tracker` 创建 CLI symlink
+6. 检查服务端口、Dashboard 和 Agent setup health
+7. 重启 API，让刚构建出来的 Dashboard 生效
 
 如果 `~/.local/bin` 不在 `PATH` 里，安装脚本会打印该加到 shell profile 的命令。
 
@@ -92,7 +92,17 @@ npm run dev
 
 然后打开 [http://localhost:5173](http://localhost:5173)。
 
-### 3. 生成第一条 tracked event
+### 3. 把 Agent 指向 collector
+
+Bootstrap 只检查 Agent setup health，不再配置 Agent。改 Agent 是 client 的职责：
+
+```bash
+llm-tracker setup
+```
+
+它会把这台机器上已安装的 Agent 指向本地 OTLP collector，不会动它不拥有的配置项。`llm-tracker setup --disable` 可以撤回这些设置。`llm-tracker status` 会显示装了什么、是否在运行、Agent 指向哪里。
+
+### 4. 生成第一条 tracked event
 
 Bootstrap 之后，运行 Dashboard 里展示的命令，或者直接用下面这些：
 
@@ -104,15 +114,15 @@ llm-tracker claude
 如果 symlink 还没进 `PATH`，可以用 repo-local fallback：
 
 ```bash
-llm-tracker codex exec "hello"
-llm-tracker claude
+./scripts/llm-tracker codex exec "hello"
+./scripts/llm-tracker claude
 ```
 
 空 Dashboard 会自动检查第一条 event。没有假 demo 数据，也不用手动 seed。
 
 ## CLI 示例
 
-Wrapper 会运行子命令，捕获运行期间的使用量，然后打印摘要。
+Wrapper 会运行子命令，捕获运行期间的使用量，然后打印摘要。它上报给已经在运行的 collector：不会替你启动服务，不会为单次运行创建临时数据库或临时 collector，结束后也不需要合并任何东西。collector 不可达时子命令照样运行，只是不被追踪，退出码仍然是子命令自己的。
 
 ```bash
 # 交互式 agents
@@ -126,6 +136,19 @@ llm-tracker codex exec "say hello in one sentence"
 llm-tracker codex exec "say hello in one sentence"
 ```
 
+同一个命令也负责所有不是「跑一次被追踪的命令」的操作：
+
+```bash
+# 组件、服务、Agent
+llm-tracker status
+llm-tracker setup
+llm-tracker update --check
+
+# 用远端 server 代替本地 server
+llm-tracker login --server https://app.example.com
+llm-tracker logout
+```
+
 只有在传 `llm-tracker` 自己的 flags 时才需要 `--`：
 
 ```bash
@@ -137,7 +160,7 @@ llm-tracker --proxy-env -- some-openai-compatible-cli
 llm-tracker --no-summary -- codex exec "say hello"
 ```
 
-完整 CLI 参考见 [docs/cli-reference.md](docs/cli-reference.md)，包括所有 flags、tracking modes、退出码、服务命令、API endpoints 和环境变量。
+完整 CLI 参考见 [docs/cli-reference.md](docs/cli-reference.md)，包括所有 flags、tracking model、退出码、服务命令、API endpoints 和环境变量。逐命令的行为见 [docs/cli-refactor.md](docs/cli-refactor.md)。
 
 ## Dashboard
 
@@ -171,10 +194,12 @@ Dashboard 提供：
 服务命令：
 
 ```bash
-bash scripts/status.sh
-bash scripts/restart.sh
-bash scripts/stop.sh
+llm-tracker server status
+llm-tracker server restart
+llm-tracker server stop
 ```
+
+`llm-tracker server start` 负责把服务启动起来，`llm-tracker server bootstrap` 负责重新安装、重建 Dashboard 并重启 API 让新产物生效。`llm-tracker status` 是另一个命令：它报告装了哪些组件、它们是否在运行。
 
 运行时文件在 `~/.llm-tracker/run/`。日志写入 `logs/`。
 
@@ -219,7 +244,7 @@ db:
   url: postgresql+psycopg://user:password@db-host:5432/llm_tracker?sslmode=require
 ```
 
-`bash scripts/start.sh` 和 `bash scripts/restart.sh` 会把 `config.example.yaml` 里缺失的默认值合并进用户配置，但不会覆盖已有值。
+`llm-tracker server start` 会把 `config.example.yaml` 里缺失的默认值合并进用户配置，但不会覆盖已有值。
 
 ## 把客户端指向 Proxy
 

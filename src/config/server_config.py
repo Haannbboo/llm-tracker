@@ -21,7 +21,8 @@ class ServerConfig:
     base_url: str | None = None
 
 
-def _resolve_otlp_host_port(config: dict) -> tuple[str, int]:
+def resolve_otlp_host_port(config: dict) -> tuple[str, int]:
+    """Effective collector bind address, shared by gunicorn and diagnostics."""
     endpoint = os.environ.get(OTEL_EXPORTER_OTLP_LOGS_ENDPOINT_ENV)
     if endpoint:
         try:
@@ -89,7 +90,7 @@ def load_server_config() -> ServerConfig:
     host = str(server.get("host", "127.0.0.1"))
     base_url = server.get("base_url")
     port = int(server.get("port", 4000))
-    otlp_host, otlp_port = _resolve_otlp_host_port(cfg)
+    otlp_host, otlp_port = resolve_otlp_host_port(cfg)
 
     return ServerConfig(
         host=host,

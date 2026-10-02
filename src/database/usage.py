@@ -8,7 +8,7 @@ from __future__ import annotations
 import calendar
 import json
 import logging
-from collections.abc import Callable, Sequence
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from decimal import Decimal
@@ -31,7 +31,7 @@ from ..pricing.costs import calculate_costs, compute_input_split, resolve_pricin
 from ..pricing.models import normalize_model_cost_key
 from ..utils import micros_to_secs, secs_to_micros
 from .engine import get_engine
-from .models import BaseUrl, PriceSnapshot, ToolCall, Usage, UsageDaily
+from .models import BaseUrl, ToolCall, Usage, UsageDaily
 
 logger = logging.getLogger(__name__)
 
@@ -644,131 +644,6 @@ def reprice_estimated_rows(
         else:
             repriced += 1
     return {"candidates": examined, "repriced": repriced, "skipped": skipped}
-
-
-USAGE_COPY_FIELDS = (
-    "id",
-    "user_id",
-    "ts",
-    "provider",
-    "model",
-    "client_source",
-    "session_id",
-    "endpoint",
-    "prompt_tokens",
-    "prompt_length",
-    "completion_tokens",
-    "reasoning_tokens",
-    "cached_tokens",
-    "total_tokens",
-    "latency_ms",
-    "ttft_ms",
-    "tool_tokens",
-    "cache_creation_tokens",
-    "input_cost_usd",
-    "output_cost_usd",
-    "total_cost_usd",
-    "status",
-    "client_ip",
-)
-
-# NOTE: price_snapshot_id is omitted from USAGE_COPY_FIELDS because its value is
-# remapped through the copied price_snapshots table in merge_usage_database.
-# _usage_copy_kwargs still mirrors the copied columns; the merge sets the
-# binding explicitly.
-
-
-def _usage_copy_kwargs(row: Usage) -> dict[str, Any]:
-    return {field: getattr(row, field) for field in USAGE_COPY_FIELDS}
-
-
-def _copy_price_snapshots(
-    snapshots: Sequence[PriceSnapshot], target_db_path: str | None
-) -> dict[int, int]:
-    """Recreate source snapshots in the target; return {source_id: target_id}.
-
-    Content-addressed, so an identical rate set already in the target is reused
-    rather than duplicated.
-    """
-    from ..pricing.snapshots import ensure_price_snapshot, parse_rates
-
-    id_map: dict[int, int] = {}
-    for snap in snapshots:
-        cost, multiplier = parse_rates(snap.rates_json)
-        id_map[snap.id] = ensure_price_snapshot(
-            date=snap.date,
-            provider=snap.provider,
-            model=snap.model,
-            source=snap.source,
-            cost=cost,
-            multiplier=multiplier,
-            db_path=target_db_path,
-        )
-    return id_map
-
-
-def merge_usage_database(
-    *,
-    source_db_path: str,
-    target_db_path: str | None = None,
-) -> int:
-    """Copy usage rows from an isolated run DB into the configured/main DB."""
-    from .base_url import get_or_create_base_url
-
-    source_engine = get_engine(source_db_path)
-    target_engine = get_engine(target_db_path)
-    inserted = 0
-
-    with Session(source_engine) as source:
-        rows = source.execute(
-            select(Usage, BaseUrl)
-            .outerjoin(BaseUrl, Usage.base_url_id == BaseUrl.id)
-            .order_by(Usage.id.asc())
-        ).all()
-        tool_calls = source.execute(select(ToolCall)).scalars().all()
-        snapshots = source.execute(select(PriceSnapshot)).scalars().all()
-
-    # Copy snapshots first so merged rows can be bound to their target ids.
-    snapshot_id_map = _copy_price_snapshots(snapshots, target_db_path)
-
-    with Session(target_engine) as target:
-        for row, base_url in rows:
-            base_url_id = None
-            if base_url is not None:
-                base_url_id = get_or_create_base_url(
-                    base_url.base_url,
-                    db_path=target_db_path,
-                    provider_name=base_url.provider_name,
-                    source=base_url.source,
-                )
-            copy_kwargs = _usage_copy_kwargs(row)
-            copy_kwargs["price_snapshot_id"] = (
-                snapshot_id_map.get(row.price_snapshot_id)
-                if row.price_snapshot_id is not None
-                else None
-            )
-            target.add(
-                Usage(
-                    **copy_kwargs,
-                    base_url_id=base_url_id,
-                )
-            )
-            inserted += 1
-        for tc in tool_calls:
-            target.merge(
-                ToolCall(
-                    tool_use_id=tc.tool_use_id,
-                    user_id=tc.user_id,
-                    usage_id=tc.usage_id,
-                    session_id=tc.session_id,
-                    tool_name=tc.tool_name,
-                    client_source=tc.client_source,
-                    ts=tc.ts,
-                )
-            )
-        target.commit()
-
-    return inserted
 
 
 # === Reporting / Query Helpers ===

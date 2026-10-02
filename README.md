@@ -68,11 +68,11 @@ Bootstrap does the boring crap for you:
 
 1. installs Python dependencies into `.venv`
 2. builds the dashboard when Node/npm are available
-3. creates `~/.llm-tracker/config.yaml` if needed
-4. configures detected agents for local OTLP tracking
+3. creates a CLI symlink at `~/.local/bin/llm-tracker`
+4. creates `~/.llm-tracker/config.yaml` if needed
 5. starts proxy, API, and OTLP services with Supervisor
-6. verifies service ports and agent setup health
-7. creates a CLI symlink at `~/.local/bin/llm-tracker`
+6. verifies service ports, the dashboard, and agent setup health
+7. restarts the API so the freshly built dashboard is served
 
 If `~/.local/bin` is not on your `PATH`, the installer prints the shell command to add it.
 
@@ -92,7 +92,21 @@ npm run dev
 
 Then open [http://localhost:5173](http://localhost:5173).
 
-### 3. Generate your first tracked event
+### 3. Point your agents at the collector
+
+Bootstrap reports agent setup health but does not configure agents any more. That
+is the client's job:
+
+```bash
+llm-tracker setup
+```
+
+It points the agents installed on this machine at the local OTLP collector, and
+leaves every setting it does not own alone. `llm-tracker setup --disable` takes
+them back off again. `llm-tracker status` shows what is installed, whether it
+runs, and where the agents point.
+
+### 4. Generate your first tracked event
 
 After bootstrap, run one of the commands shown by the dashboard, or use one of these directly:
 
@@ -104,8 +118,8 @@ llm-tracker claude
 Repo-local fallback, useful before the symlink is on your `PATH`:
 
 ```bash
-llm-tracker codex exec "hello"
-llm-tracker claude
+./scripts/llm-tracker codex exec "hello"
+./scripts/llm-tracker claude
 ```
 
 The empty dashboard automatically checks for your first event. No fake demo data, no manual seeding.
@@ -116,7 +130,7 @@ Run all three servers in a single container for NAS or remote server deployment.
 
 ## CLI examples
 
-The wrapper runs a child command, captures usage while it runs, then prints a summary.
+The wrapper runs a child command, captures usage while it runs, then prints a summary. It reports to the collector that is already running: it never starts a service, never spins up a temporary database or collector, and never merges anything afterwards. If the collector is not reachable the child still runs, untracked, and the exit code is still the child's.
 
 ```bash
 # Interactive agents
@@ -130,6 +144,19 @@ llm-tracker codex exec "say hello in one sentence"
 llm-tracker codex exec "say hello in one sentence"
 ```
 
+The same command also covers everything that is not a tracked run:
+
+```bash
+# Components, services, agents
+llm-tracker status
+llm-tracker setup
+llm-tracker update --check
+
+# A remote server instead of a local one
+llm-tracker login --server https://app.example.com
+llm-tracker logout
+```
+
 Use `--` when passing flags to `llm-tracker` itself:
 
 ```bash
@@ -141,7 +168,7 @@ llm-tracker --proxy-env -- some-openai-compatible-cli
 llm-tracker --no-summary -- codex exec "say hello"
 ```
 
-See [docs/cli-reference.md](docs/cli-reference.md) for all flags, tracking modes, exit codes, service commands, API endpoints, and environment variables.
+See [docs/cli-reference.md](docs/cli-reference.md) for all flags, the tracking model, exit codes, service commands, API endpoints, and environment variables. Per-command behavior is in [docs/cli-refactor.md](docs/cli-refactor.md).
 
 ## Dashboard
 
@@ -175,10 +202,15 @@ Frontend-specific notes live in [frontend/README.md](frontend/README.md).
 Service commands:
 
 ```bash
-bash scripts/status.sh
-bash scripts/restart.sh
-bash scripts/stop.sh
+llm-tracker server status
+llm-tracker server restart
+llm-tracker server stop
 ```
+
+`llm-tracker server start` turns the services on, and `llm-tracker server
+bootstrap` reinstalls, rebuilds the dashboard and restarts the API so the new
+bundle is served. `llm-tracker status` is a different command: it reports the
+installed components and whether they run.
 
 Runtime files live under `~/.llm-tracker/run/`. Logs are written to `logs/`.
 
@@ -223,7 +255,7 @@ db:
   url: postgresql+psycopg://user:password@db-host:5432/llm_tracker?sslmode=require
 ```
 
-`bash scripts/start.sh` and `bash scripts/restart.sh` merge missing defaults from `config.example.yaml` into your user config without overwriting existing values.
+`llm-tracker server start` merges missing defaults from `config.example.yaml` into your user config without overwriting existing values.
 
 ## Point clients at the proxy
 
@@ -282,7 +314,7 @@ For streamed responses, the proxy records TTFT as time until the first upstream 
 
 TTFT is an operational signal, not a billing-grade metric. Each agent exposes different timing data.
 
-OpenCode and Kilo Code tracking is provided by local plugins (`plugins/opencode` and `plugins/kilo`) that emit one OTLP log record for each completed assistant message. `scripts/start.sh` and `scripts/restart.sh` run `scripts/configure-opencode-plugin.py` when `opencode` is installed and `scripts/configure-kilo-plugin.py` when `kilo` is installed, registering each built plugin with the local OTLP logs endpoint.
+OpenCode and Kilo Code tracking is provided by local plugins (`plugins/opencode` and `plugins/kilo`) that emit one OTLP log record for each completed assistant message. `llm-tracker setup` runs `scripts/configure-opencode-plugin.py` when `opencode` is installed and `scripts/configure-kilo-plugin.py` when `kilo` is installed, registering each built plugin with the local OTLP logs endpoint.
 
 ## API
 

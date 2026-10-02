@@ -25,6 +25,8 @@ graphify-out/
 # Project specific
 todo.md
 docs/*
+!docs/cli-review-fixes-handoff.md
+!docs/client-server-split-handoff.md
 .dev-env.json
 
 # Plugin build outputs

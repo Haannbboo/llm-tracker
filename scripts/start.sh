@@ -14,7 +14,6 @@ VENV_DIR="${ROOT_DIR}/.venv"
 PYTHON="${VENV_DIR}/bin/python"
 SUPERVISORD="${VENV_DIR}/bin/supervisord"
 SUPERVISORCTL="${VENV_DIR}/bin/supervisorctl"
-REQS_STAMP="${VENV_DIR}/.requirements.sha256"
 PORT_CHECKER="${ROOT_DIR}/scripts/check-service-ports.py"
 AUTO_PORT_ASSIGNER="${ROOT_DIR}/scripts/auto-assign-ports.py"
 
@@ -33,26 +32,20 @@ if [[ ! -x "${PYTHON}" ]]; then
   exit 1
 fi
 
-if [[ ! -L "${HOME}/.local/bin/llm-tracker" ]]; then
-  info "NOTE: CLI symlink missing — run scripts/bootstrap.sh to set it up"
+# ── Dependencies must already be installed ──────────────────────────
+# Installing belongs to bootstrap. start only turns services on, so it
+# refuses when the recorded requirements hash no longer matches the file.
+# shellcheck source=scripts/lib/requirements.sh
+source "${ROOT_DIR}/scripts/lib/requirements.sh"
+if ! requirements_are_current "${VENV_DIR}" "${ROOT_DIR}/requirements.txt"; then
+  fail "Dependencies are out of date (requirements.txt changed)"
+  info "run llm-tracker server bootstrap"
+  exit 1
 fi
+pass "Dependencies up to date"
 
-# ── Install deps when requirements.txt changes ─────────────────────
-if command -v shasum >/dev/null 2>&1; then
-  CURRENT_HASH="$(shasum -a 256 "${ROOT_DIR}/requirements.txt" | awk '{print $1}')"
-elif command -v sha256sum >/dev/null 2>&1; then
-  CURRENT_HASH="$(sha256sum "${ROOT_DIR}/requirements.txt" | awk '{print $1}')"
-else
-  CURRENT_HASH="$(ls -l "${ROOT_DIR}/requirements.txt" | awk '{print $5 "_" $9}')"
-fi
-SAVED_HASH="$(cat "${REQS_STAMP}" 2>/dev/null || true)"
-if [[ "${CURRENT_HASH}" != "${SAVED_HASH}" ]]; then
-  info "Installing dependencies..."
-  uv pip install --python "${PYTHON}" -r "${ROOT_DIR}/requirements.txt"
-  echo "${CURRENT_HASH}" > "${REQS_STAMP}"
-  pass "Dependencies installed"
-else
-  pass "Dependencies up to date"
+if [[ ! -x "${HOME}/.local/bin/llm-tracker" ]]; then
+  info "NOTE: llm-tracker is not on PATH — run scripts/bootstrap.sh to set it up"
 fi
 
 mkdir -p "${ROOT_DIR}/logs" "${RUNTIME_DIR}"
@@ -98,38 +91,9 @@ else
   pass "Port check passed"
 fi
 
-# Read OTLP port and host from config
-OTLP_PORT="4002"
-OTLP_HOST="localhost"
-if [[ -f "${CONFIG_PATH}" ]]; then
-  _otlp_line=$("${PYTHON}" "${ROOT_DIR}/scripts/read-otlp-config.py" "${CONFIG_PATH}" 2>/dev/null || echo "4002 localhost")
-  OTLP_PORT="${_otlp_line%% *}"
-  OTLP_HOST="${_otlp_line#* }"
-fi
-OTLP_ENDPOINT=$("${PYTHON}" "${ROOT_DIR}/scripts/read-otlp-config.py" "${CONFIG_PATH}" --endpoint 2>/dev/null || echo "http://${OTLP_HOST}:${OTLP_PORT}/v1/logs")
-
-# ── Configure agent OTLP telemetry ──────────────────────────────────
-if command -v codex >/dev/null 2>&1; then
-  CODEX_CONFIG="${HOME}/.codex/config.toml"
-  "${PYTHON}" "${ROOT_DIR}/scripts/configure-codex-settings.py" "${CODEX_CONFIG}" "${OTLP_PORT}" "${OTLP_HOST}" "${OTLP_ENDPOINT}"
-  pass "Codex configured"
-fi
-
-if command -v claude >/dev/null 2>&1; then
-  CLAUDE_SETTINGS="${HOME}/.claude/settings.json"
-  "${PYTHON}" "${ROOT_DIR}/scripts/configure-claude-settings.py" "${CLAUDE_SETTINGS}" "${OTLP_PORT}" "${OTLP_HOST}" "${OTLP_ENDPOINT}"
-  pass "Claude configured"
-fi
-
-if command -v opencode >/dev/null 2>&1; then
-  "${PYTHON}" "${ROOT_DIR}/scripts/configure-opencode-plugin.py" "${ROOT_DIR}" "${OTLP_PORT}" "${OTLP_HOST}" "${OTLP_ENDPOINT}"
-  pass "OpenCode configured"
-fi
-
-if command -v kilo >/dev/null 2>&1; then
-  "${PYTHON}" "${ROOT_DIR}/scripts/configure-kilo-plugin.py" "${ROOT_DIR}" "${OTLP_PORT}" "${OTLP_HOST}" "${OTLP_ENDPOINT}"
-  pass "Kilo Code configured"
-fi
+# Agent telemetry is the client's job now. `llm-tracker setup` points detected
+# agents at this collector, and `llm-tracker server bootstrap` reports when one is
+# installed but not wired. The server never edits user agent settings.
 
 # ── Schema migrations ───────────────────────────────────────────────
 info "Applying schema migrations..."
@@ -222,14 +186,9 @@ for prog in llm-tracker-proxy llm-tracker-api llm-tracker-otlp; do
   esac
 done
 
-# ── Restart API if frontend is built ────────────────────────────────
-if [[ -d "${ROOT_DIR}/frontend/dist" ]]; then
-  "${SUPERVISORCTL}" -c "${SUPERVISORD_CONF}" restart llm-tracker-api
-  pass "llm-tracker-api: restarted (frontend available)"
-fi
-
 # ── Final status (only when run standalone) ─────────────────────────
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
   API_PORT=$("${PYTHON}" -c "import yaml; from pathlib import Path; p = Path('${CONFIG_PATH}'); c = yaml.safe_load(p.read_text()) or {}; print(c.get('server', {}).get('api_port', c.get('server', {}).get('port', 4000) + 1))" 2>/dev/null || echo "4001")
-  final_status_ok "http://${OTLP_HOST}:${API_PORT}"
+  DISPLAY_HOST="$("${PYTHON}" "${ROOT_DIR}/scripts/read-otlp-config.py" "${CONFIG_PATH}" 2>/dev/null | awk '{print $2}' || true)"
+  final_status_ok "http://${DISPLAY_HOST:-127.0.0.1}:${API_PORT}"
 fi
