@@ -205,6 +205,7 @@ _TRUNCATE_TABLES = [
     "usage",
     "base_urls",
     "auth_tokens",
+    "devices",
     "users",
 ]
 

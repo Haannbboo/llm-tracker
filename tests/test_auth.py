@@ -144,6 +144,52 @@ def test_migrate_old_schema_creates_auth_tables(
     assert "auth_tokens" in tables
 
 
+def test_migrate_existing_auth_tokens_adds_device_link(
+    database_module, schema_migrations_module, isolated_home
+):
+    import sqlite3
+
+    from sqlalchemy import inspect
+
+    db_file = isolated_home / "usage.db"
+    with sqlite3.connect(db_file) as connection:
+        connection.execute(
+            "CREATE TABLE users (id TEXT PRIMARY KEY, email TEXT NOT NULL UNIQUE, "
+            "name TEXT, created_at BIGINT NOT NULL)"
+        )
+        connection.execute(
+            "CREATE TABLE auth_tokens (id TEXT PRIMARY KEY, user_id TEXT NOT NULL, "
+            "kind TEXT NOT NULL, device_name TEXT, token_hash TEXT NOT NULL UNIQUE, "
+            "created_at BIGINT NOT NULL, last_used_at BIGINT, revoked_at BIGINT)"
+        )
+        connection.execute(
+            "INSERT INTO users (id, email, created_at) VALUES ('u1', 'a@example.com', 1)"
+        )
+        connection.execute(
+            "INSERT INTO auth_tokens (id, user_id, kind, token_hash, created_at) "
+            "VALUES ('t1', 'u1', 'cli', 'hash', 1)"
+        )
+
+    applied = schema_migrations_module.migrate_database(str(db_file))
+    engine = database_module.get_engine(str(db_file))
+    inspector = inspect(engine)
+    assert "devices" in inspector.get_table_names()
+    assert "device_id" in {
+        column["name"] for column in inspector.get_columns("auth_tokens")
+    }
+    assert "auth_tokens.device_id" in applied
+    with engine.connect() as connection:
+        assert (
+            connection.execute(
+                text("SELECT device_id FROM auth_tokens WHERE id = 't1'")
+            ).scalar_one()
+            is None
+        )
+    assert "auth_tokens.device_id" not in schema_migrations_module.migrate_database(
+        str(db_file)
+    )
+
+
 def test_auth_me_disabled(api_module):
     response = TestClient(api_module.app).get("/auth/me")
     assert response.status_code == 200

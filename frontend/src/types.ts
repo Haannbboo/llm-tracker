@@ -315,5 +315,7 @@ export type DeviceRow = {
   device_name: string | null
   created_at: number
   last_used_at: number | null
+  client_version: string | null
+  client_commit: string | null
   current: boolean
 }

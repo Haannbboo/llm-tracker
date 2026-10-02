@@ -96,10 +96,21 @@ def _web_login(api_module, monkeypatch, client, email="a@example.com"):
     assert client.cookies.get(SESSION_COOKIE)
 
 
-def _exchange(client, code, verifier):
+def _exchange(client, code, verifier, **extra):
     return client.post(
-        "/auth/cli/exchange", json={"code": code, "code_verifier": verifier}
+        "/auth/cli/exchange",
+        json={"code": code, "code_verifier": verifier, **extra},
     )
+
+
+def _approve_and_exchange(client, device_name, **extra):
+    verifier, challenge = _pkce_pair()
+    approved = client.post(
+        "/auth/cli/start",
+        data={"code_challenge": challenge, "device_name": device_name},
+    )
+    assert approved.status_code == 200
+    return _exchange(client, _code_from_page(approved.text), verifier, **extra)
 
 
 def _code_from_page(text: str) -> str:
@@ -316,7 +327,186 @@ def test_exchange_missing_fields_400(api_module, monkeypatch, fresh_db):
     )
 
 
+def test_malformed_client_fields_422_and_leave_the_code_unusable(
+    api_module, monkeypatch, fresh_db
+):
+    # A rejected client_version must not consume the one-time code, and must
+    # not answer 400 — the CLI retries 400 with an identical body three times.
+    _enable_auth(monkeypatch)
+    client = TestClient(api_module.app)
+    _web_login(api_module, monkeypatch, client)
+    verifier, challenge = _pkce_pair()
+    approved = client.post(
+        "/auth/cli/start",
+        data={"code_challenge": challenge, "device_name": "d"},
+    )
+    code = _code_from_page(approved.text)
+
+    rejected = _exchange(
+        client,
+        code,
+        verifier,
+        installation_key="a" * 64,
+        client_version="0.1.0-rc1",
+    )
+    assert rejected.status_code == 422
+    assert rejected.json()["detail"] == "invalid client_version"
+
+    # Code survives the rejection: a corrected retry still redeems it.
+    assert (
+        _exchange(
+            client,
+            code,
+            verifier,
+            installation_key="a" * 64,
+            client_version="0.1.180",
+        ).status_code
+        == 200
+    )
+
+
 # -------------------------------------------------------- revoke-and-remint
+
+
+def test_installed_machine_relogin_rotates_both_tokens_and_revoke_stops_ingest(
+    api_module, otlp_module, monkeypatch, fresh_db
+):
+    _enable_auth(monkeypatch)
+    client = TestClient(api_module.app)
+    _web_login(api_module, monkeypatch, client)
+    installation_key = "a" * 64
+    first = _approve_and_exchange(
+        client,
+        "laptop",
+        installation_key=installation_key,
+        client_version="0.1.180",
+        client_commit="b" * 40,
+    )
+    assert first.status_code == 200
+    first_tokens = first.json()
+    device_id = first_tokens["device_id"]
+    assert device_id
+
+    second = _approve_and_exchange(
+        client,
+        "renamed-laptop",
+        installation_key=installation_key,
+        device_id=device_id,
+        client_version="0.1.181",
+        client_commit="c" * 40,
+    )
+    assert second.status_code == 200
+    second_tokens = second.json()
+    assert second_tokens["device_id"] == device_id
+    from src.auth.tokens import resolve_token
+
+    assert resolve_token(first_tokens["cli_token"]) is None
+    assert resolve_token(first_tokens["ingest_token"]) is None
+    assert resolve_token(second_tokens["cli_token"]) is not None
+    assert resolve_token(second_tokens["ingest_token"]) is not None
+
+    devices = client.get("/auth/devices").json()["devices"]
+    machine = [row for row in devices if row["kind"] == "client"]
+    assert len(machine) == 1
+    assert machine[0]["id"] == device_id
+    assert machine[0]["device_name"] == "renamed-laptop"
+    assert machine[0]["client_version"] == "0.1.181"
+    assert machine[0]["client_commit"] == "c" * 40
+
+    assert client.post(f"/auth/devices/{device_id}/revoke").status_code == 204
+    assert resolve_token(second_tokens["cli_token"]) is None
+    assert resolve_token(second_tokens["ingest_token"]) is None
+    otlp_client = TestClient(otlp_module.app)
+    rejected = otlp_client.post(
+        "/v1/logs",
+        json={},
+        headers={"x-llm-tracker-token": second_tokens["ingest_token"]},
+    )
+    assert rejected.status_code == 401
+
+
+def test_same_hostname_distinct_installations_and_exact_legacy_upgrade(
+    api_module, monkeypatch, fresh_db
+):
+    _enable_auth(monkeypatch)
+    client = TestClient(api_module.app)
+    _web_login(api_module, monkeypatch, client)
+    from src.auth.tokens import mint_token, resolve_token
+
+    old_cli, _ = mint_token("a@example.com", kind="cli", device_name="laptop")
+    old_ingest, _ = mint_token("a@example.com", kind="ingest", device_name="laptop")
+    other_cli, _ = mint_token("a@example.com", kind="cli", device_name="laptop")
+    first = _approve_and_exchange(
+        client,
+        "laptop",
+        installation_key="a" * 64,
+        prior_cli_token=old_cli,
+        prior_ingest_token=old_ingest,
+    )
+    second = _approve_and_exchange(client, "laptop", installation_key="b" * 64)
+    assert first.status_code == second.status_code == 200
+    assert first.json()["device_id"] != second.json()["device_id"]
+    assert resolve_token(old_cli) is None
+    assert resolve_token(old_ingest) is None
+    assert resolve_token(other_cli) is not None
+    machines = [
+        row
+        for row in client.get("/auth/devices").json()["devices"]
+        if row["kind"] == "client"
+    ]
+    assert len(machines) == 2
+    assert (
+        client.post(f"/auth/devices/{first.json()['device_id']}/revoke").status_code
+        == 204
+    )
+    assert resolve_token(second.json()["ingest_token"]) is not None
+
+
+def test_legacy_login_same_hostname_does_not_revoke_installed_machine(
+    api_module, monkeypatch, fresh_db
+):
+    _enable_auth(monkeypatch)
+    client = TestClient(api_module.app)
+    _web_login(api_module, monkeypatch, client)
+    installed = _approve_and_exchange(client, "laptop", installation_key="a" * 64)
+    legacy = _approve_and_exchange(client, "laptop")
+    assert installed.status_code == legacy.status_code == 200
+    from src.auth.tokens import resolve_token
+
+    assert resolve_token(installed.json()["cli_token"]) is not None
+    assert resolve_token(installed.json()["ingest_token"]) is not None
+
+
+def test_installation_key_is_scoped_to_user_and_cross_user_revoke_is_404(
+    api_module, monkeypatch, fresh_db
+):
+    _enable_auth(monkeypatch)
+    first_client = TestClient(api_module.app)
+    _web_login(api_module, monkeypatch, first_client, email="a@example.com")
+    first = _approve_and_exchange(
+        first_client, "shared-hostname", installation_key="a" * 64
+    )
+    assert first.status_code == 200
+
+    second_client = TestClient(api_module.app)
+    _web_login(api_module, monkeypatch, second_client, email="b@example.com")
+    second = _approve_and_exchange(
+        second_client,
+        "shared-hostname",
+        installation_key="a" * 64,
+        device_id=first.json()["device_id"],
+    )
+    assert second.status_code == 200
+    assert second.json()["device_id"] != first.json()["device_id"]
+    assert (
+        second_client.post(
+            f"/auth/devices/{first.json()['device_id']}/revoke"
+        ).status_code
+        == 404
+    )
+    from src.auth.tokens import resolve_token
+
+    assert resolve_token(first.json()["ingest_token"]) is not None
 
 
 def test_revoke_and_remint_same_device_only(api_module, monkeypatch, fresh_db):
