@@ -200,7 +200,12 @@ def test_login_writes_credentials_0600(monkeypatch, capsys):
     assert len(exchange_calls) == 1
     assert exchange_calls[0][1] == "https://srv.example/auth/cli/exchange"
     assert exchange_calls[0][2]["code"] == "THEONETIMECODE"
-    assert set(exchange_calls[0][2]) == {"code", "code_verifier"}
+    assert set(exchange_calls[0][2]) == {
+        "code",
+        "code_verifier",
+        "installation_key",
+        "client_version",
+    }
 
     path = auth.credentials_path()
     data = json.loads(path.read_text(encoding="utf-8"))
@@ -229,6 +234,41 @@ def test_login_retries_on_400_then_succeeds(monkeypatch, capsys):
     posts = [c for c in fake.calls if c[0] == "POST"]
     assert [p[2]["code"] for p in posts] == ["BADCODE", "GOODCODE"]
     assert "paste it again" in capsys.readouterr().err
+
+
+def test_login_registers_this_installation_across_logins_and_logout(
+    monkeypatch,
+):
+    """The installation key is stable per machine and survives logout."""
+    code, first_fake, _ = _run_login(monkeypatch, inputs=["code-one"])
+    assert code == 0
+
+    key_path = paths.installation_key_path()
+    assert stat.S_IMODE(key_path.stat().st_mode) == 0o600
+    key = key_path.read_text(encoding="utf-8").strip()
+    assert len(key) >= 43
+
+    code, second_fake, _ = _run_login(monkeypatch, inputs=["code-two"])
+    assert code == 0
+    first_body = [c for c in first_fake.calls if c[0] == "POST"][0][2]
+    second_body = [c for c in second_fake.calls if c[0] == "POST"][0][2]
+    assert first_body["installation_key"] == second_body["installation_key"] == key
+
+    assert auth.logout(keep_agents=True) == 0
+    assert key_path.read_text(encoding="utf-8").strip() == key
+    assert not paths.credentials_path().exists()
+
+
+def test_login_regenerates_a_corrupt_installation_key(monkeypatch):
+    key_path = paths.installation_key_path()
+    key_path.parent.mkdir(parents=True, exist_ok=True)
+    key_path.write_text("not-a-valid-key\n", encoding="utf-8")
+
+    code, fake, _ = _run_login(monkeypatch, inputs=["code"])
+    assert code == 0
+    body = [c for c in fake.calls if c[0] == "POST"][0][2]
+    assert body["installation_key"] != "not-a-valid-key"
+    assert key_path.read_text(encoding="utf-8").strip() == body["installation_key"]
 
 
 def test_login_three_failures_exit_1_no_credentials(monkeypatch):

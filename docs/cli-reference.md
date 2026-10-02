@@ -40,7 +40,7 @@ as a wrapper option.
 
 | Command | Component | Effect |
 |---|---|---|
-| `llm-tracker login [--server URL] [--device-name NAME] [--no-browser]` | client | Sign in and wire detected agents. Stores the server's `otlp_logs_endpoint`. |
+| `llm-tracker login [--server URL] [--device-name NAME] [--no-browser]` | client | Register this machine and sign in; wires detected agents. Persists an installation key (survives logout) so re-login rotates the machine's tokens instead of duplicating it. Stores the server's `otlp_logs_endpoint`. |
 | `llm-tracker logout [--keep-agents]` | client | Delete this machine's credentials, then un-wire the agents. |
 | `llm-tracker setup [--disable]` | client | Point detected agents at a collector, or take llm-tracker's telemetry keys back off. |
 | `llm-tracker status [--json]` | either | Report installed components, whether they run, and where agents point. |

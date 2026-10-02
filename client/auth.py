@@ -1,7 +1,9 @@
 """Sign-in, credentials, and sign-out for this machine.
 
 Credentials live in ``$LLM_TRACKER_HOME/credentials.json`` with mode 0600.
-The client stores separate CLI and ingestion tokens returned by the server.
+The client stores separate CLI and ingestion tokens returned by the server,
+plus a machine-scoped installation key (``installation_key`` file) that
+registers this installation with the server across re-logins.
 """
 
 from __future__ import annotations
@@ -10,6 +12,7 @@ import base64
 import hashlib
 import json
 import os
+import re
 import secrets
 import socket
 import sys
@@ -21,7 +24,14 @@ from urllib.parse import urlencode, urlparse
 
 import httpx
 
-from client.paths import credentials_path, display_endpoint, read_object
+from client.paths import (
+    client_commit,
+    client_version,
+    credentials_path,
+    display_endpoint,
+    installation_key_path,
+    read_object,
+)
 from protocol import CURRENT_GENERATION
 
 
@@ -60,6 +70,26 @@ def _pkce_pair() -> tuple[str, str]:
     digest = hashlib.sha256(verifier.encode("ascii")).digest()
     challenge = base64.urlsafe_b64encode(digest).rstrip(b"=").decode("ascii")
     return verifier, challenge
+
+
+def _load_or_create_installation_key() -> str:
+    """This machine's stable secret. Re-login rotates tokens; the key stays.
+
+    An unreadable or malformed file is regenerated, so a broken file can never
+    wedge login — it only costs the machine its device history.
+    """
+    path = installation_key_path()
+    try:
+        key = path.read_text(encoding="utf-8").strip()
+    except FileNotFoundError:
+        key = ""
+    if not re.fullmatch(r"[A-Za-z0-9_-]{43,128}", key):
+        key = secrets.token_urlsafe(32)
+        path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(key + "\n")
+    return key
 
 
 def normalize_server_url(raw: str) -> str:
@@ -210,6 +240,12 @@ def login(
     if check_server(server) != 0:
         return 1
 
+    try:
+        installation_key = _load_or_create_installation_key()
+    except OSError as exc:
+        print(f"llm-tracker: cannot store the installation key: {exc}", file=sys.stderr)
+        return 1
+
     verifier, challenge = _pkce_pair()
     device_name = _device_name(device_name_arg or socket.gethostname())
     login_url = f"{server}/auth/cli/start?" + urlencode(
@@ -221,7 +257,14 @@ def login(
     ):
         webbrowser.open(login_url)
 
-    body = {"code_verifier": verifier}
+    body: dict[str, str] = {
+        "code_verifier": verifier,
+        "installation_key": installation_key,
+        "client_version": client_version(),
+    }
+    commit = client_commit()
+    if commit:
+        body["client_commit"] = commit
 
     for attempt in range(3):
         try:

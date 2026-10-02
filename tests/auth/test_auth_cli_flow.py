@@ -97,6 +97,7 @@ def _web_login(api_module, monkeypatch, client, email="a@example.com"):
 
 
 def _exchange(client, code, verifier, **extra):
+    extra.setdefault("installation_key", secrets.token_urlsafe(32))
     return client.post(
         "/auth/cli/exchange",
         json={"code": code, "code_verifier": verifier, **extra},
@@ -123,7 +124,10 @@ def _token_rows(fresh_db):
     engine = fresh_db.database_module.get_engine(fresh_db.db_path)
     with engine.connect() as conn:
         return conn.execute(
-            text("SELECT kind, device_name, revoked_at FROM auth_tokens")
+            text(
+                "SELECT kind, device_name, device_id IS NOT NULL, revoked_at"
+                " FROM auth_tokens"
+            )
         ).all()
 
 
@@ -137,7 +141,8 @@ def test_cli_routes_404_when_auth_disabled(api_module):
     assert client.post("/auth/cli/start", data=params).status_code == 404
     assert (
         client.post(
-            "/auth/cli/exchange", json={"code": "c", "code_verifier": "v"}
+            "/auth/cli/exchange",
+            json={"code": "c", "code_verifier": "v", "installation_key": "a" * 64},
         ).status_code
         == 404
     )
@@ -185,20 +190,21 @@ def test_session_shortcut_confirm_and_exchange(api_module, monkeypatch, fresh_db
     body = exchanged.json()
     assert body["user"]["email"] == "a@example.com"
     assert body["device_name"] == "<evil>host"
+    assert body["device_id"]
     assert body["cli_token"].startswith("llmt_cli_")
     assert body["ingest_token"].startswith("llmt_ingest_")
     assert body["otlp"]["logs_endpoint"].endswith("/v1/logs")
     assert body["otlp"]["endpoint"]
 
     kinds = sorted(
-        (kind, device, revoked is None)
-        for kind, device, revoked in _token_rows(fresh_db)
+        (kind, device, linked, revoked is None)
+        for kind, device, linked, revoked in _token_rows(fresh_db)
     )
-    # 1 web (from _web_login) + 1 cli + 1 ingest, none revoked.
+    # 1 web (from _web_login, unlinked) + 1 linked cli + 1 linked ingest.
     assert kinds == [
-        ("cli", "<evil>host", True),
-        ("ingest", "<evil>host", True),
-        ("web", "browser", True),
+        ("cli", "<evil>host", True, True),
+        ("ingest", "<evil>host", True, True),
+        ("web", "browser", False, True),
     ]
 
 
@@ -315,13 +321,23 @@ def test_exchange_unknown_code_fails(api_module, monkeypatch, fresh_db):
     assert _exchange(client, "no-such-code", "v").status_code == 400
 
 
-def test_exchange_missing_fields_400(api_module, monkeypatch, fresh_db):
+def test_exchange_missing_fields_rejected(api_module, monkeypatch, fresh_db):
     _enable_auth(monkeypatch)
     client = TestClient(api_module.app)
-    assert client.post("/auth/cli/exchange", json={}).status_code == 400
+    # installation_key is a required request field.
+    assert client.post("/auth/cli/exchange", json={}).status_code == 422
     assert (
         client.post(
-            "/auth/cli/exchange", json={"code": "ABC", "code_verifier": ""}
+            "/auth/cli/exchange",
+            json={"code": "ABC", "code_verifier": ""},
+        ).status_code
+        == 422
+    )
+    # Present but empty code fields are the handler's 400.
+    assert (
+        client.post(
+            "/auth/cli/exchange",
+            json={"code": "", "code_verifier": "", "installation_key": "a" * 64},
         ).status_code
         == 400
     )
@@ -425,30 +441,19 @@ def test_installed_machine_relogin_rotates_both_tokens_and_revoke_stops_ingest(
     assert rejected.status_code == 401
 
 
-def test_same_hostname_distinct_installations_and_exact_legacy_upgrade(
-    api_module, monkeypatch, fresh_db
-):
+def test_same_hostname_distinct_installations(api_module, monkeypatch, fresh_db):
     _enable_auth(monkeypatch)
     client = TestClient(api_module.app)
     _web_login(api_module, monkeypatch, client)
-    from src.auth.tokens import mint_token, resolve_token
+    from src.auth.tokens import resolve_token
 
-    old_cli, _ = mint_token("a@example.com", kind="cli", device_name="laptop")
-    old_ingest, _ = mint_token("a@example.com", kind="ingest", device_name="laptop")
-    other_cli, _ = mint_token("a@example.com", kind="cli", device_name="laptop")
-    first = _approve_and_exchange(
-        client,
-        "laptop",
-        installation_key="a" * 64,
-        prior_cli_token=old_cli,
-        prior_ingest_token=old_ingest,
-    )
+    first = _approve_and_exchange(client, "laptop", installation_key="a" * 64)
     second = _approve_and_exchange(client, "laptop", installation_key="b" * 64)
     assert first.status_code == second.status_code == 200
     assert first.json()["device_id"] != second.json()["device_id"]
-    assert resolve_token(old_cli) is None
-    assert resolve_token(old_ingest) is None
-    assert resolve_token(other_cli) is not None
+    # A second installation never revokes the first one's credentials.
+    assert resolve_token(first.json()["cli_token"]) is not None
+    assert resolve_token(first.json()["ingest_token"]) is not None
     machines = [
         row
         for row in client.get("/auth/devices").json()["devices"]
@@ -460,21 +465,7 @@ def test_same_hostname_distinct_installations_and_exact_legacy_upgrade(
         == 204
     )
     assert resolve_token(second.json()["ingest_token"]) is not None
-
-
-def test_legacy_login_same_hostname_does_not_revoke_installed_machine(
-    api_module, monkeypatch, fresh_db
-):
-    _enable_auth(monkeypatch)
-    client = TestClient(api_module.app)
-    _web_login(api_module, monkeypatch, client)
-    installed = _approve_and_exchange(client, "laptop", installation_key="a" * 64)
-    legacy = _approve_and_exchange(client, "laptop")
-    assert installed.status_code == legacy.status_code == 200
-    from src.auth.tokens import resolve_token
-
-    assert resolve_token(installed.json()["cli_token"]) is not None
-    assert resolve_token(installed.json()["ingest_token"]) is not None
+    assert resolve_token(first.json()["ingest_token"]) is None
 
 
 def test_installation_key_is_scoped_to_user_and_cross_user_revoke_is_404(
@@ -509,7 +500,9 @@ def test_installation_key_is_scoped_to_user_and_cross_user_revoke_is_404(
     assert resolve_token(first.json()["ingest_token"]) is not None
 
 
-def test_revoke_and_remint_same_device_only(api_module, monkeypatch, fresh_db):
+def test_exchange_creates_device_pair_and_leaves_unlinked_tokens_alone(
+    api_module, monkeypatch, fresh_db
+):
     _enable_auth(monkeypatch)
     client = TestClient(api_module.app)
     _web_login(api_module, monkeypatch, client)
@@ -529,13 +522,17 @@ def test_revoke_and_remint_same_device_only(api_module, monkeypatch, fresh_db):
     assert _exchange(client, code, verifier).status_code == 200
 
     rows = {
-        (kind, device): revoked is None
-        for kind, device, revoked in _token_rows(fresh_db)
+        (kind, device, linked): revoked is None
+        for kind, device, linked, revoked in _token_rows(fresh_db)
     }
-    assert rows[("cli", "myhost")]  # freshly reminted
-    assert rows[("ingest", "myhost")]
-    assert rows[("cli", "otherhost")]  # other device untouched
-    assert rows[("web", "browser")]  # web session untouched
+    # The exchange registered a device: linked cli + ingest pair.
+    assert rows[("cli", "myhost", True)]
+    assert rows[("ingest", "myhost", True)]
+    # Operator-minted unlinked tokens are untouched by client logins.
+    assert rows[("cli", "myhost", False)]
+    assert rows[("ingest", "myhost", False)]
+    assert rows[("cli", "otherhost", False)]
+    assert rows[("web", "browser", False)]
 
 
 # ------------------------------------------------------------- validation

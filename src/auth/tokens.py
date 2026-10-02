@@ -237,8 +237,6 @@ def mint_device_tokens(
     *,
     client_version: str | None = None,
     client_commit: str | None = None,
-    prior_cli_token: str | None = None,
-    prior_ingest_token: str | None = None,
     db_path: str | None = None,
 ) -> tuple[str, str, Device]:
     """Create or rotate a machine's CLI and ingestion credentials atomically."""
@@ -292,24 +290,6 @@ def mint_device_tokens(
                     )
                     .values(revoked_at=now)
                 )
-                # Upgrade from unlinked legacy credentials without revoking
-                # another installation that happens to share the hostname.
-                for kind, prior in (
-                    ("cli", prior_cli_token),
-                    ("ingest", prior_ingest_token),
-                ):
-                    if prior:
-                        session.execute(
-                            sa_update(AuthToken)
-                            .where(
-                                AuthToken.user_id == user_id,
-                                AuthToken.kind == kind,
-                                AuthToken.device_id.is_(None),
-                                AuthToken.token_hash == hash_token(prior),
-                                AuthToken.revoked_at.is_(None),
-                            )
-                            .values(revoked_at=now)
-                        )
                 session.add_all(
                     [
                         AuthToken(
@@ -364,32 +344,3 @@ def revoke_device(device_id: str, user_id: str, db_path: str | None = None) -> b
             )
         session.commit()
     return changed
-
-
-def revoke_device_tokens(
-    user_id: str,
-    device_name: str,
-    kinds: tuple[str, ...] = ("cli", "ingest"),
-    db_path: str | None = None,
-) -> int:
-    """Revoke the user's active tokens for one device (re-login cleanup).
-
-    `web` tokens are never device tokens; operator-minted rows with a NULL
-    device_name are untouched (SQL `=` never matches NULL).
-    """
-    engine = get_engine(db_path)
-    with Session(engine, expire_on_commit=False) as session:
-        result = session.execute(
-            sa_update(AuthToken)
-            .where(
-                AuthToken.user_id == user_id,
-                AuthToken.device_name == device_name,
-                AuthToken.device_id.is_(None),
-                AuthToken.kind.in_(kinds),
-                AuthToken.revoked_at.is_(None),
-            )
-            .values(revoked_at=_now_micros())
-        )
-        changed = result.rowcount  # type: ignore[attr-defined]
-        session.commit()
-    return int(changed)

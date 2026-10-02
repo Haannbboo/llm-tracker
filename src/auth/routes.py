@@ -24,7 +24,6 @@ from .tokens import (
     mint_token,
     resolve_token,
     revoke_device,
-    revoke_device_tokens,
     revoke_token,
     update_user_name,
 )
@@ -291,7 +290,7 @@ def auth_logout(request: Request, user: User | None = Depends(get_current_user))
 
 @router.get("/auth/devices")
 def auth_devices(request: Request, user: User | None = Depends(get_current_user)):
-    """List installed machines and legacy browser/token sessions."""
+    """List installed machines, plus browser and operator-minted sessions."""
     if user is None:
         raise HTTPException(status_code=404, detail="not found")
     auth_token = getattr(request.state, "auth_token", None)
@@ -361,11 +360,9 @@ class CliExchangeRequest(BaseModel):
     # Capped: this is a public (auth-gated) endpoint taking unbounded strings.
     code: str | None = Field(default=None, max_length=256)
     code_verifier: str | None = Field(default=None, max_length=256)
-    installation_key: str | None = Field(default=None, max_length=128)
+    installation_key: str = Field(min_length=43, max_length=128)
     client_version: str | None = Field(default=None, max_length=64)
     client_commit: str | None = Field(default=None, max_length=40)
-    prior_cli_token: str | None = Field(default=None, max_length=128)
-    prior_ingest_token: str | None = Field(default=None, max_length=128)
 
 
 def _sanitize_device_name(raw: str | None) -> str:
@@ -529,17 +526,16 @@ def auth_cli_exchange(body: CliExchangeRequest):
     # client_version/client_commit would otherwise burn a one-time code the
     # user then has to re-request. 422 (not 400) so the CLI's "wrong code,
     # paste again" retry loop stops instead of re-sending an identical body.
-    if body.installation_key is not None:
-        if not re.fullmatch(r"[A-Za-z0-9_-]{43,128}", body.installation_key):
-            raise HTTPException(status_code=422, detail="invalid installation_key")
-        if body.client_version is not None and not re.fullmatch(
-            r"\d+\.\d+\.\d+", body.client_version
-        ):
-            raise HTTPException(status_code=422, detail="invalid client_version")
-        if body.client_commit is not None and not re.fullmatch(
-            r"[0-9a-fA-F]{40}", body.client_commit
-        ):
-            raise HTTPException(status_code=422, detail="invalid client_commit")
+    if not re.fullmatch(r"[A-Za-z0-9_-]{43,128}", body.installation_key):
+        raise HTTPException(status_code=422, detail="invalid installation_key")
+    if body.client_version is not None and not re.fullmatch(
+        r"\d+\.\d+\.\d+", body.client_version
+    ):
+        raise HTTPException(status_code=422, detail="invalid client_version")
+    if body.client_commit is not None and not re.fullmatch(
+        r"[0-9a-fA-F]{40}", body.client_commit
+    ):
+        raise HTTPException(status_code=422, detail="invalid client_commit")
     entry = auth_google.pop_cli_code(_normalize_cli_code(body.code))
     if entry is None:
         raise HTTPException(status_code=400, detail="invalid code")
@@ -552,28 +548,18 @@ def auth_cli_exchange(body: CliExchangeRequest):
     if user is None:
         raise HTTPException(status_code=400, detail="invalid code")
     device_name = _sanitize_device_name(str(entry.get("device_name") or ""))
-    if body.installation_key is not None:
-        cli_token, ingest_token, device = mint_device_tokens(
-            user.id,
-            body.installation_key,
-            device_name,
-            client_version=body.client_version,
-            client_commit=body.client_commit,
-            prior_cli_token=body.prior_cli_token,
-            prior_ingest_token=body.prior_ingest_token,
-        )
-    else:
-        # Keep the pre-installation clients' exchange behavior until they are
-        # replaced. Their unlinked tokens remain revocable individually.
-        revoke_device_tokens(user.id, device_name)
-        cli_token, _ = mint_token(user.email, kind="cli", device_name=device_name)
-        ingest_token, _ = mint_token(user.email, kind="ingest", device_name=device_name)
-        device = None
+    cli_token, ingest_token, device = mint_device_tokens(
+        user.id,
+        body.installation_key,
+        device_name,
+        client_version=body.client_version,
+        client_commit=body.client_commit,
+    )
     urls = resolve_server_urls(CONFIG)
     return {
         "user": {"id": user.id, "email": user.email, "name": user.name},
         "device_name": device_name,
-        "device_id": device.id if device is not None else None,
+        "device_id": device.id,
         "cli_token": cli_token,
         "ingest_token": ingest_token,
         "otlp": {

@@ -43,6 +43,11 @@ def credentials_path() -> Path:
     return tracker_home() / "credentials.json"
 
 
+def installation_key_path() -> Path:
+    """Machine-scoped installation secret; it survives logout and re-login."""
+    return tracker_home() / "installation_key"
+
+
 def config_path() -> Path:
     return Path(
         os.environ.get("LLM_TRACKER_CONFIG", "~/.llm-tracker/config.yaml")
