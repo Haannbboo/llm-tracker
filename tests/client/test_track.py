@@ -357,9 +357,45 @@ def test_poll_summary_surfaces_api_error(capsys):
         after_ts=0,
         options=track.RunOptions(wait_ms=0),
     )
-
     assert result is None
     assert "llm-tracker login" in capsys.readouterr().err
+
+
+def test_poll_summary_tolerates_malformed_summary_payload(monkeypatch):
+    class MalformedClient:
+        def __init__(self):
+            self.payloads = [
+                {"summary": None},
+                {"summary": {"requests": 1}},
+            ]
+            self.watermark_calls = 0
+
+        def get_run_summary(self, *, after_ts, until_ts=None):
+            return self.payloads.pop(0)
+
+        def get_high_watermark(self):
+            self.watermark_calls += 1
+            return 12
+
+    monkeypatch.setattr(track.time, "sleep", lambda seconds: None)
+    client = MalformedClient()
+
+    summary = track.poll_summary(
+        client,
+        after_ts=10,
+        options=track.RunOptions(wait_ms=0),
+    )
+
+    assert summary["summary"]["requests"] == 1
+    assert client.watermark_calls == 1
+
+
+def test_format_human_summary_tolerates_null_summary():
+    assert (
+        track.format_human_summary({"summary": None})
+        == "No llm-tracker usage recorded after the starting watermark.\n"
+        "Concurrent runs are included; delayed events may fall outside this window.\n"
+    )
 
 
 # ----------------------------------------------------------------- run + exit

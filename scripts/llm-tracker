@@ -202,7 +202,8 @@ run_server() {
   for arg in "$@"; do
     [[ "$arg" == "--no-banner" ]] || server_args+=("$arg")
   done
-  set -- "${server_args[@]}"
+  # ${var[@]+"${var[@]}"}: an empty array must not trip set -u on bash 3.2.
+  set -- ${server_args[@]+"${server_args[@]}"}
   local sub="${1:-}"
   if [[ -z "$sub" || "$sub" == "-h" || "$sub" == "--help" ]]; then
     cat >&2 <<EOF

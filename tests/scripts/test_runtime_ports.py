@@ -533,9 +533,7 @@ def test_start_creates_config_from_example_and_leaves_home_agents_alone(tmp_path
     (home / ".codex" / "config.toml").write_text('model = "gpt-5"\n', encoding="utf-8")
 
     result, output = _run_start(fake_repo, env)
-    # start.sh's standalone status line trips over an unbound OTLP_HOST
-    # (scripts/start.sh:199), so only the effects before it are asserted here.
-    assert result.returncode in (0, 1), output
+    assert result.returncode == 0, output
     assert "Config created" in output
     assert "Port check passed" in output
 
@@ -571,7 +569,7 @@ def test_start_records_auto_assigned_ports_and_leaves_home_agents_alone(tmp_path
     (home / ".codex").mkdir()
 
     result, output = _run_start(fake_repo, env)
-    assert result.returncode in (0, 1), output  # see the OTLP_HOST note above
+    assert result.returncode == 0, output
     assert "Ports auto-assigned" in output
 
     config = yaml.safe_load(

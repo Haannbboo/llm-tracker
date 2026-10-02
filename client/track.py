@@ -184,7 +184,9 @@ def poll_summary(
             break
         time.sleep(max(options.poll_ms, 1) / 1000)
 
-    if latest_summary and latest_summary.get("summary", {}).get("requests", 0) > 0:
+    totals = latest_summary.get("summary") if isinstance(latest_summary, dict) else None
+    requests = totals.get("requests") if isinstance(totals, dict) else None
+    if isinstance(requests, (int, float)) and requests > 0:
         return latest_summary
 
     # Nothing arrived within the wait window. Re-anchor on the current
@@ -283,6 +285,8 @@ def _format_ms(value: Any) -> str:
 
 def format_human_summary(summary: dict[str, Any]) -> str:
     totals = summary.get("summary", {})
+    if not isinstance(totals, dict):
+        totals = {}
     requests = int(totals.get("requests", 0) or 0)
     if requests == 0:
         return (

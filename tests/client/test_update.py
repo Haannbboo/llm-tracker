@@ -107,6 +107,16 @@ def test_client_update_runs_installer_with_login_skipped(
     assert installer_env["LLM_TRACKER_SERVER"] == "https://host.test"
 
 
+def test_client_update_rejects_invalid_stored_server_url(monkeypatch) -> None:
+    from client import auth
+
+    for stored in ("http://evil.example", "not a url", None, ""):
+        monkeypatch.setattr(
+            auth, "load_credentials", lambda stored=stored: {"server_url": stored}
+        )
+        assert update.update_client() == 1, stored
+
+
 def test_update_parser_no_longer_accepts_plugin_rebuild_flag() -> None:
     parser = cli._build_subcommand("update")
 

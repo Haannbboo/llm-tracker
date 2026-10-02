@@ -55,9 +55,13 @@ def update_server(*, check: bool, dry_run: bool) -> int:
 
 def update_client() -> int:
     """Install the newest client snapshot without starting a new login."""
-    from client.auth import load_credentials
+    from client.auth import load_credentials, normalize_server_url
 
-    server_url = (load_credentials() or {}).get("server_url")
+    raw = (load_credentials() or {}).get("server_url")
+    try:
+        server_url = normalize_server_url(raw) if isinstance(raw, str) and raw else None
+    except ValueError:
+        server_url = None
     if not server_url:
         print(
             "llm-tracker: cannot update the client without a server; run "

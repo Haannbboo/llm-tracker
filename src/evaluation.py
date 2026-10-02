@@ -14,6 +14,7 @@ from contextlib import closing
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 from sqlalchemy.orm import Session
 
@@ -652,15 +653,51 @@ def _build_claude_evaluator_invocation(prompt: str) -> AgentInvocation:
     )
 
 
+def _tracker_proxy_origins() -> set[tuple[str, str, int]]:
+    """Origins of this server's own proxy, matched against base-URL env vars."""
+    try:
+        from src.config.app import load_config
+        from src.config.server_config import resolve_server_urls
+
+        proxy = urlparse(resolve_server_urls(load_config())["proxy_url"])
+    except Exception:
+        return set()
+    if not proxy.hostname or proxy.port is None:
+        return set()
+    return {(proxy.scheme, proxy.hostname, proxy.port)}
+
+
+def _points_at_tracker_proxy(value: str, origins: set[tuple[str, str, int]]) -> bool:
+    try:
+        parsed = urlparse(value)
+    except ValueError:
+        return False
+    if not parsed.hostname or parsed.scheme not in ("http", "https"):
+        return False
+    port = parsed.port or (443 if parsed.scheme == "https" else 80)
+    return any(
+        parsed.scheme == scheme and parsed.hostname == host and port == proxy_port
+        for scheme, host, proxy_port in origins
+    )
+
+
 def _evaluator_env(overrides: dict[str, str] | None) -> dict[str, str]:
     """Environment for the evaluator subprocess.
 
     The evaluator's own LLM call must never be recorded as the user's usage. The
     OTLP exporters are switched off by the invocation builders; a proxy base URL
-    inherited from the parent shell is the other recording path, so it is
-    dropped here too.
+    inherited from the parent shell is the other recording path, so only values
+    that point at this server's proxy are dropped here. Other gateway endpoints
+    (LiteLLM, Azure, regional bases) stay, because losing them would send the
+    evaluator to the vendor default and fail authentication.
     """
-    env = {k: v for k, v in os.environ.items() if k not in _UNTRACKED_ENV_KEYS}
+    origins = _tracker_proxy_origins()
+    env = {
+        key: value
+        for key, value in os.environ.items()
+        if key not in _UNTRACKED_ENV_KEYS
+        or (origins and not _points_at_tracker_proxy(value, origins))
+    }
     if overrides:
         env.update(overrides)
     return env

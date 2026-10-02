@@ -58,6 +58,22 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+# An OTEL endpoint override wins over server.otlp_port at bind time
+# (resolve_otlp_host_port), so --otlp-port would be saved but never take effect.
+if [[ -n "${OTLP_PORT}" && -n "${OTEL_EXPORTER_OTLP_LOGS_ENDPOINT:-}" ]]; then
+  if "${PYTHON}" - "${OTEL_EXPORTER_OTLP_LOGS_ENDPOINT}" <<'PY'
+import sys
+from urllib.parse import urlparse
+
+parsed = urlparse(sys.argv[1])
+raise SystemExit(0 if parsed.hostname and parsed.port else 1)
+PY
+  then
+    fail "OTEL_EXPORTER_OTLP_LOGS_ENDPOINT is set, so the collector keeps binding to it and --otlp-port would not take effect. Unset the endpoint (and restart supervisord) or bake the port into the endpoint."
+    exit 1
+  fi
+fi
+
 # ── Schema migrations ───────────────────────────────────────────────
 # The one thing a reload must not skip: new code against an old schema.
 step_header "Applying schema migrations"

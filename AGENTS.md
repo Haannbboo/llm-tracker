@@ -248,4 +248,4 @@ Default labels: `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-huma
 ### Domain docs
 
 Single-context repo. Use root README plus `.agents/commands/llm-tracker.md`; ADRs may live under `docs/adr/` only for durable architecture decisions.
-For the planned hosted client/server split, read `docs/client-server-split-handoff.md` before implementation.
+For the hosted client/server split design, read `docs/client-server-split-handoff.md`.
