@@ -10,6 +10,7 @@ from __future__ import annotations
 import threading
 from typing import Any
 
+from ..utils import normalize_model_name, normalize_provider_name
 from ..utils import replace_contents as _replace_contents
 from .models import (
     ModelCost,
@@ -17,7 +18,6 @@ from .models import (
     ResolvedCost,
     ResolvedCosts,
     build_segment_index,
-    normalize_model_cost_key,
 )
 from .sources.base import FetchedSource
 
@@ -155,13 +155,15 @@ def resolve_all_costs(
     ):
         for entry in source.entries:
             resolved = ResolvedCost(cost=entry.cost, source=source.name)
+            key = normalize_model_name(entry.key)
             if entry.provider:
-                provider_costs.setdefault(entry.provider, {})[entry.key] = resolved
+                provider = normalize_provider_name(entry.provider)
+                provider_costs.setdefault(provider, {})[key] = resolved
             else:
-                global_costs[entry.key] = resolved
+                global_costs[key] = resolved
 
     for model_name, model_config in config.get("models", {}).items():
-        normalized_model = normalize_model_cost_key(model_name)
+        normalized_model = normalize_model_name(model_name)
         base_cost = global_costs.get(normalized_model)
         model_cost = _parse_model_cost(
             model_config,
@@ -176,10 +178,11 @@ def resolve_all_costs(
     for provider_name, provider in config.get("providers", {}).items():
         if not isinstance(provider, dict):
             continue
+        provider_name = normalize_provider_name(provider_name)
         models = provider.get("models", {})
         if isinstance(models, dict):
             for model_name, model_config in models.items():
-                normalized_model = normalize_model_cost_key(model_name)
+                normalized_model = normalize_model_name(model_name)
                 base_cost = provider_costs.get(provider_name, {}).get(
                     normalized_model
                 ) or global_costs.get(normalized_model)

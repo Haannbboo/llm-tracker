@@ -12,6 +12,8 @@ from urllib.parse import urlparse
 
 import tomllib
 
+from .utils import normalize_provider_name
+
 # URL-based provider mapping rules (checked in order)
 PROVIDER_RULES: list[tuple[str, str]] = [
     ("api.minimaxi", "MiniMax"),
@@ -209,7 +211,9 @@ def parse_provider_metadata(
     if provider == "unknown":
         provider = PROVIDER_DEFAULTS.get(agent, "unknown")
 
-    return ProviderMetadata(provider=provider, base_url=base_url, source=source)
+    return ProviderMetadata(
+        provider=normalize_provider_name(provider), base_url=base_url, source=source
+    )
 
 
 def parse_provider(agent: str) -> str:

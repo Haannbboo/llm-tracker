@@ -6,6 +6,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from ..utils import normalize_provider_name
 from .engine import get_engine
 from .models import BaseUrl
 
@@ -34,6 +35,8 @@ def get_or_create_base_url(
     source: str | None = None,
 ) -> int:
     """Resolve a stable `base_urls.id`, updating missing metadata when possible."""
+    if provider_name is not None:
+        provider_name = normalize_provider_name(provider_name)
     engine = get_engine(db_path)
 
     for attempt in range(2):

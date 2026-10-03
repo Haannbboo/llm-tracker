@@ -5,6 +5,7 @@ from decimal import Decimal
 
 from src.config.app import PROVIDER_MAP
 
+from ..utils import normalize_model_name, normalize_provider_name
 from .maps import (
     MAPS_LOCK,
     MODEL_COST_SOURCES,
@@ -18,7 +19,6 @@ from .models import (
     ModelCost,
     ModelTier,
     build_segment_index,
-    normalize_model_cost_key,
     resolve_effective_cost,
 )
 
@@ -26,7 +26,7 @@ from .models import (
 def get_provider_price_multiplier(provider: str | None) -> Decimal:
     if not provider:
         return Decimal("1.0")
-    provider_config = PROVIDER_MAP.get(provider)
+    provider_config = PROVIDER_MAP.get(normalize_provider_name(provider))
     if provider_config is None:
         return Decimal("1.0")
     return Decimal(str(provider_config.price_multiplier))
@@ -57,6 +57,8 @@ def resolve_cost_match(
     the matching ``*_sources`` maps so provenance stays consistent with them;
     otherwise the runtime source maps are used.
     """
+    if provider is not None:
+        provider = normalize_provider_name(provider)
     using_runtime_maps = model_costs is None
     model_costs = MODEL_COSTS if model_costs is None else model_costs
     provider_model_costs = (
@@ -68,7 +70,7 @@ def resolve_cost_match(
         if provider_model_cost_sources is None
         else provider_model_cost_sources
     )
-    normalized_model = normalize_model_cost_key(model)
+    normalized_model = normalize_model_name(model)
     provider_costs = (
         provider_model_costs.get(provider, {}) if provider is not None else {}
     )

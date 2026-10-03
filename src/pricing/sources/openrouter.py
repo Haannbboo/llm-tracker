@@ -12,7 +12,8 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from ..models import ModelCost, ModelTier, TimeRate, normalize_model_cost_key
+from ...utils import normalize_model_name
+from ..models import ModelCost, ModelTier, TimeRate
 from .base import (
     REQUEST_TIMEOUT,
     SourceEntry,
@@ -205,7 +206,7 @@ def _parse_model_entry(entry: dict) -> tuple[str, ModelCost] | None:
         ),
         time_rates=tuple(time_rates),
     )
-    return normalize_model_cost_key(model_id), cost
+    return normalize_model_name(model_id), cost
 
 
 def parse_openrouter_json(data: object) -> dict[str, ModelCost]:

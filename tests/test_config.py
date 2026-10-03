@@ -46,6 +46,17 @@ providers: {}
     assert config["models"] == {}
 
 
+def test_load_config_normalizes_provider_keys(config_module, tmp_path):
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        "providers:\n  OpenAI:\n    base_url: https://api.example.com/v1\n",
+        encoding="utf-8",
+    )
+    config = config_module.load_config(str(config_path))
+    assert set(config["providers"]) == {"openai"}
+    assert config["providers"]["openai"]["base_url"] == "https://api.example.com/v1"
+
+
 def test_load_config_rejects_nonpositive_record_cap(config_module, tmp_path):
     """A 0/negative record cap would silently drop every export; default wins."""
     config_path = tmp_path / "config.yaml"
@@ -166,7 +177,7 @@ def test_build_maps_parses_provider_price_multiplier(config_module):
         {
             "models": {"alpha-1": {}},
             "providers": {
-                "alpha": {
+                "AlPhA": {
                     "base_url": "https://alpha.example/v1",
                     "price_multiplier": 1.35,
                     "models": {"alpha-1": {}},
@@ -202,6 +213,48 @@ def test_build_maps_allows_provider_without_models(config_module):
         api_key="empty-key",
     )
     assert model_map == {}
+
+
+def test_build_maps_skips_disabled_provider(config_module):
+    provider_map, model_map = config_module.build_maps(
+        {
+            "models": {},
+            "providers": {
+                "live": {
+                    "base_url": "https://live.example/v1",
+                    "models": {"live-1": {}},
+                },
+                "paused": {
+                    "enabled": False,
+                    "base_url": "https://paused.example/v1",
+                    "api_key": "paused-key",
+                    "models": {"paused-1": {}},
+                },
+            },
+        }
+    )
+
+    assert "paused" not in provider_map
+    assert "paused-1" not in model_map
+    assert provider_map["live"].name == "live"
+    assert model_map["live-1"].name == "live"
+
+
+def test_build_maps_treats_missing_enabled_as_enabled(config_module):
+    provider_map, _ = config_module.build_maps(
+        {
+            "models": {},
+            "providers": {
+                "alpha": {
+                    "base_url": "https://alpha.example/v1",
+                    "enabled": True,
+                    "models": {"alpha-1": {}},
+                },
+            },
+        }
+    )
+
+    assert provider_map["alpha"].name == "alpha"
 
 
 def test_build_maps_normalizes_empty_api_key_to_none(config_module):

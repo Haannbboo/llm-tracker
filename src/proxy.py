@@ -30,7 +30,7 @@ from src.config.models import ProviderConfig
 from .auth import _require_local_profile
 from .database import init_db
 from .recorder import record_tool_call, record_usage
-from .utils import extract_usage, find_stream_usage
+from .utils import extract_usage, find_stream_usage, normalize_provider_name
 
 REQUEST_TIMEOUT_SECONDS = 300
 logger = logging.getLogger(__name__)
@@ -111,6 +111,7 @@ def resolve_provider(model: str) -> tuple[ProviderConfig, str]:
     for sep in ("/", "."):
         if sep in model:
             provider_name, upstream_model = model.split(sep, 1)
+            provider_name = normalize_provider_name(provider_name)
             if provider_name in PROVIDER_MAP:
                 return PROVIDER_MAP[provider_name], upstream_model
 
@@ -462,7 +463,7 @@ async def forward(request: Request, path: str):
             headers=headers,
             body=body,
             provider=provider,
-            model=model,
+            model=upstream_model,
             client_source=client_source,
             client_ip=client_ip,
             path=path,
@@ -495,7 +496,7 @@ async def forward(request: Request, path: str):
     tool_calls = extract_tool_calls(response_json) if response_json else []
     usage = record_usage(
         provider=provider.name,
-        model=model,
+        model=upstream_model,
         client_source=client_source,
         session_id=None,
         endpoint=path,

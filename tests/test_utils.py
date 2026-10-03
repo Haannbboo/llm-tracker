@@ -1,3 +1,33 @@
+def test_normalize_model_name():
+    from src.utils import normalize_model_name
+
+    cases = {
+        " Space-Bunny-Free ": "stealth/space-bunny-alpha",
+        "STEALTH/SPACE-BUNNY-ALPHA": "stealth/space-bunny-alpha",
+        " MiniMax-M2.7 ": "minimax-m2.7",
+        "deepseek-v4.1-flash-free": "deepseek-v4.1-flash-free",
+        "vendor/model:free": "vendor/model:free",
+        "vendor/model:batch": "vendor/model:batch",
+        "claude-sonnet-4-5-20250929": "claude-sonnet-4-5-20250929",
+        "openrouter/vendor/custom-model": "openrouter/vendor/custom-model",
+        "": "",
+        " \t\n": "",
+    }
+    for name, expected in cases.items():
+        assert normalize_model_name(name) == expected
+        assert normalize_model_name(expected) == expected
+
+
+def test_normalize_provider_name():
+    from src.utils import normalize_provider_name
+
+    assert normalize_provider_name("OpenAI") == "openai"
+    assert normalize_provider_name("MiniMax") == "minimax"
+    assert normalize_provider_name("My-Custom-Provider") == "my-custom-provider"
+    assert normalize_provider_name(" OpenAI ") == " openai "
+    assert normalize_provider_name("") == ""
+
+
 def test_extract_usage_supports_responses_format_and_details(utils_module):
     usage = utils_module.extract_usage(
         {

@@ -43,6 +43,174 @@ def test_record_usage_inserts_row(test_db):
     assert row["total_cost_usd"] is not None
 
 
+def test_record_usage_normalizes_models_and_rollups(test_db, monkeypatch):
+    import json
+
+    from sqlalchemy import select
+    from sqlalchemy.orm import Session
+
+    from src.database import count_usage, get_engine, summarize_usage_window
+    from src.database.models import PriceSnapshot, SessionRecord, UsageDaily
+    from src.pricing import costs
+    from src.pricing.models import ModelCost
+    from src.recorder import record_usage
+
+    canonical = "stealth/space-bunny-alpha"
+    monkeypatch.setitem(
+        costs.MODEL_COSTS, canonical, ModelCost(input=0, output=0, cache_read=0)
+    )
+    usages = []
+    for model in (" Space-Bunny-Free ", "STEALTH/SPACE-BUNNY-ALPHA"):
+        usage = record_usage(
+            ts=1779148800000000,
+            provider="normalization-test",
+            model=model,
+            client_source="opencode",
+            session_id="normalized-session",
+            endpoint="otlp",
+            prompt_tokens=100,
+            completion_tokens=50,
+            total_tokens=150,
+            status=200,
+            db_path=test_db,
+        )
+        assert usage is not None
+        assert usage.model == canonical
+        assert usage.price_snapshot_id is not None
+        usages.append(usage)
+    assert usages[0].price_snapshot_id == usages[1].price_snapshot_id
+
+    with Session(get_engine(test_db)) as session:
+        daily = session.scalars(select(UsageDaily)).one()
+        assert (daily.model, daily.request_count, daily.total_tokens) == (
+            canonical,
+            2,
+            300,
+        )
+        record = session.get(SessionRecord, "normalized-session")
+        assert record is not None
+        assert record.primary_model == canonical
+        assert json.loads(record.models_json) == {canonical: 0}
+        assert session.scalars(select(PriceSnapshot)).one().model == canonical
+
+    for model in (" Space-Bunny-Free ", canonical):
+        assert len(fetch_recent_usage(limit=10, model=model, db_path=test_db)) == 2
+        assert count_usage(model=model, db_path=test_db) == 2
+        assert (
+            count_usage(model=model, session_id="normalized-session", db_path=test_db)
+            == 2
+        )
+        summary = summarize_usage_window(model=model, db_path=test_db)
+        assert summary["window"]["row_count"] == 2
+        assert summary["models"][0]["model"] == canonical
+
+
+def test_record_usage_normalizes_provider_without_losing_pricing(test_db, monkeypatch):
+    import json
+    from decimal import Decimal
+
+    from sqlalchemy import select
+    from sqlalchemy.orm import Session
+
+    from src.config.app import build_maps
+    from src.database import count_usage, get_engine, summarize_usage_window
+    from src.database.models import BaseUrl, PriceSnapshot, SessionRecord, UsageDaily
+    from src.pricing import costs
+    from src.pricing.maps import resolve_all_costs
+    from src.pricing.models import ModelCost
+    from src.pricing.sources.base import FetchedSource, SourceEntry
+    from src.recorder import record_usage
+
+    config = {
+        "providers": {
+            "Custom-Provider": {
+                "base_url": "https://api.example.com/v1",
+                "price_multiplier": 2,
+                "models": {"test-model": {"cost": {"output": 3}}},
+            }
+        }
+    }
+    provider_map, _ = build_maps(config)
+    resolved = resolve_all_costs(
+        config,
+        [
+            FetchedSource(
+                name="test-source",
+                priority=0,
+                entries=(
+                    SourceEntry(
+                        provider="CUSTOM-PROVIDER",
+                        key="test-model",
+                        cost=ModelCost(
+                            input=1, output=2, cache_read=0.25, cache_write=0.5
+                        ),
+                    ),
+                ),
+            )
+        ],
+    )
+    provider = "custom-provider"
+    monkeypatch.setitem(costs.PROVIDER_MAP, provider, provider_map[provider])
+    monkeypatch.setitem(
+        costs.PROVIDER_MODEL_COSTS,
+        provider,
+        {key: rc.cost for key, rc in resolved.provider_costs[provider].items()},
+    )
+    assert costs.get_provider_price_multiplier("CUSTOM-PROVIDER") == Decimal("2")
+    assert costs.resolve_cost_match("Custom-Provider", "test-model").scope == "provider"
+
+    for name in ("CUSTOM-PROVIDER", "Custom-Provider"):
+        usage = record_usage(
+            ts=1779148800000000,
+            provider=name,
+            model="test-model",
+            session_id="provider-normalization",
+            endpoint="otlp",
+            prompt_tokens=1000,
+            completion_tokens=500,
+            cached_tokens=200,
+            cache_creation_tokens=100,
+            total_tokens=1600,
+            base_url="https://api.example.com/v1",
+            base_url_provider=name,
+            db_path=test_db,
+        )
+        assert usage is not None
+        assert usage.provider == provider
+        assert usage.total_cost_usd == Decimal("0.0048")
+        assert usage.price_snapshot_id is not None
+
+    with Session(get_engine(test_db)) as session:
+        daily = session.scalars(select(UsageDaily)).one()
+        assert daily.provider == provider
+        assert daily.request_count == 2
+        record = session.get(SessionRecord, "provider-normalization")
+        assert record.primary_provider == provider
+        assert json.loads(record.providers_json) == {provider: 0.0096}
+        assert session.scalars(select(PriceSnapshot)).one().provider == provider
+        assert session.scalars(select(BaseUrl)).one().provider_name == provider
+
+    assert (
+        len(fetch_recent_usage(limit=10, provider="CUSTOM-PROVIDER", db_path=test_db))
+        == 2
+    )
+    assert count_usage(provider="CUSTOM-PROVIDER", db_path=test_db) == 2
+    assert (
+        count_usage(
+            provider="CUSTOM-PROVIDER",
+            session_id="provider-normalization",
+            db_path=test_db,
+        )
+        == 2
+    )
+    assert (
+        summarize_usage_window(provider="CUSTOM-PROVIDER", db_path=test_db)["window"][
+            "row_count"
+        ]
+        == 2
+    )
+
+
 def test_record_usage_computes_costs(test_db):
     from src.pricing import costs as costs_module
     from src.pricing.costs import ModelCost
@@ -578,6 +746,37 @@ def _record_proxy_usage(test_db, **overrides):
     )
     fields.update(overrides)
     return record_usage(**fields)
+
+
+@pytest.mark.parametrize("otlp_first", [True, False])
+def test_record_usage_deduplicates_model_aliases(test_db, otlp_first):
+    def otlp():
+        return _record_otlp_usage(
+            test_db, model=" Space-Bunny-Free ", client_source="opencode"
+        )
+
+    def proxy():
+        return _record_proxy_usage(
+            test_db, model="STEALTH/SPACE-BUNNY-ALPHA", client_source="opencode"
+        )
+
+    first, second = (otlp, proxy) if otlp_first else (proxy, otlp)
+    initial = first()
+    duplicate = second()
+    assert initial is not None and duplicate is not None
+    assert initial.id == duplicate.id
+    assert duplicate.model == "stealth/space-bunny-alpha"
+    assert len(fetch_recent_usage(limit=10, db_path=test_db)) == 1
+
+
+def test_record_usage_keeps_unmapped_model_variants_separate(test_db):
+    otlp = _record_otlp_usage(test_db, model="deepseek-v4.1-flash-free")
+    proxy = _record_proxy_usage(test_db, model="deepseek-v4.1-flash")
+    assert otlp is not None and proxy is not None
+    assert otlp.model == "deepseek-v4.1-flash-free"
+    assert otlp.id != proxy.id
+    assert otlp.price_snapshot_id is None
+    assert otlp.total_cost_usd == 0
 
 
 def test_record_usage_merges_proxy_duplicate_into_existing_otlp_row(test_db):

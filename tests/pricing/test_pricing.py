@@ -5,6 +5,7 @@ import os
 import time
 import urllib.error
 
+import pytest
 from fastapi.testclient import TestClient
 
 import src.pricing.sources.base as base_module
@@ -1270,7 +1271,10 @@ def test_single_model_pricing_yaml_override_beats_litellm(api_module, monkeypatc
     assert data["output"] == 4.0
 
 
-def test_single_model_pricing_provider_scope_and_multiplier(api_module, monkeypatch):
+@pytest.mark.parametrize("provider", ["prov-a", "PROV-A", "Prov-A"])
+def test_single_model_pricing_provider_scope_and_multiplier(
+    api_module, monkeypatch, provider
+):
     api_module.CONFIG.clear()
     api_module.CONFIG.update(
         {
@@ -1294,11 +1298,13 @@ def test_single_model_pricing_provider_scope_and_multiplier(api_module, monkeypa
         "src.pricing.sources.litellm.fetch_remote_pricing", lambda *args, **kwargs: {}
     )
 
-    response = TestClient(api_module.app).get("/pricing/test-model?provider=prov-a")
+    client = TestClient(api_module.app)
+    response = client.get("/pricing/test-model", params={"provider": provider})
 
     assert response.status_code == 200
     data = response.json()
     assert data["resolved"] is True
+    assert data["provider"] == "prov-a"
     assert data["model"] == "test-model"
     assert data["scope"] == "prov-a"
     assert data["source"] == "yaml"
@@ -1306,6 +1312,10 @@ def test_single_model_pricing_provider_scope_and_multiplier(api_module, monkeypa
     assert data["multiplier"] == 2.0
     assert data["effective_input"] == 10.0
     assert data["effective_output"] == 20.0
+
+    listing = client.get("/pricing", params={"provider": provider}).json()
+    assert listing["test-model"]["scope"] == "prov-a"
+    assert listing["test-model"]["effective_input"] == 10.0
 
 
 def test_single_model_pricing_cheapest_contains_match(api_module, monkeypatch):
@@ -1358,19 +1368,27 @@ def test_single_model_pricing_slashed_model_exact_yaml(api_module, monkeypatch):
     assert data["input"] == 0.98
 
 
-def test_single_model_pricing_unresolved(api_module, monkeypatch):
+@pytest.mark.parametrize(
+    "model, expected",
+    [
+        ("unknown-model", "unknown-model"),
+        (" Unknown-Model ", "unknown-model"),
+        ("Space-Bunny-Free", "stealth/space-bunny-alpha"),
+    ],
+)
+def test_single_model_pricing_unresolved(api_module, monkeypatch, model, expected):
     api_module.CONFIG.clear()
     api_module.CONFIG.update({"models": {}, "providers": {}})
     monkeypatch.setattr(
         "src.pricing.sources.litellm.fetch_remote_pricing", lambda *args, **kwargs: {}
     )
 
-    response = TestClient(api_module.app).get("/pricing/unknown-model")
+    response = TestClient(api_module.app).get(f"/pricing/{model}")
 
     assert response.status_code == 200
     data = response.json()
     assert data["resolved"] is False
-    assert data["model"] == "unknown-model"
+    assert data["model"] == expected
     assert data["input"] == 0.0
     assert data["output"] == 0.0
 
