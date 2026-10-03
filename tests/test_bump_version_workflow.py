@@ -68,6 +68,22 @@ def test_bump_version_workflow_never_lowers_an_existing_patch_version():
     assert "CURRENT_PATCH" in bump_step["run"]
 
 
+def test_bump_version_workflow_fails_when_path_detection_fails():
+    """A failed git diff must fail the job, not silently bump nothing."""
+    workflow = load_workflow()
+
+    bump_step = workflow["jobs"]["bump"]["steps"][1]
+
+    # The diff is captured and status-checked; the loop no longer reads from a
+    # process substitution, which discards git's exit status.
+    assert (
+        'if ! CHANGED_FILES=$(git diff --name-only "origin/$BASE_REF...HEAD"); then'
+        in bump_step["run"]
+    )
+    assert '<<< "$CHANGED_FILES"' in bump_step["run"]
+    assert "< <(git diff" not in bump_step["run"]
+
+
 def test_bump_version_workflow_includes_version_in_bump_commit_message():
     workflow = load_workflow()
 

@@ -32,6 +32,13 @@ jobs:
           git fetch origin "$BASE_REF" --depth=1
           BUMP_SERVER=false
           BUMP_CLIENT=false
+          # Capture before looping: a process substitution hides git diff's exit
+          # status, and a failed comparison (e.g. no merge base) would otherwise
+          # leave both flags false and bump nothing while the job passed.
+          if ! CHANGED_FILES=$(git diff --name-only "origin/$BASE_REF...HEAD"); then
+            echo "cannot compare origin/$BASE_REF with HEAD; is a merge base missing?" >&2
+            exit 1
+          fi
           while IFS= read -r FILE; do
             case "$FILE" in
               protocol/*|scripts/configure-*)
@@ -45,7 +52,7 @@ jobs:
                 BUMP_SERVER=true
                 ;;
             esac
-          done < <(git diff --name-only "origin/$BASE_REF...HEAD")
+          done <<< "$CHANGED_FILES"
 
           bump_file() {
             local FILE="$1"
