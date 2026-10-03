@@ -32,6 +32,7 @@ from ..utils import (
     micros_to_secs,
     normalize_model_name,
     normalize_provider_name,
+    normalize_tool_name,
     secs_to_micros,
 )
 from .engine import get_engine
@@ -770,8 +771,6 @@ def _usage_filters(
     if session_id:
         filters.append(Usage.session_id == session_id)
     if tool_name is not None:
-        from ..recorder import normalize_tool_name
-
         filters.append(
             select(ToolCall.tool_use_id)
             .where(

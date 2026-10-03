@@ -20,6 +20,11 @@ def normalize_provider_name(provider_name: str) -> str:
     return provider_name.lower()
 
 
+def normalize_tool_name(tool_name: str) -> str:
+    """Fold tool name casing so e.g. `Bash`/`bash` aggregate as one tool."""
+    return tool_name.lower()
+
+
 def replace_contents(target: dict, source: dict) -> None:
     """Update target in place to match source without a clear-then-fill window."""
     target.update(source)

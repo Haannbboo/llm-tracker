@@ -18,7 +18,12 @@ from .database.models import ToolCall, Usage
 from .database.usage import log_usage, merge_duplicate_usage
 from .pricing.costs import ResolvedPricing, calculate_costs, resolve_pricing
 from .pricing.snapshots import ensure_price_snapshot
-from .utils import micros_to_secs, normalize_model_name, normalize_provider_name
+from .utils import (
+    micros_to_secs,
+    normalize_model_name,
+    normalize_provider_name,
+    normalize_tool_name,
+)
 
 log = logging.getLogger(__name__)
 
@@ -159,11 +164,6 @@ def _record_price_snapshot(
     except Exception:
         log.warning("Failed to record price snapshot for %s/%s", provider, model)
         return None
-
-
-def normalize_tool_name(tool_name: str) -> str:
-    """Fold tool name casing so e.g. `Bash`/`bash` aggregate as one tool."""
-    return tool_name.lower()
 
 
 def update_tool_call_duration(
