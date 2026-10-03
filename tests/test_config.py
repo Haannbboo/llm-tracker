@@ -215,6 +215,48 @@ def test_build_maps_allows_provider_without_models(config_module):
     assert model_map == {}
 
 
+def test_build_maps_skips_disabled_provider(config_module):
+    provider_map, model_map = config_module.build_maps(
+        {
+            "models": {},
+            "providers": {
+                "live": {
+                    "base_url": "https://live.example/v1",
+                    "models": {"live-1": {}},
+                },
+                "paused": {
+                    "enabled": False,
+                    "base_url": "https://paused.example/v1",
+                    "api_key": "paused-key",
+                    "models": {"paused-1": {}},
+                },
+            },
+        }
+    )
+
+    assert "paused" not in provider_map
+    assert "paused-1" not in model_map
+    assert provider_map["live"].name == "live"
+    assert model_map["live-1"].name == "live"
+
+
+def test_build_maps_treats_missing_enabled_as_enabled(config_module):
+    provider_map, _ = config_module.build_maps(
+        {
+            "models": {},
+            "providers": {
+                "alpha": {
+                    "base_url": "https://alpha.example/v1",
+                    "enabled": True,
+                    "models": {"alpha-1": {}},
+                },
+            },
+        }
+    )
+
+    assert provider_map["alpha"].name == "alpha"
+
+
 def test_build_maps_normalizes_empty_api_key_to_none(config_module):
     provider_map, _ = config_module.build_maps(
         {

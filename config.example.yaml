@@ -64,8 +64,12 @@ models:
       cacheRead: 0.084
 
 providers:
+  # `enabled: false` takes a provider out of routing without deleting it:
+  # its models leave the proxy's model list and nothing is forwarded
+  # upstream, while base_url/api_key and historical costs stay untouched.
   my-provider:
     base_url: https://api.example.com/v1
+    # enabled: false           # optional; omit or true to route normally
     # api_key: sk-...          # optional; client Authorization is always stripped; if set, proxy injects Bearer <key>
     models:
       gemini-3.1-pro-preview: {}
