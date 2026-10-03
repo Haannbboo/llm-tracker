@@ -1,7 +1,9 @@
 """Sign-in, credentials, and sign-out for this machine.
 
 Credentials live in ``$LLM_TRACKER_HOME/credentials.json`` with mode 0600.
-The client stores separate CLI and ingestion tokens returned by the server.
+The client stores separate CLI and ingestion tokens returned by the server,
+plus a machine-scoped installation key (``installation_key`` file) that
+registers this installation with the server across re-logins.
 """
 
 from __future__ import annotations
@@ -10,6 +12,7 @@ import base64
 import hashlib
 import json
 import os
+import re
 import secrets
 import socket
 import sys
@@ -21,7 +24,14 @@ from urllib.parse import urlencode, urlparse
 
 import httpx
 
-from client.paths import credentials_path, display_endpoint, read_object
+from client.paths import (
+    client_commit,
+    client_version,
+    credentials_path,
+    display_endpoint,
+    installation_key_path,
+    read_object,
+)
 from protocol import CURRENT_GENERATION
 
 
@@ -60,6 +70,38 @@ def _pkce_pair() -> tuple[str, str]:
     digest = hashlib.sha256(verifier.encode("ascii")).digest()
     challenge = base64.urlsafe_b64encode(digest).rstrip(b"=").decode("ascii")
     return verifier, challenge
+
+
+def _write_private_text(path: Path, text: str) -> None:
+    """Write 0600 text atomically, so a crash never leaves a partial file."""
+    path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    temporary = path.with_name(f".{path.name}.{secrets.token_hex(8)}.tmp")
+    fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(text)
+        temporary.replace(path)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def _load_or_create_installation_key() -> str:
+    """This machine's stable secret. Re-login rotates tokens; the key stays.
+
+    A missing, malformed, or non-UTF-8 file is regenerated, so a broken file can
+    never wedge login — it only costs the machine its device history. Any other
+    read error (permissions, a directory in the way) reaches the caller and fails
+    the login rather than silently minting a second identity for this machine.
+    """
+    path = installation_key_path()
+    try:
+        key = path.read_text(encoding="utf-8").strip()
+    except (FileNotFoundError, UnicodeDecodeError):
+        key = ""
+    if not re.fullmatch(r"[A-Za-z0-9_-]{43,128}", key):
+        key = secrets.token_urlsafe(32)
+        _write_private_text(path, f"{key}\n")
+    return key
 
 
 def normalize_server_url(raw: str) -> str:
@@ -210,6 +252,12 @@ def login(
     if check_server(server) != 0:
         return 1
 
+    try:
+        installation_key = _load_or_create_installation_key()
+    except OSError as exc:
+        print(f"llm-tracker: cannot store the installation key: {exc}", file=sys.stderr)
+        return 1
+
     verifier, challenge = _pkce_pair()
     device_name = _device_name(device_name_arg or socket.gethostname())
     login_url = f"{server}/auth/cli/start?" + urlencode(
@@ -221,7 +269,18 @@ def login(
     ):
         webbrowser.open(login_url)
 
-    body = {"code_verifier": verifier}
+    body: dict[str, str] = {
+        "code_verifier": verifier,
+        "installation_key": installation_key,
+    }
+    # The server validates both fields strictly; a malformed one would fail the
+    # exchange permanently, so an unrecognized value is simply not sent.
+    version = client_version()
+    if re.fullmatch(r"\d+\.\d+\.\d+", version):
+        body["client_version"] = version
+    commit = client_commit()
+    if commit:
+        body["client_commit"] = commit
 
     for attempt in range(3):
         try:

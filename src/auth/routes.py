@@ -18,10 +18,12 @@ from . import google as auth_google
 from .tokens import (
     get_or_create_user,
     get_user_by_id,
+    list_user_devices,
     list_user_tokens,
+    mint_device_tokens,
     mint_token,
     resolve_token,
-    revoke_device_tokens,
+    revoke_device,
     revoke_token,
     update_user_name,
 )
@@ -288,22 +290,39 @@ def auth_logout(request: Request, user: User | None = Depends(get_current_user))
 
 @router.get("/auth/devices")
 def auth_devices(request: Request, user: User | None = Depends(get_current_user)):
-    """List the caller's active tokens; `current` marks the authenticating one."""
+    """List installed machines, plus browser and operator-minted sessions."""
     if user is None:
         raise HTTPException(status_code=404, detail="not found")
     auth_token = getattr(request.state, "auth_token", None)
     current_id = auth_token.id if auth_token is not None else None
+    current_device_id = auth_token.device_id if auth_token is not None else None
     return {
         "devices": [
+            {
+                "id": device.id,
+                "kind": "client",
+                "device_name": device.device_name,
+                "created_at": device.created_at,
+                "last_used_at": device.last_seen_at,
+                "client_version": device.client_version,
+                "client_commit": device.client_commit,
+                "current": device.id == current_device_id,
+            }
+            for device in list_user_devices(user.id)
+        ]
+        + [
             {
                 "id": device.id,
                 "kind": device.kind,
                 "device_name": device.device_name,
                 "created_at": device.created_at,
                 "last_used_at": device.last_used_at,
+                "client_version": None,
+                "client_commit": None,
                 "current": device.id == current_id,
             }
             for device in list_user_tokens(user.id)
+            if device.device_id is None
         ]
     }
 
@@ -314,10 +333,10 @@ def auth_devices_revoke(
     request: Request,
     user: User | None = Depends(get_current_user),
 ):
-    """Revoke a token owned by the caller. 404 for unknown or other-owned ids."""
+    """Revoke a machine or legacy token owned by the caller."""
     if user is None:
         raise HTTPException(status_code=404, detail="not found")
-    if not revoke_token(device_id, user.id):
+    if not revoke_device(device_id, user.id) and not revoke_token(device_id, user.id):
         raise HTTPException(status_code=404, detail="not found")
     return Response(status_code=204)
 
@@ -339,8 +358,13 @@ _CLI_CODE_ALPHABET = "BCDFGHJKLMNPQRSTVWXZ"
 
 class CliExchangeRequest(BaseModel):
     # Capped: this is a public (auth-gated) endpoint taking unbounded strings.
+    # installation_key stays optional here so pydantic's 422 never echoes the
+    # secret in its error body; the handler checks it and returns a static 422.
     code: str | None = Field(default=None, max_length=256)
     code_verifier: str | None = Field(default=None, max_length=256)
+    installation_key: str | None = Field(default=None, max_length=128)
+    client_version: str | None = Field(default=None, max_length=64)
+    client_commit: str | None = Field(default=None, max_length=40)
 
 
 def _sanitize_device_name(raw: str | None) -> str:
@@ -500,6 +524,22 @@ def auth_cli_exchange(body: CliExchangeRequest):
     if not body.code or not body.code_verifier:
         # One message for all failures — no oracle for which half was wrong.
         raise HTTPException(status_code=400, detail="invalid code")
+    # Format-check the client fields before the code is consumed: a malformed
+    # client_version/client_commit would otherwise burn a one-time code the
+    # user then has to re-request. 422 (not 400) so the CLI's "wrong code,
+    # paste again" retry loop stops instead of re-sending an identical body.
+    if not body.installation_key or not re.fullmatch(
+        r"[A-Za-z0-9_-]{43,128}", body.installation_key
+    ):
+        raise HTTPException(status_code=422, detail="invalid installation_key")
+    if body.client_version is not None and not re.fullmatch(
+        r"\d+\.\d+\.\d+", body.client_version
+    ):
+        raise HTTPException(status_code=422, detail="invalid client_version")
+    if body.client_commit is not None and not re.fullmatch(
+        r"[0-9a-fA-F]{40}", body.client_commit
+    ):
+        raise HTTPException(status_code=422, detail="invalid client_commit")
     entry = auth_google.pop_cli_code(_normalize_cli_code(body.code))
     if entry is None:
         raise HTTPException(status_code=400, detail="invalid code")
@@ -512,13 +552,18 @@ def auth_cli_exchange(body: CliExchangeRequest):
     if user is None:
         raise HTTPException(status_code=400, detail="invalid code")
     device_name = _sanitize_device_name(str(entry.get("device_name") or ""))
-    revoke_device_tokens(user.id, device_name)
-    cli_token, _ = mint_token(user.email, kind="cli", device_name=device_name)
-    ingest_token, _ = mint_token(user.email, kind="ingest", device_name=device_name)
+    cli_token, ingest_token, device = mint_device_tokens(
+        user.id,
+        body.installation_key,
+        device_name,
+        client_version=body.client_version,
+        client_commit=body.client_commit,
+    )
     urls = resolve_server_urls(CONFIG)
     return {
         "user": {"id": user.id, "email": user.email, "name": user.name},
         "device_name": device_name,
+        "device_id": device.id,
         "cli_token": cli_token,
         "ingest_token": ingest_token,
         "otlp": {

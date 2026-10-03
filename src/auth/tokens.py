@@ -10,6 +10,7 @@ import hashlib
 import logging
 import secrets
 import time
+from uuid import uuid4
 
 from sqlalchemy import select, text
 from sqlalchemy import update as sa_update
@@ -17,7 +18,7 @@ from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from ..database.engine import get_engine
-from ..database.models import AuthToken, User
+from ..database.models import AuthToken, Device, User
 
 TOKEN_KINDS = ("cli", "ingest", "web")
 AUTH_STATEMENT_TIMEOUT_MILLISECONDS = 10_000
@@ -146,6 +147,12 @@ def resolve_token(
                 .where(AuthToken.id == auth_token.id)
                 .values(last_used_at=_now_micros())
             )
+            if auth_token.device_id is not None:
+                update_session.execute(
+                    sa_update(Device)
+                    .where(Device.id == auth_token.device_id)
+                    .values(last_seen_at=_now_micros())
+                )
             update_session.commit()
     except SQLAlchemyError:
         logging.getLogger(__name__).warning(
@@ -206,29 +213,140 @@ def list_user_tokens(user_id: str, db_path: str | None = None) -> list[AuthToken
         return list(rows)
 
 
-def revoke_device_tokens(
-    user_id: str,
-    device_name: str,
-    kinds: tuple[str, ...] = ("cli", "ingest"),
-    db_path: str | None = None,
-) -> int:
-    """Revoke the user's active tokens for one device (re-login cleanup).
-
-    `web` tokens are never device tokens; operator-minted rows with a NULL
-    device_name are untouched (SQL `=` never matches NULL).
-    """
+def list_user_devices(user_id: str, db_path: str | None = None) -> list[Device]:
     engine = get_engine(db_path)
     with Session(engine, expire_on_commit=False) as session:
-        result = session.execute(
-            sa_update(AuthToken)
-            .where(
-                AuthToken.user_id == user_id,
-                AuthToken.device_name == device_name,
-                AuthToken.kind.in_(kinds),
-                AuthToken.revoked_at.is_(None),
+        _set_auth_statement_timeout(session)
+        rows = (
+            session.execute(
+                select(Device)
+                .where(Device.user_id == user_id, Device.revoked_at.is_(None))
+                .order_by(Device.created_at.desc())
             )
-            .values(revoked_at=_now_micros())
+            .scalars()
+            .all()
         )
-        changed = result.rowcount  # type: ignore[attr-defined]
+        session.expunge_all()
+        return list(rows)
+
+
+def mint_device_tokens(
+    user_id: str,
+    installation_key: str,
+    device_name: str,
+    *,
+    client_version: str | None = None,
+    client_commit: str | None = None,
+    db_path: str | None = None,
+) -> tuple[str, str, Device]:
+    """Create or rotate a machine's CLI and ingestion credentials atomically."""
+    installation_hash = hash_token(installation_key)
+    engine = get_engine(db_path)
+    for attempt in range(2):
+        now = _now_micros()
+        cli_token = f"llmt_cli_{secrets.token_hex(24)}"
+        ingest_token = f"llmt_ingest_{secrets.token_hex(24)}"
+        try:
+            with Session(engine, expire_on_commit=False) as session:
+                _set_auth_statement_timeout(session)
+                device = session.execute(
+                    select(Device)
+                    .where(
+                        Device.user_id == user_id,
+                        Device.installation_hash == installation_hash,
+                    )
+                    # Row lock on servers that honor it (PostgreSQL). SQLite
+                    # drops it; there the unique index plus the IntegrityError
+                    # retry below is what keeps two first logins from racing.
+                    .with_for_update()
+                ).scalar_one_or_none()
+                if device is None:
+                    # A supplied device_id is never proof of ownership. The
+                    # installation secret, scoped to the user, is the key.
+                    device = Device(
+                        id=str(uuid4()),
+                        user_id=user_id,
+                        installation_hash=installation_hash,
+                        device_name=device_name,
+                        client_version=client_version,
+                        client_commit=client_commit,
+                        created_at=now,
+                        last_seen_at=now,
+                    )
+                    session.add(device)
+                    session.flush()
+                else:
+                    device.device_name = device_name
+                    # A revoked machine comes back only through a fresh browser
+                    # approval: the installation key is not a credential, so the
+                    # code + PKCE exchange is what re-authorizes it.
+                    device.revoked_at = None
+                    device.last_seen_at = now
+                    if client_version is not None:
+                        device.client_version = client_version
+                    if client_commit is not None:
+                        device.client_commit = client_commit
+                session.execute(
+                    sa_update(AuthToken)
+                    .where(
+                        AuthToken.user_id == user_id,
+                        AuthToken.device_id == device.id,
+                        AuthToken.kind.in_(("cli", "ingest")),
+                        AuthToken.revoked_at.is_(None),
+                    )
+                    .values(revoked_at=now)
+                )
+                session.add_all(
+                    [
+                        AuthToken(
+                            user_id=user_id,
+                            device_id=device.id,
+                            kind=kind,
+                            device_name=device_name,
+                            token_hash=hash_token(token),
+                            created_at=now,
+                        )
+                        for kind, token in (
+                            ("cli", cli_token),
+                            ("ingest", ingest_token),
+                        )
+                    ]
+                )
+                session.commit()
+                return cli_token, ingest_token, device
+        except IntegrityError:
+            # Two first exchanges for one installation can race at the unique
+            # index. Retry in a fresh transaction and rotate the winner's pair.
+            if attempt == 1:
+                raise
+    raise RuntimeError("device token rotation failed")
+
+
+def revoke_device(device_id: str, user_id: str, db_path: str | None = None) -> bool:
+    """Revoke a machine and all its credentials in one transaction."""
+    engine = get_engine(db_path)
+    now = _now_micros()
+    with Session(engine, expire_on_commit=False) as session:
+        _set_auth_statement_timeout(session)
+        result = session.execute(
+            sa_update(Device)
+            .where(
+                Device.id == device_id,
+                Device.user_id == user_id,
+                Device.revoked_at.is_(None),
+            )
+            .values(revoked_at=now)
+        )
+        changed = result.rowcount > 0  # type: ignore[attr-defined]
+        if changed:
+            session.execute(
+                sa_update(AuthToken)
+                .where(
+                    AuthToken.device_id == device_id,
+                    AuthToken.user_id == user_id,
+                    AuthToken.revoked_at.is_(None),
+                )
+                .values(revoked_at=now)
+            )
         session.commit()
-    return int(changed)
+    return changed

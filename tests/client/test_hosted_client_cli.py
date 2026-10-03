@@ -99,7 +99,7 @@ def test_check_server_checks_protocol_without_writing(monkeypatch, capsys):
 # ------------------------------------------------------------------ full login
 
 
-def test_login_replaces_tokens_using_existing_exchange_contract(monkeypatch, capsys):
+def test_login_replaces_tokens_and_keeps_the_installation_key(monkeypatch, capsys):
     fake = FakeHttpx()
     _install_fake_httpx(monkeypatch, fake)
     monkeypatch.setattr("builtins.input", lambda _prompt="": "ab-cd")
@@ -109,12 +109,22 @@ def test_login_replaces_tokens_using_existing_exchange_contract(monkeypatch, cap
         )
     first, second = fake.exchanges
     assert first["code"] == "ABCD"
-    assert set(first) == set(second) == {"code", "code_verifier"}
+    # Both logins register the same machine and report its client build.
+    assert (
+        set(first)
+        == set(second)
+        == {
+            "code",
+            "code_verifier",
+            "installation_key",
+            "client_version",
+            "client_commit",
+        }
+    )
+    assert first["installation_key"] == second["installation_key"]
     credentials = json.loads(auth.credentials_path().read_text(encoding="utf-8"))
     assert credentials["cli_token"] == "cli-2"
-    assert "device_id" not in credentials
     assert stat.S_IMODE(auth.credentials_path().stat().st_mode) == 0o600
-    assert not (auth.credentials_path().parent / "installation.json").exists()
     output = capsys.readouterr()
     assert "cli-" not in output.out + output.err
     assert "ingest-" not in output.out + output.err

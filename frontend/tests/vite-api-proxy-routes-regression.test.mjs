@@ -17,6 +17,8 @@ const proxiedRoutes = [
   '/local/sessions/session-123/evaluation-jobs',
   '/pricing',
   '/pricing/z-ai/glm-5.1-20260406',
+  '/auth/devices',
+  '/auth/devices/device-123/revoke',
 ]
 
 for (const route of proxiedRoutes) {

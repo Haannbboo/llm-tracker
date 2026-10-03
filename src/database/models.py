@@ -37,6 +37,29 @@ class User(Base):
     created_at: Mapped[int] = mapped_column(BigInteger, nullable=False)
 
 
+class Device(Base):
+    __tablename__ = "devices"
+    __table_args__ = (
+        UniqueConstraint(
+            "user_id", "installation_hash", name="uq_devices_installation"
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(
+        String, primary_key=True, default=lambda: str(uuid4())
+    )
+    user_id: Mapped[str] = mapped_column(
+        String, ForeignKey("users.id"), nullable=False, index=True
+    )
+    installation_hash: Mapped[str] = mapped_column(String, nullable=False)
+    device_name: Mapped[str] = mapped_column(String, nullable=False)
+    client_version: Mapped[str | None] = mapped_column(String, nullable=True)
+    client_commit: Mapped[str | None] = mapped_column(String, nullable=True)
+    created_at: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    last_seen_at: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    revoked_at: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+
+
 class AuthToken(Base):
     __tablename__ = "auth_tokens"
 
@@ -48,6 +71,9 @@ class AuthToken(Base):
     )
     kind: Mapped[str] = mapped_column(String, nullable=False)
     device_name: Mapped[str | None] = mapped_column(String, nullable=True)
+    device_id: Mapped[str | None] = mapped_column(
+        String, ForeignKey("devices.id"), nullable=True, index=True
+    )
     token_hash: Mapped[str] = mapped_column(String, nullable=False, unique=True)
     created_at: Mapped[int] = mapped_column(BigInteger, nullable=False)
     last_used_at: Mapped[int | None] = mapped_column(BigInteger, nullable=True)

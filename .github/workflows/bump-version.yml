@@ -21,39 +21,89 @@ jobs:
           ref: ${{ github.head_ref }}
           fetch-depth: 0
 
-      - name: Bump patch
+      - name: Bump changed package versions
         id: bump
         shell: bash
+        env:
+          # Via env, not inline ${{ }}: a base branch name may contain shell
+          # syntax that would otherwise be substituted into the script itself.
+          BASE_REF: ${{ github.base_ref }}
         run: |
-          CURRENT_VERSION=$(cat VERSION)
-          git fetch origin "${{ github.base_ref }}" --depth=1
-          BASE_VERSION=$(git show "origin/${{ github.base_ref }}:VERSION" 2>/dev/null || echo "0.0.0")
-
-          if [[ ! "$CURRENT_VERSION" =~ ^([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
-            echo "VERSION must use MAJOR.MINOR.PATCH format, got: $CURRENT_VERSION" >&2
+          git fetch origin "$BASE_REF" --depth=1
+          BUMP_SERVER=false
+          BUMP_CLIENT=false
+          # Capture before looping: a process substitution hides git diff's exit
+          # status, and a failed comparison (e.g. no merge base) would otherwise
+          # leave both flags false and bump nothing while the job passed.
+          if ! CHANGED_FILES=$(git diff --name-only "origin/$BASE_REF...HEAD"); then
+            echo "cannot compare origin/$BASE_REF with HEAD; is a merge base missing?" >&2
             exit 1
           fi
-          CURRENT_MAJOR="${BASH_REMATCH[1]}"
-          CURRENT_MINOR="${BASH_REMATCH[2]}"
-          CURRENT_PATCH="${BASH_REMATCH[3]}"
+          while IFS= read -r FILE; do
+            case "$FILE" in
+              protocol/*|scripts/configure-*)
+                BUMP_SERVER=true
+                BUMP_CLIENT=true
+                ;;
+              client/*|plugins/*|scripts/hosted-install.sh)
+                BUMP_CLIENT=true
+                ;;
+              server/*|src/*|frontend/*|scripts/*|requirements.txt|config.example.yaml|install.sh|Dockerfile|VERSION)
+                BUMP_SERVER=true
+                ;;
+            esac
+          done <<< "$CHANGED_FILES"
 
-          if [[ ! "$BASE_VERSION" =~ ^([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
-            echo "Base VERSION must use MAJOR.MINOR.PATCH format, got: $BASE_VERSION" >&2
-            exit 1
-          fi
-          BASE_MAJOR="${BASH_REMATCH[1]}"
-          BASE_MINOR="${BASH_REMATCH[2]}"
-          BASE_PATCH="${BASH_REMATCH[3]}"
+          bump_file() {
+            local FILE="$1"
+            local CURRENT_VERSION BASE_VERSION CURRENT_MAJOR CURRENT_MINOR CURRENT_PATCH BASE_MAJOR BASE_MINOR BASE_PATCH NEW
+            CURRENT_VERSION=$(cat "$FILE")
+            BASE_VERSION=$(git show "origin/$BASE_REF:$FILE" 2>/dev/null || echo "0.0.0")
+            if [[ ! "$CURRENT_VERSION" =~ ^([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
+              echo "$FILE must use MAJOR.MINOR.PATCH format, got: $CURRENT_VERSION" >&2
+              exit 1
+            fi
+            CURRENT_MAJOR="${BASH_REMATCH[1]}"
+            CURRENT_MINOR="${BASH_REMATCH[2]}"
+            CURRENT_PATCH="${BASH_REMATCH[3]}"
+            if [[ ! "$BASE_VERSION" =~ ^([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
+              echo "Base $FILE must use MAJOR.MINOR.PATCH format, got: $BASE_VERSION" >&2
+              exit 1
+            fi
+            BASE_MAJOR="${BASH_REMATCH[1]}"
+            BASE_MINOR="${BASH_REMATCH[2]}"
+            BASE_PATCH="${BASH_REMATCH[3]}"
+            if [[ "$CURRENT_MAJOR.$CURRENT_MINOR" != "$BASE_MAJOR.$BASE_MINOR" ]]; then
+              NEW="$CURRENT_VERSION"
+            else
+              # Never step a patch backwards: a PR that already carries a
+              # higher patch keeps it instead of dropping to base + 1.
+              if (( CURRENT_PATCH > BASE_PATCH + 1 )); then
+                NEW="$CURRENT_VERSION"
+              else
+                NEW="$BASE_MAJOR.$BASE_MINOR.$((BASE_PATCH + 1))"
+              fi
+            fi
+            echo "$NEW" > "$FILE"
+            echo "$NEW"
+          }
 
-          if [[ "$CURRENT_MAJOR.$CURRENT_MINOR" != "$BASE_MAJOR.$BASE_MINOR" ]]; then
-            NEW="$CURRENT_MAJOR.$CURRENT_MINOR.$CURRENT_PATCH"
-          else
-            NEW="$BASE_MAJOR.$BASE_MINOR.$((BASE_PATCH + 1))"
+          VERSIONS=()
+          if [[ "$BUMP_SERVER" == true ]]; then
+            NEW_SERVER=$(bump_file VERSION)
+            VERSIONS+=("server $NEW_SERVER")
           fi
-          echo "$NEW" > VERSION
-          echo "new_version=$NEW" >> "$GITHUB_OUTPUT"
+          if [[ "$BUMP_CLIENT" == true ]]; then
+            NEW_CLIENT=$(bump_file client/VERSION)
+            VERSIONS+=("client $NEW_CLIENT")
+          fi
+          if (( ${#VERSIONS[@]} > 0 )); then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            echo "new_version=${VERSIONS[*]}" >> "$GITHUB_OUTPUT"
+          fi
 
       - uses: stefanzweifel/git-auto-commit-action@v5
+        if: steps.bump.outputs.changed == 'true'
         with:
           commit_message: "chore: bump version to ${{ steps.bump.outputs.new_version }}"
-          file_pattern: VERSION
+          file_pattern: VERSION client/VERSION

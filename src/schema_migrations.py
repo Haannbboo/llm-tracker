@@ -689,6 +689,22 @@ def migrate_database(db_path: str | None = None) -> list[str]:
 
     init_db(db_path)
 
+    if _table_exists(engine, "auth_tokens") and _ensure_column(
+        engine,
+        "auth_tokens",
+        "device_id",
+        sqlite_definition="TEXT REFERENCES devices(id)",
+        postgresql_definition="TEXT REFERENCES devices(id)",
+    ):
+        applied.append("auth_tokens.device_id")
+    if _table_exists(engine, "auth_tokens") and _ensure_index(
+        engine,
+        "auth_tokens",
+        "ix_auth_tokens_device_id",
+        "CREATE INDEX IF NOT EXISTS ix_auth_tokens_device_id ON auth_tokens (device_id)",
+    ):
+        applied.append("auth_tokens.ix_device_id")
+
     if _table_exists(engine, "evaluation_jobs"):
         if _ensure_evaluation_jobs_active_unique_index(engine):
             applied.append("evaluation_jobs.active_unique_index")

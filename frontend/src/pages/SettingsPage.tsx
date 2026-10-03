@@ -12,6 +12,7 @@ import { useDashboardAgents } from '../hooks/useDashboardAgents'
 import { useVersion } from '../hooks/useVersion'
 
 const DEVICE_KIND_LABELS: Record<string, string> = {
+  client: 'Machine',
   web: 'Browser',
   cli: 'CLI',
   ingest: 'Ingest',
@@ -628,82 +629,87 @@ export function SettingsPage() {
 
       {activeSection === 'devices' && (
         <div className="panel">
-          <div className="panel-tabs" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <div className="tab active"><span>💻</span> {t('Devices')}</div>
-            {auth.user && (
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <span className="user-avatar">
-                  {(auth.user.name || auth.user.email).charAt(0).toUpperCase()}
-                </span>
-                <span className="user-email" title={auth.user.email}>
-                  {auth.user.name || auth.user.email}
-                </span>
-                <button className="btn-danger" onClick={() => void signOut()}>
-                  {t('Sign out')}
-                </button>
-              </div>
-            )}
-          </div>
-          <div className="panel-body" style={{ padding: '0' }}>
-            <div style={{ padding: '16px', borderBottom: '1px solid var(--border-color)', fontSize: '13px', color: 'var(--text-secondary)' }}>
-              {t('Sessions that hold a login token. Revoking a device signs it out immediately.')}
+            <div className="panel-tabs" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div className="tab active"><span>💻</span> {t('Devices')}</div>
+              {auth.user && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <span className="user-avatar">
+                    {(auth.user.name || auth.user.email).charAt(0).toUpperCase()}
+                  </span>
+                  <span className="user-email" title={auth.user.email}>
+                    {auth.user.name || auth.user.email}
+                  </span>
+                  <button className="btn-danger" onClick={() => void signOut()}>
+                    {t('Sign out')}
+                  </button>
+                </div>
+              )}
             </div>
-            <table className="table">
-              <thead>
-                <tr>
-                  <th>{t('Device')}</th>
-                  <th>{t('Kind')}</th>
-                  <th>{t('Created')}</th>
-                  <th>{t('Last used')}</th>
-                  <th>{t('Status')}</th>
-                  <th></th>
-                </tr>
-              </thead>
-              <tbody>
-                {devices && devices.length > 0 ? devices.map((device) => (
-                  <tr key={device.id}>
-                    <td style={{ fontWeight: 700 }}>
-                      {device.device_name ?? '—'}
-                      {device.current && (
-                        <span className="badge badge-success" style={{ marginLeft: '8px' }}>
-                          {t('Current device')}
-                        </span>
-                      )}
-                    </td>
-                    <td style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
-                      {t(DEVICE_KIND_LABELS[device.kind] ?? device.kind)}
-                    </td>
-                    <td style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>{formatTime(device.created_at)}</td>
-                    <td style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
-                      {device.last_used_at != null ? formatTime(device.last_used_at) : '—'}
-                    </td>
-                    <td>
-                      <span className={`badge ${device.current ? 'badge-success' : 'badge-neutral'}`}>
-                        {device.current ? t('Active') : t('Idle')}
-                      </span>
-                    </td>
-                    <td style={{ textAlign: 'right' }}>
-                      <button
-                        type="button"
-                        className="btn-danger"
-                        disabled={revokingDeviceId !== null}
-                        onClick={() => void handleRevokeDevice(device.id)}
-                      >
-                        {revokingDeviceId === device.id ? `${t('Revoke')}…` : t('Revoke')}
-                      </button>
-                    </td>
-                  </tr>
-                )) : (
+            <div className="panel-body" style={{ padding: '0' }}>
+              <div style={{ padding: '16px', borderBottom: '1px solid var(--border-color)', fontSize: '13px', color: 'var(--text-secondary)' }}>
+                {t('Installed machines and browser sessions. Revoking a machine stops tracking immediately.')}
+              </div>
+              <table className="table">
+                <thead>
                   <tr>
-                    <td colSpan={6} style={{ textAlign: 'center', padding: '24px', color: 'var(--text-muted)' }}>
-                      {devices ? t('No devices found.') : t('Loading...')}
-                    </td>
+                    <th>{t('Device')}</th>
+                    <th>{t('Kind')}</th>
+                    <th>{t('Installed version')}</th>
+                    <th>{t('Created')}</th>
+                    <th>{t('Last used')}</th>
+                    <th>{t('Status')}</th>
+                    <th></th>
                   </tr>
-                )}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {devices && devices.length > 0 ? devices.map((device) => (
+                    <tr key={device.id}>
+                      <td style={{ fontWeight: 700 }}>
+                        {device.device_name ?? '—'}
+                        {device.current && (
+                          <span className="badge badge-success" style={{ marginLeft: '8px' }}>
+                            {t('Current device')}
+                          </span>
+                        )}
+                      </td>
+                      <td style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
+                        {t(DEVICE_KIND_LABELS[device.kind] ?? device.kind)}
+                      </td>
+                      <td style={{ fontSize: '12px', color: 'var(--text-secondary)' }} title={device.client_commit ?? undefined}>
+                        {device.client_version ?? '—'}
+                        {device.client_commit && ` (${device.client_commit.slice(0, 7)})`}
+                      </td>
+                      <td style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>{formatTime(device.created_at)}</td>
+                      <td style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
+                        {device.last_used_at != null ? formatTime(device.last_used_at) : '—'}
+                      </td>
+                      <td>
+                        <span className={`badge ${device.kind === 'client' || device.current ? 'badge-success' : 'badge-neutral'}`}>
+                          {device.kind === 'client' ? t('Authorized') : device.current ? t('Active') : t('Idle')}
+                        </span>
+                      </td>
+                      <td style={{ textAlign: 'right' }}>
+                        <button
+                          type="button"
+                          className="btn-danger"
+                          disabled={revokingDeviceId !== null}
+                          onClick={() => void handleRevokeDevice(device.id)}
+                        >
+                          {revokingDeviceId === device.id ? `${t('Revoke')}…` : t('Revoke')}
+                        </button>
+                      </td>
+                    </tr>
+                  )) : (
+                    <tr>
+                      <td colSpan={7} style={{ textAlign: 'center', padding: '24px', color: 'var(--text-muted)' }}>
+                        {devices ? t('No devices found.') : t('Loading...')}
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
           </div>
-        </div>
       )}
     </div>
   )
