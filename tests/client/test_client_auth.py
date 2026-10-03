@@ -262,13 +262,18 @@ def test_login_registers_this_installation_across_logins_and_logout(
 def test_login_regenerates_a_corrupt_installation_key(monkeypatch):
     key_path = paths.installation_key_path()
     key_path.parent.mkdir(parents=True, exist_ok=True)
-    key_path.write_text("not-a-valid-key\n", encoding="utf-8")
 
-    code, fake, _ = _run_login(monkeypatch, inputs=["code"])
-    assert code == 0
-    body = [c for c in fake.calls if c[0] == "POST"][0][2]
-    assert body["installation_key"] != "not-a-valid-key"
-    assert key_path.read_text(encoding="utf-8").strip() == body["installation_key"]
+    for content in ("not-a-valid-key\n", b"\xff\xfe\x00bad"):
+        if isinstance(content, str):
+            key_path.write_text(content, encoding="utf-8")
+        else:
+            key_path.write_bytes(content)
+
+        code, fake, _ = _run_login(monkeypatch, inputs=["code"])
+        assert code == 0
+        body = [c for c in fake.calls if c[0] == "POST"][0][2]
+        assert body["installation_key"] not in ("not-a-valid-key", content)
+        assert key_path.read_text(encoding="utf-8").strip() == body["installation_key"]
 
 
 def test_login_three_failures_exit_1_no_credentials(monkeypatch):

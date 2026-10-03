@@ -88,15 +88,15 @@ def _write_private_text(path: Path, text: str) -> None:
 def _load_or_create_installation_key() -> str:
     """This machine's stable secret. Re-login rotates tokens; the key stays.
 
-    A missing or malformed file is regenerated, so a broken file can never wedge
-    login — it only costs the machine its device history. Any other read error
-    (permissions, a directory in the way) reaches the caller and fails the
-    login rather than silently minting a second identity for this machine.
+    A missing, malformed, or non-UTF-8 file is regenerated, so a broken file can
+    never wedge login — it only costs the machine its device history. Any other
+    read error (permissions, a directory in the way) reaches the caller and fails
+    the login rather than silently minting a second identity for this machine.
     """
     path = installation_key_path()
     try:
         key = path.read_text(encoding="utf-8").strip()
-    except FileNotFoundError:
+    except (FileNotFoundError, UnicodeDecodeError):
         key = ""
     if not re.fullmatch(r"[A-Za-z0-9_-]{43,128}", key):
         key = secrets.token_urlsafe(32)
