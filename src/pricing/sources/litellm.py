@@ -11,7 +11,8 @@ import re
 import threading
 from typing import Any
 
-from src.pricing.models import ModelCost, ModelTier, normalize_model_cost_key
+from src.pricing.models import ModelCost, ModelTier
+from src.utils import normalize_model_name
 
 from .base import (
     REQUEST_TIMEOUT,
@@ -260,8 +261,8 @@ def _parse_model_entry(
         tiers=tuple(tiers) if tiers else (),
     )
 
-    # Normalize key: strip provider prefix, lowercase
-    normalized = normalize_model_cost_key(_strip_provider_prefix(model_key))
+    # Strip LiteLLM transport prefixes before shared model-name normalization.
+    normalized = normalize_model_name(_strip_provider_prefix(model_key))
     return normalized, cost
 
 
@@ -284,7 +285,7 @@ def _claude_3x_alias(name: str) -> str | None:
 def _add_aliases(costs: dict[str, ModelCost], key: str, cost: ModelCost) -> None:
     """Add useful aliases for a model key if they don't already exist."""
     # Version-stripped alias (e.g. strip -20250929 from claude-sonnet-4-5-20250929)
-    base_name = normalize_model_cost_key(_strip_version_suffix(key))
+    base_name = normalize_model_name(_strip_version_suffix(key))
     if base_name != key and base_name not in costs:
         costs[base_name] = cost
 
@@ -313,7 +314,7 @@ def _parse_litellm_json(data: dict[str, Any]) -> dict[str, ModelCost]:
     # keep only the shorter base name.
     to_remove: list[str] = []
     for key in costs:
-        base = normalize_model_cost_key(_strip_version_suffix(key))
+        base = normalize_model_name(_strip_version_suffix(key))
         if base != key and base in costs:
             to_remove.append(key)
 

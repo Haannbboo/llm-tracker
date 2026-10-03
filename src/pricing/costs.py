@@ -5,6 +5,7 @@ from decimal import Decimal
 
 from src.config.app import PROVIDER_MAP
 
+from ..utils import normalize_model_name
 from .maps import (
     MAPS_LOCK,
     MODEL_COST_SOURCES,
@@ -18,7 +19,6 @@ from .models import (
     ModelCost,
     ModelTier,
     build_segment_index,
-    normalize_model_cost_key,
     resolve_effective_cost,
 )
 
@@ -68,7 +68,7 @@ def resolve_cost_match(
         if provider_model_cost_sources is None
         else provider_model_cost_sources
     )
-    normalized_model = normalize_model_cost_key(model)
+    normalized_model = normalize_model_name(model)
     provider_costs = (
         provider_model_costs.get(provider, {}) if provider is not None else {}
     )

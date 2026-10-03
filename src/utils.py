@@ -1,6 +1,19 @@
 import time
 from typing import Any
 
+_MODEL_NAME_ALIASES = {
+    "space-bunny-free": "stealth/space-bunny-alpha",
+}
+
+
+def normalize_model_name(model_name: str) -> str:
+    """Normalize casing/whitespace and resolve confirmed model aliases.
+
+    Unknown names keep their provider prefixes, versions, and variant suffixes.
+    """
+    name = model_name.strip().lower()
+    return _MODEL_NAME_ALIASES.get(name, name)
+
 
 def replace_contents(target: dict, source: dict) -> None:
     """Update target in place to match source without a clear-then-fill window."""
