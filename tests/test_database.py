@@ -108,6 +108,36 @@ def test_init_db_log_usage_and_fetch_rows(database_module, isolated_home):
     }
 
 
+def test_log_usage_normalizes_model_before_rollups(fresh_db):
+    import json
+
+    from sqlalchemy import select
+    from sqlalchemy.orm import Session
+
+    from src.database import get_engine, log_usage
+    from src.database.models import SessionRecord, Usage, UsageDaily
+
+    usage = Usage(
+        ts=TS_2026_05_19_00,
+        provider="custom",
+        model=" Space-Bunny-Free ",
+        client_source="opencode",
+        session_id="normalized-session",
+        endpoint="otlp",
+    )
+    log_usage(usage, db_path=fresh_db.db_path)
+
+    with Session(get_engine(fresh_db.db_path)) as session:
+        assert session.get(Usage, usage.id).model == "stealth/space-bunny-alpha"
+        assert (
+            session.scalars(select(UsageDaily)).one().model
+            == "stealth/space-bunny-alpha"
+        )
+        record = session.get(SessionRecord, "normalized-session")
+        assert record.primary_model == "stealth/space-bunny-alpha"
+        assert json.loads(record.models_json) == {"stealth/space-bunny-alpha": 0}
+
+
 def test_fetch_recent_usage_returns_expected_row_shape(fresh_db):
     database_module = fresh_db.database_module
     db_path = fresh_db.db_path

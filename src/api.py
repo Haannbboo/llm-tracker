@@ -82,6 +82,7 @@ from .evaluation import (
 from .evaluation_worker import load_evaluation_worker_config, run_evaluation_worker
 from .pricing.costs import resolve_cost_match
 from .pricing.snapshots import enrich_rows
+from .utils import normalize_model_name
 
 logger = logging.getLogger(__name__)
 EVALUATION_WORKER_SHUTDOWN_TIMEOUT_SECONDS = 5
@@ -1110,6 +1111,7 @@ async def get_model_pricing(model: str, provider: str | None = None):
     then the configured price sources (in priority order), with a
     containing-name fallback when no exact match exists.
     """
+    model = normalize_model_name(model)
     if not model:
         raise HTTPException(status_code=422, detail="model must not be empty")
 

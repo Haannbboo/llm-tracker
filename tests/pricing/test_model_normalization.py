@@ -124,8 +124,26 @@ def test_snapshot_enrichment_resolves_alias(fresh_db):
     assert row["pricing"]["source"] == "yaml"
 
 
-def test_legacy_cost_key_export_uses_shared_normalizer():
-    from src.pricing.models import normalize_model_cost_key
-    from src.utils import normalize_model_name
+def test_snapshot_writes_and_lookups_share_model_normalization(fresh_db):
+    from src.pricing.models import ModelCost
+    from src.pricing.snapshots import ensure_price_snapshot, get_price_snapshot
 
-    assert normalize_model_cost_key is normalize_model_name
+    snapshot_ids = []
+    for name in (" Space-Bunny-Free ", "STEALTH/SPACE-BUNNY-ALPHA"):
+        snapshot_ids.append(
+            ensure_price_snapshot(
+                date="2026-05-19",
+                provider="custom",
+                model=name,
+                source="yaml",
+                cost=ModelCost(input=0, output=0, cache_read=0),
+                multiplier=Decimal("1"),
+                db_path=fresh_db.db_path,
+            )
+        )
+        snapshot = get_price_snapshot(
+            date="2026-05-19", provider="custom", model=name, db_path=fresh_db.db_path
+        )
+        assert snapshot is not None
+        assert snapshot[0].input == 0
+    assert snapshot_ids[0] == snapshot_ids[1]

@@ -362,7 +362,17 @@ def test_record_proxy_user_agent_ignores_filesystem_errors(proxy_module, monkeyp
 
 
 @pytest.mark.anyio
-async def test_forward_persists_parsed_client_source(proxy_module, monkeypatch):
+@pytest.mark.parametrize(
+    "model, upstream_model",
+    [
+        ("test-model", "test-model"),
+        ("test-provider/space-bunny-free", "space-bunny-free"),
+        ("test-provider.space-bunny-free", "space-bunny-free"),
+    ],
+)
+async def test_forward_persists_parsed_client_source(
+    proxy_module, monkeypatch, model, upstream_model
+):
     captured = {}
 
     class FakeResponse:
@@ -383,12 +393,13 @@ async def test_forward_persists_parsed_client_source(proxy_module, monkeypatch):
 
         async def post(self, url, headers, content):
             captured["url"] = url
+            captured["upstream_model"] = json.loads(content)["model"]
             return FakeResponse()
 
     async def receive():
         return {
             "type": "http.request",
-            "body": b'{"model":"test-model","stream":false}',
+            "body": json.dumps({"model": model, "stream": False}).encode(),
             "more_body": False,
         }
 
@@ -418,6 +429,7 @@ async def test_forward_persists_parsed_client_source(proxy_module, monkeypatch):
 
     assert response.status_code == 200
     assert captured["client_source"] == "opencode"
+    assert captured["model"] == captured["upstream_model"] == upstream_model
 
 
 def test_resolve_provider_supports_configured_model_matches(proxy_module):
@@ -719,8 +731,16 @@ async def test_streaming_forward_logs_first_chunk_latency(proxy_module, monkeypa
 
 
 @pytest.mark.anyio
+@pytest.mark.parametrize(
+    "model, upstream_model",
+    [
+        ("test-model", "test-model"),
+        ("test-provider/space-bunny-free", "space-bunny-free"),
+        ("test-provider.space-bunny-free", "space-bunny-free"),
+    ],
+)
 async def test_streaming_forward_merges_anthropic_message_start_and_delta_usage(
-    proxy_module, monkeypatch
+    proxy_module, monkeypatch, model, upstream_model
 ):
     """Anthropic streams input/cache tokens in message_start and output tokens
     in a later message_delta; the proxy must merge both instead of the final
@@ -754,6 +774,7 @@ async def test_streaming_forward_merges_anthropic_message_start_and_delta_usage(
             self.timeout = timeout
 
         def build_request(self, method, url, headers=None, content=None):
+            captured["upstream_model"] = json.loads(content)["model"]
             return FakeRequest(method, url, headers, content)
 
         async def send(self, request, stream=False):
@@ -765,7 +786,7 @@ async def test_streaming_forward_merges_anthropic_message_start_and_delta_usage(
     async def receive():
         return {
             "type": "http.request",
-            "body": b'{"model":"test-model","stream":true}',
+            "body": json.dumps({"model": model, "stream": True}).encode(),
             "more_body": False,
         }
 
@@ -793,6 +814,7 @@ async def test_streaming_forward_merges_anthropic_message_start_and_delta_usage(
     assert captured["cached_tokens"] == 3
     assert captured["cache_creation_tokens"] == 8
     assert captured["completion_tokens"] == 15
+    assert captured["model"] == captured["upstream_model"] == upstream_model
 
 
 @pytest.mark.anyio

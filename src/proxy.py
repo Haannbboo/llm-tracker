@@ -462,7 +462,7 @@ async def forward(request: Request, path: str):
             headers=headers,
             body=body,
             provider=provider,
-            model=model,
+            model=upstream_model,
             client_source=client_source,
             client_ip=client_ip,
             path=path,
@@ -495,7 +495,7 @@ async def forward(request: Request, path: str):
     tool_calls = extract_tool_calls(response_json) if response_json else []
     usage = record_usage(
         provider=provider.name,
-        model=model,
+        model=upstream_model,
         client_source=client_source,
         session_id=None,
         endpoint=path,

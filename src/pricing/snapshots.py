@@ -114,6 +114,7 @@ def ensure_price_snapshot(
     called from the hot record path. ``cost`` must already be time-of-day
     resolved (see ``resolve_effective_cost``).
     """
+    model = normalize_model_name(model)
     engine = get_engine(db_path)
     payload = serialize_rates(cost, multiplier)
     digest = rates_hash(payload)
@@ -161,6 +162,7 @@ def get_price_snapshot(
 
     Legacy/unbound lookup only; new rows read via ``price_snapshot_id``.
     """
+    model = normalize_model_name(model)
     engine = get_engine(db_path)
     with engine.connect() as connection:
         record = connection.execute(

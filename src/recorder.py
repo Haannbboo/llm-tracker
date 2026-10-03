@@ -17,9 +17,8 @@ from .database.base_url import resolve_base_url_id
 from .database.models import ToolCall, Usage
 from .database.usage import log_usage, merge_duplicate_usage
 from .pricing.costs import ResolvedPricing, calculate_costs, resolve_pricing
-from .pricing.models import normalize_model_cost_key
 from .pricing.snapshots import ensure_price_snapshot
-from .utils import micros_to_secs
+from .utils import micros_to_secs, normalize_model_name
 
 log = logging.getLogger(__name__)
 
@@ -57,6 +56,7 @@ def record_usage(
     ):
         return None
 
+    model = normalize_model_name(model)
     usage_ts = ts if ts is not None else time.time_ns() // 1000
 
     # Proxy and OTLP are independent collection paths for the same agent;
@@ -149,7 +149,7 @@ def _record_price_snapshot(
         return ensure_price_snapshot(
             date=date,
             provider=provider,
-            model=normalize_model_cost_key(model),
+            model=model,
             source=resolved.source or "unknown",
             cost=resolved.cost,
             multiplier=resolved.multiplier,

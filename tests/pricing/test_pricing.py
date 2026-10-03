@@ -5,6 +5,7 @@ import os
 import time
 import urllib.error
 
+import pytest
 from fastapi.testclient import TestClient
 
 import src.pricing.sources.base as base_module
@@ -1358,19 +1359,27 @@ def test_single_model_pricing_slashed_model_exact_yaml(api_module, monkeypatch):
     assert data["input"] == 0.98
 
 
-def test_single_model_pricing_unresolved(api_module, monkeypatch):
+@pytest.mark.parametrize(
+    "model, expected",
+    [
+        ("unknown-model", "unknown-model"),
+        (" Unknown-Model ", "unknown-model"),
+        ("Space-Bunny-Free", "stealth/space-bunny-alpha"),
+    ],
+)
+def test_single_model_pricing_unresolved(api_module, monkeypatch, model, expected):
     api_module.CONFIG.clear()
     api_module.CONFIG.update({"models": {}, "providers": {}})
     monkeypatch.setattr(
         "src.pricing.sources.litellm.fetch_remote_pricing", lambda *args, **kwargs: {}
     )
 
-    response = TestClient(api_module.app).get("/pricing/unknown-model")
+    response = TestClient(api_module.app).get(f"/pricing/{model}")
 
     assert response.status_code == 200
     data = response.json()
     assert data["resolved"] is False
-    assert data["model"] == "unknown-model"
+    assert data["model"] == expected
     assert data["input"] == 0.0
     assert data["output"] == 0.0
 

@@ -28,8 +28,7 @@ from sqlalchemy import (
 from sqlalchemy.orm import Session
 
 from ..pricing.costs import calculate_costs, compute_input_split, resolve_pricing
-from ..pricing.models import normalize_model_cost_key
-from ..utils import micros_to_secs, secs_to_micros
+from ..utils import micros_to_secs, normalize_model_name, secs_to_micros
 from .engine import get_engine
 from .models import BaseUrl, ToolCall, Usage, UsageDaily
 
@@ -172,7 +171,7 @@ def merge_duplicate_usage(
                     endpoint_filter,
                     Usage.user_id == user_id,
                     Usage.client_source.in_(other_path_sources),
-                    Usage.model == model,
+                    Usage.model == normalize_model_name(model),
                     Usage.prompt_tokens == prompt_tokens,
                     Usage.completion_tokens == completion_tokens,
                     Usage.cached_tokens == cached_tokens,
@@ -231,6 +230,7 @@ def merge_duplicate_usage(
 
 def log_usage(usage: Usage, db_path: str | None = None) -> None:
     """Persist a single usage row and update the daily aggregation table."""
+    usage.model = normalize_model_name(usage.model)
     with Session(get_engine(db_path), expire_on_commit=False) as session:
         session.add(usage)
         session.commit()
@@ -468,7 +468,7 @@ def recalculate_usage_cost(
             usage.price_snapshot_id = ensure_price_snapshot(
                 date=date,
                 provider=usage.provider,
-                model=normalize_model_cost_key(usage.model),
+                model=usage.model,
                 source=resolved.source or "unknown",
                 cost=resolved.cost,
                 multiplier=resolved.multiplier,
@@ -758,7 +758,7 @@ def _usage_filters(
     if provider:
         filters.append(Usage.provider == provider)
     if model:
-        filters.append(Usage.model == model)
+        filters.append(Usage.model == normalize_model_name(model))
     if client_source:
         filters.append(Usage.client_source == client_source)
     if session_id:
@@ -881,7 +881,7 @@ def _daily_usage_filters(
     if provider:
         filters.append(UsageDaily.provider == provider)
     if model:
-        filters.append(UsageDaily.model == model)
+        filters.append(UsageDaily.model == normalize_model_name(model))
     if client_source:
         filters.append(UsageDaily.client_source == client_source)
     return filters
@@ -1248,21 +1248,17 @@ def summarize_usage_window(
     include_rows: bool = False,
     db_path: str | None = None,
 ) -> dict[str, Any]:
-    filters = [Usage.ts > after_ts]
+    filters = _usage_filters(
+        provider=provider,
+        model=model,
+        client_source=client_source,
+        session_id=session_id,
+        since=since,
+        until=until,
+    )
+    filters.append(Usage.ts > after_ts)
     if until_ts is not None:
         filters.append(Usage.ts <= until_ts)
-    if since:
-        filters.append(Usage.ts >= _iso_to_micros(since))
-    if until:
-        filters.append(Usage.ts <= _iso_to_micros(until))
-    if client_source:
-        filters.append(Usage.client_source == client_source)
-    if session_id:
-        filters.append(Usage.session_id == session_id)
-    if provider:
-        filters.append(Usage.provider == provider)
-    if model:
-        filters.append(Usage.model == model)
 
     query = (
         select(

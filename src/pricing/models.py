@@ -9,8 +9,6 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 
-from ..utils import normalize_model_name
-
 
 @dataclass(frozen=True)
 class ModelTier:
@@ -64,10 +62,6 @@ class ResolvedCost:
 class ResolvedCosts:
     global_costs: dict[str, ResolvedCost]
     provider_costs: dict[str, dict[str, ResolvedCost]]
-
-
-# Compatibility export for recorder/database callers until they use utils directly.
-normalize_model_cost_key = normalize_model_name
 
 
 def cost_rank(cost: ModelCost) -> tuple[float, ...]:
