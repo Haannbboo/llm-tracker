@@ -21,7 +21,7 @@ from sqlalchemy import select, tuple_
 from sqlalchemy.dialects import postgresql, sqlite
 
 from ..database import PriceSnapshot, get_engine
-from ..utils import micros_to_secs, normalize_model_name
+from ..utils import micros_to_secs, normalize_model_name, normalize_provider_name
 from .costs import (
     compute_input_split,
     get_provider_price_multiplier,
@@ -114,6 +114,7 @@ def ensure_price_snapshot(
     called from the hot record path. ``cost`` must already be time-of-day
     resolved (see ``resolve_effective_cost``).
     """
+    provider = normalize_provider_name(provider)
     model = normalize_model_name(model)
     engine = get_engine(db_path)
     payload = serialize_rates(cost, multiplier)
@@ -162,6 +163,7 @@ def get_price_snapshot(
 
     Legacy/unbound lookup only; new rows read via ``price_snapshot_id``.
     """
+    provider = normalize_provider_name(provider)
     model = normalize_model_name(model)
     engine = get_engine(db_path)
     with engine.connect() as connection:
@@ -206,7 +208,11 @@ def _lookup_key(row: dict) -> tuple[str, str, str] | None:
     model = row.get("model")
     if not provider or not model:
         return None
-    return (_ts_date(row.get("ts")), provider, normalize_model_name(model))
+    return (
+        _ts_date(row.get("ts")),
+        normalize_provider_name(provider),
+        normalize_model_name(model),
+    )
 
 
 def _load_snapshot_cache(

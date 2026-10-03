@@ -10,7 +10,7 @@ from __future__ import annotations
 import threading
 from typing import Any
 
-from ..utils import normalize_model_name
+from ..utils import normalize_model_name, normalize_provider_name
 from ..utils import replace_contents as _replace_contents
 from .models import (
     ModelCost,
@@ -157,7 +157,8 @@ def resolve_all_costs(
             resolved = ResolvedCost(cost=entry.cost, source=source.name)
             key = normalize_model_name(entry.key)
             if entry.provider:
-                provider_costs.setdefault(entry.provider, {})[key] = resolved
+                provider = normalize_provider_name(entry.provider)
+                provider_costs.setdefault(provider, {})[key] = resolved
             else:
                 global_costs[key] = resolved
 
@@ -177,6 +178,7 @@ def resolve_all_costs(
     for provider_name, provider in config.get("providers", {}).items():
         if not isinstance(provider, dict):
             continue
+        provider_name = normalize_provider_name(provider_name)
         models = provider.get("models", {})
         if isinstance(models, dict):
             for model_name, model_config in models.items():

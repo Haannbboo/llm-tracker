@@ -102,7 +102,7 @@ def test_snapshot_enrichment_resolves_alias(fresh_db):
 
     ensure_price_snapshot(
         date="2026-05-19",
-        provider="custom",
+        provider="CUSTOM",
         model="stealth/space-bunny-alpha",
         source="yaml",
         cost=ModelCost(input=1, output=2, cache_read=0),
@@ -113,7 +113,7 @@ def test_snapshot_enrichment_resolves_alias(fresh_db):
         [
             {
                 "ts": 1779148800000000,
-                "provider": "custom",
+                "provider": "Custom",
                 "model": " Space-Bunny-Free ",
                 "prompt_tokens": 1000,
             }
@@ -129,11 +129,14 @@ def test_snapshot_writes_and_lookups_share_model_normalization(fresh_db):
     from src.pricing.snapshots import ensure_price_snapshot, get_price_snapshot
 
     snapshot_ids = []
-    for name in (" Space-Bunny-Free ", "STEALTH/SPACE-BUNNY-ALPHA"):
+    for name, provider in (
+        (" Space-Bunny-Free ", "CUSTOM"),
+        ("STEALTH/SPACE-BUNNY-ALPHA", "Custom"),
+    ):
         snapshot_ids.append(
             ensure_price_snapshot(
                 date="2026-05-19",
-                provider="custom",
+                provider=provider,
                 model=name,
                 source="yaml",
                 cost=ModelCost(input=0, output=0, cache_read=0),
@@ -142,7 +145,7 @@ def test_snapshot_writes_and_lookups_share_model_normalization(fresh_db):
             )
         )
         snapshot = get_price_snapshot(
-            date="2026-05-19", provider="custom", model=name, db_path=fresh_db.db_path
+            date="2026-05-19", provider=provider, model=name, db_path=fresh_db.db_path
         )
         assert snapshot is not None
         assert snapshot[0].input == 0

@@ -368,6 +368,7 @@ def test_record_proxy_user_agent_ignores_filesystem_errors(proxy_module, monkeyp
         ("test-model", "test-model"),
         ("test-provider/space-bunny-free", "space-bunny-free"),
         ("test-provider.space-bunny-free", "space-bunny-free"),
+        ("TEST-PROVIDER/space-bunny-free", "space-bunny-free"),
     ],
 )
 async def test_forward_persists_parsed_client_source(

@@ -18,7 +18,7 @@ from .database.models import ToolCall, Usage
 from .database.usage import log_usage, merge_duplicate_usage
 from .pricing.costs import ResolvedPricing, calculate_costs, resolve_pricing
 from .pricing.snapshots import ensure_price_snapshot
-from .utils import micros_to_secs, normalize_model_name
+from .utils import micros_to_secs, normalize_model_name, normalize_provider_name
 
 log = logging.getLogger(__name__)
 
@@ -56,6 +56,7 @@ def record_usage(
     ):
         return None
 
+    provider = normalize_provider_name(provider)
     model = normalize_model_name(model)
     usage_ts = ts if ts is not None else time.time_ns() // 1000
 

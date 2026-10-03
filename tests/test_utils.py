@@ -18,6 +18,16 @@ def test_normalize_model_name():
         assert normalize_model_name(expected) == expected
 
 
+def test_normalize_provider_name():
+    from src.utils import normalize_provider_name
+
+    assert normalize_provider_name("OpenAI") == "openai"
+    assert normalize_provider_name("MiniMax") == "minimax"
+    assert normalize_provider_name("My-Custom-Provider") == "my-custom-provider"
+    assert normalize_provider_name(" OpenAI ") == " openai "
+    assert normalize_provider_name("") == ""
+
+
 def test_extract_usage_supports_responses_format_and_details(utils_module):
     usage = utils_module.extract_usage(
         {

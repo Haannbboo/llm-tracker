@@ -46,6 +46,17 @@ providers: {}
     assert config["models"] == {}
 
 
+def test_load_config_normalizes_provider_keys(config_module, tmp_path):
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        "providers:\n  OpenAI:\n    base_url: https://api.example.com/v1\n",
+        encoding="utf-8",
+    )
+    config = config_module.load_config(str(config_path))
+    assert set(config["providers"]) == {"openai"}
+    assert config["providers"]["openai"]["base_url"] == "https://api.example.com/v1"
+
+
 def test_load_config_rejects_nonpositive_record_cap(config_module, tmp_path):
     """A 0/negative record cap would silently drop every export; default wins."""
     config_path = tmp_path / "config.yaml"
@@ -166,7 +177,7 @@ def test_build_maps_parses_provider_price_multiplier(config_module):
         {
             "models": {"alpha-1": {}},
             "providers": {
-                "alpha": {
+                "AlPhA": {
                     "base_url": "https://alpha.example/v1",
                     "price_multiplier": 1.35,
                     "models": {"alpha-1": {}},

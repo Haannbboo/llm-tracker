@@ -15,6 +15,11 @@ def normalize_model_name(model_name: str) -> str:
     return _MODEL_NAME_ALIASES.get(name, name)
 
 
+def normalize_provider_name(provider_name: str) -> str:
+    """Fold provider casing so names share one identity."""
+    return provider_name.lower()
+
+
 def replace_contents(target: dict, source: dict) -> None:
     """Update target in place to match source without a clear-then-fill window."""
     target.update(source)

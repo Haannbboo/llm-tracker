@@ -28,7 +28,12 @@ from sqlalchemy import (
 from sqlalchemy.orm import Session
 
 from ..pricing.costs import calculate_costs, compute_input_split, resolve_pricing
-from ..utils import micros_to_secs, normalize_model_name, secs_to_micros
+from ..utils import (
+    micros_to_secs,
+    normalize_model_name,
+    normalize_provider_name,
+    secs_to_micros,
+)
 from .engine import get_engine
 from .models import BaseUrl, ToolCall, Usage, UsageDaily
 
@@ -230,6 +235,7 @@ def merge_duplicate_usage(
 
 def log_usage(usage: Usage, db_path: str | None = None) -> None:
     """Persist a single usage row and update the daily aggregation table."""
+    usage.provider = normalize_provider_name(usage.provider)
     usage.model = normalize_model_name(usage.model)
     with Session(get_engine(db_path), expire_on_commit=False) as session:
         session.add(usage)
@@ -756,7 +762,7 @@ def _usage_filters(
 ) -> list[Any]:
     filters: list[Any] = []
     if provider:
-        filters.append(Usage.provider == provider)
+        filters.append(Usage.provider == normalize_provider_name(provider))
     if model:
         filters.append(Usage.model == normalize_model_name(model))
     if client_source:
@@ -879,7 +885,7 @@ def _daily_usage_filters(
     if _until:
         filters.append(UsageDaily.date <= _until[:10])
     if provider:
-        filters.append(UsageDaily.provider == provider)
+        filters.append(UsageDaily.provider == normalize_provider_name(provider))
     if model:
         filters.append(UsageDaily.model == normalize_model_name(model))
     if client_source:

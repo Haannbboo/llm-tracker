@@ -105,6 +105,112 @@ def test_record_usage_normalizes_models_and_rollups(test_db, monkeypatch):
         assert summary["models"][0]["model"] == canonical
 
 
+def test_record_usage_normalizes_provider_without_losing_pricing(test_db, monkeypatch):
+    import json
+    from decimal import Decimal
+
+    from sqlalchemy import select
+    from sqlalchemy.orm import Session
+
+    from src.config.app import build_maps
+    from src.database import count_usage, get_engine, summarize_usage_window
+    from src.database.models import BaseUrl, PriceSnapshot, SessionRecord, UsageDaily
+    from src.pricing import costs
+    from src.pricing.maps import resolve_all_costs
+    from src.pricing.models import ModelCost
+    from src.pricing.sources.base import FetchedSource, SourceEntry
+    from src.recorder import record_usage
+
+    config = {
+        "providers": {
+            "Custom-Provider": {
+                "base_url": "https://api.example.com/v1",
+                "price_multiplier": 2,
+                "models": {"test-model": {"cost": {"output": 3}}},
+            }
+        }
+    }
+    provider_map, _ = build_maps(config)
+    resolved = resolve_all_costs(
+        config,
+        [
+            FetchedSource(
+                name="test-source",
+                priority=0,
+                entries=(
+                    SourceEntry(
+                        provider="CUSTOM-PROVIDER",
+                        key="test-model",
+                        cost=ModelCost(
+                            input=1, output=2, cache_read=0.25, cache_write=0.5
+                        ),
+                    ),
+                ),
+            )
+        ],
+    )
+    provider = "custom-provider"
+    monkeypatch.setitem(costs.PROVIDER_MAP, provider, provider_map[provider])
+    monkeypatch.setitem(
+        costs.PROVIDER_MODEL_COSTS,
+        provider,
+        {key: rc.cost for key, rc in resolved.provider_costs[provider].items()},
+    )
+    assert costs.get_provider_price_multiplier("CUSTOM-PROVIDER") == Decimal("2")
+    assert costs.resolve_cost_match("Custom-Provider", "test-model").scope == "provider"
+
+    for name in ("CUSTOM-PROVIDER", "Custom-Provider"):
+        usage = record_usage(
+            ts=1779148800000000,
+            provider=name,
+            model="test-model",
+            session_id="provider-normalization",
+            endpoint="otlp",
+            prompt_tokens=1000,
+            completion_tokens=500,
+            cached_tokens=200,
+            cache_creation_tokens=100,
+            total_tokens=1600,
+            base_url="https://api.example.com/v1",
+            base_url_provider=name,
+            db_path=test_db,
+        )
+        assert usage is not None
+        assert usage.provider == provider
+        assert usage.total_cost_usd == Decimal("0.0048")
+        assert usage.price_snapshot_id is not None
+
+    with Session(get_engine(test_db)) as session:
+        daily = session.scalars(select(UsageDaily)).one()
+        assert daily.provider == provider
+        assert daily.request_count == 2
+        record = session.get(SessionRecord, "provider-normalization")
+        assert record.primary_provider == provider
+        assert json.loads(record.providers_json) == {provider: 0.0096}
+        assert session.scalars(select(PriceSnapshot)).one().provider == provider
+        assert session.scalars(select(BaseUrl)).one().provider_name == provider
+
+    assert (
+        len(fetch_recent_usage(limit=10, provider="CUSTOM-PROVIDER", db_path=test_db))
+        == 2
+    )
+    assert count_usage(provider="CUSTOM-PROVIDER", db_path=test_db) == 2
+    assert (
+        count_usage(
+            provider="CUSTOM-PROVIDER",
+            session_id="provider-normalization",
+            db_path=test_db,
+        )
+        == 2
+    )
+    assert (
+        summarize_usage_window(provider="CUSTOM-PROVIDER", db_path=test_db)["window"][
+            "row_count"
+        ]
+        == 2
+    )
+
+
 def test_record_usage_computes_costs(test_db):
     from src.pricing import costs as costs_module
     from src.pricing.costs import ModelCost

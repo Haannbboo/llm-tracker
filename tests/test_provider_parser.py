@@ -80,15 +80,15 @@ def test_derive_provider_from_base_url(provider_parser_module, url, expected):
 class TestParseProvider:
     def test_claude_provider(self, provider_parser_module, isolated_home: Path):
         _write_claude_settings(isolated_home, "https://api.anthropic.com")
-        assert provider_parser_module.parse_provider("claude") == "Anthropic"
+        assert provider_parser_module.parse_provider("claude") == "anthropic"
 
     def test_codex_provider(self, provider_parser_module, isolated_home: Path):
         _write_codex_config(isolated_home, "https://api.openai.com/v1")
-        assert provider_parser_module.parse_provider("codex") == "OpenAI"
+        assert provider_parser_module.parse_provider("codex") == "openai"
 
     def test_opencode_provider(self, provider_parser_module, isolated_home: Path):
         _write_opencode_config(isolated_home, "https://api.anthropic.com")
-        assert provider_parser_module.parse_provider("opencode") == "Anthropic"
+        assert provider_parser_module.parse_provider("opencode") == "anthropic"
 
     def test_claude_fallback(self, provider_parser_module, isolated_home: Path):
         _write_claude_settings(isolated_home, None)
@@ -147,7 +147,7 @@ class TestParseProvider:
         _write_claude_settings(
             isolated_home, "https://token-plan-sgp.xiaomimimo.com/anthropic"
         )
-        assert provider_parser_module.parse_provider("claude") == "Xiaomi"
+        assert provider_parser_module.parse_provider("claude") == "xiaomi"
 
 
 class TestCodexHomeOverride:
@@ -185,7 +185,7 @@ class TestCodexHomeOverride:
         self, provider_parser_module, isolated_home: Path
     ):
         _write_codex_config(isolated_home, "https://api.anthropic.com")
-        assert provider_parser_module.parse_provider("codex") == "Anthropic"
+        assert provider_parser_module.parse_provider("codex") == "anthropic"
 
     def test_codex_home_metadata_source(
         self,
