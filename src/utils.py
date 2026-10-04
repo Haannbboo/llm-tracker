@@ -17,7 +17,7 @@ def normalize_model_name(model_name: str) -> str:
 
 def normalize_provider_name(provider_name: str) -> str:
     """Fold provider casing so names share one identity."""
-    return provider_name.lower()
+    return provider_name.strip().lower()
 
 
 def normalize_tool_name(tool_name: str) -> str:

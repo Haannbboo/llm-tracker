@@ -24,7 +24,7 @@ def test_normalize_provider_name():
     assert normalize_provider_name("OpenAI") == "openai"
     assert normalize_provider_name("MiniMax") == "minimax"
     assert normalize_provider_name("My-Custom-Provider") == "my-custom-provider"
-    assert normalize_provider_name(" OpenAI ") == " openai "
+    assert normalize_provider_name(" OpenAI ") == "openai"
     assert normalize_provider_name("") == ""
 
 
