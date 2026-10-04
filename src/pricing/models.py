@@ -64,10 +64,6 @@ class ResolvedCosts:
     provider_costs: dict[str, dict[str, ResolvedCost]]
 
 
-def normalize_model_cost_key(model_name: str) -> str:
-    return model_name.lower()
-
-
 def cost_rank(cost: ModelCost) -> tuple[float, ...]:
     """Ordering key for comparing model costs, cheapest first."""
     return (

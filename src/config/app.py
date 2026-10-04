@@ -4,6 +4,7 @@ from typing import Any
 
 import yaml
 
+from ..utils import normalize_provider_name
 from ..utils import replace_contents as _replace_contents
 from . import merge as merge_helpers
 from .models import ProviderConfig, expand_path, get_tracker_home
@@ -33,7 +34,10 @@ def load_config(path: str | None = None) -> dict[str, Any]:
     server = config.setdefault("server", {})
     db = config.setdefault("db", {})
     config.setdefault("models", {})
-    config.setdefault("providers", {})
+    config["providers"] = {
+        normalize_provider_name(name): provider
+        for name, provider in config.get("providers", {}).items()
+    }
 
     server.setdefault("host", "127.0.0.1")
     server.setdefault("port", 4000)
@@ -125,6 +129,13 @@ def build_maps(
     model_map: dict[str, ProviderConfig] = {}
 
     for provider_name, provider in config["providers"].items():
+        # `enabled: false` keeps the provider stanza (base_url/api_key/pricing)
+        # but takes it out of routing entirely: no prefixed route, no model
+        # list entry, nothing forwarded upstream. Costs stay intact because
+        # pricing maps read the config, not these maps.
+        if not provider.get("enabled", True):
+            continue
+        provider_name = normalize_provider_name(provider_name)
         provider_config = ProviderConfig(
             name=provider_name,
             base_url=provider["base_url"],

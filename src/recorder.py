@@ -17,9 +17,13 @@ from .database.base_url import resolve_base_url_id
 from .database.models import ToolCall, Usage
 from .database.usage import log_usage, merge_duplicate_usage
 from .pricing.costs import ResolvedPricing, calculate_costs, resolve_pricing
-from .pricing.models import normalize_model_cost_key
 from .pricing.snapshots import ensure_price_snapshot
-from .utils import micros_to_secs
+from .utils import (
+    micros_to_secs,
+    normalize_model_name,
+    normalize_provider_name,
+    normalize_tool_name,
+)
 
 log = logging.getLogger(__name__)
 
@@ -57,6 +61,8 @@ def record_usage(
     ):
         return None
 
+    provider = normalize_provider_name(provider)
+    model = normalize_model_name(model)
     usage_ts = ts if ts is not None else time.time_ns() // 1000
 
     # Proxy and OTLP are independent collection paths for the same agent;
@@ -149,7 +155,7 @@ def _record_price_snapshot(
         return ensure_price_snapshot(
             date=date,
             provider=provider,
-            model=normalize_model_cost_key(model),
+            model=model,
             source=resolved.source or "unknown",
             cost=resolved.cost,
             multiplier=resolved.multiplier,
@@ -158,11 +164,6 @@ def _record_price_snapshot(
     except Exception:
         log.warning("Failed to record price snapshot for %s/%s", provider, model)
         return None
-
-
-def normalize_tool_name(tool_name: str) -> str:
-    """Fold tool name casing so e.g. `Bash`/`bash` aggregate as one tool."""
-    return tool_name.lower()
 
 
 def update_tool_call_duration(

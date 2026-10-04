@@ -108,6 +108,40 @@ def test_init_db_log_usage_and_fetch_rows(database_module, isolated_home):
     }
 
 
+def test_log_usage_normalizes_model_before_rollups(fresh_db):
+    import json
+
+    from sqlalchemy import select
+    from sqlalchemy.orm import Session
+
+    from src.database import get_engine, log_usage
+    from src.database.models import SessionRecord, Usage, UsageDaily
+
+    usage = Usage(
+        ts=TS_2026_05_19_00,
+        provider="CuStOm",
+        model=" Space-Bunny-Free ",
+        client_source="opencode",
+        session_id="normalized-session",
+        endpoint="otlp",
+    )
+    log_usage(usage, db_path=fresh_db.db_path)
+
+    with Session(get_engine(fresh_db.db_path)) as session:
+        assert session.get(Usage, usage.id).provider == "custom"
+        assert session.get(Usage, usage.id).model == "stealth/space-bunny-alpha"
+        assert session.scalars(select(UsageDaily)).one().provider == "custom"
+        assert (
+            session.scalars(select(UsageDaily)).one().model
+            == "stealth/space-bunny-alpha"
+        )
+        record = session.get(SessionRecord, "normalized-session")
+        assert record.primary_provider == "custom"
+        assert json.loads(record.providers_json) == {"custom": 0}
+        assert record.primary_model == "stealth/space-bunny-alpha"
+        assert json.loads(record.models_json) == {"stealth/space-bunny-alpha": 0}
+
+
 def test_fetch_recent_usage_returns_expected_row_shape(fresh_db):
     database_module = fresh_db.database_module
     db_path = fresh_db.db_path
@@ -1484,7 +1518,7 @@ def test_get_or_create_base_url_reuses_exact_url_and_updates_metadata(fresh_db):
     assert len(rows) == 1
     row = rows[0]
     assert row.base_url == "https://gateway.example/v1"
-    assert row.provider_name == "OpenAI"
+    assert row.provider_name == "openai"
     assert row.source == "codex_config"
 
 

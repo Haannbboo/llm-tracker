@@ -82,6 +82,7 @@ from .evaluation import (
 from .evaluation_worker import load_evaluation_worker_config, run_evaluation_worker
 from .pricing.costs import resolve_cost_match
 from .pricing.snapshots import enrich_rows
+from .utils import normalize_model_name, normalize_provider_name
 
 logger = logging.getLogger(__name__)
 EVALUATION_WORKER_SHUTDOWN_TIMEOUT_SECONDS = 5
@@ -1033,7 +1034,9 @@ def _pricing_entry(resolved_cost, scope: str, multiplier: float) -> dict:
 def _resolve_provider_multiplier(config_snapshot: dict, provider: str | None) -> float:
     if provider is None:
         return 1.0
-    provider_config = config_snapshot.get("providers", {}).get(provider, {})
+    provider_config = config_snapshot.get("providers", {}).get(
+        normalize_provider_name(provider), {}
+    )
     if not isinstance(provider_config, dict):
         return 1.0
     return float(provider_config.get("price_multiplier", 1.0))
@@ -1082,6 +1085,7 @@ async def get_pricing(provider: str | None = None):
     result: dict[str, dict] = {}
 
     if provider is not None:
+        provider = normalize_provider_name(provider)
         multiplier = _resolve_provider_multiplier(config_snapshot, provider)
 
         for key, resolved_cost in resolved.global_costs.items():
@@ -1110,6 +1114,9 @@ async def get_model_pricing(model: str, provider: str | None = None):
     then the configured price sources (in priority order), with a
     containing-name fallback when no exact match exists.
     """
+    model = normalize_model_name(model)
+    if provider is not None:
+        provider = normalize_provider_name(provider)
     if not model:
         raise HTTPException(status_code=422, detail="model must not be empty")
 

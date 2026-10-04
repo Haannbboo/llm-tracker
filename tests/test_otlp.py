@@ -376,7 +376,7 @@ def test_extract_opencode_fields_resolves_base_url_for_event_provider(
 
     assert fields["provider"] == "openai"
     assert fields["base_url"] == "https://api.openai.com/v1"
-    assert fields["base_url_provider"] == "OpenAI"
+    assert fields["base_url_provider"] == "openai"
     assert fields["base_url_source"] == "opencode_config"
 
 
