@@ -17,10 +17,6 @@ from fastapi.testclient import TestClient
 from sqlalchemy import text
 
 SESSION_COOKIE = "tokenage_session"
-_CHROME_LINUX_UA = (
-    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
-    "(KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36"
-)
 
 
 def _routes_module():
@@ -94,9 +90,7 @@ def _web_login(api_module, monkeypatch, client, email="a@example.com"):
     assert response.status_code == 302
     state = parse_qs(urlparse(response.headers["location"]).query)["state"][0]
     callback = client.get(
-        f"/auth/google/callback?code=the-code&state={state}",
-        follow_redirects=False,
-        headers={"user-agent": _CHROME_LINUX_UA},
+        f"/auth/google/callback?code=the-code&state={state}", follow_redirects=False
     )
     assert callback.status_code == 302
     assert client.cookies.get(SESSION_COOKIE)
@@ -210,7 +204,7 @@ def test_session_shortcut_confirm_and_exchange(api_module, monkeypatch, fresh_db
     assert kinds == [
         ("cli", "<evil>host", True, True),
         ("ingest", "<evil>host", True, True),
-        ("web", "Chrome on Linux", False, True),
+        ("web", "browser", False, True),
     ]
 
 
@@ -537,7 +531,7 @@ def test_exchange_creates_device_pair_and_leaves_unlinked_tokens_alone(
     assert rows[("cli", "myhost", False)]
     assert rows[("ingest", "myhost", False)]
     assert rows[("cli", "otherhost", False)]
-    assert rows[("web", "Chrome on Linux", False)]
+    assert rows[("web", "browser", False)]
 
 
 # ------------------------------------------------------------- validation

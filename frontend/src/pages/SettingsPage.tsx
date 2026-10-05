@@ -13,7 +13,6 @@ import { useVersion } from '../hooks/useVersion'
 
 const DEVICE_KIND_LABELS: Record<string, string> = {
   client: 'Machine',
-  web: 'Browser',
   cli: 'CLI',
   ingest: 'Ingest',
 }

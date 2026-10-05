@@ -265,11 +265,7 @@ async def auth_google_callback(request: Request):
     # One live browser session per user: the new login retires the old cookie.
     user = get_or_create_user(email)
     _retire_web_sessions(user.id)
-    plaintext_token, user = mint_token(
-        email,
-        kind="web",
-        device_name=_web_session_label(request.headers.get("user-agent")),
-    )
+    plaintext_token, user = mint_token(email, kind="web", device_name="browser")
     update_user_name(user.id, str(claims.get("name") or "").strip() or None)
     response = _frontend_redirect(origin)
     response.set_cookie(
@@ -297,7 +293,11 @@ def auth_logout(request: Request, user: User | None = Depends(get_current_user))
 
 @router.get("/auth/devices")
 def auth_devices(request: Request, user: User | None = Depends(get_current_user)):
-    """List installed machines, plus browser and operator-minted sessions."""
+    """List installed machines and the caller's unlinked tokens.
+
+    Browser sessions are deliberately absent: signing in again retires the
+    previous one, so a stale browser entry is never left to manage here.
+    """
     if user is None:
         raise HTTPException(status_code=404, detail="not found")
     auth_token = getattr(request.state, "auth_token", None)
@@ -329,7 +329,7 @@ def auth_devices(request: Request, user: User | None = Depends(get_current_user)
                 "current": device.id == current_id,
             }
             for device in list_user_tokens(user.id)
-            if device.device_id is None
+            if device.device_id is None and device.kind != "web"
         ]
     }
 
@@ -377,37 +377,6 @@ class CliExchangeRequest(BaseModel):
 def _sanitize_device_name(raw: str | None) -> str:
     cleaned = "".join(c for c in (raw or "").strip() if c.isprintable())
     return cleaned[:64] or _DEFAULT_DEVICE_NAME
-
-
-# Longest-first: every Chromium UA also claims Safari, and Edge/Opera also
-# claim Chrome.
-_UA_BROWSERS = (
-    ("Edg/", "Edge"),
-    ("OPR/", "Opera"),
-    ("Chrome/", "Chrome"),
-    ("Firefox/", "Firefox"),
-    ("Safari/", "Safari"),
-)
-_UA_PLATFORMS = (
-    ("Android", "Android"),
-    ("iPhone", "iOS"),
-    ("Windows", "Windows"),
-    ("Mac OS", "macOS"),
-    ("Linux", "Linux"),
-)
-
-
-def _web_session_label(user_agent: str | None) -> str:
-    """A short label for a browser session, e.g. "Chrome on Linux".
-
-    Only the derived label is stored, never the raw User-Agent.
-    """
-    # ponytail: substring sniffing, not a UA database — swap in a parser if the
-    # label ever needs to be precise.
-    ua = user_agent or ""
-    browser = next((name for needle, name in _UA_BROWSERS if needle in ua), "browser")
-    platform = next((name for needle, name in _UA_PLATFORMS if needle in ua), "unknown")
-    return _sanitize_device_name(f"{browser} on {platform}")
 
 
 def _retire_web_sessions(user_id: str) -> None:

@@ -192,14 +192,7 @@ def test_google_callback_happy_path(api_module, monkeypatch, fresh_db):
     state = _start_login(api_module, monkeypatch, client)
 
     callback = client.get(
-        f"/auth/google/callback?code=the-code&state={state}",
-        follow_redirects=False,
-        headers={
-            "user-agent": (
-                "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
-                "(KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36"
-            )
-        },
+        f"/auth/google/callback?code=the-code&state={state}", follow_redirects=False
     )
     assert callback.status_code == 302
     assert callback.headers["location"] == "/"
@@ -213,7 +206,7 @@ def test_google_callback_happy_path(api_module, monkeypatch, fresh_db):
     assert body["auth_enabled"] is True
     assert body["user"]["email"] == "a@example.com"
     assert body["user"]["name"] == "Alice"
-    assert body["token"] == {"kind": "web", "device_name": "Chrome on Linux"}
+    assert body["token"] == {"kind": "web", "device_name": "browser"}
 
 
 def test_second_login_retires_the_previous_web_session(
@@ -234,9 +227,8 @@ def test_second_login_retires_the_previous_web_session(
 
     assert first.get("/auth/me").status_code == 401
 
-    devices = second.get("/auth/devices").json()["devices"]
-    assert [device["device_name"] for device in devices] == ["browser on unknown"]
-    assert devices[0]["current"] is True
+    # The surviving session is a cookie, not a listed device.
+    assert second.get("/auth/devices").json()["devices"] == []
 
 
 def test_google_callback_state_replay(api_module, monkeypatch, fresh_db):
@@ -667,21 +659,20 @@ def test_devices_list_marks_current(api_module, monkeypatch, fresh_db):
     token_a, _ = mint_token(
         "a@example.com", kind="cli", device_name="old-laptop", db_path=fresh_db.db_path
     )
-    token_b, _ = mint_token(
+    mint_token(
         "a@example.com", kind="web", device_name="browser", db_path=fresh_db.db_path
     )
     client = TestClient(api_module.app)
     devices = client.get(
-        "/auth/devices", headers={"Authorization": f"Bearer {token_b}"}
+        "/auth/devices", headers={"Authorization": f"Bearer {token_a}"}
     )
     assert devices.status_code == 200
     body = devices.json()["devices"]
-    assert len(body) == 2
-    by_name = {device["device_name"]: device for device in body}
-    assert by_name["browser"]["current"] is True
-    assert by_name["old-laptop"]["current"] is False
-    assert by_name["old-laptop"]["kind"] == "cli"
-    assert by_name["old-laptop"]["created_at"] > 0
+    # The browser session is not a device: a new login replaces it.
+    assert [device["device_name"] for device in body] == ["old-laptop"]
+    assert body[0]["current"] is True
+    assert body[0]["kind"] == "cli"
+    assert body[0]["created_at"] > 0
 
 
 def test_devices_revoke_own_token(api_module, monkeypatch, fresh_db):
@@ -702,7 +693,7 @@ def test_devices_revoke_own_token(api_module, monkeypatch, fresh_db):
     assert revoked.status_code == 204
 
     remaining = client.get("/auth/devices", headers=headers).json()["devices"]
-    assert [device["device_name"] for device in remaining] == ["browser"]
+    assert remaining == []
 
     assert resolve_token(token_a, db_path=fresh_db.db_path) is None
 
@@ -739,22 +730,6 @@ def test_devices_revoke_unknown_id_is_404(api_module, monkeypatch, fresh_db):
         headers={"Authorization": f"Bearer {token_b}"},
     )
     assert response.status_code == 404
-
-
-def test_devices_revoke_current_token_401s_next_request(
-    api_module, monkeypatch, fresh_db
-):
-    _enable_auth(monkeypatch)
-    _mock_google_flow(api_module, monkeypatch)
-    client = TestClient(api_module.app)
-    state = _start_login(api_module, monkeypatch, client)
-    client.get(f"/auth/google/callback?code=the-code&state={state}")
-
-    devices = client.get("/auth/devices").json()["devices"]
-    current = next(device for device in devices if device["current"])
-
-    assert client.post(f"/auth/devices/{current['id']}/revoke").status_code == 204
-    assert client.get("/usage").status_code == 401
 
 
 # ---------------------------------------------------------------- database
