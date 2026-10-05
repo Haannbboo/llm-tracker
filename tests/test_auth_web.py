@@ -192,7 +192,14 @@ def test_google_callback_happy_path(api_module, monkeypatch, fresh_db):
     state = _start_login(api_module, monkeypatch, client)
 
     callback = client.get(
-        f"/auth/google/callback?code=the-code&state={state}", follow_redirects=False
+        f"/auth/google/callback?code=the-code&state={state}",
+        follow_redirects=False,
+        headers={
+            "user-agent": (
+                "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+                "(KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36"
+            )
+        },
     )
     assert callback.status_code == 302
     assert callback.headers["location"] == "/"
@@ -206,7 +213,30 @@ def test_google_callback_happy_path(api_module, monkeypatch, fresh_db):
     assert body["auth_enabled"] is True
     assert body["user"]["email"] == "a@example.com"
     assert body["user"]["name"] == "Alice"
-    assert body["token"] == {"kind": "web", "device_name": "browser"}
+    assert body["token"] == {"kind": "web", "device_name": "Chrome on Linux"}
+
+
+def test_second_login_retires_the_previous_web_session(
+    api_module, monkeypatch, fresh_db
+):
+    """One live browser session per user: the new login revokes the old cookie."""
+    _enable_auth(monkeypatch)
+    _mock_google_flow(api_module, monkeypatch)
+    first = TestClient(api_module.app)
+    state = _start_login(api_module, monkeypatch, first)
+    first.get(f"/auth/google/callback?code=the-code&state={state}")
+    assert first.get("/auth/me").status_code == 200
+
+    second = TestClient(api_module.app)
+    state = _start_login(api_module, monkeypatch, second)
+    second.get(f"/auth/google/callback?code=the-code&state={state}")
+    assert second.get("/auth/me").status_code == 200
+
+    assert first.get("/auth/me").status_code == 401
+
+    devices = second.get("/auth/devices").json()["devices"]
+    assert [device["device_name"] for device in devices] == ["browser on unknown"]
+    assert devices[0]["current"] is True
 
 
 def test_google_callback_state_replay(api_module, monkeypatch, fresh_db):
