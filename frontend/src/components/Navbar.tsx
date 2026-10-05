@@ -3,12 +3,18 @@ import { useApp } from '../contexts/AppContext'
 
 type View = 'dashboard' | 'logs' | 'settings'
 
+const ASCII_ART = `████████  ██████  ██   ██ ███████ ███    ██  █████   ██████  ███████
+   ██    ██    ██ ██  ██  ██      ████   ██ ██   ██ ██       ██
+   ██    ██    ██ █████   █████   ██ ██  ██ ███████ ██   ███ █████
+   ██    ██    ██ ██  ██  ██      ██  ██ ██ ██   ██ ██    ██ ██
+   ██     ██████  ██   ██ ███████ ██   ████ ██   ██  ██████  ███████`
+
 export function Navbar({ currentView, onNavigate }: { currentView: View; onNavigate: (v: View) => void }) {
   const { theme, toggleThemeHandler, lang, setLang, auth } = useApp()
 
   return (
     <header className="top-navbar">
-      <span className="navbar-brand">tokenage</span>
+      <pre className="navbar-brand-art" aria-hidden="true">{ASCII_ART}</pre>
       <nav className="navbar-nav">
         <button className={`nav-item ${currentView === 'dashboard' ? 'active' : ''}`} onClick={() => onNavigate('dashboard')}>
           📊 {t('Dashboard')}

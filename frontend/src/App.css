@@ -22,13 +22,16 @@
   padding: 8px 24px;
 }
 
-.navbar-brand {
+.navbar-brand-art {
   flex-shrink: 0;
-  color: var(--text-primary);
+  margin: 0 clamp(12px, 2vw, 28px) 0 0;
   font-family: var(--font-mono);
-  font-size: 20px;
-  font-weight: 700;
-  opacity: 0.85;
+  font-size: 4px;
+  line-height: 1;
+  color: var(--text-primary);
+  opacity: 0.7;
+  pointer-events: none;
+  user-select: none;
 }
 
 .navbar-nav {
@@ -1666,6 +1669,10 @@
 }
 
 @media (max-width: 1200px) {
+  /* The wordmark is 60+ monospace columns wide; below this the nav needs the room. */
+  .navbar-brand-art {
+    display: none;
+  }
   .widgets-grid {
     grid-template-columns: repeat(2, 1fr);
   }

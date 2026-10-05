@@ -202,8 +202,8 @@ def test_banner_is_suppressed_for_machine_readable_output(tmp_path):
     result = _run_launcher(tmp_path, "status", "--json")
 
     assert result.returncode in (0, 1)
-    assert "── tokenage ──" not in result.stdout
-    assert "── tokenage ──" not in result.stderr
+    assert "████" not in result.stdout
+    assert "████" not in result.stderr
     # One compact line, so a caller can parse it directly.
     assert len(result.stdout.strip().splitlines()) == 1
     assert json.loads(result.stdout)["account"]["signed_in"] is False
@@ -241,14 +241,14 @@ def test_banner_prints_on_a_terminal(tmp_path):
     process, captured = _run_on_pty(tmp_path, "--help")
 
     assert process.returncode == 0
-    assert "── tokenage ──" in captured
+    assert "████████" in captured
     # And it did not contaminate the child's stdout channel.
     assert "usage: tokenage" in process.stdout.read()
 
     # The same holds under --json: the banner is suppressed on a tty too.
     process, captured = _run_on_pty(tmp_path, "status", "--json")
     assert process.returncode in (0, 1)
-    assert "── tokenage ──" not in captured
+    assert "████████" not in captured
     stdout = process.stdout.read()
     assert len(stdout.strip().splitlines()) == 1
     assert json.loads(stdout)["account"]["signed_in"] is False
