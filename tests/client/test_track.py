@@ -204,7 +204,7 @@ def test_build_child_env_does_not_leak_the_db_override(monkeypatch):
     monkeypatch.setattr(
         track, "local_server_info", lambda: {"proxy_url": "http://localhost:49152"}
     )
-    monkeypatch.setenv("LLM_TRACKER_DB_URL", "sqlite:///main-should-not-leak.db")
+    monkeypatch.setenv("TOKENAGE_DB_URL", "sqlite:///main-should-not-leak.db")
     from contextlib import nullcontext
 
     monkeypatch.setattr(
@@ -215,7 +215,7 @@ def test_build_child_env_does_not_leak_the_db_override(monkeypatch):
 
     assert env["OPENAI_BASE_URL"] == "http://localhost:49152/v1"
     assert env["ANTHROPIC_BASE_URL"] == "http://localhost:49152"
-    assert "LLM_TRACKER_DB_URL" not in env
+    assert "TOKENAGE_DB_URL" not in env
 
 
 def test_proxy_env_fails_before_launch_when_proxy_is_unavailable(monkeypatch, capsys):
@@ -350,7 +350,7 @@ def test_poll_summary_falls_back_to_watermark_when_open_window_has_no_rows(
 def test_poll_summary_surfaces_api_error(capsys):
     class RejectingClient:
         def get_run_summary(self, **kwargs):
-            raise track.ApiError("session rejected — run llm-tracker login")
+            raise track.ApiError("session rejected — run tokenage login")
 
     result = track.poll_summary(
         RejectingClient(),
@@ -358,7 +358,7 @@ def test_poll_summary_surfaces_api_error(capsys):
         options=track.RunOptions(wait_ms=0),
     )
     assert result is None
-    assert "llm-tracker login" in capsys.readouterr().err
+    assert "tokenage login" in capsys.readouterr().err
 
 
 def test_poll_summary_tolerates_malformed_summary_payload(monkeypatch):
@@ -393,7 +393,7 @@ def test_poll_summary_tolerates_malformed_summary_payload(monkeypatch):
 def test_format_human_summary_tolerates_null_summary():
     assert (
         track.format_human_summary({"summary": None})
-        == "No llm-tracker usage recorded after the starting watermark.\n"
+        == "No tokenage usage recorded after the starting watermark.\n"
         "Concurrent runs are included; delayed events may fall outside this window.\n"
     )
 
@@ -446,14 +446,14 @@ def test_run_command_handles_unavailable_api_before_child(monkeypatch, capsys):
 
     captured = capsys.readouterr()
     assert code == 0
-    assert "llm-tracker API unavailable before command start" in captured.err
+    assert "tokenage API unavailable before command start" in captured.err
     assert "No summary could be produced." in captured.err
 
 
 def test_run_command_reports_a_rejected_session(monkeypatch, capsys):
     class RejectedClient:
         def get_high_watermark(self):
-            raise track.ApiError("session rejected — run llm-tracker login")
+            raise track.ApiError("session rejected — run tokenage login")
 
     monkeypatch.setattr(track, "UsageApiClient", lambda: RejectedClient())
     monkeypatch.setattr(
@@ -468,7 +468,7 @@ def test_run_command_reports_a_rejected_session(monkeypatch, capsys):
     )
 
     assert code == 0
-    assert "llm-tracker login" in capsys.readouterr().err
+    assert "tokenage login" in capsys.readouterr().err
 
 
 def test_json_summary_defaults_to_stderr(fake_client, no_sleep, monkeypatch, capsys):
@@ -656,7 +656,7 @@ def test_write_json_summary_to_file(tmp_path):
 def test_format_human_summary_reports_nothing_recorded():
     assert (
         track.format_human_summary({"summary": {"requests": 0}})
-        == "No llm-tracker usage recorded after the starting watermark.\n"
+        == "No tokenage usage recorded after the starting watermark.\n"
         "Concurrent runs are included; delayed events may fall outside this window.\n"
     )
 
@@ -717,4 +717,4 @@ def test_summary_write_failure_preserves_child_exit_code(
 
     captured = capsys.readouterr()
     assert code == 7
-    assert "llm-tracker summary output failed: disk full" in captured.err
+    assert "tokenage summary output failed: disk full" in captured.err

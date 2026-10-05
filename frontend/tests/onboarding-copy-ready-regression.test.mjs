@@ -44,7 +44,7 @@ test('shared copy button supports success-only copy callbacks', () => {
 })
 
 test('bootstrap copy does not arm the event verification step', () => {
-  assert.match(bootstrapStepBlock, /text="llm-tracker bootstrap"/)
+  assert.match(bootstrapStepBlock, /text="tokenage bootstrap"/)
   assert.doesNotMatch(bootstrapStepBlock, /setCopiedOnboardingCommand/)
   assert.doesNotMatch(bootstrapStepBlock, /source: 'Bootstrap'/)
   assert.doesNotMatch(bootstrapStepBlock, /Agent command copied/)

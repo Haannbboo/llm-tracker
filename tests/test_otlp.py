@@ -31,7 +31,7 @@ def test_health_routes_return_service_status(otlp_module):
         response = client.get(path)
 
         assert response.status_code == 200
-        assert response.json() == {"status": "ok", "service": "llm-tracker-otlp"}
+        assert response.json() == {"status": "ok", "service": "tokenage-otlp"}
 
 
 def test_retired_gemini_logs_are_ignored_without_debug_dumps(
@@ -1380,7 +1380,7 @@ def test_auth_enabled_valid_ingest_token_records_user_id(
     response = client.post(
         "/v1/logs",
         json=_minimal_otlp_body(),
-        headers={"x-llm-tracker-token": token},
+        headers={"x-tokenage-token": token},
     )
 
     assert response.status_code == 200
@@ -1449,7 +1449,7 @@ def test_authenticated_otlp_tool_calls_keep_user_id(otlp_module, monkeypatch, fr
     )
 
     response = TestClient(otlp_module.app).post(
-        "/v1/logs", json=body, headers={"x-llm-tracker-token": token}
+        "/v1/logs", json=body, headers={"x-tokenage-token": token}
     )
 
     assert response.status_code == 200
@@ -1518,7 +1518,7 @@ def test_repeated_invalid_token_is_rate_limited_before_db_lookup(
     )
 
     client = TestClient(otlp_module.app)
-    headers = {"x-llm-tracker-token": "llmt_ingest_invalid"}
+    headers = {"x-tokenage-token": "tokenage_ingest_invalid"}
 
     assert (
         client.post("/v1/logs", json=_minimal_otlp_body(), headers=headers).status_code
@@ -1548,7 +1548,7 @@ def test_auth_enabled_wrong_kind_token_returns_401(otlp_module, monkeypatch, fre
     response = client.post(
         "/v1/logs",
         json=_minimal_otlp_body(),
-        headers={"x-llm-tracker-token": token},
+        headers={"x-tokenage-token": token},
     )
 
     assert response.status_code == 401
@@ -1579,7 +1579,7 @@ def test_auth_enabled_revoked_token_returns_401(otlp_module, monkeypatch, fresh_
     response = client.post(
         "/v1/logs",
         json=_minimal_otlp_body(),
-        headers={"x-llm-tracker-token": token},
+        headers={"x-tokenage-token": token},
     )
 
     assert response.status_code == 401
@@ -1726,7 +1726,7 @@ def test_rate_limit_exceeded_returns_429(otlp_module, monkeypatch, fresh_db):
         response = client.post(
             "/v1/logs",
             json=_minimal_otlp_body(),
-            headers={"x-llm-tracker-token": token1},
+            headers={"x-tokenage-token": token1},
         )
         assert response.status_code == 200
 
@@ -1734,7 +1734,7 @@ def test_rate_limit_exceeded_returns_429(otlp_module, monkeypatch, fresh_db):
     response = client.post(
         "/v1/logs",
         json=_minimal_otlp_body(),
-        headers={"x-llm-tracker-token": token1},
+        headers={"x-tokenage-token": token1},
     )
     assert response.status_code == 429
 
@@ -1742,7 +1742,7 @@ def test_rate_limit_exceeded_returns_429(otlp_module, monkeypatch, fresh_db):
     response = client.post(
         "/v1/logs",
         json=_minimal_otlp_body(),
-        headers={"x-llm-tracker-token": token2},
+        headers={"x-tokenage-token": token2},
     )
     assert response.status_code == 200
 

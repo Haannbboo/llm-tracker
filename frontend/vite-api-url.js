@@ -28,14 +28,14 @@ function readApiUrlFromTrackerConfig(trackerConfigPath) {
 
 export function resolveApiUrl({
   env,
-  trackerConfigPath = join(homedir(), '.llm-tracker', 'config.yaml'),
+  trackerConfigPath = join(homedir(), '.tokenage', 'config.yaml'),
 } = {}) {
-  if (env?.LLM_TRACKER_API_URL) {
-    return env.LLM_TRACKER_API_URL
+  if (env?.TOKENAGE_API_URL) {
+    return env.TOKENAGE_API_URL
   }
 
-  if (env?.LLM_TRACKER_BACKEND_URL) {
-    return env.LLM_TRACKER_BACKEND_URL
+  if (env?.TOKENAGE_BACKEND_URL) {
+    return env.TOKENAGE_BACKEND_URL
   }
 
   return readApiUrlFromTrackerConfig(trackerConfigPath) ?? DEFAULT_API_URL

@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Configure the llm-tracker plugin for OpenCode.
+"""Configure the tokenage plugin for OpenCode.
 
 Usage: configure-opencode-plugin.py PROJECT_ROOT [OTLP_PORT]
 
 The plugin registers itself in the OpenCode config as a tracked plugin
-so that llm-tracker's health endpoint can detect it.
+so that tokenage's health endpoint can detect it.
 """
 
 from __future__ import annotations
@@ -41,9 +41,7 @@ def load_json(path: Path) -> dict[str, Any]:
 def load_ingest_token() -> str | None:
     try:
         credentials = json.loads(
-            (Path.home() / ".llm-tracker" / "credentials.json").read_text(
-                encoding="utf-8"
-            )
+            (Path.home() / ".tokenage" / "credentials.json").read_text(encoding="utf-8")
         )
     except (OSError, UnicodeError, json.JSONDecodeError):
         return None
@@ -109,7 +107,7 @@ def _disable(config_path: Path, expected_endpoint: str | None) -> int:
     config = load_json(config_path)
     plugins = config.get("plugin")
     if not isinstance(plugins, list):
-        _info(f"No llm-tracker plugin in {config_path}")
+        _info(f"No tokenage plugin in {config_path}")
         return 2
     kept = []
     removed = 0
@@ -144,14 +142,14 @@ def _disable(config_path: Path, expected_endpoint: str | None) -> int:
             continue
         kept.append(entry)
     if not removed:
-        _info(f"No matching llm-tracker plugin in {config_path}")
+        _info(f"No matching tokenage plugin in {config_path}")
         return 2
     if kept:
         config["plugin"] = kept
     else:
         config.pop("plugin", None)
     save_json(config_path, config)
-    _info(f"llm-tracker plugin removed from {config_path}")
+    _info(f"tokenage plugin removed from {config_path}")
     return 0
 
 
@@ -184,7 +182,7 @@ def _main() -> int:
     token = (
         argv[4]
         if len(argv) >= 5
-        else os.environ.get("LLM_TRACKER_INGEST_TOKEN") or load_ingest_token()
+        else os.environ.get("TOKENAGE_INGEST_TOKEN") or load_ingest_token()
     )
     plugin_dir = project_root / "plugins" / "opencode"
     dist_dir = plugin_dir / "dist"
@@ -256,7 +254,7 @@ def _main() -> int:
 
     config["plugin"] = plugins
     save_json(config_path, config)
-    _info(f"llm-tracker plugin registered in {config_path}")
+    _info(f"tokenage plugin registered in {config_path}")
 
     return 0
 

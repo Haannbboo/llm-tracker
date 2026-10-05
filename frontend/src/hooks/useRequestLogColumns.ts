@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState, type SetStateAction } from 'react'
 
-const REQUEST_LOG_COLUMN_KEY = 'llm-tracker-request-log-columns'
+const REQUEST_LOG_COLUMN_KEY = 'tokenage-request-log-columns'
 
 export type RequestLogColumnId =
   | 'time'

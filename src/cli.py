@@ -2,8 +2,8 @@
 
 Everything a per-user client does — the tracking wrapper, sign-in, agent
 configuration, status — lives in ``client/`` and never imports this module.
-``llm-tracker server <command>`` routes the service commands to the shell
-scripts; the launcher routes ``llm-tracker server token`` here.
+``tokenage server <command>`` routes the service commands to the shell
+scripts; the launcher routes ``tokenage server token`` here.
 """
 
 from __future__ import annotations
@@ -14,7 +14,7 @@ import sys
 from src.auth import mint_token
 from src.database import init_db
 
-PROG = "llm-tracker server"
+PROG = "tokenage server"
 
 
 def parse_token_args(argv: list[str]) -> argparse.Namespace:

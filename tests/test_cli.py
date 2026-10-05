@@ -2,8 +2,8 @@
 
 Everything a per-user client does — tracking, sign-in, agent wiring — is tested
 in tests/client/ against the client package. What is left here is what only the
-server can answer (`llm-tracker server token ...`) and the contract of
-scripts/llm-tracker, the one installed command.
+server can answer (`tokenage server token ...`) and the contract of
+scripts/tokenage, the one installed command.
 """
 
 from __future__ import annotations
@@ -16,23 +16,23 @@ import sys
 import time
 from pathlib import Path
 
-LAUNCHER = Path(__file__).resolve().parents[1] / "scripts" / "llm-tracker"
+LAUNCHER = Path(__file__).resolve().parents[1] / "scripts" / "tokenage"
 CLIENT = Path(__file__).resolve().parents[1] / "client"
 
 
 def _scrubbed_env(tmp_path):
     """Launcher test env: no machine home, no machine shell state.
 
-    `LLM_TRACKER_ROOT` and `LLM_TRACKER_SKIP_BANNER` are exactly the exports a
+    `TOKENAGE_ROOT` and `TOKENAGE_SKIP_BANNER` are exactly the exports a
     developer's shell may carry, and they change which component the launcher
     resolves and whether the banner prints at all.
     """
     env = os.environ.copy()
     for key in (
-        "LLM_TRACKER_ROOT",
-        "LLM_TRACKER_SKIP_BANNER",
-        "LLM_TRACKER_CLIENT_COMMIT",
-        "LLM_TRACKER_SERVER_ROOT",
+        "TOKENAGE_ROOT",
+        "TOKENAGE_SKIP_BANNER",
+        "TOKENAGE_CLIENT_COMMIT",
+        "TOKENAGE_SERVER_ROOT",
         "NO_COLOR",
     ):
         env.pop(key, None)
@@ -46,7 +46,7 @@ def _run_launcher(tmp_path, *args):
     # A test-owned client snapshot keeps the launcher's discovery off this
     # machine, and no tty plus a fixed width keeps the banner out of captured
     # output.
-    env["LLM_TRACKER_HOME"] = str(_client_snapshot(tmp_path / "tracker-home"))
+    env["TOKENAGE_HOME"] = str(_client_snapshot(tmp_path / "tracker-home"))
     env["PYTHONDONTWRITEBYTECODE"] = "1"
     env["COLUMNS"] = "100"
     return subprocess.run(
@@ -82,13 +82,13 @@ def test_run_token_command_prints_the_token_once(cli_module, isolated_home, caps
     assert code == 0
     assert "Minted cli token for a@example.com" in out
     token = out.strip().splitlines()[-1]
-    assert token.startswith("llmt_cli_")
+    assert token.startswith("tokenage_cli_")
     assert resolve_token(token) is not None
 
 
 def test_main_without_a_command_prints_usage(cli_module, isolated_home, capsys):
     assert cli_module.main([]) == 2
-    assert "usage: llm-tracker server token create --email" in capsys.readouterr().err
+    assert "usage: tokenage server token create --email" in capsys.readouterr().err
 
 
 # ------------------------------------------------------------ launcher wiring
@@ -103,20 +103,20 @@ def test_dev_scripts_live_under_scripts_dev():
     assert (scripts_dir / "dev" / "dev-stop.sh").exists()
 
 
-def test_llm_tracker_script_routes_to_client_and_server():
+def test_tokenage_script_routes_to_client_and_server():
     content = LAUNCHER.read_text(encoding="utf-8")
 
     # Anything that is not a server command runs the client. `-P` matters: without
     # it a `python -m` run from inside some other checkout would import that
     # checkout's client instead of the installed one.
     assert 'exec "$python" -P -m client "$@"' in content
-    # `llm-tracker server ...` is the server half: shell scripts, plus the
+    # `tokenage server ...` is the server half: shell scripts, plus the
     # operator CLI for `server token`.
     assert "run_server() {" in content
     assert '-m src.cli "$@"' in content
 
 
-def test_llm_tracker_server_routes_bootstrap_to_the_script(tmp_path):
+def test_tokenage_server_routes_bootstrap_to_the_script(tmp_path):
     content = LAUNCHER.read_text(encoding="utf-8")
 
     assert 'exec bash "${root}/scripts/${name}.sh" "$@"' in content
@@ -132,7 +132,7 @@ def test_llm_tracker_server_routes_bootstrap_to_the_script(tmp_path):
 
 
 def test_status_is_not_a_legacy_alias(tmp_path):
-    """`llm-tracker status` reports components; the service view is `server status`."""
+    """`tokenage status` reports components; the service view is `server status`."""
     result = _run_launcher(tmp_path, "status")
 
     assert result.returncode in (0, 1)
@@ -144,12 +144,12 @@ def test_status_is_not_a_legacy_alias(tmp_path):
 
 def test_server_command_without_the_server_component_says_so(tmp_path):
     """A launcher copied outside any checkout is a client-only install."""
-    launcher = tmp_path / "llm-tracker"
+    launcher = tmp_path / "tokenage"
     launcher.write_text(LAUNCHER.read_text(encoding="utf-8"), encoding="utf-8")
     launcher.chmod(0o755)
     env = _scrubbed_env(tmp_path)
-    env["LLM_TRACKER_HOME"] = str(tmp_path / "tracker-home")
-    env["LLM_TRACKER_BIN_DIR"] = str(tmp_path / "bin")
+    env["TOKENAGE_HOME"] = str(tmp_path / "tracker-home")
+    env["TOKENAGE_BIN_DIR"] = str(tmp_path / "bin")
     result = subprocess.run(
         [str(launcher), "server", "status"],
         cwd=tmp_path,
@@ -202,8 +202,8 @@ def test_banner_is_suppressed_for_machine_readable_output(tmp_path):
     result = _run_launcher(tmp_path, "status", "--json")
 
     assert result.returncode in (0, 1)
-    assert "█" not in result.stdout
-    assert "█" not in result.stderr
+    assert "── tokenage ──" not in result.stdout
+    assert "── tokenage ──" not in result.stderr
     # One compact line, so a caller can parse it directly.
     assert len(result.stdout.strip().splitlines()) == 1
     assert json.loads(result.stdout)["account"]["signed_in"] is False
@@ -214,7 +214,7 @@ def _run_on_pty(tmp_path, *args):
     import pty
 
     env = _scrubbed_env(tmp_path)
-    env["LLM_TRACKER_HOME"] = str(_client_snapshot(tmp_path / "tracker-home"))
+    env["TOKENAGE_HOME"] = str(_client_snapshot(tmp_path / "tracker-home"))
     controller, follower = pty.openpty()
     try:
         process = subprocess.Popen(
@@ -241,14 +241,14 @@ def test_banner_prints_on_a_terminal(tmp_path):
     process, captured = _run_on_pty(tmp_path, "--help")
 
     assert process.returncode == 0
-    assert "\u2588" in captured  # the banner's block character
+    assert "── tokenage ──" in captured
     # And it did not contaminate the child's stdout channel.
-    assert "usage: llm-tracker" in process.stdout.read()
+    assert "usage: tokenage" in process.stdout.read()
 
     # The same holds under --json: the banner is suppressed on a tty too.
     process, captured = _run_on_pty(tmp_path, "status", "--json")
     assert process.returncode in (0, 1)
-    assert "\u2588" not in captured
+    assert "── tokenage ──" not in captured
     stdout = process.stdout.read()
     assert len(stdout.strip().splitlines()) == 1
     assert json.loads(stdout)["account"]["signed_in"] is False
@@ -284,7 +284,7 @@ def _client_install(root: Path, label: str, version: str, commit: str) -> None:
         "from pathlib import Path\n"
         "print(json.dumps({'root': str(Path(__file__).parent.parent), "
         "'interpreter': os.environ['TEST_CLIENT_INTERPRETER'], "
-        "'commit': os.environ['LLM_TRACKER_CLIENT_COMMIT']}))\n"
+        "'commit': os.environ['TOKENAGE_CLIENT_COMMIT']}))\n"
     )
     interpreter = root / ".venv" / "bin" / "python"
     interpreter.parent.mkdir(parents=True)
@@ -305,13 +305,13 @@ def test_snapshot_source_interpreter_and_version_agree_with_server_present(tmp_p
     _client_install(server, "server", "4.5.6", "b" * 40)
     (server / "VERSION").write_text("7.8.9")
     (home / "current").symlink_to("versions/snapshot")
-    launcher = tmp_path / "bin" / "llm-tracker"
+    launcher = tmp_path / "bin" / "tokenage"
     launcher.parent.mkdir()
     launcher.write_text(LAUNCHER.read_text())
     launcher.chmod(0o755)
-    env = {**os.environ, "LLM_TRACKER_HOME": str(home)}
-    env.pop("LLM_TRACKER_ROOT", None)
-    env["LLM_TRACKER_CLIENT_COMMIT"] = "c" * 40
+    env = {**os.environ, "TOKENAGE_HOME": str(home)}
+    env.pop("TOKENAGE_ROOT", None)
+    env["TOKENAGE_CLIENT_COMMIT"] = "c" * 40
 
     result = subprocess.run(
         [str(launcher), "status"], env=env, capture_output=True, text=True
@@ -327,9 +327,9 @@ def test_snapshot_source_interpreter_and_version_agree_with_server_present(tmp_p
         [str(launcher), "--version"], env=env, capture_output=True, text=True
     )
     assert version.returncode == 0, version.stderr
-    assert version.stdout.strip() == "llm-tracker 1.2.3 (client aaaaaaa) · server 7.8.9"
+    assert version.stdout.strip() == "tokenage 1.2.3 (client aaaaaaa) · server 7.8.9"
 
-    env["LLM_TRACKER_ROOT"] = str(server)
+    env["TOKENAGE_ROOT"] = str(server)
     override = subprocess.run(
         [str(launcher), "status"], env=env, capture_output=True, text=True
     )
@@ -345,23 +345,75 @@ def test_snapshot_source_interpreter_and_version_agree_with_server_present(tmp_p
     assert "4.5.6 (client bbbbbbb)" in version.stdout
 
 
+def test_tokenage_identity_defaults_and_env_overrides_agree_with_launcher(
+    tmp_path, monkeypatch
+):
+    from client import paths
+
+    home = tmp_path / "os-home"
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.delenv("TOKENAGE_HOME", raising=False)
+    monkeypatch.delenv("TOKENAGE_CONFIG", raising=False)
+    default_home = home / ".tokenage"
+    assert paths.tracker_home() == default_home
+    assert paths.credentials_path() == default_home / "credentials.json"
+    assert paths.config_path() == default_home / "config.yaml"
+
+    snapshot = default_home / "versions" / "test"
+    _client_install(snapshot, "snapshot", "1.2.3", "a" * 40)
+    (default_home / "current").symlink_to("versions/test")
+    launcher = home / ".local" / "bin" / "tokenage"
+    launcher.parent.mkdir(parents=True)
+    launcher.write_text(LAUNCHER.read_text())
+    launcher.chmod(0o755)
+    env = _scrubbed_env(tmp_path)
+    result = subprocess.run(
+        [str(launcher), "--version"],
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == "tokenage 1.2.3 (client aaaaaaa)\n"
+
+    override_home = tmp_path / "custom-home"
+    _client_install(override_home / "versions" / "test", "override", "4.5.6", "b" * 40)
+    (override_home / "current").symlink_to("versions/test")
+    monkeypatch.setenv("TOKENAGE_HOME", str(override_home))
+    monkeypatch.setenv("TOKENAGE_CONFIG", str(tmp_path / "custom.yaml"))
+    assert paths.tracker_home() == override_home
+    assert paths.credentials_path() == override_home / "credentials.json"
+    assert paths.config_path() == tmp_path / "custom.yaml"
+    env["TOKENAGE_HOME"] = str(override_home)
+    result = subprocess.run(
+        [str(launcher), "--version"],
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == "tokenage 4.5.6 (client bbbbbbb)\n"
+
+
 def test_relative_launcher_symlink_uses_its_checkout(tmp_path):
     checkout = tmp_path / "checkout"
     _client_install(checkout, "checkout", "1.2.3", "a" * 40)
     scripts = checkout / "scripts"
     scripts.mkdir()
     (checkout / "src").mkdir()
-    launcher = scripts / "llm-tracker"
+    launcher = scripts / "tokenage"
     launcher.write_text(LAUNCHER.read_text())
     launcher.chmod(0o755)
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
-    linked = bin_dir / "llm-tracker"
-    linked.symlink_to("../checkout/scripts/llm-tracker")
+    linked = bin_dir / "tokenage"
+    linked.symlink_to("../checkout/scripts/tokenage")
     unrelated_cwd = tmp_path / "other"
     unrelated_cwd.mkdir()
-    env = {**os.environ, "LLM_TRACKER_HOME": str(tmp_path / "empty-home")}
-    env.pop("LLM_TRACKER_ROOT", None)
+    env = {**os.environ, "TOKENAGE_HOME": str(tmp_path / "empty-home")}
+    env.pop("TOKENAGE_ROOT", None)
 
     result = subprocess.run(
         [str(linked), "status"],
@@ -376,7 +428,7 @@ def test_relative_launcher_symlink_uses_its_checkout(tmp_path):
 
 def test_hosted_launcher_does_not_use_unrelated_home_virtualenv_as_server(tmp_path):
     home = tmp_path / "home"
-    tracker = home / ".llm-tracker"
+    tracker = home / ".tokenage"
     snapshot = tracker / "versions" / "client"
     _client_install(snapshot, "snapshot", "1.2.3", "a" * 40)
     (tracker / "current").symlink_to("versions/client")
@@ -384,12 +436,12 @@ def test_hosted_launcher_does_not_use_unrelated_home_virtualenv_as_server(tmp_pa
     python.parent.mkdir(parents=True)
     python.write_text("#!/bin/sh\nexit 0\n")
     python.chmod(0o755)
-    launcher = home / ".local" / "bin" / "llm-tracker"
+    launcher = home / ".local" / "bin" / "tokenage"
     launcher.parent.mkdir()
     launcher.write_text(LAUNCHER.read_text())
     launcher.chmod(0o755)
-    env = {**os.environ, "HOME": str(home), "LLM_TRACKER_HOME": str(tracker)}
-    env.pop("LLM_TRACKER_ROOT", None)
+    env = {**os.environ, "HOME": str(home), "TOKENAGE_HOME": str(tracker)}
+    env.pop("TOKENAGE_ROOT", None)
     result = subprocess.run(
         [str(launcher), "--version"], env=env, capture_output=True, text=True
     )
@@ -414,8 +466,8 @@ def test_server_dispatch_consumes_no_banner_without_changing_other_arguments(tmp
     (src / "cli.py").write_text("import json, sys\nprint(json.dumps(sys.argv[1:]))\n")
     env = {
         **os.environ,
-        "LLM_TRACKER_ROOT": str(root),
-        "LLM_TRACKER_HOME": str(tmp_path / "tracker"),
+        "TOKENAGE_ROOT": str(root),
+        "TOKENAGE_HOME": str(tmp_path / "tracker"),
     }
     for args, expected in [
         (

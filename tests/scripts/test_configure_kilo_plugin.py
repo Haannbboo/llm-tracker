@@ -106,7 +106,7 @@ def test_configure_kilo_plugin_preserves_token_and_removes_other_builds(tmp_path
         ),
         encoding="utf-8",
     )
-    credentials_path = home / ".llm-tracker" / "credentials.json"
+    credentials_path = home / ".tokenage" / "credentials.json"
     credentials_path.parent.mkdir(parents=True)
     credentials_path.write_text(
         json.dumps({"ingest_token": "ingest-secret"}), encoding="utf-8"

@@ -70,19 +70,19 @@ INVALID_TOKEN_CACHE_SIZE = 4096
 INVALID_TOKEN_CACHE_TTL_SECONDS = 60
 AUTH_LOOKUP_TIMEOUT_SECONDS = 10
 _auth_executor = concurrent.futures.ThreadPoolExecutor(
-    max_workers=4, thread_name_prefix="llm-tracker-auth"
+    max_workers=4, thread_name_prefix="tokenage-auth"
 )
 
 
 def _resolve_ingest_user(request: Request) -> tuple[str | None, str | None]:
-    """Return (user_id, token_id) from x-llm-tracker-token, or (None, None) when auth is disabled.
+    """Return (user_id, token_id) from x-tokenage-token, or (None, None) when auth is disabled.
 
     Raises HTTPException(401) for missing/invalid/revoked/wrong-kind tokens.
     """
     if not _auth_enabled():
         return None, None
 
-    token = request.headers.get("x-llm-tracker-token")
+    token = request.headers.get("x-tokenage-token")
     if not token:
         _reject_invalid_token(request)
 
@@ -107,7 +107,7 @@ def _reject_invalid_token(request: Request) -> NoReturn:
     client_ip = request.client.host if request.client else "unknown"
     key = (
         f"invalid:{client_ip}"
-        if request.headers.get("x-llm-tracker-token")
+        if request.headers.get("x-tokenage-token")
         else f"missing:{client_ip}"
     )
     _check_rate_limit(key)
@@ -1033,7 +1033,7 @@ async def lifespan(app: FastAPI):
     yield
 
 
-app = FastAPI(title="llm-tracker-otlp", lifespan=lifespan)
+app = FastAPI(title="tokenage-otlp", lifespan=lifespan)
 
 
 @app.get("/")

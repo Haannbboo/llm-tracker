@@ -243,7 +243,7 @@ def test_usage_ingest_route_is_not_available(api_module):
 def test_get_config_returns_raw_content_for_malformed_yaml(
     api_module, isolated_home, monkeypatch
 ):
-    config_path = isolated_home / ".llm-tracker" / "broken.yaml"
+    config_path = isolated_home / ".tokenage" / "broken.yaml"
     config_path.write_text("providers:\n  broken: [\n", encoding="utf-8")
     monkeypatch.setattr(api_module, "CONFIG_PATH", str(config_path))
 
@@ -255,7 +255,7 @@ def test_get_config_returns_raw_content_for_malformed_yaml(
 
 
 def test_get_config_surfaces_runtime_evaluator(api_module, isolated_home, monkeypatch):
-    config_path = isolated_home / ".llm-tracker" / "config.yaml"
+    config_path = isolated_home / ".tokenage" / "config.yaml"
     config_path.parent.mkdir(parents=True, exist_ok=True)
     config_path.write_text(
         """
@@ -275,7 +275,7 @@ evaluation:
 def test_update_config_refreshes_runtime_config(
     api_module, config_module, isolated_home
 ):
-    config_path = isolated_home / ".llm-tracker" / "config.yaml"
+    config_path = isolated_home / ".tokenage" / "config.yaml"
     api_module.CONFIG_PATH = str(config_path)
 
     result = asyncio.run(
@@ -288,7 +288,7 @@ server:
   host: 0.0.0.0
   port: 4000
 db:
-  path: ~/.llm-tracker/usage.db
+  path: ~/.tokenage/usage.db
 models:
   new-model: {}
 providers:
@@ -2131,10 +2131,10 @@ def test_hosted_installer_uses_configured_origin_and_is_public(
     )
     assert response.status_code == 200
     assert "text/x-shellscript" in response.headers["content-type"]
-    assert f"LLM_TRACKER_INSTALL_SERVER={shlex.quote(server_url)}" in response.text
-    assert "LLM_TRACKER_INSTALL_COMMIT=''" in response.text
-    assert "__LLM_TRACKER_SERVER_URL__" not in response.text
-    assert "__LLM_TRACKER_INSTALL_COMMIT__" not in response.text
+    assert f"TOKENAGE_INSTALL_SERVER={shlex.quote(server_url)}" in response.text
+    assert "TOKENAGE_INSTALL_COMMIT=''" in response.text
+    assert "__TOKENAGE_SERVER_URL__" not in response.text
+    assert "__TOKENAGE_INSTALL_COMMIT__" not in response.text
     assert (
         subprocess.run(
             ["sh", "-n"], input=response.text, text=True, capture_output=True

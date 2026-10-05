@@ -1,4 +1,4 @@
-# llm-tracker Agent Guide
+# tokenage Agent Guide
 
 LLM usage tracker: transparent proxy + OTLP collector. See [README.md](README.md) for architecture, setup, and commands.
 
@@ -36,7 +36,7 @@ Verification workflow: `.agents/commands/verify.md`.
 Independent review: `.agents/commands/review/SKILL.md`.
 Open PR workflow: `.agents/commands/open-pr.md`.
 Pre-PR checklist: `.agents/commands/pre-pr.md`.
-Project rules: `.agents/commands/llm-tracker.md`.
+Project rules: `.agents/commands/tokenage.md`.
 
 When handling PR comments, CI failures, or CodeRabbit feedback, read `.agents/commands/pr-follow-up.md` before acting. For review comments only, read `.agents/commands/respond-to-pr-comments.md`. These are not optional — they cover reply style, fix scoping, verification, and resolving GitHub conversations.
 
@@ -72,7 +72,7 @@ Version format: `MAJOR.MINOR.PATCH` (e.g. `0.1.180`).
 - `MINOR`: bumped manually for feature releases — edit second field in the file.
 - `PATCH`: auto-incremented on PR branches targeting `main` by `.github/workflows/bump-version.yml`; the bump commit becomes part of the PR before squash merge, so `main` gets a single squashed commit. The workflow raises only the files the diff touched: `client/`, `plugins/` and `scripts/hosted-install.sh` bump the client, `src/`, `frontend/`, `scripts/`, `VERSION` and friends bump the server, and `protocol/` and `scripts/configure-*` bump both.
 
-`llm-tracker --version` prints the client version and commit, and appends `· server <VERSION>` when the server component is installed.
+`tokenage --version` prints the client version and commit, and appends `· server <VERSION>` when the server component is installed.
 
 The version is exposed via `GET /version` (both API and proxy apps) and displayed in Settings → Services in the frontend.
 
@@ -123,7 +123,7 @@ Use targeted tests during iteration, but before commit/PR run the relevant full 
 
 ## Bootstrap architecture
 
-There is one installed command: `scripts/llm-tracker`. Both installers write it, and the `# llm-tracker launcher` marker line is how each recognises a launcher it previously wrote. The all-in-one installer symlinks it from the server clone into `~/.local/bin`; the hosted client installer copies it there. It resolves the two components out of `$LLM_TRACKER_HOME` — `current` for the client snapshot, `src` for the server clone — and routes to whichever one the arguments name.
+There is one installed command: `scripts/tokenage`. Both installers write it, and the `# tokenage launcher` marker line is how each recognises a launcher it previously wrote. The all-in-one installer symlinks it from the server clone into `~/.local/bin`; the hosted client installer copies it there. It resolves the two components out of `$TOKENAGE_HOME` — `current` for the client snapshot, `src` for the server clone — and routes to whichever one the arguments name.
 
 - `client/` — the client: tracking wrapper, agent configuration, sign-in, component report. It must never import `src`.
 - `src/`, `scripts/` — the server component: API, OTLP collector, proxy, dashboard, evaluation worker.
@@ -131,29 +131,29 @@ There is one installed command: `scripts/llm-tracker`. Both installers write it,
 Command surface:
 
 ```bash
-llm-tracker status            # installed components, agents, whether things run
-llm-tracker setup             # agent configuration, in both installation modes
-llm-tracker server start      # turn the services on
-llm-tracker server restart    # reload running code
-llm-tracker server bootstrap  # install, build the dashboard, start, verify
-llm-tracker server status     # the service view
+tokenage status            # installed components, agents, whether things run
+tokenage setup             # agent configuration, in both installation modes
+tokenage server start      # turn the services on
+tokenage server restart    # reload running code
+tokenage server bootstrap  # install, build the dashboard, start, verify
+tokenage server status     # the service view
 ```
 
-`llm-tracker start`, `stop`, `restart`, `bootstrap` and `token` still forward to the matching `server` command with a one-line note on stderr. `llm-tracker status` is not an alias for the service view.
+`tokenage start`, `stop`, `restart`, `bootstrap` and `token` still forward to the matching `server` command with a one-line note on stderr. `tokenage status` is not an alias for the service view.
 
-### Testing local changes: set `LLM_TRACKER_ROOT`
+### Testing local changes: set `TOKENAGE_ROOT`
 
-`llm-tracker server ...` runs the scripts from `$LLM_TRACKER_HOME/src` — the deployed clone — not the checkout you are editing. Older clones also configure agents from `start.sh`/`restart.sh`, rebuilding the endpoint as `http://localhost:<port>/v1/logs` and dropping the scheme from `server.base_url`, which silently repoints agent settings and fails the `otlp-ready` hook. So prefix server commands in a checkout:
+`tokenage server ...` runs the scripts from `$TOKENAGE_HOME/src` — the deployed clone — not the checkout you are editing. Older clones also configure agents from `start.sh`/`restart.sh`, rebuilding the endpoint as `http://localhost:<port>/v1/logs` and dropping the scheme from `server.base_url`, which silently repoints agent settings and fails the `otlp-ready` hook. So prefix server commands in a checkout:
 
 ```bash
-LLM_TRACKER_ROOT="$PWD" llm-tracker server restart    # reload THIS checkout's code
-LLM_TRACKER_ROOT="$PWD" llm-tracker server bootstrap  # build THIS checkout's dashboard
+TOKENAGE_ROOT="$PWD" tokenage server restart    # reload THIS checkout's code
+TOKENAGE_ROOT="$PWD" tokenage server bootstrap  # build THIS checkout's dashboard
 ```
 
 It also makes the client import this checkout instead of a snapshot. Repair agent settings with the scheme intact:
 
 ```bash
-EP="$(python scripts/read-otlp-config.py ~/.llm-tracker/config.yaml --endpoint)"
+EP="$(python scripts/read-otlp-config.py ~/.tokenage/config.yaml --endpoint)"
 python scripts/configure-claude-settings.py ~/.claude/settings.json 0 localhost "$EP"
 python scripts/configure-codex-settings.py ~/.codex/config.toml      0 localhost "$EP"
 ```
@@ -164,15 +164,15 @@ The all-in-one install is still a three-script chain:
 install.sh (root) → scripts/bootstrap.sh → scripts/start.sh
 ```
 
-- `install.sh` — curl-pipe-bash entrypoint at repo root. Checks prerequisites (git, bash, curl), clones/updates repo to `~/.llm-tracker/src`, delegates to `scripts/bootstrap.sh`.
+- `install.sh` — curl-pipe-bash entrypoint at repo root. Checks prerequisites (git, bash, curl), clones/updates repo to `~/.tokenage/src`, delegates to `scripts/bootstrap.sh`.
 - `bootstrap.sh` — installs deps (via embedded `_install_deps()`), builds the dashboard, starts services via `start.sh`, runs post-start verification, then restarts the API so the new `frontend/dist` is served. Only the command that builds restarts the API, because the mount happens at import time.
-- `start.sh` — config, port check, schema migrations, supervisord. Refuses with "run llm-tracker server bootstrap" when `requirements.txt` changed. Never touches agent settings.
+- `start.sh` — config, port check, schema migrations, supervisord. Refuses with "run tokenage server bootstrap" when `requirements.txt` changed. Never touches agent settings.
 - `scripts/restart.sh` — migrations, then `SIGHUP` to the running services. Nothing else; `--otlp-port N` is its only flag and persists the port.
-- The hosted client install is `scripts/hosted-install.sh`, served from `GET /install.sh`. It writes a client snapshot under `~/.llm-tracker/versions` and flips `~/.llm-tracker/current`.
+- The hosted client install is `scripts/hosted-install.sh`, served from `GET /install.sh`. It writes a client snapshot under `~/.tokenage/versions` and flips `~/.tokenage/current`.
 
-Quick backend iteration: `LLM_TRACKER_ROOT="$PWD" llm-tracker server restart` (see `scripts/restart.sh`) reloads the supervisord-managed services to pick up backend changes locally.
+Quick backend iteration: `TOKENAGE_ROOT="$PWD" tokenage server restart` (see `scripts/restart.sh`) reloads the supervisord-managed services to pick up backend changes locally.
 
-The human views frontend changes through the built version, not Vite dev — after frontend edits, run `LLM_TRACKER_ROOT="$PWD" llm-tracker server bootstrap` to rebuild `frontend/dist` (`npm install && npm run build`) so the changes show up.
+The human views frontend changes through the built version, not Vite dev — after frontend edits, run `TOKENAGE_ROOT="$PWD" tokenage server bootstrap` to rebuild `frontend/dist` (`npm install && npm run build`) so the changes show up.
 
 Frontend dev:
 
@@ -180,25 +180,25 @@ Frontend dev:
 cd frontend && npm run dev
 ```
 
-Vite dev uses port `5173`. `llm-tracker server bootstrap` builds and serves the frontend through FastAPI.
+Vite dev uses port `5173`. `tokenage server bootstrap` builds and serves the frontend through FastAPI.
 
 ## Worktree dev environment
 
-Create feature worktrees in `../llm-tracker-worktrees/`, next to the main `llm-tracker` clone. After creating one, symlink the main clone's virtualenv into it (`ln -s /path/to/main/clone/.venv .venv`) — `scripts/llm-tracker` and tests need it; without it they fall back to system `python3` and fail on missing deps.
+Create feature worktrees in `../tokenage-worktrees/`, next to the main `tokenage` clone. After creating one, symlink the main clone's virtualenv into it (`ln -s /path/to/main/clone/.venv .venv`) — `scripts/tokenage` and tests need it; without it they fall back to system `python3` and fail on missing deps.
 
 `scripts/dev/dev-start.sh` launches an isolated dev environment for worktree work. It is fully independent from the main production server:
 
 | | Main API server | Dev API server |
 |---|---|---|
-| **Manager** | supervisord (`~/.llm-tracker/supervisord.conf`) | standalone uvicorn |
-| **Working dir** | `~/Documents/llm-tracker/` | worktree dir |
-| **Port** | from `~/.llm-tracker/config.yaml` | random free port |
-| **DB** | `~/.llm-tracker/usage.db` | ephemeral copy in `/tmp/` |
+| **Manager** | supervisord (`~/.tokenage/supervisord.conf`) | standalone uvicorn |
+| **Working dir** | `~/Documents/tokenage/` | worktree dir |
+| **Port** | from `~/.tokenage/config.yaml` | random free port |
+| **DB** | `~/.tokenage/usage.db` | ephemeral copy in `/tmp/` |
 | **Auto-reload** | no | yes (`--reload`) |
 
 Key behaviors:
 
-- **Ephemeral DB**: copies `~/.llm-tracker/usage.db` into a temp dir; the main DB is never modified. Temp dir is deleted on stop.
+- **Ephemeral DB**: copies `~/.tokenage/usage.db` into a temp dir; the main DB is never modified. Temp dir is deleted on stop.
 - **Free ports**: API and Vite ports are allocated dynamically; no conflicts with main server.
 - **Auto-reload**: the dev uvicorn server runs with `--reload`, so Python file changes restart it automatically.
 - **Safe restart**: `scripts/dev/dev-stop.sh` + `scripts/dev/dev-start.sh` restarts only the dev server. The main supervisord-managed server is unaffected.
@@ -214,8 +214,8 @@ Key behaviors:
 ## Durable repo notes
 
 - `client/` must never import `src`. A client-only install has no server clone, so the dependency would break the whole client; `tests/client/test_no_server_imports.py` enforces it.
-- Runtime API port is config-driven. Do not assume `4001`; read `~/.llm-tracker/config.yaml`. This repo has recently run the API on `4004`.
-- Service control uses `~/.llm-tracker/supervisord.conf`.
+- Runtime API port is config-driven. Do not assume `4001`; read `~/.tokenage/config.yaml`. This repo has recently run the API on `4004`.
+- Service control uses `~/.tokenage/supervisord.conf`.
 - The configured DB may be remote Postgres/Supabase, not local SQLite. Worker and session-selector changes must tolerate slow or hung DB calls.
 - For stuck evaluations, inspect `evaluation_jobs` plus `/evaluation-jobs/active`. A queued auto job can be normal buffer behavior; if no running job exists and it survives a worker interval, suspect the worker loop.
 - Frontend-used API routes must be added to `frontend/vite-api-proxy.js` and its proxy route tests, or Vite dev mode may fail while production works.
@@ -233,7 +233,7 @@ Treat these as review-sensitive:
 - Worker loops, background jobs, and DB calls that can hang.
 - Frontend/backend route parity, especially Vite proxy behavior.
 
-More details: `.agents/commands/llm-tracker.md`.
+More details: `.agents/commands/tokenage.md`.
 
 ## Agent skills
 
@@ -247,5 +247,5 @@ Default labels: `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-huma
 
 ### Domain docs
 
-Single-context repo. Use root README plus `.agents/commands/llm-tracker.md`; ADRs may live under `docs/adr/` only for durable architecture decisions.
+Single-context repo. Use root README plus `.agents/commands/tokenage.md`; ADRs may live under `docs/adr/` only for durable architecture decisions.
 For the hosted client/server split design, read `docs/client-server-split-handoff.md`.

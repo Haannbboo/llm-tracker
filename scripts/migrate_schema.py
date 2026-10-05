@@ -15,12 +15,12 @@ from src.schema_migrations import migrate_database  # noqa: E402
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Apply explicit llm-tracker schema migrations."
+        description="Apply explicit tokenage schema migrations."
     )
     parser.add_argument(
         "--db-url",
         default=CONFIG["db"]["url"],
-        help="Target SQLAlchemy URL. Defaults to db.url from ~/.llm-tracker/config.yaml.",
+        help="Target SQLAlchemy URL. Defaults to db.url from ~/.tokenage/config.yaml.",
     )
     return parser.parse_args()
 

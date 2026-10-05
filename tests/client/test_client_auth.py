@@ -21,8 +21,8 @@ from protocol import CURRENT_GENERATION
 EXCHANGE_PAYLOAD = {
     "user": {"id": "u1", "email": "a@example.com", "name": "Alice"},
     "device_name": "testhost",
-    "cli_token": "llmt_cli abcdef",
-    "ingest_token": "llmt_ingest abcdef",
+    "cli_token": "tokenage_cli abcdef",
+    "ingest_token": "tokenage_ingest abcdef",
     "otlp": {
         "endpoint": "https://api.example.com:4005",
         "logs_endpoint": "https://api.example.com:4005/v1/logs",
@@ -38,7 +38,7 @@ EXCHANGE_PAYLOAD = {
 def test_corrupt_credentials_are_reported_without_a_traceback(
     command, content, capsys, monkeypatch
 ):
-    monkeypatch.delenv("LLMTRACKER_SERVER", raising=False)
+    monkeypatch.delenv("TOKENAGE_SERVER", raising=False)
     monkeypatch.setattr(setup, "installed_agents", lambda: ["codex"])
     monkeypatch.setattr(client_cli.update, "client_root", lambda: paths.tracker_home())
     monkeypatch.setattr(client_cli.update, "server_root", lambda: None)
@@ -57,7 +57,7 @@ def test_corrupt_credentials_are_reported_without_a_traceback(
 def client_home(tmp_path, monkeypatch):
     """Credentials and agent config never touch real $HOME."""
     monkeypatch.setenv("HOME", str(tmp_path))
-    monkeypatch.setenv("LLM_TRACKER_HOME", str(tmp_path / "tracker"))
+    monkeypatch.setenv("TOKENAGE_HOME", str(tmp_path / "tracker"))
 
 
 class FakeHttpx:
@@ -122,7 +122,7 @@ def _run_login(
 ):
     fake = FakeHttpx(exchange_status=exchange_status)
     _install_fake_httpx(monkeypatch, fake)
-    monkeypatch.delenv("LLMTRACKER_SERVER", raising=False)
+    monkeypatch.delenv("TOKENAGE_SERVER", raising=False)
     for key in ("SSH_CONNECTION", "SSH_TTY"):
         monkeypatch.delenv(key, raising=False)
     if ssh_env:
@@ -218,10 +218,10 @@ def test_login_writes_credentials_0600(monkeypatch, capsys):
     assert stat.S_IMODE(path.stat().st_mode) == 0o600
 
     # Tokens are never printed to the terminal.
-    assert "llmt_cli" not in captured.out
-    assert "llmt_cli" not in captured.err
-    assert "llmt_ingest" not in captured.out
-    assert "llmt_ingest" not in captured.err
+    assert "tokenage_cli" not in captured.out
+    assert "tokenage_cli" not in captured.err
+    assert "tokenage_ingest" not in captured.out
+    assert "tokenage_ingest" not in captured.err
 
 
 def test_login_retries_on_400_then_succeeds(monkeypatch, capsys):
@@ -319,12 +319,12 @@ def test_login_unreachable_server_fails_clean(monkeypatch):
 
 
 def test_login_requires_server(monkeypatch):
-    monkeypatch.delenv("LLMTRACKER_SERVER", raising=False)
+    monkeypatch.delenv("TOKENAGE_SERVER", raising=False)
     assert auth.login(None, device_name_arg=None, no_browser=True) == 2
 
 
 def test_login_server_from_env(monkeypatch):
-    monkeypatch.setenv("LLMTRACKER_SERVER", "https://env.example")
+    monkeypatch.setenv("TOKENAGE_SERVER", "https://env.example")
     fake = FakeHttpx(get_error=httpx.ConnectError("stop here"))
     _install_fake_httpx(monkeypatch, fake)
     auth.login(None, device_name_arg=None, no_browser=True)
@@ -370,8 +370,11 @@ def test_login_accepts_plain_http_only_for_loopback(monkeypatch, server, expecte
     assert auth.credentials_path().exists() is (expected_code == 0)
 
 
-def test_check_server_rejects_an_incompatible_protocol(monkeypatch, capsys):
-    _install_fake_httpx(monkeypatch, FakeHttpx(protocol_min=99, protocol_max=99))
+@pytest.mark.parametrize("generation", [1, 99])
+def test_check_server_rejects_an_incompatible_protocol(monkeypatch, capsys, generation):
+    _install_fake_httpx(
+        monkeypatch, FakeHttpx(protocol_min=generation, protocol_max=generation)
+    )
 
     assert auth.check_server("https://srv.example") == 1
     assert "incompatible" in capsys.readouterr().err
@@ -493,7 +496,7 @@ def test_usage_client_401_surfaces_relogin_message(monkeypatch):
     client = track.UsageApiClient()
     with pytest.raises(track.ApiError) as excinfo:
         client.get_high_watermark()
-    assert "llm-tracker login" in str(excinfo.value)
+    assert "tokenage login" in str(excinfo.value)
 
 
 # ------------------------------------------------------------------ wiring
@@ -546,7 +549,7 @@ def test_wire_agents_passes_ingest_token_via_environment(monkeypatch):
     assert calls
     for cmd, kwargs in calls:
         assert all("ingest-secret" not in str(arg) for arg in cmd)
-        assert kwargs["env"]["LLM_TRACKER_INGEST_TOKEN"] == "ingest-secret"
+        assert kwargs["env"]["TOKENAGE_INGEST_TOKEN"] == "ingest-secret"
 
 
 def test_wire_agents_strips_otel_env_var(monkeypatch):

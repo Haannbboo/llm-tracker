@@ -16,7 +16,7 @@ def test_mint_and_resolve_roundtrip(fresh_db):
     from src.auth.tokens import resolve_token
 
     token, user = _mint(fresh_db, device_name="laptop")
-    assert token.startswith("llmt_cli_")
+    assert token.startswith("tokenage_cli_")
     resolved = resolve_token(token, db_path=fresh_db.db_path)
     assert resolved is not None
     resolved_user, resolved_token = resolved
@@ -58,7 +58,7 @@ def test_plaintext_token_not_stored(fresh_db):
 def test_resolve_unknown_token(fresh_db):
     from src.auth.tokens import resolve_token
 
-    assert resolve_token("llmt_cli_deadbeef", db_path=fresh_db.db_path) is None
+    assert resolve_token("tokenage_cli_deadbeef", db_path=fresh_db.db_path) is None
 
 
 def test_resolve_revoked_token(fresh_db):
@@ -211,7 +211,7 @@ def test_auth_me_enabled(api_module, fresh_db, monkeypatch):
     )
     assert (
         client.get(
-            "/auth/me", headers={"Authorization": "Bearer llmt_cli_wrong"}
+            "/auth/me", headers={"Authorization": "Bearer tokenage_cli_wrong"}
         ).status_code
         == 401
     )
@@ -259,7 +259,9 @@ def test_auth_me_db_error_is_500_not_none(api_module, monkeypatch):
 
     monkeypatch.setattr(auth_routes, "resolve_token", boom)
     client = TestClient(api_module.app, raise_server_exceptions=False)
-    response = client.get("/auth/me", headers={"Authorization": "Bearer llmt_cli_x"})
+    response = client.get(
+        "/auth/me", headers={"Authorization": "Bearer tokenage_cli_x"}
+    )
     assert response.status_code == 500
 
 
@@ -270,7 +272,7 @@ def test_auth_me_enabled_no_users_is_401_not_500(api_module, fresh_db, monkeypat
         src.config.app.CONFIG, "auth", {"enabled": True, "allowlist": []}
     )
     response = TestClient(api_module.app).get(
-        "/auth/me", headers={"Authorization": "Bearer llmt_cli_x"}
+        "/auth/me", headers={"Authorization": "Bearer tokenage_cli_x"}
     )
     assert response.status_code == 401
 
@@ -333,7 +335,7 @@ def test_token_create_cli(cli_module, capsys):
     )
     captured = capsys.readouterr()
     assert exit_code == 0
-    assert "llmt_cli_" in captured.out
+    assert "tokenage_cli_" in captured.out
     assert "cli@example.com" in captured.out
 
 

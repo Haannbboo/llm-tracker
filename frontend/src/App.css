@@ -22,9 +22,12 @@
   padding: 8px 24px;
 }
 
-.navbar-ascii {
+.navbar-brand {
   flex-shrink: 0;
   color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: 20px;
+  font-weight: 700;
   opacity: 0.85;
 }
 

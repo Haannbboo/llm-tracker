@@ -21,7 +21,7 @@ export function LogsPage() {
   // Read session filter from sessionStorage (set by Dashboard/Sessions tab navigation)
   const storedSessionFilter = useMemo(() => {
     try {
-      const raw = sessionStorage.getItem('llm-tracker-logs-filters')
+      const raw = sessionStorage.getItem('tokenage-logs-filters')
       if (raw) return JSON.parse(raw).sessionFilter ?? null
     } catch { /* ignore */ }
     return null
@@ -29,7 +29,7 @@ export function LogsPage() {
 
   // Clear the one-shot session filter after commit
   useEffect(() => {
-    sessionStorage.removeItem('llm-tracker-logs-filters')
+    sessionStorage.removeItem('tokenage-logs-filters')
   }, [])
 
   const { showToast, requestUsageRefresh, activeFilter, setActiveFilter, activeSource, setActiveSource, dateRange, setDateRange, customSince, setCustomSince, customUntil, setCustomUntil, timezone } = useApp()

@@ -1,8 +1,14 @@
 import os
 
+from dotenv import load_dotenv
+
 from src.config.server_config import load_server_config
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+# Optional env overrides (Google OAuth credentials and anything else a
+# deployment injects) without touching ~/.tokenage/config.yaml.
+load_dotenv(os.path.join(ROOT, ".env"))
 
 _server = load_server_config()
 bind = f"{_server.host}:{_server.api_port}"

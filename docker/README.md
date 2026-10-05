@@ -21,7 +21,7 @@ server:
   api_port: 4001
 
 db:
-  url: postgresql+psycopg://user:password@db-host:5432/llm_tracker
+  url: postgresql+psycopg://user:password@db-host:5432/tokenage
 
 providers:
   my-provider:
@@ -41,7 +41,7 @@ docker compose up -d
 Check logs:
 
 ```bash
-docker logs -f llm-tracker
+docker logs -f tokenage
 ```
 
 ## 3. Update agent configs (remote deployment)
@@ -70,7 +70,7 @@ Dashboard: open `http://your-nas.tailnet.ts.net:4001` in your browser.
 - The entrypoint runs schema migrations on startup, then starts all three servers under supervisord.
 - `server.host` is automatically patched from `127.0.0.1` to `0.0.0.0` inside the container for proper Docker networking.
 - The container exposes ports 4000 (proxy), 4001 (API + dashboard), and 4002 (OTLP).
-- Logs go to stdout/stderr — use `docker logs llm-tracker` to view them.
+- Logs go to stdout/stderr — use `docker logs tokenage` to view them.
 
 ## Unraid
 

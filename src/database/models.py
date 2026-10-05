@@ -1,4 +1,4 @@
-"""ORM model classes and validation constants for llm-tracker."""
+"""ORM model classes and validation constants for tokenage."""
 
 from __future__ import annotations
 

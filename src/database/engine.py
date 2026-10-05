@@ -1,4 +1,4 @@
-"""Engine management for llm-tracker database connections."""
+"""Engine management for tokenage database connections."""
 
 from __future__ import annotations
 
@@ -13,7 +13,7 @@ from src.config.app import CONFIG
 
 from .models import Base
 
-DB_URL_ENV_VAR = "LLM_TRACKER_DB_URL"
+DB_URL_ENV_VAR = "TOKENAGE_DB_URL"
 DB_CONNECT_TIMEOUT_SECONDS = 5
 
 _engine_cache: dict[str, Engine] = {}

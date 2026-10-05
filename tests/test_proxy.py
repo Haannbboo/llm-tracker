@@ -481,7 +481,7 @@ async def test_list_models_returns_configured_models(proxy_module):
 def test_proxy_metadata_describes_supported_endpoints(proxy_module):
     result = proxy_module.proxy_metadata()
 
-    assert result["name"] == "llm-tracker-proxy"
+    assert result["name"] == "tokenage-proxy"
     assert "/api/v1/models" in result["supported_endpoints"]
     assert "/v1/props" in result["supported_endpoints"]
     assert "/version" not in result["supported_endpoints"]
@@ -518,7 +518,7 @@ async def test_props_returns_proxy_metadata(proxy_module):
 async def test_version_returns_proxy_identity(proxy_module):
     result = await proxy_module.version()
 
-    assert result["name"] == "llm-tracker-proxy"
+    assert result["name"] == "tokenage-proxy"
     parts = result["version"].split(".")
     assert len(parts) == 3 and all(p.isdigit() for p in parts), (
         f"Expected x.y.z format, got {result['version']!r}"

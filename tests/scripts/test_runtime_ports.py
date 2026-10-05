@@ -5,7 +5,7 @@ def test_detect_port_issues_flags_preflight_conflict(runtime_ports_module):
     service_ports = [
         runtime_ports_module.ServicePort(
             service="API",
-            program="llm-tracker-api",
+            program="tokenage-api",
             host="127.0.0.1",
             port=4001,
         )
@@ -23,7 +23,7 @@ def test_detect_port_issues_flags_preflight_conflict(runtime_ports_module):
     assert len(issues) == 1
     assert issues[0] == runtime_ports_module.PortIssue(
         service="API",
-        program="llm-tracker-api",
+        program="tokenage-api",
         host="127.0.0.1",
         port=4001,
         kind="occupied_by_other_process",
@@ -39,13 +39,13 @@ def test_detect_port_issues_flags_running_service_owned_by_other_process(
     service_ports = [
         runtime_ports_module.ServicePort(
             service="API",
-            program="llm-tracker-api",
+            program="tokenage-api",
             host="127.0.0.1",
             port=4001,
         )
     ]
     supervisor_states = {
-        "llm-tracker-api": runtime_ports_module.SupervisorProgramState(
+        "tokenage-api": runtime_ports_module.SupervisorProgramState(
             status="RUNNING",
             pid=76037,
         )
@@ -63,7 +63,7 @@ def test_detect_port_issues_flags_running_service_owned_by_other_process(
     assert len(issues) == 1
     assert issues[0] == runtime_ports_module.PortIssue(
         service="API",
-        program="llm-tracker-api",
+        program="tokenage-api",
         host="127.0.0.1",
         port=4001,
         kind="occupied_by_unexpected_process",
@@ -79,13 +79,13 @@ def test_detect_port_issues_allows_running_service_on_expected_port(
     service_ports = [
         runtime_ports_module.ServicePort(
             service="API",
-            program="llm-tracker-api",
+            program="tokenage-api",
             host="127.0.0.1",
             port=4001,
         )
     ]
     supervisor_states = {
-        "llm-tracker-api": runtime_ports_module.SupervisorProgramState(
+        "tokenage-api": runtime_ports_module.SupervisorProgramState(
             status="RUNNING",
             pid=76037,
         )
@@ -107,7 +107,7 @@ def test_get_blocking_port_issues_ignores_not_listening(runtime_ports_module):
     issues = [
         runtime_ports_module.PortIssue(
             service="API",
-            program="llm-tracker-api",
+            program="tokenage-api",
             host="127.0.0.1",
             port=4004,
             kind="not_listening",
@@ -141,7 +141,7 @@ def test_get_configured_service_ports_prefers_otlp_endpoint_env(
 
     assert service_ports[-1] == runtime_ports_module.ServicePort(
         "OTLP",
-        "llm-tracker-otlp",
+        "tokenage-otlp",
         "127.0.0.1",
         49153,
     )
@@ -165,7 +165,7 @@ def test_get_configured_service_ports_uses_configured_otlp_port_without_env(
 
     assert service_ports[-1] == runtime_ports_module.ServicePort(
         "OTLP",
-        "llm-tracker-otlp",
+        "tokenage-otlp",
         "127.0.0.1",
         4005,
     )
@@ -260,7 +260,7 @@ def test_check_service_ports_strict_mode_reports_only_blocking_issues():
 
 
 def test_start_and_restart_never_configure_agents():
-    """Agent wiring is the client's job: `llm-tracker setup` / `llm-tracker login`."""
+    """Agent wiring is the client's job: `tokenage setup` / `tokenage login`."""
     repo_root = __import__("pathlib").Path(__file__).resolve().parents[2]
     start_script = (repo_root / "scripts" / "start.sh").read_text(encoding="utf-8")
     restart_script = (repo_root / "scripts" / "restart.sh").read_text(encoding="utf-8")
@@ -312,7 +312,7 @@ def test_restart_persists_otlp_port_before_restarting_collector(tmp_path):
     supervisorctl.chmod(0o755)
 
     home = tmp_path / "home with spaces"
-    config_dir = home / ".llm-tracker"
+    config_dir = home / ".tokenage"
     config_dir.mkdir(parents=True)
     (config_dir / "supervisord.conf").write_text("[supervisord]\n")
     config_path = config_dir / "config.yaml"
@@ -344,8 +344,8 @@ def test_restart_persists_otlp_port_before_restarting_collector(tmp_path):
     assert config["db"]["path"] == "keep.db"
     assert config_path.stat().st_mode & 0o777 == 0o600
     calls = supervisor_log.read_text(encoding="utf-8").splitlines()
-    assert any(call.endswith("restart llm-tracker-otlp") for call in calls)
-    assert any(call.endswith("signal HUP llm-tracker-api") for call in calls)
+    assert any(call.endswith("restart tokenage-otlp") for call in calls)
+    assert any(call.endswith("signal HUP tokenage-api") for call in calls)
     assert "OTLP port saved as 5505" in result.stdout
 
 
@@ -409,9 +409,9 @@ case "${1:-}" in
     exit 0
     ;;
   */check-service-ports.py)
-    if [[ ! -f "${HOME}/.llm-tracker/.port-check-failed" ]]; then
-      mkdir -p "${HOME}/.llm-tracker"
-      touch "${HOME}/.llm-tracker/.port-check-failed"
+    if [[ ! -f "${HOME}/.tokenage/.port-check-failed" ]]; then
+      mkdir -p "${HOME}/.tokenage"
+      touch "${HOME}/.tokenage/.port-check-failed"
       echo "defaults busy" >&2
       exit 1
     fi
@@ -538,7 +538,7 @@ def test_start_creates_config_from_example_and_leaves_home_agents_alone(tmp_path
     assert "Port check passed" in output
 
     config = yaml.safe_load(
-        (home / ".llm-tracker" / "config.yaml").read_text(encoding="utf-8")
+        (home / ".tokenage" / "config.yaml").read_text(encoding="utf-8")
     )
     example = yaml.safe_load(
         (fake_repo / "config.example.yaml").read_text(encoding="utf-8")
@@ -573,7 +573,7 @@ def test_start_records_auto_assigned_ports_and_leaves_home_agents_alone(tmp_path
     assert "Ports auto-assigned" in output
 
     config = yaml.safe_load(
-        (home / ".llm-tracker" / "config.yaml").read_text(encoding="utf-8")
+        (home / ".tokenage" / "config.yaml").read_text(encoding="utf-8")
     )
     for key, port in _ASSIGNED_PORTS.items():
         assert config["server"][key] == port
@@ -595,8 +595,8 @@ def test_start_refuses_to_run_when_requirements_stamp_is_stale(tmp_path):
 
     assert result.returncode == 1, output
     assert "Dependencies are out of date" in output
-    assert "run llm-tracker server bootstrap" in output
-    assert not (home / ".llm-tracker" / "config.yaml").exists()
+    assert "run tokenage server bootstrap" in output
+    assert not (home / ".tokenage" / "config.yaml").exists()
 
 
 # ---------------------------------------------------------------------------
@@ -635,10 +635,10 @@ def test_parse_supervisor_status_empty_string(runtime_ports_module):
 
 def test_parse_supervisor_status_single_program_with_pid(runtime_ports_module):
     result = runtime_ports_module.parse_supervisor_status(
-        "llm-tracker-proxy RUNNING pid 1234"
+        "tokenage-proxy RUNNING pid 1234"
     )
     assert result == {
-        "llm-tracker-proxy": runtime_ports_module.SupervisorProgramState(
+        "tokenage-proxy": runtime_ports_module.SupervisorProgramState(
             status="RUNNING",
             pid=1234,
         )
@@ -646,9 +646,9 @@ def test_parse_supervisor_status_single_program_with_pid(runtime_ports_module):
 
 
 def test_parse_supervisor_status_program_without_pid(runtime_ports_module):
-    result = runtime_ports_module.parse_supervisor_status("llm-tracker-proxy STOPPED")
+    result = runtime_ports_module.parse_supervisor_status("tokenage-proxy STOPPED")
     assert result == {
-        "llm-tracker-proxy": runtime_ports_module.SupervisorProgramState(
+        "tokenage-proxy": runtime_ports_module.SupervisorProgramState(
             status="STOPPED",
             pid=None,
         )
@@ -657,19 +657,19 @@ def test_parse_supervisor_status_program_without_pid(runtime_ports_module):
 
 def test_parse_supervisor_status_multiple_programs(runtime_ports_module):
     text = (
-        "llm-tracker-proxy RUNNING pid 100\n"
-        "llm-tracker-api RUNNING pid 200\n"
-        "llm-tracker-otlp STOPPED\n"
+        "tokenage-proxy RUNNING pid 100\n"
+        "tokenage-api RUNNING pid 200\n"
+        "tokenage-otlp STOPPED\n"
     )
     result = runtime_ports_module.parse_supervisor_status(text)
     assert result == {
-        "llm-tracker-proxy": runtime_ports_module.SupervisorProgramState(
+        "tokenage-proxy": runtime_ports_module.SupervisorProgramState(
             status="RUNNING", pid=100
         ),
-        "llm-tracker-api": runtime_ports_module.SupervisorProgramState(
+        "tokenage-api": runtime_ports_module.SupervisorProgramState(
             status="RUNNING", pid=200
         ),
-        "llm-tracker-otlp": runtime_ports_module.SupervisorProgramState(
+        "tokenage-otlp": runtime_ports_module.SupervisorProgramState(
             status="STOPPED", pid=None
         ),
     }
@@ -683,7 +683,7 @@ def test_parse_supervisor_status_multiple_programs(runtime_ports_module):
 def test_format_port_issue_not_listening(runtime_ports_module):
     issue = runtime_ports_module.PortIssue(
         service="API",
-        program="llm-tracker-api",
+        program="tokenage-api",
         host="127.0.0.1",
         port=4001,
         kind="not_listening",
@@ -693,7 +693,7 @@ def test_format_port_issue_not_listening(runtime_ports_module):
     )
     text = runtime_ports_module.format_port_issue(issue)
     assert "expected" in text
-    assert "llm-tracker-api" in text
+    assert "tokenage-api" in text
     assert "pid 76037" in text
     assert "nothing is listening" in text
 
@@ -701,7 +701,7 @@ def test_format_port_issue_not_listening(runtime_ports_module):
 def test_format_port_issue_occupied_by_unexpected_process(runtime_ports_module):
     issue = runtime_ports_module.PortIssue(
         service="API",
-        program="llm-tracker-api",
+        program="tokenage-api",
         host="127.0.0.1",
         port=4001,
         kind="occupied_by_unexpected_process",
@@ -712,13 +712,13 @@ def test_format_port_issue_occupied_by_unexpected_process(runtime_ports_module):
     text = runtime_ports_module.format_port_issue(issue)
     assert "owned by" in text
     assert "QQ (pid 18431)" in text
-    assert "not llm-tracker-api pid 76037" in text
+    assert "not tokenage-api pid 76037" in text
 
 
 def test_format_port_issue_occupied_by_other_process(runtime_ports_module):
     issue = runtime_ports_module.PortIssue(
         service="API",
-        program="llm-tracker-api",
+        program="tokenage-api",
         host="127.0.0.1",
         port=4001,
         kind="occupied_by_other_process",
@@ -729,7 +729,7 @@ def test_format_port_issue_occupied_by_other_process(runtime_ports_module):
     text = runtime_ports_module.format_port_issue(issue)
     assert "already owned by" in text
     assert "QQ (pid 18431)" in text
-    assert "llm-tracker-api cannot bind" in text
+    assert "tokenage-api cannot bind" in text
 
 
 # ---------------------------------------------------------------------------
@@ -741,13 +741,13 @@ def test_detect_port_issues_stopped_program_with_listeners(runtime_ports_module)
     service_ports = [
         runtime_ports_module.ServicePort(
             service="API",
-            program="llm-tracker-api",
+            program="tokenage-api",
             host="127.0.0.1",
             port=4001,
         )
     ]
     supervisor_states = {
-        "llm-tracker-api": runtime_ports_module.SupervisorProgramState(
+        "tokenage-api": runtime_ports_module.SupervisorProgramState(
             status="STOPPED",
             pid=None,
         )
@@ -765,7 +765,7 @@ def test_detect_port_issues_stopped_program_with_listeners(runtime_ports_module)
     assert len(issues) == 1
     assert issues[0] == runtime_ports_module.PortIssue(
         service="API",
-        program="llm-tracker-api",
+        program="tokenage-api",
         host="127.0.0.1",
         port=4001,
         kind="occupied_by_other_process",
@@ -779,7 +779,7 @@ def test_detect_port_issues_empty_service_ports(runtime_ports_module):
     issues = runtime_ports_module.detect_port_issues(
         service_ports=[],
         supervisor_states={
-            "llm-tracker-api": runtime_ports_module.SupervisorProgramState(
+            "tokenage-api": runtime_ports_module.SupervisorProgramState(
                 status="RUNNING", pid=100
             )
         },
@@ -794,13 +794,13 @@ def test_detect_port_issues_multiple_listeners_uses_first(runtime_ports_module):
     service_ports = [
         runtime_ports_module.ServicePort(
             service="API",
-            program="llm-tracker-api",
+            program="tokenage-api",
             host="127.0.0.1",
             port=4001,
         )
     ]
     supervisor_states = {
-        "llm-tracker-api": runtime_ports_module.SupervisorProgramState(
+        "tokenage-api": runtime_ports_module.SupervisorProgramState(
             status="RUNNING",
             pid=76037,
         )

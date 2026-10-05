@@ -13,7 +13,7 @@ import pytest
 NO_REMOTE_PRICING_CONFIG = (
     Path(__file__).parent / "fixtures" / "no-remote-pricing-config.yaml"
 )
-os.environ.setdefault("LLM_TRACKER_CONFIG", str(NO_REMOTE_PRICING_CONFIG))
+os.environ.setdefault("TOKENAGE_CONFIG", str(NO_REMOTE_PRICING_CONFIG))
 
 
 CONFIG_TEMPLATE = """
@@ -90,7 +90,7 @@ def clear_project_modules() -> None:
 def isolated_home(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> Generator[Path, None, None]:
-    config_dir = tmp_path / ".llm-tracker"
+    config_dir = tmp_path / ".tokenage"
     config_dir.mkdir(parents=True, exist_ok=True)
     config_path = config_dir / "config.yaml"
     config_path.write_text(
@@ -99,7 +99,7 @@ def isolated_home(
     )
 
     monkeypatch.setenv("HOME", str(tmp_path))
-    monkeypatch.setenv("LLM_TRACKER_CONFIG", str(config_path))
+    monkeypatch.setenv("TOKENAGE_CONFIG", str(config_path))
     clear_project_modules()
     # Patch CONFIG["db"] so cached modules see the test's DB path.
     import src.config.app
@@ -211,10 +211,10 @@ _TRUNCATE_TABLES = [
 
 
 # Postgres test harness (docs/quick/postgres-testing.md): local-only, gated on
-# LLM_TRACKER_TEST_PG_URL. Every PG test skips when the env var is unset; CI
+# TOKENAGE_TEST_PG_URL. Every PG test skips when the env var is unset; CI
 # never sets it.
 
-PG_URL_ENV_VAR = "LLM_TRACKER_TEST_PG_URL"
+PG_URL_ENV_VAR = "TOKENAGE_TEST_PG_URL"
 
 
 def _pg_test_url() -> str | None:
@@ -230,7 +230,7 @@ def _session_db(request, tmp_path_factory):
     """Session-scoped DB with latest schema — shared across all fresh_db tests.
 
     Parametrized over backends: postgres only joins in when
-    LLM_TRACKER_TEST_PG_URL is set, doubling up every fresh_db-based test.
+    TOKENAGE_TEST_PG_URL is set, doubling up every fresh_db-based test.
     """
     import src.database as db
     import src.schema_migrations as sm

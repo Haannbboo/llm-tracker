@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 # scripts/status.sh
-# Show llm-tracker service status.
+# Show tokenage service status.
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-SUPERVISORD_CONF="${HOME}/.llm-tracker/supervisord.conf"
+SUPERVISORD_CONF="${HOME}/.tokenage/supervisord.conf"
 SUPERVISORCTL="${ROOT_DIR}/.venv/bin/supervisorctl"
-CONFIG_PATH="${HOME}/.llm-tracker/config.yaml"
+CONFIG_PATH="${HOME}/.tokenage/config.yaml"
 PYTHON="${ROOT_DIR}/.venv/bin/python"
 PORT_CHECKER="${ROOT_DIR}/scripts/check-service-ports.py"
 

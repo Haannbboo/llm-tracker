@@ -1,6 +1,6 @@
 """Postgres tests for the PR 4 tenancy schema (docs/quick/postgres-testing.md).
 
-Local-only: every test in this module skips unless LLM_TRACKER_TEST_PG_URL
+Local-only: every test in this module skips unless TOKENAGE_TEST_PG_URL
 points at a dedicated scratch database. CI stays SQLite-only.
 """
 

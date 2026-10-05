@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 # install.sh
-# curl-pipe-bash installer for llm-tracker.
+# curl-pipe-bash installer for tokenage.
 #
 # Usage:
-#   curl -fsSL https://raw.githubusercontent.com/Haannbboo/llm-tracker/main/install.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/Haannbboo/tokenage/main/install.sh | bash
 #
 # Environment variables:
-#   LLM_TRACKER_BRANCH  — branch to install (default: main)
+#   TOKENAGE_BRANCH  — branch to install (default: main)
 set -euo pipefail
 
 # ── Color helpers ─────────────────────────────────────────────────
@@ -25,12 +25,7 @@ fi
 # ── Banner ────────────────────────────────────────────────────────
 printf "\n"
 printf "%b" "${_C_PURPLE}${_C_BOLD}"
-printf '  ██╗      ██╗      ███╗   ███╗    ████████╗██████╗  █████╗  ██████╗██╗  ██╗███████╗██████╗ \n'
-printf '  ██║      ██║      ████╗ ████║    ╚══██╔══╝██╔══██╗██╔══██╗██╔════╝██║ ██╔╝██╔════╝██╔══██╗\n'
-printf '  ██║      ██║      ██╔████╔██║       ██║   ██████╔╝███████║██║     █████╔╝ █████╗  ██████╔╝\n'
-printf '  ██║      ██║      ██║╚██╔╝██║       ██║   ██╔══██╗██╔══██║██║     ██╔═██╗ ██╔══╝  ██╔══██╗\n'
-printf '  ███████╗ ███████╗ ██║ ╚═╝ ██║       ██║   ██║  ██║██║  ██║╚██████╗██║  ██╗███████╗██║  ██║\n'
-printf '  ╚══════╝ ╚══════╝ ╚═╝     ╚═╝       ╚═╝   ╚═╝  ╚═╝╚═╝  ╚═╝ ╚═════╝╚═╝  ╚═╝╚══════╝╚═╝  ╚═╝\n'
+printf '  ── tokenage ──\n'
 printf "%b" "${_C_RESET}"
 printf "\n"
 
@@ -42,9 +37,9 @@ _info() {
   fi
 }
 
-REPO="Haannbboo/llm-tracker"
-BRANCH="${LLM_TRACKER_BRANCH:-main}"
-INSTALL_DIR="${HOME}/.llm-tracker/src"
+REPO="Haannbboo/tokenage"
+BRANCH="${TOKENAGE_BRANCH:-main}"
+INSTALL_DIR="${HOME}/.tokenage/src"
 EXPECTED_HTTPS_REMOTE="https://github.com/${REPO}.git"
 EXPECTED_SSH_REMOTE="git@github.com:${REPO}.git"
 
@@ -91,15 +86,15 @@ if [[ -d "${INSTALL_DIR}/.git" ]]; then
     echo "Expected ${EXPECTED_HTTPS_REMOTE} (or SSH equivalent)." >&2
     exit 1
   fi
-  _info "Updating llm-tracker in ${INSTALL_DIR}..."
+  _info "Updating tokenage in ${INSTALL_DIR}..."
   git -C "${INSTALL_DIR}" fetch origin "${BRANCH}"
   git -C "${INSTALL_DIR}" checkout "${BRANCH}"
   git -C "${INSTALL_DIR}" pull origin "${BRANCH}"
 else
-  _info "Cloning llm-tracker to ${INSTALL_DIR}..."
+  _info "Cloning tokenage to ${INSTALL_DIR}..."
   mkdir -p "$(dirname "${INSTALL_DIR}")"
   git clone --branch "${BRANCH}" "https://github.com/${REPO}.git" "${INSTALL_DIR}"
 fi
 
 # ── Bootstrap ─────────────────────────────────────────────────────
-exec env LLM_TRACKER_SKIP_BANNER=1 bash "${INSTALL_DIR}/scripts/bootstrap.sh" "$@"
+exec env TOKENAGE_SKIP_BANNER=1 bash "${INSTALL_DIR}/scripts/bootstrap.sh" "$@"

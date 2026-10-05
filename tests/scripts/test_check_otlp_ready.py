@@ -28,7 +28,7 @@ def test_script_exits_zero_when_config_missing(monkeypatch):
     spec.loader.exec_module(check_otlp_ready)
 
     # When config file doesn't exist, get_api_url returns None and main exits early
-    monkeypatch.setenv("LLM_TRACKER_CONFIG", "/tmp/non-existent-config.yaml")
+    monkeypatch.setenv("TOKENAGE_CONFIG", "/tmp/non-existent-config.yaml")
     assert check_otlp_ready.main() == 0
 
 
@@ -49,7 +49,7 @@ def test_script_uses_custom_port_from_config(monkeypatch, tmp_path):
     config_data = {"server": {"api_port": 5001}}
     config_file.write_text(yaml.dump(config_data))
 
-    monkeypatch.setenv("LLM_TRACKER_CONFIG", str(config_file))
+    monkeypatch.setenv("TOKENAGE_CONFIG", str(config_file))
     with patch("httpx.get") as mock_get:
         mock_get.side_effect = Exception("Connection refused")
         assert check_otlp_ready.main() == 0
@@ -72,7 +72,7 @@ def test_script_exits_zero_when_port_not_determinable(monkeypatch, tmp_path):
     # Config exists but neither api_port nor port is available
     config_file = tmp_path / "config.yaml"
     config_file.write_text(yaml.dump({"server": {}}))
-    monkeypatch.setenv("LLM_TRACKER_CONFIG", str(config_file))
+    monkeypatch.setenv("TOKENAGE_CONFIG", str(config_file))
     assert check_otlp_ready.main() == 0
 
 

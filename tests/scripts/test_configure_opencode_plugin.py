@@ -104,7 +104,7 @@ def test_configure_opencode_plugin_preserves_token_without_new_token(tmp_path):
         ),
         encoding="utf-8",
     )
-    credentials_path = home / ".llm-tracker" / "credentials.json"
+    credentials_path = home / ".tokenage" / "credentials.json"
     credentials_path.parent.mkdir(parents=True)
     credentials_path.write_text(
         json.dumps({"ingest_token": "ingest-secret"}), encoding="utf-8"
@@ -150,7 +150,7 @@ def test_configure_opencode_plugin_removes_other_tracker_builds(tmp_path):
         project_root,
         home,
         "4102",
-        {"LLM_TRACKER_INGEST_TOKEN": "ingest-secret"},
+        {"TOKENAGE_INGEST_TOKEN": "ingest-secret"},
     )
 
     assert result.returncode == 0, result.stderr
@@ -192,7 +192,7 @@ def test_configure_opencode_plugin_replaces_prior_collector_entry(
         ),
         encoding="utf-8",
     )
-    credentials_path = home / ".llm-tracker" / "credentials.json"
+    credentials_path = home / ".tokenage" / "credentials.json"
     credentials_path.parent.mkdir(parents=True)
     credentials_path.write_text(
         json.dumps({"ingest_token": "ingest-secret"}), encoding="utf-8"

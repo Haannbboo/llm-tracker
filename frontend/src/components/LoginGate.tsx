@@ -31,7 +31,7 @@ export function LoginGate() {
           <span>{t('Sign in required')}</span>
         </div>
         <div className="login-gate-subtitle">
-          {t('Sign in with your Google account to continue using llm-tracker.')}
+          {t('Sign in with your Google account to continue using tokenage.')}
         </div>
         {errorMessage && (
           <div className="login-gate-error">

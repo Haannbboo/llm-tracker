@@ -60,7 +60,7 @@ Use for most behavior changes.
 
 - Independent code review completed before commit: yes/no
 - Must-fix review findings resolved: yes/no
-- Standards checked against `AGENTS.md` and `.agents/commands/llm-tracker.md`: yes/no
+- Standards checked against `AGENTS.md` and `.agents/commands/tokenage.md`: yes/no
 
 ## Known Limitations / Follow-ups
 
@@ -124,7 +124,7 @@ This PR changes high-risk area(s): <list>.
 
 - Independent code review completed before commit: yes/no
 - Must-fix review findings resolved: yes/no
-- Standards checked against `AGENTS.md`, `.agents/commands/llm-tracker.md`, and `.agents/commands/pre-pr.md`: yes/no
+- Standards checked against `AGENTS.md`, `.agents/commands/tokenage.md`, and `.agents/commands/pre-pr.md`: yes/no
 
 ## Known Limitations / Follow-ups
 

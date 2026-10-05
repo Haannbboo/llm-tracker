@@ -1,4 +1,4 @@
-# llm-tracker Project Rules
+# tokenage Project Rules
 
 This project tracks LLM usage via a transparent proxy and OTLP collector. Its core risk is obvious: it sits near prompts, responses, auth headers, token counts, cost data, and provider-specific weirdness. Don't be sloppy.
 
@@ -7,7 +7,7 @@ This project tracks LLM usage via a transparent proxy and OTLP collector. Its co
 - Never commit secrets: API keys, provider tokens, auth headers, cookies, passwords, connection strings.
 - Never store or log raw prompts/responses/request bodies by default unless explicitly configured and approved.
 - Never expose private local agent memory in public repo files.
-- Never assume runtime ports. Read `~/.llm-tracker/config.yaml`.
+- Never assume runtime ports. Read `~/.tokenage/config.yaml`.
 - Never assume local SQLite. DB may be remote Postgres/Supabase.
 - Never change schema/cost/provider behavior without tests.
 
@@ -137,7 +137,7 @@ install.sh (root) → bootstrap.sh → start.sh
 Quick backend restart:
 
 ```bash
-~/.venv/bin/supervisorctl -c ~/.llm-tracker/supervisord.conf restart llm-tracker-api
+~/.venv/bin/supervisorctl -c ~/.tokenage/supervisord.conf restart tokenage-api
 ```
 
 ## Documentation policy

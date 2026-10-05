@@ -7,7 +7,7 @@ import yaml
 
 def load_config():
     config_path = os.path.expanduser(
-        os.environ.get("LLM_TRACKER_CONFIG", "~/.llm-tracker/config.yaml")
+        os.environ.get("TOKENAGE_CONFIG", "~/.tokenage/config.yaml")
     )
     if not os.path.exists(config_path):
         return None

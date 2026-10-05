@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Report configured llm-tracker port conflicts before or after service startup."""
+"""Report configured tokenage port conflicts before or after service startup."""
 
 from __future__ import annotations
 
@@ -128,7 +128,7 @@ def main() -> int:
     if args.strict and blocking_issues:
         print(
             "Resolve the conflicting port or change the configured service port "
-            "before starting or restarting llm-tracker.",
+            "before starting or restarting tokenage.",
             file=sys.stderr,
         )
         return 1

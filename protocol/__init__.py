@@ -1,5 +1,6 @@
 """Wire protocol generations shared by hosted clients and servers."""
 
-CURRENT_GENERATION = 1
-MIN_SUPPORTED_GENERATION = 1
-MAX_SUPPORTED_GENERATION = 1
+# Generation 2 uses the tokenage ingestion header.
+CURRENT_GENERATION = 2
+MIN_SUPPORTED_GENERATION = 2
+MAX_SUPPORTED_GENERATION = 2

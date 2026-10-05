@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # scripts/bootstrap.sh
-# One-command local startup: install, start, and verify llm-tracker services.
+# One-command local startup: install, start, and verify tokenage services.
 set -euo pipefail
 
 # ── Resolve repo root ───────────────────────────────────────────────
@@ -11,9 +11,9 @@ done
 ROOT_DIR="$(cd "$(dirname "${BOOTSTRAP_SOURCE}")/.." && pwd)"
 
 SCRIPTS_DIR="${ROOT_DIR}/scripts"
-CONFIG_PATH="${HOME}/.llm-tracker/config.yaml"
-CLI_WRAPPER="${SCRIPTS_DIR}/llm-tracker"
-CLI_SYMLINK="${HOME}/.local/bin/llm-tracker"
+CONFIG_PATH="${HOME}/.tokenage/config.yaml"
+CLI_WRAPPER="${SCRIPTS_DIR}/tokenage"
+CLI_SYMLINK="${HOME}/.local/bin/tokenage"
 
 # ── Load terminal helpers ───────────────────────────────────────────
 source "${SCRIPTS_DIR}/lib/terminal.sh"
@@ -79,25 +79,25 @@ except Exception:
 source "${SCRIPTS_DIR}/lib/requirements.sh"
 
 _install_deps() {
-  if [[ "${LLM_TRACKER_SKIP_INSTALL:-0}" == "1" ]]; then
-    mkdir -p "${HOME}/.local/bin" "${HOME}/.llm-tracker"
-    ln -sf "${SCRIPTS_DIR}/llm-tracker" "${HOME}/.local/bin/llm-tracker"
-    chmod +x "${SCRIPTS_DIR}/llm-tracker"
+  if [[ "${TOKENAGE_SKIP_INSTALL:-0}" == "1" ]]; then
+    mkdir -p "${HOME}/.local/bin" "${HOME}/.tokenage"
+    ln -sf "${SCRIPTS_DIR}/tokenage" "${HOME}/.local/bin/tokenage"
+    chmod +x "${SCRIPTS_DIR}/tokenage"
     # `server start` refuses when this stamp is missing or stale, so record it
     # even on the skip path — the flag asserts deps are current by fiat.
     record_requirements_stamp "${ROOT_DIR}/.venv" "${ROOT_DIR}/requirements.txt"
-    info "Installation skipped (LLM_TRACKER_SKIP_INSTALL=1)"
+    info "Installation skipped (TOKENAGE_SKIP_INSTALL=1)"
     return 0
   fi
 
-  local python_version="${LLM_TRACKER_PYTHON_VERSION:-3.13}"
+  local python_version="${TOKENAGE_PYTHON_VERSION:-3.13}"
   local venv_dir="${ROOT_DIR}/.venv"
   local bin_dir="${HOME}/.local/bin"
-  local cli_link="${bin_dir}/llm-tracker"
-  local cli_source="${SCRIPTS_DIR}/llm-tracker"
+  local cli_link="${bin_dir}/tokenage"
+  local cli_source="${SCRIPTS_DIR}/tokenage"
   local frontend_dir="${ROOT_DIR}/frontend"
 
-  info "Setting up llm-tracker environment..."
+  info "Setting up tokenage environment..."
 
   # 1. Bootstrap uv
   if ! command -v uv >/dev/null 2>&1; then
@@ -159,7 +159,7 @@ _install_deps() {
     echo ""
     echo "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
     echo "WARNING: ${bin_dir} is not in your PATH."
-    echo "To use 'llm-tracker' from anywhere, add this to your shell profile:"
+    echo "To use 'tokenage' from anywhere, add this to your shell profile:"
     echo ""
     if [[ "${SHELL}" == *"/zsh" ]]; then
       echo "  echo 'export PATH=\"\$HOME/.local/bin:\$PATH\"' >> ~/.zshrc"
@@ -172,7 +172,7 @@ _install_deps() {
     echo ""
   fi
 
-  info "Installation complete! You can now use 'llm-tracker' (if in PATH) or 'scripts/start.sh'."
+  info "Installation complete! You can now use 'tokenage' (if in PATH) or 'scripts/start.sh'."
 }
 
 _verify_agent_setup_health() {
@@ -204,21 +204,21 @@ _verify_agent_setup_health() {
   command -v kilo >/dev/null 2>&1 && kilo_detected=1
 
   if printf "%s" "${health_json}" \
-      | LLM_TRACKER_CLAUDE_DETECTED="${claude_detected}" \
-        LLM_TRACKER_CODEX_DETECTED="${codex_detected}" \
-        LLM_TRACKER_OPENCODE_DETECTED="${opencode_detected}" \
-        LLM_TRACKER_KILO_DETECTED="${kilo_detected}" \
-        LLM_TRACKER_GREEN="${_T_GREEN}" \
-        LLM_TRACKER_RED="${_T_RED}" \
-        LLM_TRACKER_RESET="${_T_RESET}" \
+      | TOKENAGE_CLAUDE_DETECTED="${claude_detected}" \
+        TOKENAGE_CODEX_DETECTED="${codex_detected}" \
+        TOKENAGE_OPENCODE_DETECTED="${opencode_detected}" \
+        TOKENAGE_KILO_DETECTED="${kilo_detected}" \
+        TOKENAGE_GREEN="${_T_GREEN}" \
+        TOKENAGE_RED="${_T_RED}" \
+        TOKENAGE_RESET="${_T_RESET}" \
         "${python}" -c '
 import json
 import os
 import sys
 
-GREEN = os.environ.get("LLM_TRACKER_GREEN", "")
-RED = os.environ.get("LLM_TRACKER_RED", "")
-RESET = os.environ.get("LLM_TRACKER_RESET", "")
+GREEN = os.environ.get("TOKENAGE_GREEN", "")
+RED = os.environ.get("TOKENAGE_RED", "")
+RESET = os.environ.get("TOKENAGE_RESET", "")
 
 try:
     data = json.loads(sys.stdin.read())
@@ -249,7 +249,7 @@ for key, label in (
     status = agent.get("status")
     configured = agent.get("configured") is True
     endpoint_matches = agent.get("endpoint_matches") is True
-    detected = os.environ.get(f"LLM_TRACKER_{key.upper()}_DETECTED") == "1"
+    detected = os.environ.get(f"TOKENAGE_{key.upper()}_DETECTED") == "1"
 
     if not detected:
         skipped += 1
@@ -281,7 +281,7 @@ sys.exit(1 if failed else 0)
 }
 
 # ── Banner ──────────────────────────────────────────────────────────
-if [[ -z "${LLM_TRACKER_SKIP_BANNER:-}" ]]; then
+if [[ -z "${TOKENAGE_SKIP_BANNER:-}" ]]; then
   banner
 fi
 
@@ -291,7 +291,7 @@ _install_deps
 
 # ── Step 2: Start services ──────────────────────────────────────────
 step_header "Starting services"
-LLM_TRACKER_SKIP_BANNER=1 bash "${SCRIPTS_DIR}/start.sh"
+TOKENAGE_SKIP_BANNER=1 bash "${SCRIPTS_DIR}/start.sh"
 
 # ── Step 3: Post-start checks ──────────────────────────────────────
 step_header "Running post-start checks"
@@ -361,10 +361,10 @@ fi
 
 # CLI wrapper
 if [[ -x "${CLI_WRAPPER}" ]]; then
-  pass "CLI wrapper: scripts/llm-tracker"
+  pass "CLI wrapper: scripts/tokenage"
   CHECKS_PASS=$((CHECKS_PASS + 1))
 else
-  fail "CLI wrapper: scripts/llm-tracker (not executable)"
+  fail "CLI wrapper: scripts/tokenage (not executable)"
   CHECKS_FAIL=$((CHECKS_FAIL + 1))
 fi
 
@@ -409,7 +409,7 @@ fi
 # So the only command that builds is also the one that restarts the API.
 if [[ -d "${ROOT_DIR}/frontend/dist" ]]; then
   info "Restarting the API to serve the new dashboard..."
-  "${ROOT_DIR}/.venv/bin/supervisorctl" -c "${HOME}/.llm-tracker/supervisord.conf" restart llm-tracker-api || true
+  "${ROOT_DIR}/.venv/bin/supervisorctl" -c "${HOME}/.tokenage/supervisord.conf" restart tokenage-api || true
 fi
 
 # Dashboard reachable (API serves frontend)

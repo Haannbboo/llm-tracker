@@ -79,7 +79,7 @@ def resolve_server_urls(config: dict) -> dict[str, str]:
 
 
 def load_server_config() -> ServerConfig:
-    config_path = os.path.expanduser("~/.llm-tracker/config.yaml")
+    config_path = os.path.expanduser("~/.tokenage/config.yaml")
     try:
         with open(config_path, encoding="utf-8") as config_file:
             cfg = yaml.safe_load(config_file) or {}

@@ -1,10 +1,10 @@
 """Where things live on disk, for both installation modes.
 
 The client never imports the server. It discovers what is installed by looking
-at ``$LLM_TRACKER_HOME``:
+at ``$TOKENAGE_HOME``:
 
-- ``$LLM_TRACKER_HOME/current``  -> a client source snapshot (client-only installs)
-- ``$LLM_TRACKER_HOME/src``      -> the server clone (all-in-one installs)
+- ``$TOKENAGE_HOME/current``  -> a client source snapshot (client-only installs)
+- ``$TOKENAGE_HOME/src``      -> the server clone (all-in-one installs)
 
 A client-only install brings its own virtualenv. An all-in-one install reuses the
 server's, because the client needs nothing the server does not already have.
@@ -36,7 +36,7 @@ DEFAULT_PROXY_PORT = 4000
 
 
 def tracker_home() -> Path:
-    return Path(os.environ.get("LLM_TRACKER_HOME", "~/.llm-tracker")).expanduser()
+    return Path(os.environ.get("TOKENAGE_HOME", "~/.tokenage")).expanduser()
 
 
 def credentials_path() -> Path:
@@ -50,7 +50,7 @@ def installation_key_path() -> Path:
 
 def config_path() -> Path:
     return Path(
-        os.environ.get("LLM_TRACKER_CONFIG", "~/.llm-tracker/config.yaml")
+        os.environ.get("TOKENAGE_CONFIG", "~/.tokenage/config.yaml")
     ).expanduser()
 
 
@@ -100,7 +100,7 @@ def client_version() -> str:
 
 
 def client_commit() -> str | None:
-    raw = os.environ.get("LLM_TRACKER_CLIENT_COMMIT")
+    raw = os.environ.get("TOKENAGE_CLIENT_COMMIT")
     if raw is None and COMMIT_FILE.exists():
         raw = COMMIT_FILE.read_text(encoding="utf-8").strip()
     value = (raw or "").lower()
@@ -120,13 +120,13 @@ def client_root() -> Path | None:
 def server_root() -> Path | None:
     """The server clone, if this machine has the server component installed.
 
-    ``LLM_TRACKER_ROOT`` wins so worktrees and tests can point at any checkout.
+    ``TOKENAGE_ROOT`` wins so worktrees and tests can point at any checkout.
     """
     candidates = []
-    override = os.environ.get("LLM_TRACKER_ROOT")
+    override = os.environ.get("TOKENAGE_ROOT")
     if override:
         candidates.append(Path(override).expanduser())
-    discovered = os.environ.get("LLM_TRACKER_SERVER_ROOT")
+    discovered = os.environ.get("TOKENAGE_SERVER_ROOT")
     if discovered:
         candidates.append(Path(discovered).expanduser())
     candidates.append(tracker_home() / "src")

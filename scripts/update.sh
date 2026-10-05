@@ -21,7 +21,7 @@ while [[ $# -gt 0 ]]; do
     --check)   MODE="check";   shift ;;
     --dry-run) MODE="dry-run"; shift ;;
     --help|-h)
-      echo "Usage: llm-tracker update [--check] [--dry-run]"
+      echo "Usage: tokenage update [--check] [--dry-run]"
       echo
       echo "Options:"
       echo "  --check     Show status without pulling or bootstrapping"
@@ -50,7 +50,7 @@ pass "Git repository"
 
 # Worktree must be clean
 if [[ -n "$(git -C "${ROOT_DIR}" status --porcelain)" ]]; then
-  fail "llm-tracker update refused: local changes detected."
+  fail "tokenage update refused: local changes detected."
   echo "  Commit, stash, or discard your changes, then retry."
   exit 1
 fi
@@ -58,7 +58,7 @@ pass "Worktree clean"
 
 # HEAD must be attached
 if ! git -C "${ROOT_DIR}" symbolic-ref -q HEAD >/dev/null 2>&1; then
-  fail "llm-tracker update refused: detached HEAD."
+  fail "tokenage update refused: detached HEAD."
   echo "  Check out a branch first, then retry."
   exit 1
 fi
@@ -67,7 +67,7 @@ pass "HEAD attached"
 # Current branch must have an upstream
 BRANCH="$(git -C "${ROOT_DIR}" symbolic-ref --short HEAD 2>/dev/null)"
 if ! git -C "${ROOT_DIR}" rev-parse --abbrev-ref "@{upstream}" >/dev/null 2>&1; then
-  fail "llm-tracker update refused: branch '${BRANCH}' has no upstream."
+  fail "tokenage update refused: branch '${BRANCH}' has no upstream."
   echo "  Set an upstream or run git pull manually."
   exit 1
 fi
@@ -76,7 +76,7 @@ UPSTREAM_REMOTE="${UPSTREAM%%/*}"
 
 # Upstream remote must exist
 if ! git -C "${ROOT_DIR}" remote get-url "${UPSTREAM_REMOTE}" >/dev/null 2>&1; then
-  fail "llm-tracker update refused: remote '${UPSTREAM_REMOTE}' not found."
+  fail "tokenage update refused: remote '${UPSTREAM_REMOTE}' not found."
   exit 1
 fi
 pass "Branch: ${BRANCH} → ${UPSTREAM}"
@@ -133,7 +133,7 @@ fi
 # ── Pull (ff-only) ─────────────────────────────────────────────────
 step_header "Pulling updates"
 if ! git -C "${ROOT_DIR}" pull --ff-only; then
-  fail "llm-tracker update refused: upstream cannot be fast-forwarded."
+  fail "tokenage update refused: upstream cannot be fast-forwarded."
   echo "  Resolve with git manually, then rerun scripts/bootstrap.sh."
   exit 1
 fi
@@ -146,7 +146,7 @@ if ! bash "${SCRIPTS_DIR}/bootstrap.sh"; then
   fail "Source update succeeded, but bootstrap failed."
   echo "  The repo is now at ${NEW_HEAD}."
   echo "  Fix the error above, then rerun:"
-  echo "    llm-tracker update"
+  echo "    tokenage update"
   echo "  or:"
   echo "    scripts/bootstrap.sh"
   exit 1
@@ -170,4 +170,4 @@ fi
 
 # ── Done ────────────────────────────────────────────────────────────
 step_header "Update complete"
-pass "llm-tracker updated to ${NEW_HEAD}"
+pass "tokenage updated to ${NEW_HEAD}"

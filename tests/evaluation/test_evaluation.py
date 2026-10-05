@@ -1616,11 +1616,11 @@ def test_parse_evaluation_output_extracts_project(evaluation_module):
                 "confidence": 0.9,
                 "evidence": ["auth fixed"],
                 "failure_reason": None,
-                "project": "llm-tracker",
+                "project": "tokenage",
             }
         )
     )
-    assert parsed["project"] == "llm-tracker"
+    assert parsed["project"] == "tokenage"
 
 
 def test_parse_evaluation_output_allows_null_project(evaluation_module):

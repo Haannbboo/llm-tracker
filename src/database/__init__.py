@@ -1,4 +1,4 @@
-"""Database models and query helpers for llm-tracker.
+"""Database models and query helpers for tokenage.
 
 The steady-state pattern in this module is:
 - ORM models for entity lifecycle operations such as inserts and base URL resolution

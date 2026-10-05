@@ -30,8 +30,8 @@ from .tokens import (
 
 logger = logging.getLogger(__name__)
 
-SESSION_COOKIE_NAME = "llm_tracker_session"
-OAUTH_STATE_COOKIE_NAME = "llm_tracker_oauth_state"
+SESSION_COOKIE_NAME = "tokenage_session"
+OAUTH_STATE_COOKIE_NAME = "tokenage_oauth_state"
 _NO_STORE = {"Cache-Control": "no-store"}
 
 router = APIRouter()
@@ -403,11 +403,11 @@ def _mint_cli_code(user: User, device_name: str, code_challenge: str) -> str:
 
 def _confirm_page(user: User, device_name: str, code_challenge: str) -> str:
     return f"""<!doctype html>
-<html><head><title>llm-tracker CLI login</title></head>
+<html><head><title>tokenage CLI login</title></head>
 <body style="font-family: system-ui, sans-serif; max-width: 32rem; margin: 4rem auto;">
 <h2>CLI login request</h2>
 <p>A CLI on device <b>{html.escape(device_name)}</b> is requesting access to
-llm-tracker as <b>{html.escape(user.email)}</b>.</p>
+tokenage as <b>{html.escape(user.email)}</b>.</p>
 <p><b>Only approve logins you started in a terminal you are looking at.</b></p>
 <form method="post" action="/auth/cli/start">
 <input type="hidden" name="code_challenge" value="{html.escape(code_challenge, quote=True)}">
@@ -420,7 +420,7 @@ llm-tracker as <b>{html.escape(user.email)}</b>.</p>
 
 def _code_page(code: str, device_name: str) -> str:
     return f"""<!doctype html>
-<html><head><title>llm-tracker CLI login</title></head>
+<html><head><title>tokenage CLI login</title></head>
 <body style="font-family: system-ui, sans-serif; max-width: 32rem; margin: 4rem auto;">
 <h2>CLI login code</h2>
 <p>Paste this code into your terminal

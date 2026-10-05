@@ -17,7 +17,7 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import text
 
-SESSION_COOKIE = "llm_tracker_session"
+SESSION_COOKIE = "tokenage_session"
 
 
 def _routes_module():
@@ -120,7 +120,7 @@ def test_state_store_roundtrip(api_module, isolated_home):
 def test_state_store_rejects_expired_and_missing(api_module, isolated_home):
     auth_google = _routes_module().auth_google
     auth_google.store_oauth_state("old", {"nonce": "n", "redirect_uri": "u"})
-    state_path = Path(isolated_home) / ".llm-tracker" / "oauth_state.json"
+    state_path = Path(isolated_home) / ".tokenage" / "oauth_state.json"
     stored = json.loads(state_path.read_text())
     stored["old"]["exp"] = time.time() - 1
     state_path.write_text(json.dumps(stored))
@@ -132,7 +132,7 @@ def test_state_store_rejects_expired_and_missing(api_module, isolated_home):
 def test_state_store_prunes_expired_on_insert(api_module, isolated_home):
     auth_google = _routes_module().auth_google
     auth_google.store_oauth_state("a", {"nonce": "n", "redirect_uri": "u"})
-    state_path = Path(isolated_home) / ".llm-tracker" / "oauth_state.json"
+    state_path = Path(isolated_home) / ".tokenage" / "oauth_state.json"
     stored = json.loads(state_path.read_text())
     stored["a"]["exp"] = time.time() - 1
     state_path.write_text(json.dumps(stored))
@@ -149,7 +149,7 @@ def test_state_store_caps_pending_entries(api_module, isolated_home, monkeypatch
     for i in range(4):
         auth_google.store_oauth_state(f"s{i}", {"nonce": "n", "redirect_uri": "u"})
 
-    state_path = Path(isolated_home) / ".llm-tracker" / "oauth_state.json"
+    state_path = Path(isolated_home) / ".tokenage" / "oauth_state.json"
     stored = json.loads(state_path.read_text())
     assert len(stored) == 3
     assert "s0" not in stored  # oldest evicted to make room
@@ -198,7 +198,7 @@ def test_google_callback_happy_path(api_module, monkeypatch, fresh_db):
     assert callback.headers["location"] == "/"
 
     cookie = callback.cookies.get(SESSION_COOKIE)
-    assert cookie and cookie.startswith("llmt_web_")
+    assert cookie and cookie.startswith("tokenage_web_")
 
     me = client.get("/auth/me")
     assert me.status_code == 200
@@ -312,7 +312,7 @@ def test_google_callback_rejects_non_ascii_state_cookie(
     callback = client.get(
         f"/auth/google/callback?code=the-code&state={state}",
         follow_redirects=False,
-        headers=[(b"cookie", b"llm_tracker_oauth_state=" + bytes([0xE9, 0xE9]))],
+        headers=[(b"cookie", b"tokenage_oauth_state=" + bytes([0xE9, 0xE9]))],
     )
     assert callback.status_code == 302
     assert callback.headers["location"] == "/?auth_error=invalid_state"
@@ -458,6 +458,7 @@ def test_logout_revokes_token_and_clears_cookie(api_module, monkeypatch, fresh_d
 
     logout = client.post("/auth/logout")
     assert logout.status_code == 204
+    assert logout.cookies.get(SESSION_COOKIE) is None
 
     me = client.get("/auth/me")
     assert me.status_code == 401

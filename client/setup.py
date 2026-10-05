@@ -164,7 +164,7 @@ def _health(configured: bool, endpoint: str | None, expected: str | None) -> dic
 def read_agent_states(expected_endpoint: str | None) -> dict[str, dict[str, Any]]:
     """Per-agent wiring state, with the same semantics as ``/local/setup-health``.
 
-    ``llm-tracker status`` reports this, so the CLI and the dashboard cannot
+    ``tokenage status`` reports this, so the CLI and the dashboard cannot
     disagree about whether an agent is wired.
     """
     claude_env = _read_json(Path(agent_targets()["claude"])).get("env")
@@ -223,9 +223,9 @@ def _child_env(*, token: str | None, disable: bool) -> dict[str, str]:
     # wiring, so it is always stripped.
     env.pop("OTEL_EXPORTER_OTLP_LOGS_ENDPOINT", None)
     if not disable and token:
-        env["LLM_TRACKER_INGEST_TOKEN"] = token
+        env["TOKENAGE_INGEST_TOKEN"] = token
     else:
-        env.pop("LLM_TRACKER_INGEST_TOKEN", None)
+        env.pop("TOKENAGE_INGEST_TOKEN", None)
     return env
 
 
@@ -272,7 +272,7 @@ class DisableResult:
 
 
 def disable_agents(*, expected_endpoint: str | None = None) -> DisableResult:
-    """Remove llm-tracker's telemetry settings from the agents it manages.
+    """Remove tokenage's telemetry settings from the agents it manages.
 
     Remove settings only when their collector matches this installation's known
     endpoint. Unknown ownership leaves the configuration untouched.
@@ -318,7 +318,7 @@ def disable_agents(*, expected_endpoint: str | None = None) -> DisableResult:
 
 
 def run_setup(*, disable: bool) -> int:
-    """``llm-tracker setup`` — wire, or un-wire, the agents found on this machine."""
+    """``tokenage setup`` — wire, or un-wire, the agents found on this machine."""
     agents = installed_agents()
     if not agents:
         print("No tracked agents detected; nothing to wire.")
@@ -339,7 +339,7 @@ def run_setup(*, disable: bool) -> int:
     endpoint = discover_collector() or expected
     if not endpoint:
         print(
-            "No collector to wire agents to. Sign in with llm-tracker login, "
+            "No collector to wire agents to. Sign in with tokenage login, "
             "or install the server component.",
             file=sys.stderr,
         )

@@ -16,7 +16,7 @@ from urllib.parse import parse_qs, urlparse
 from fastapi.testclient import TestClient
 from sqlalchemy import text
 
-SESSION_COOKIE = "llm_tracker_session"
+SESSION_COOKIE = "tokenage_session"
 
 
 def _routes_module():
@@ -191,8 +191,8 @@ def test_session_shortcut_confirm_and_exchange(api_module, monkeypatch, fresh_db
     assert body["user"]["email"] == "a@example.com"
     assert body["device_name"] == "<evil>host"
     assert body["device_id"]
-    assert body["cli_token"].startswith("llmt_cli_")
-    assert body["ingest_token"].startswith("llmt_ingest_")
+    assert body["cli_token"].startswith("tokenage_cli_")
+    assert body["ingest_token"].startswith("tokenage_ingest_")
     assert body["otlp"]["logs_endpoint"].endswith("/v1/logs")
     assert body["otlp"]["endpoint"]
 
@@ -435,7 +435,7 @@ def test_installed_machine_relogin_rotates_both_tokens_and_revoke_stops_ingest(
     rejected = otlp_client.post(
         "/v1/logs",
         json={},
-        headers={"x-llm-tracker-token": second_tokens["ingest_token"]},
+        headers={"x-tokenage-token": second_tokens["ingest_token"]},
     )
     assert rejected.status_code == 401
 

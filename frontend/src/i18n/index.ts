@@ -3,7 +3,7 @@ import { zh } from './zh'
 
 export type Lang = 'en' | 'zh'
 
-const LANG_KEY = 'llm-tracker-lang'
+const LANG_KEY = 'tokenage-lang'
 
 let currentLang: Lang = (() => {
   const saved = localStorage.getItem(LANG_KEY)

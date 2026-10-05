@@ -9,7 +9,7 @@ ROOT_DIR="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 IMAGE="${BOOTSTRAP_SMOKE_IMAGE:-python:3.11-slim}"
 CONTAINER_TIMEOUT_SECONDS="${BOOTSTRAP_SMOKE_TIMEOUT_SECONDS:-900}"
 RUN_TESTS="${BOOTSTRAP_SMOKE_RUN_TESTS:-1}"
-CONTAINER_NAME="llm-tracker-bootstrap-smoke-$(date +%s)-$$"
+CONTAINER_NAME="tokenage-bootstrap-smoke-$(date +%s)-$$"
 
 usage() {
   cat <<'EOF'
@@ -74,7 +74,7 @@ host_timeout() {
   fi
 
   local status timed_out
-  timed_out="$(mktemp "${TMPDIR:-/tmp}/llm-tracker-smoke-timeout.XXXXXX")"
+  timed_out="$(mktemp "${TMPDIR:-/tmp}/tokenage-smoke-timeout.XXXXXX")"
   : > "${timed_out}"
 
   "$@" &
@@ -229,9 +229,9 @@ PYTHON_BIN="$(command -v python3 || command -v python || true)"
 
 [[ -d /repo ]] || fail "read-only repo mount missing at /repo"
 
-WORK_ROOT="$(mktemp -d /tmp/llm-tracker-smoke.XXXXXX)"
-SMOKE_HOME="$(mktemp -d /tmp/llm-tracker-home.XXXXXX)"
-PYTEST_HOME="$(mktemp -d /tmp/llm-tracker-pytest-home.XXXXXX)"
+WORK_ROOT="$(mktemp -d /tmp/tokenage-smoke.XXXXXX)"
+SMOKE_HOME="$(mktemp -d /tmp/tokenage-home.XXXXXX)"
+PYTEST_HOME="$(mktemp -d /tmp/tokenage-pytest-home.XXXXXX)"
 mkdir -p "${WORK_ROOT}/repo"
 
 log "Copying mounted repo to temporary workspace"
@@ -280,7 +280,7 @@ fi
 run_step 600 env -i \
   HOME="${SMOKE_HOME}" \
   PATH="${SMOKE_HOME}/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" \
-  LLM_TRACKER_PYTHON_VERSION=3.11 \
+  TOKENAGE_PYTHON_VERSION=3.11 \
   UV_LINK_MODE=copy \
   bash scripts/bootstrap.sh
 EOF

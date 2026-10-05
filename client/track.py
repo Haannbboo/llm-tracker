@@ -105,7 +105,7 @@ class UsageApiClient:
             return response.json()
         except httpx.HTTPStatusError as exc:
             if exc.response.status_code == 401:
-                raise ApiError("session rejected — run llm-tracker login") from exc
+                raise ApiError("session rejected — run tokenage login") from exc
             raise ApiError(str(exc)) from exc
         except Exception as exc:
             raise ApiError(str(exc)) from exc
@@ -154,7 +154,7 @@ def build_child_env(options: RunOptions) -> dict[str, str] | None:
             "--proxy-env requires a running proxy at the configured address"
         ) from exc
     env = os.environ.copy()
-    env.pop("LLM_TRACKER_DB_URL", None)
+    env.pop("TOKENAGE_DB_URL", None)
     env["OPENAI_BASE_URL"] = f"{info['proxy_url']}/v1"
     env["ANTHROPIC_BASE_URL"] = info["proxy_url"]
     return env
@@ -176,7 +176,7 @@ def poll_summary(
         try:
             summary = client.get_run_summary(after_ts=after_ts)
         except ApiError as exc:
-            print(f"llm-tracker API error: {exc}", file=sys.stderr)
+            print(f"tokenage API error: {exc}", file=sys.stderr)
             return latest_summary
 
         latest_summary = summary
@@ -195,13 +195,13 @@ def poll_summary(
     try:
         until_ts = client.get_high_watermark()
     except ApiError as exc:
-        print(f"llm-tracker API error: {exc}", file=sys.stderr)
+        print(f"tokenage API error: {exc}", file=sys.stderr)
         return latest_summary
 
     try:
         return client.get_run_summary(after_ts=after_ts, until_ts=until_ts)
     except ApiError as exc:
-        print(f"llm-tracker API error: {exc}", file=sys.stderr)
+        print(f"tokenage API error: {exc}", file=sys.stderr)
         return None
 
 
@@ -213,7 +213,7 @@ def run_with_tracking(*, command: list[str], options: RunOptions) -> int:
         before_ts = client.get_high_watermark()
     except ApiError as exc:
         print(
-            f"llm-tracker API unavailable before command start: {exc}",
+            f"tokenage API unavailable before command start: {exc}",
             file=sys.stderr,
         )
         before_ts = None
@@ -234,7 +234,7 @@ def run_with_tracking(*, command: list[str], options: RunOptions) -> int:
     summary = poll_summary(client, after_ts=before_ts, options=options)
     if summary is None:
         print(
-            "Command completed, but llm-tracker summary retrieval failed.",
+            "Command completed, but tokenage summary retrieval failed.",
             file=sys.stderr,
         )
         return child_code
@@ -242,7 +242,7 @@ def run_with_tracking(*, command: list[str], options: RunOptions) -> int:
     try:
         write_summary(summary, options)
     except Exception as exc:
-        print(f"llm-tracker summary output failed: {exc}", file=sys.stderr)
+        print(f"tokenage summary output failed: {exc}", file=sys.stderr)
     return child_code
 
 
@@ -290,7 +290,7 @@ def format_human_summary(summary: dict[str, Any]) -> str:
     requests = int(totals.get("requests", 0) or 0)
     if requests == 0:
         return (
-            "No llm-tracker usage recorded after the starting watermark.\n"
+            "No tokenage usage recorded after the starting watermark.\n"
             "Concurrent runs are included; delayed events may fall outside this window.\n"
         )
 
@@ -300,7 +300,7 @@ def format_human_summary(summary: dict[str, Any]) -> str:
     total_cost = float(totals.get("total_cost_usd", 0) or 0)
 
     lines = [
-        "llm-tracker usage summary (account window)",
+        "tokenage usage summary (account window)",
         "Concurrent runs are included; delayed events may fall outside this window.",
         (
             f"requests: {requests}, total tokens: {total_tokens:,}, "

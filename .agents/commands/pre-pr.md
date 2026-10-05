@@ -18,7 +18,7 @@ Run this before pushing/opening a PR.
 - [ ] Error paths do not dump sensitive payloads.
 - [ ] Local files such as `AGENTS.local.md`, `CLAUDE.local.md`, `.claude/*.local.md`, `.agents/private/` are not committed.
 
-## llm-tracker risks
+## tokenage risks
 
 - [ ] Cost/token accounting tested if touched: `uv run python -m pytest tests/test_costs.py tests/test_pricing.py -q`.
 - [ ] Provider/model normalization tested if touched: `uv run python -m pytest tests/test_provider_parser.py tests/test_config.py -q`.

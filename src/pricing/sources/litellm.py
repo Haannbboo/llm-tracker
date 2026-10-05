@@ -76,7 +76,7 @@ _DATE_SUFFIX_RE = re.compile(r"-\d{8}(?:-\w+)?(?:-v\d+(?::\d+)?)?$")
 # Version suffixes: gpt-4o-2024-08-06, gpt-5.4-turbo
 _VERSION_SUFFIX_RE = re.compile(r"-\d{4}-\d{2}-\d{2}$")
 
-# LiteLLM uses "claude-3-7-sonnet", llm-tracker uses "claude-sonnet-3-7"
+# LiteLLM uses "claude-3-7-sonnet", tokenage uses "claude-sonnet-3-7"
 _CLAUDE_3X_RE = re.compile(r"^claude-(\d+)-(?:(\d+)-)?(sonnet|opus|haiku)$")
 
 
@@ -267,7 +267,7 @@ def _parse_model_entry(
 
 
 def _claude_3x_alias(name: str) -> str | None:
-    """Generate llm-tracker style alias for LiteLLM's claude-3-x-sonnet naming.
+    """Generate tokenage style alias for LiteLLM's claude-3-x-sonnet naming.
 
     'claude-3-7-sonnet' -> 'claude-sonnet-3-7'
     'claude-3-opus'     -> 'claude-opus-3'

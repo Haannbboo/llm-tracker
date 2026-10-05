@@ -161,7 +161,7 @@ def fetch_json(url: str, timeout: int = REQUEST_TIMEOUT) -> Any | None:
     """
     opener = urllib.request.build_opener(_IPv4OnlyHTTPSHandler)
     try:
-        request = urllib.request.Request(url, headers={"User-Agent": "llm-tracker"})
+        request = urllib.request.Request(url, headers={"User-Agent": "tokenage"})
         with opener.open(request, timeout=timeout) as response:
             return json.loads(response.read().decode("utf-8"))
     except (urllib.error.URLError, OSError, json.JSONDecodeError, TimeoutError):

@@ -1,21 +1,21 @@
 #!/usr/bin/env bash
-# llm-tracker launcher
+# tokenage launcher
 # The one installed command. This marker line lets an installer recognise a
 # launcher it previously wrote, and replace it.
 #
 # The client is mandatory; the server component is optional. This script
-# discovers both from $LLM_TRACKER_HOME and routes to whichever one the
+# discovers both from $TOKENAGE_HOME and routes to whichever one the
 # arguments call for. It is installed either as a symlink into the server clone
 # (all-in-one) or as a copy in ~/.local/bin (client-only), so it must not depend
 # on its own location for anything but the dev fallback.
 set -euo pipefail
 
-TRACKER_HOME="${LLM_TRACKER_HOME:-$HOME/.llm-tracker}"
-BIN_DIR="${LLM_TRACKER_BIN_DIR:-$HOME/.local/bin}"
-REPOSITORY="Haannbboo/llm-tracker"
+TRACKER_HOME="${TOKENAGE_HOME:-$HOME/.tokenage}"
+BIN_DIR="${TOKENAGE_BIN_DIR:-$HOME/.local/bin}"
+REPOSITORY="Haannbboo/tokenage"
 
 # ── Locate the server component ─────────────────────────────────────────────
-# LLM_TRACKER_ROOT wins so a worktree or a test can point at any checkout.
+# TOKENAGE_ROOT wins so a worktree or a test can point at any checkout.
 _self_dir() {
   local source="${BASH_SOURCE[0]}"
   while [[ -L "$source" ]]; do
@@ -31,7 +31,7 @@ _self_dir() {
 
 server_root() {
   local candidate
-  for candidate in "${LLM_TRACKER_ROOT:-}" "${TRACKER_HOME}/src"; do
+  for candidate in "${TOKENAGE_ROOT:-}" "${TRACKER_HOME}/src"; do
     [[ -n "$candidate" && -x "${candidate}/.venv/bin/python" ]] || continue
     printf '%s' "$candidate"
     return 0
@@ -43,7 +43,7 @@ server_root() {
   if [[ -n "$snapshot" && "$candidate" == "$(cd "$snapshot" && pwd)" ]]; then
     return 1
   fi
-  if [[ -x "${candidate}/.venv/bin/python" && -f "${candidate}/scripts/llm-tracker" && -d "${candidate}/src" ]]; then
+  if [[ -x "${candidate}/.venv/bin/python" && -f "${candidate}/scripts/tokenage" && -d "${candidate}/src" ]]; then
     printf '%s' "$candidate"
     return 0
   fi
@@ -68,8 +68,8 @@ client_root() {
 # then the installed snapshot, then the server checkout for all-in-one installs.
 active_client_root() {
   local candidate
-  if [[ -n "${LLM_TRACKER_ROOT:-}" ]]; then
-    candidate="$LLM_TRACKER_ROOT"
+  if [[ -n "${TOKENAGE_ROOT:-}" ]]; then
+    candidate="$TOKENAGE_ROOT"
   elif candidate="$(client_root)"; then
     :
   else
@@ -90,7 +90,7 @@ client_commit() {
 
 missing_client() {
   cat >&2 <<EOF
-llm-tracker: the client component is not installed on this machine.
+tokenage: the client component is not installed on this machine.
 Install it with:
   curl -fsSL https://YOUR_SERVER/install.sh | sh
 EOF
@@ -99,7 +99,7 @@ EOF
 
 missing_server() {
   cat >&2 <<EOF
-llm-tracker: the server component is not installed on this machine.
+tokenage: the server component is not installed on this machine.
 This machine has the client only, which reports to a remote server.
 To run a local server, install the all-in-one release:
   curl -fsSL https://raw.githubusercontent.com/${REPOSITORY}/main/install.sh | bash
@@ -109,7 +109,7 @@ EOF
 
 # ── Banner ──────────────────────────────────────────────────────────────────
 # Printed by the launcher so every command starts the same way, and only once:
-# LLM_TRACKER_SKIP_BANNER keeps the scripts it calls from printing a second one.
+# TOKENAGE_SKIP_BANNER keeps the scripts it calls from printing a second one.
 print_banner() {
   # The banner is decoration: it goes to stderr so a tracked child's stdout is
   # exactly what the child wrote. A machine-readable flag suppresses it.
@@ -123,7 +123,7 @@ print_banner() {
         ;;
     esac
   done
-  [[ -n "${LLM_TRACKER_SKIP_BANNER:-}" ]] && return 0
+  [[ -n "${TOKENAGE_SKIP_BANNER:-}" ]] && return 0
 
   local helpers=""
   local root
@@ -147,7 +147,7 @@ print_version() {
   local active root
   active="$(active_client_root)" || missing_client
   root="$(server_root 2>/dev/null || true)"
-  local line="llm-tracker $(cat "${active}/client/VERSION")"
+  local line="tokenage $(cat "${active}/client/VERSION")"
   local commit
   commit="$(client_commit "$active")"
   if [[ -n "$commit" ]]; then
@@ -169,10 +169,10 @@ run_client() {
   root="$(server_root 2>/dev/null || true)"
   # Report the discovered server to the Python client without changing which
   # source this invocation selected.
-  export LLM_TRACKER_SERVER_ROOT="$root"
-  export LLM_TRACKER_CLIENT_COMMIT="$(client_commit "$active")"
+  export TOKENAGE_SERVER_ROOT="$root"
+  export TOKENAGE_CLIENT_COMMIT="$(client_commit "$active")"
   export PYTHONPATH="${active}${PYTHONPATH:+:${PYTHONPATH}}"
-  export LLM_TRACKER_SKIP_BANNER=1
+  export TOKENAGE_SKIP_BANNER=1
   exec "$python" -P -m client "$@"
 }
 
@@ -182,7 +182,7 @@ run_server_script() {
   local root
   root="$(server_root)" || missing_server
   [[ -f "${root}/scripts/${name}.sh" ]] || missing_server
-  export LLM_TRACKER_SKIP_BANNER="${LLM_TRACKER_SKIP_BANNER:-1}"
+  export TOKENAGE_SKIP_BANNER="${TOKENAGE_SKIP_BANNER:-1}"
   exec bash "${root}/scripts/${name}.sh" "$@"
 }
 
@@ -190,7 +190,7 @@ run_server_script() {
 run_server_python() {
   local root
   root="$(server_root)" || missing_server
-  export LLM_TRACKER_SKIP_BANNER="${LLM_TRACKER_SKIP_BANNER:-1}"
+  export TOKENAGE_SKIP_BANNER="${TOKENAGE_SKIP_BANNER:-1}"
   export PYTHONPATH="${root}${PYTHONPATH:+:${PYTHONPATH}}"
   # -P so a checkout the user happens to be standing in cannot shadow this one.
   exec "${root}/.venv/bin/python" -P -m src.cli "$@"
@@ -207,7 +207,7 @@ run_server() {
   local sub="${1:-}"
   if [[ -z "$sub" || "$sub" == "-h" || "$sub" == "--help" ]]; then
     cat >&2 <<EOF
-usage: llm-tracker server <command>
+usage: tokenage server <command>
 
   bootstrap              install, build the dashboard, start, verify
   start                  turn the services on
@@ -222,7 +222,7 @@ EOF
     token) shift; run_server_python token "$@" ;;
     bootstrap|start|stop|restart|status) shift; run_server_script "$sub" "$@" ;;
     *)
-      printf 'llm-tracker: unknown server command: %s\n' "$sub" >&2
+      printf 'tokenage: unknown server command: %s\n' "$sub" >&2
       return 2
       ;;
   esac
@@ -230,7 +230,7 @@ EOF
 
 # Legacy spellings, kept until the next major release of the server.
 alias_notice() {
-  printf 'note: "llm-tracker %s" is now "llm-tracker server %s"\n' "$1" "$1" >&2
+  printf 'note: "tokenage %s" is now "tokenage server %s"\n' "$1" "$1" >&2
 }
 
 main() {
@@ -259,7 +259,7 @@ main() {
       ;;
     bootstrap|start|stop|restart|token)
       # `status` is deliberately not here: it is the component report now, not an
-      # alias. The old service view is `llm-tracker server status`.
+      # alias. The old service view is `tokenage server status`.
       alias_notice "$1"
       print_banner "$@"
       run_server "$@"

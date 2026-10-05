@@ -29,7 +29,7 @@ from src.config.server_config import resolve_server_urls
 def test_local_urls_match_server(section, tmp_path, monkeypatch):
     config = tmp_path / "config.yaml"
     config.write_text(yaml.safe_dump({"server": section}))
-    monkeypatch.setenv("LLM_TRACKER_CONFIG", str(config))
+    monkeypatch.setenv("TOKENAGE_CONFIG", str(config))
 
     client = paths.local_server_info()
     server = resolve_server_urls({"server": section})

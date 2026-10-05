@@ -28,11 +28,11 @@ def _make_fake_bootstrap_repo(
     )
 
     # Create CLI wrapper directly (install logic is now inline in bootstrap.sh)
-    (scripts_dir / "llm-tracker").write_text(
-        "#!/usr/bin/env bash\necho llm-tracker fake cli\n",
+    (scripts_dir / "tokenage").write_text(
+        "#!/usr/bin/env bash\necho tokenage fake cli\n",
         encoding="utf-8",
     )
-    (scripts_dir / "llm-tracker").chmod(0o755)
+    (scripts_dir / "tokenage").chmod(0o755)
 
     proxy_port, api_port, otlp_port = ports
     (scripts_dir / "start.sh").write_text(
@@ -40,8 +40,8 @@ def _make_fake_bootstrap_repo(
             f"""
             #!/usr/bin/env bash
             set -euo pipefail
-            mkdir -p "{home}/.llm-tracker"
-            cat > "{home}/.llm-tracker/config.yaml" <<'EOF'
+            mkdir -p "{home}/.tokenage"
+            cat > "{home}/.tokenage/config.yaml" <<'EOF'
             server:
               host: 127.0.0.1
               port: {proxy_port}
@@ -120,7 +120,7 @@ def _run_bootstrap(
         **os.environ,
         "HOME": str(home),
         "PATH": f"{bin_dir}{os.pathsep}/bin{os.pathsep}/usr/bin",
-        "LLM_TRACKER_SKIP_INSTALL": "1",
+        "TOKENAGE_SKIP_INSTALL": "1",
     }
     if extra_env:
         env.update(extra_env)
@@ -216,7 +216,7 @@ def test_bootstrap_succeeds_when_install_start_and_post_checks_pass(tmp_path):
 
     output = result.stdout + result.stderr
     assert result.returncode == 0, output
-    assert "llm-tracker is LIVE" in output
+    assert "tokenage is LIVE" in output
     assert f"API running: http://127.0.0.1:{ports[1]}" in output
     assert f"Proxy listening: http://127.0.0.1:{ports[0]}" in output
     assert f"OTLP listening: http://127.0.0.1:{ports[2]}" in output
@@ -333,7 +333,7 @@ def test_bootstrap_exits_nonzero_when_post_start_checks_fail(tmp_path):
     fake_sleep.write_text(
         "#!/usr/bin/env sh\n"
         'if [ "$#" -eq 1 ] && [ "$1" = "1" ]; then\n'
-        '  printf "%s\\n" "$1" >> "$LLM_TRACKER_TEST_SLEEP_LOG"\n'
+        '  printf "%s\\n" "$1" >> "$TOKENAGE_TEST_SLEEP_LOG"\n'
         "  exit 0\n"
         "fi\n"
         'exec /bin/sleep "$@"\n',
@@ -345,12 +345,12 @@ def test_bootstrap_exits_nonzero_when_post_start_checks_fail(tmp_path):
         fake_repo,
         home,
         bin_dir,
-        extra_env={"LLM_TRACKER_TEST_SLEEP_LOG": str(sleep_log)},
+        extra_env={"TOKENAGE_TEST_SLEEP_LOG": str(sleep_log)},
     )
 
     output = result.stdout + result.stderr
     assert result.returncode != 0, output
-    assert "llm-tracker started with" in output
+    assert "tokenage started with" in output
     assert "API reachable: http://127.0.0.1:4401 (not responding)" in output
     assert "Proxy listening: http://127.0.0.1:4400 (not responding)" in output
     assert "OTLP listening: http://127.0.0.1:4402 (not responding)" in output

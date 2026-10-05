@@ -5,8 +5,8 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass, field
 
-DEFAULT_TRACKER_HOME = "~/.llm-tracker"
-TRACKER_HOME_ENV_VAR = "LLM_TRACKER_HOME"
+DEFAULT_TRACKER_HOME = "~/.tokenage"
+TRACKER_HOME_ENV_VAR = "TOKENAGE_HOME"
 
 
 def expand_path(path: str) -> str:

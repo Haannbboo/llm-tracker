@@ -1,10 +1,10 @@
 [English](README.md) | [中文](README_CN.md)
 
-# llm-tracker
+# tokenage
 
 **面向命令行 LLM Agent 的本地优先可观测性工具。**
 
-`llm-tracker` 用来查看你的 coding agents 到底在干什么：请求记录、token 使用量、费用估算、延迟、TTFT、模型、来源和 session ID。支持 **Claude Code**、**Codex**、**OpenCode**、**Kilo Code**，也支持 OpenAI/Anthropic 兼容流量。
+`tokenage` 用来查看你的 coding agents 到底在干什么：请求记录、token 使用量、费用估算、延迟、TTFT、模型、来源和 session ID。支持 **Claude Code**、**Codex**、**OpenCode**、**Kilo Code**，也支持 OpenAI/Anthropic 兼容流量。
 
 它适合那些本地同时跑多个 LLM Agent、又想在一个地方回答这些问题的人：
 
@@ -13,27 +13,27 @@
 - 这次 coding session 花了多少钱？
 - 哪些请求慢、走了流式、命中了缓存、用了 reasoning？
 
-默认是本地部署：配置在 `~/.llm-tracker/config.yaml`，使用量数据默认存在 SQLite `~/.llm-tracker/usage.db`，服务绑定在本机 loopback 端口。
+默认是本地部署：配置在 `~/.tokenage/config.yaml`，使用量数据默认存在 SQLite `~/.tokenage/usage.db`，服务绑定在本机 loopback 端口。
 
 ## 它能做什么
 
 - **追踪常见 coding agents**：通过本地 OTLP telemetry 追踪 Claude Code、Codex、OpenCode 和 Kilo Code。
 - **追踪 OpenAI/Anthropic 兼容客户端**：通过可选的本地 proxy 转发并记录请求。
 - **提供 Dashboard**：查看使用量、费用、延迟、模型、来源、请求日志、setup health 和 first-event onboarding。
-- **输出命令级摘要**：用 `llm-tracker` 跑 agent，结束后打印这次运行的使用量。
+- **输出命令级摘要**：用 `tokenage` 跑 agent，结束后打印这次运行的使用量。
 - **保持可检查**：纯 YAML 配置，默认 SQLite，日志在 `logs/`，不依赖 hosted backend。
 - **支持 SQL 数据库**：默认本地 SQLite，也可以通过 SQLAlchemy `db.url` 指向 PostgreSQL/MySQL。
 
 ## 采集方式
 
-`llm-tracker` 有两条互补的数据采集路径：
+`tokenage` 有两条互补的数据采集路径：
 
 ```text
 Claude Code / Codex / OpenCode / Kilo Code
         │
         │ OTLP telemetry
         ▼
-llm-tracker OTLP collector ──► database ──► dashboard / API / summaries
+tokenage OTLP collector ──► database ──► dashboard / API / summaries
 ```
 
 ```text
@@ -41,7 +41,7 @@ OpenAI-compatible or Anthropic-compatible client
         │
         │ HTTP
         ▼
-llm-tracker proxy ──► upstream provider
+tokenage proxy ──► upstream provider
         │
         ▼
      database
@@ -68,8 +68,8 @@ Bootstrap 会帮你处理这些烦人的东西：
 
 1. 把 Python 依赖安装到 `.venv`
 2. Node/npm 可用时构建 Dashboard
-3. 在 `~/.local/bin/llm-tracker` 创建 CLI symlink
-4. 按需创建 `~/.llm-tracker/config.yaml`
+3. 在 `~/.local/bin/tokenage` 创建 CLI symlink
+4. 按需创建 `~/.tokenage/config.yaml`
 5. 用 Supervisor 启动 proxy、API 和 OTLP 服务
 6. 检查服务端口、Dashboard 和 Agent setup health
 7. 重启 API，让刚构建出来的 Dashboard 生效
@@ -97,25 +97,25 @@ npm run dev
 Bootstrap 只检查 Agent setup health，不再配置 Agent。改 Agent 是 client 的职责：
 
 ```bash
-llm-tracker setup
+tokenage setup
 ```
 
-它会把这台机器上已安装的 Agent 指向本地 OTLP collector，不会动它不拥有的配置项。`llm-tracker setup --disable` 可以撤回这些设置。`llm-tracker status` 会显示装了什么、是否在运行、Agent 指向哪里。
+它会把这台机器上已安装的 Agent 指向本地 OTLP collector，不会动它不拥有的配置项。`tokenage setup --disable` 可以撤回这些设置。`tokenage status` 会显示装了什么、是否在运行、Agent 指向哪里。
 
 ### 4. 生成第一条 tracked event
 
 Bootstrap 之后，运行 Dashboard 里展示的命令，或者直接用下面这些：
 
 ```bash
-llm-tracker codex exec "hello"
-llm-tracker claude
+tokenage codex exec "hello"
+tokenage claude
 ```
 
 如果 symlink 还没进 `PATH`，可以用 repo-local fallback：
 
 ```bash
-./scripts/llm-tracker codex exec "hello"
-./scripts/llm-tracker claude
+./scripts/tokenage codex exec "hello"
+./scripts/tokenage claude
 ```
 
 空 Dashboard 会自动检查第一条 event。没有假 demo 数据，也不用手动 seed。
@@ -126,38 +126,38 @@ Wrapper 会运行子命令，捕获运行期间的使用量，然后打印摘要
 
 ```bash
 # 交互式 agents
-llm-tracker codex
-llm-tracker claude
+tokenage codex
+tokenage claude
 
 # 一次性命令
-llm-tracker codex exec "say hello in one sentence"
+tokenage codex exec "say hello in one sentence"
 
 # 安装后的 CLI
-llm-tracker codex exec "say hello in one sentence"
+tokenage codex exec "say hello in one sentence"
 ```
 
 同一个命令也负责所有不是「跑一次被追踪的命令」的操作：
 
 ```bash
 # 组件、服务、Agent
-llm-tracker status
-llm-tracker setup
-llm-tracker update --check
+tokenage status
+tokenage setup
+tokenage update --check
 
 # 用远端 server 代替本地 server
-llm-tracker login --server https://app.example.com
-llm-tracker logout
+tokenage login --server https://app.example.com
+tokenage logout
 ```
 
-只有在传 `llm-tracker` 自己的 flags 时才需要 `--`：
+只有在传 `tokenage` 自己的 flags 时才需要 `--`：
 
 ```bash
-llm-tracker --json -- codex
-llm-tracker --usage-only -- codex exec "say hello in one sentence"
-llm-tracker --wait-ms 5000 -- codex exec "say hello in one sentence"
-llm-tracker --summary-dest file --summary-file /tmp/llm-summary.json -- claude
-llm-tracker --proxy-env -- some-openai-compatible-cli
-llm-tracker --no-summary -- codex exec "say hello"
+tokenage --json -- codex
+tokenage --usage-only -- codex exec "say hello in one sentence"
+tokenage --wait-ms 5000 -- codex exec "say hello in one sentence"
+tokenage --summary-dest file --summary-file /tmp/llm-summary.json -- claude
+tokenage --proxy-env -- some-openai-compatible-cli
+tokenage --no-summary -- codex exec "say hello"
 ```
 
 完整 CLI 参考见 [docs/cli-reference.md](docs/cli-reference.md)，包括所有 flags、tracking model、退出码、服务命令、API endpoints 和环境变量。逐命令的行为见 [docs/cli-refactor.md](docs/cli-refactor.md)。
@@ -176,9 +176,9 @@ Dashboard 提供：
 
 默认情况下，后端 API 会在 `http://localhost:4001` 提供构建后的 Dashboard。前端 dev server 按下面顺序解析 API URL：
 
-1. `LLM_TRACKER_API_URL`
-2. `LLM_TRACKER_BACKEND_URL`
-3. `~/.llm-tracker/config.yaml` 中的 `server.host` 和 `server.api_port`
+1. `TOKENAGE_API_URL`
+2. `TOKENAGE_BACKEND_URL`
+3. `~/.tokenage/config.yaml` 中的 `server.host` 和 `server.api_port`
 4. `http://localhost:4001`
 
 前端相关说明见 [frontend/README.md](frontend/README.md)。
@@ -194,21 +194,21 @@ Dashboard 提供：
 服务命令：
 
 ```bash
-llm-tracker server status
-llm-tracker server restart
-llm-tracker server stop
+tokenage server status
+tokenage server restart
+tokenage server stop
 ```
 
-`llm-tracker server start` 负责把服务启动起来，`llm-tracker server bootstrap` 负责重新安装、重建 Dashboard 并重启 API 让新产物生效。`llm-tracker status` 是另一个命令：它报告装了哪些组件、它们是否在运行。
+`tokenage server start` 负责把服务启动起来，`tokenage server bootstrap` 负责重新安装、重建 Dashboard 并重启 API 让新产物生效。`tokenage status` 是另一个命令：它报告装了哪些组件、它们是否在运行。
 
-运行时文件在 `~/.llm-tracker/run/`。日志写入 `logs/`。
+运行时文件在 `~/.tokenage/run/`。日志写入 `logs/`。
 
 ## 配置
 
 主配置文件：
 
 ```text
-~/.llm-tracker/config.yaml
+~/.tokenage/config.yaml
 ```
 
 最小 provider 和数据库配置：
@@ -234,17 +234,17 @@ server:
   otlp_port: 4002
 
 db:
-  path: ~/.llm-tracker/usage.db
+  path: ~/.tokenage/usage.db
 ```
 
 如果要用 PostgreSQL 或 MySQL 替代 SQLite，设置 `db.url`：
 
 ```yaml
 db:
-  url: postgresql+psycopg://user:password@db-host:5432/llm_tracker?sslmode=require
+  url: postgresql+psycopg://user:password@db-host:5432/tokenage?sslmode=require
 ```
 
-`llm-tracker server start` 会把 `config.example.yaml` 里缺失的默认值合并进用户配置，但不会覆盖已有值。
+`tokenage server start` 会把 `config.example.yaml` 里缺失的默认值合并进用户配置，但不会覆盖已有值。
 
 ## 把客户端指向 Proxy
 
@@ -263,7 +263,7 @@ export ANTHROPIC_BASE_URL=http://127.0.0.1:4000
 也可以让 wrapper 只为某个子进程设置这些环境变量：
 
 ```bash
-llm-tracker --proxy-env -- some-openai-compatible-cli
+tokenage --proxy-env -- some-openai-compatible-cli
 ```
 
 支持的 proxy paths：
@@ -340,11 +340,11 @@ bash scripts/dev/smoke-bootstrap-container.sh
 
 ## 隐私和安全说明
 
-- `llm-tracker` 设计为本地运行。
-- 使用量默认存储在 `~/.llm-tracker/usage.db`。
+- `tokenage` 设计为本地运行。
+- 使用量默认存储在 `~/.tokenage/usage.db`。
 - 如果配置了 `db.url`，使用量数据会写入该数据库。
 - Proxy 会原样转发 auth headers。
-- `llm-tracker` 不管理 API keys。
+- `tokenage` 不管理 API keys。
 - OTLP payload 由 Agent 自己发出；如果你需要严格控制 metadata，请检查 Agent telemetry settings。
 
 ## 贡献
@@ -357,7 +357,7 @@ bash scripts/dev/smoke-bootstrap-container.sh
 - 改 Dashboard 行为时把 frontend tests 放到 `frontend/tests/`
 - 改命令、setup 或行为时同步更新 docs
 
-请保持示例一致：plain agent invocation 使用 `llm-tracker codex` 或 `llm-tracker claude`；只有传 `llm-tracker` 自己的 flags 时才保留 `--`。
+请保持示例一致：plain agent invocation 使用 `tokenage codex` 或 `tokenage claude`；只有传 `tokenage` 自己的 flags 时才保留 `--`。
 
 ## 开源协议
 
