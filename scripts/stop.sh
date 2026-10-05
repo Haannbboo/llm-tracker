@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # scripts/stop.sh
-# Stop llm-tracker services.
+# Stop tokenage services.
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-SUPERVISORD_CONF="${HOME}/.llm-tracker/supervisord.conf"
+SUPERVISORD_CONF="${HOME}/.tokenage/supervisord.conf"
 SUPERVISORCTL="${ROOT_DIR}/.venv/bin/supervisorctl"
 
 # ── Load terminal helpers ───────────────────────────────────────────
@@ -14,11 +14,11 @@ if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
   echo "Usage: scripts/stop.sh [program_name...]"
   echo
   echo "Arguments:"
-  echo "  program_name    Optional. Specific supervisor program(s) to stop (e.g., llm-tracker-proxy)."
+  echo "  program_name    Optional. Specific supervisor program(s) to stop (e.g., tokenage-proxy)."
   echo "                  If omitted, stops all programs and shuts down supervisord."
   echo
   echo "Available programs:"
-  echo "  llm-tracker-proxy, llm-tracker-api, llm-tracker-otlp"
+  echo "  tokenage-proxy, tokenage-api, tokenage-otlp"
   exit 0
 fi
 

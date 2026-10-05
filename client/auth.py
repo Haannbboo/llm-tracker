@@ -1,6 +1,6 @@
 """Sign-in, credentials, and sign-out for this machine.
 
-Credentials live in ``$LLM_TRACKER_HOME/credentials.json`` with mode 0600.
+Credentials live in ``$TOKENAGE_HOME/credentials.json`` with mode 0600.
 The client stores separate CLI and ingestion tokens returned by the server,
 plus a machine-scoped installation key (``installation_key`` file) that
 registers this installation with the server across re-logins.
@@ -170,13 +170,13 @@ def check_server(server: str) -> int:
         maximum = int(data["protocol_max"])
     except (httpx.HTTPError, ValueError, KeyError, TypeError) as exc:
         print(
-            f"llm-tracker server unavailable or incompatible at {server}: {exc}",
+            f"tokenage server unavailable or incompatible at {server}: {exc}",
             file=sys.stderr,
         )
         return 1
     if not minimum <= CURRENT_GENERATION <= maximum:
         print(
-            "This llm-tracker version is incompatible with the dashboard. "
+            "This tokenage version is incompatible with the dashboard. "
             "Ask its administrator to update it.",
             file=sys.stderr,
         )
@@ -188,7 +188,7 @@ def resolve_server(explicit: str | None) -> str | None:
     """--server, then the environment, then whatever we logged in to before."""
     raw = (
         explicit
-        or os.environ.get("LLMTRACKER_SERVER")
+        or os.environ.get("TOKENAGE_SERVER")
         or (load_credentials() or {}).get("server_url")
     )
     return str(raw) if raw else None
@@ -255,7 +255,7 @@ def login(
     try:
         installation_key = _load_or_create_installation_key()
     except OSError as exc:
-        print(f"llm-tracker: cannot store the installation key: {exc}", file=sys.stderr)
+        print(f"tokenage: cannot store the installation key: {exc}", file=sys.stderr)
         return 1
 
     verifier, challenge = _pkce_pair()
@@ -296,7 +296,7 @@ def login(
         except httpx.HTTPError as exc:
             print(
                 "login exchange could not be confirmed; your previous tokens may "
-                f"no longer work. Run llm-tracker login again. Details: {exc}",
+                f"no longer work. Run tokenage login again. Details: {exc}",
                 file=sys.stderr,
             )
             return 1
@@ -342,7 +342,7 @@ def login(
     except (KeyError, TypeError, ValueError, OSError) as exc:
         print(
             "login could not use the new credentials. Your previous tokens may "
-            f"no longer work; run llm-tracker login again. Details: {exc}",
+            f"no longer work; run tokenage login again. Details: {exc}",
             file=sys.stderr,
         )
         return 1
@@ -358,7 +358,7 @@ def login(
         print("No tracked agents detected; nothing to wire.")
     else:
         print(
-            "Signed in, but no detected agents could be wired; run llm-tracker setup.",
+            "Signed in, but no detected agents could be wired; run tokenage setup.",
             file=sys.stderr,
         )
         return 1

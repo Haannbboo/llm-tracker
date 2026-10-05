@@ -18,7 +18,7 @@ server:
   host: 127.0.0.1
   port: 4000
 db:
-  path: ~/.llm-tracker/usage.db
+  path: ~/.tokenage/usage.db
 providers: {}
 """,
         encoding="utf-8",
@@ -26,8 +26,8 @@ providers: {}
 
     config = config_module.load_config(str(config_path))
 
-    assert config["db"]["path"] == str(Path(tmp_path, ".llm-tracker/usage.db"))
-    assert config["db"]["url"] == f"sqlite:///{Path(tmp_path, '.llm-tracker/usage.db')}"
+    assert config["db"]["path"] == str(Path(tmp_path, ".tokenage/usage.db"))
+    assert config["db"]["url"] == f"sqlite:///{Path(tmp_path, '.tokenage/usage.db')}"
 
 
 def test_load_config_sets_default_models_mapping(config_module, tmp_path):
@@ -83,7 +83,7 @@ def test_load_config_keeps_database_url(config_module, tmp_path):
 server:
   host: 127.0.0.1
 db:
-  url: postgresql+psycopg://user:pass@db.example.edu:5432/llm_tracker
+  url: postgresql+psycopg://user:pass@db.example.edu:5432/tokenage
 providers: {}
 """,
         encoding="utf-8",
@@ -93,20 +93,20 @@ providers: {}
 
     assert (
         config["db"]["url"]
-        == "postgresql+psycopg://user:pass@db.example.edu:5432/llm_tracker"
+        == "postgresql+psycopg://user:pass@db.example.edu:5432/tokenage"
     )
 
 
 def test_get_config_path_prefers_env_override(config_module, tmp_path, monkeypatch):
     config_path = tmp_path / "custom-config.yaml"
-    monkeypatch.setenv("LLM_TRACKER_CONFIG", str(config_path))
+    monkeypatch.setenv("TOKENAGE_CONFIG", str(config_path))
 
     assert config_module.get_config_path() == str(config_path)
 
 
 def test_get_tracker_home_prefers_env_override(config_module, tmp_path, monkeypatch):
     tracker_home = tmp_path / "tracker-home"
-    monkeypatch.setenv("LLM_TRACKER_HOME", str(tracker_home))
+    monkeypatch.setenv("TOKENAGE_HOME", str(tracker_home))
 
     assert config_module.get_tracker_home() == str(tracker_home)
 
@@ -512,7 +512,7 @@ def test_merge_missing_config_defaults_backfills_missing_fields(config_module):
             "otlp_port": 4002,
         },
         "db": {
-            "path": "~/.llm-tracker/usage.db",
+            "path": "~/.tokenage/usage.db",
         },
     }
 
@@ -527,7 +527,7 @@ def test_merge_missing_config_defaults_backfills_missing_fields(config_module):
     assert merged_config["server"]["port"] == 4100
     assert merged_config["server"]["host"] == "127.0.0.1"
     assert merged_config["server"]["api_port"] == 4001
-    assert merged_config["db"]["path"] == "~/.llm-tracker/usage.db"
+    assert merged_config["db"]["path"] == "~/.tokenage/usage.db"
 
 
 def test_merge_missing_config_defaults_skips_example_provider_backfill(config_module):
@@ -688,7 +688,7 @@ exporter = { otlp-http = { endpoint = "http://localhost:4005/v1/logs", protocol 
     assert "localhost:4005" not in content
     parsed = tomllib.loads(content)
     assert (
-        parsed["otel"]["exporter"]["otlp-http"]["headers"]["x-llm-tracker-token"]
+        parsed["otel"]["exporter"]["otlp-http"]["headers"]["x-tokenage-token"]
         == "ingest-secret"
     )
 
@@ -750,7 +750,7 @@ def test_configure_claude_settings_prefers_otlp_endpoint_env(tmp_path):
 
 def test_otlp_gunicorn_config_prefers_otlp_endpoint_env(tmp_path, monkeypatch):
     repo_root = Path(__file__).resolve().parents[1]
-    config_dir = tmp_path / ".llm-tracker"
+    config_dir = tmp_path / ".tokenage"
     config_dir.mkdir()
     (config_dir / "config.yaml").write_text(
         """
@@ -779,7 +779,7 @@ models: {}
 
 def test_otlp_gunicorn_config_uses_configured_port_without_env(tmp_path, monkeypatch):
     repo_root = Path(__file__).resolve().parents[1]
-    config_dir = tmp_path / ".llm-tracker"
+    config_dir = tmp_path / ".tokenage"
     config_dir.mkdir()
     (config_dir / "config.yaml").write_text(
         """
@@ -805,7 +805,7 @@ models: {}
 
 def test_gunicorn_configs_resolve_log_paths_to_repo_root(tmp_path, monkeypatch):
     repo_root = Path(__file__).resolve().parents[1]
-    config_dir = tmp_path / ".llm-tracker"
+    config_dir = tmp_path / ".tokenage"
     config_dir.mkdir()
     (config_dir / "config.yaml").write_text(
         """
@@ -885,8 +885,8 @@ def test_set_evaluation_evaluator(config_module, tmp_path):
 
 
 def test_load_config_auth_defaults(config_module, tmp_path, monkeypatch):
-    monkeypatch.delenv("LLMTRACKER_AUTH__GOOGLE_CLIENT_ID", raising=False)
-    monkeypatch.delenv("LLMTRACKER_AUTH__GOOGLE_CLIENT_SECRET", raising=False)
+    monkeypatch.delenv("TOKENAGE_AUTH__GOOGLE_CLIENT_ID", raising=False)
+    monkeypatch.delenv("TOKENAGE_AUTH__GOOGLE_CLIENT_SECRET", raising=False)
     config_path = tmp_path / "config.yaml"
     config_path.write_text("providers: {}\n", encoding="utf-8")
 
@@ -898,14 +898,14 @@ def test_load_config_auth_defaults(config_module, tmp_path, monkeypatch):
     assert config["auth"]["google_client_secret"] == ""
 
 
-def test_load_config_google_creds_are_env_only(config_module, tmp_path, monkeypatch):
+def test_load_config_google_creds_prefer_env(config_module, tmp_path, monkeypatch):
     config_path = tmp_path / "config.yaml"
     config_path.write_text(
         "auth:\n  enabled: true\n  google_client_id: from-yaml\n",
         encoding="utf-8",
     )
-    monkeypatch.setenv("LLMTRACKER_AUTH__GOOGLE_CLIENT_ID", "from-env")
-    monkeypatch.setenv("LLMTRACKER_AUTH__GOOGLE_CLIENT_SECRET", "from-env-secret")
+    monkeypatch.setenv("TOKENAGE_AUTH__GOOGLE_CLIENT_ID", "from-env")
+    monkeypatch.setenv("TOKENAGE_AUTH__GOOGLE_CLIENT_SECRET", "from-env-secret")
 
     config = config_module.load_config(str(config_path))
 
@@ -914,11 +914,9 @@ def test_load_config_google_creds_are_env_only(config_module, tmp_path, monkeypa
     assert config["auth"]["google_client_secret"] == "from-env-secret"
 
 
-def test_load_config_ignores_yaml_google_creds_when_env_unset(
-    config_module, tmp_path, monkeypatch
-):
-    monkeypatch.delenv("LLMTRACKER_AUTH__GOOGLE_CLIENT_ID", raising=False)
-    monkeypatch.delenv("LLMTRACKER_AUTH__GOOGLE_CLIENT_SECRET", raising=False)
+def test_load_config_reads_google_creds_from_yaml(config_module, tmp_path, monkeypatch):
+    monkeypatch.delenv("TOKENAGE_AUTH__GOOGLE_CLIENT_ID", raising=False)
+    monkeypatch.delenv("TOKENAGE_AUTH__GOOGLE_CLIENT_SECRET", raising=False)
     config_path = tmp_path / "config.yaml"
     config_path.write_text(
         "auth:\n  google_client_id: from-yaml\n  google_client_secret: from-yaml\n",
@@ -927,12 +925,12 @@ def test_load_config_ignores_yaml_google_creds_when_env_unset(
 
     config = config_module.load_config(str(config_path))
 
-    assert config["auth"]["google_client_id"] == ""
-    assert config["auth"]["google_client_secret"] == ""
+    assert config["auth"]["google_client_id"] == "from-yaml"
+    assert config["auth"]["google_client_secret"] == "from-yaml"
 
 
 def test_set_evaluation_evaluator_creates_missing_parent_dirs(config_module, tmp_path):
-    target = tmp_path / ".llm-tracker" / "nested" / "config.yaml"
+    target = tmp_path / ".tokenage" / "nested" / "config.yaml"
 
     config_module.set_evaluation_evaluator("remote", path=str(target))
 

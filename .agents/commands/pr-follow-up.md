@@ -79,7 +79,7 @@ Read repo guidance before changing anything:
 
 ```bash
 [ -f AGENTS.md ] && sed -n '1,220p' AGENTS.md
-[ -f .agents/commands/llm-tracker.md ] && sed -n '1,260p' .agents/commands/llm-tracker.md
+[ -f .agents/commands/tokenage.md ] && sed -n '1,260p' .agents/commands/tokenage.md
 [ -f .agents/commands/verify.md ] && sed -n '1,260p' .agents/commands/verify.md
 ```
 
@@ -163,7 +163,7 @@ Minimum:
 git diff --check
 ```
 
-Then run focused tests for touched areas. For llm-tracker backend changes, prefer:
+Then run focused tests for touched areas. For tokenage backend changes, prefer:
 
 ```bash
 uv run python -m pytest -q

@@ -248,7 +248,7 @@ async def lifespan(app: FastAPI):
         await _stop_evaluation_worker(worker_task)
 
 
-app = FastAPI(title="llm-tracker-api", lifespan=lifespan)
+app = FastAPI(title="tokenage-api", lifespan=lifespan)
 app.include_router(auth_router)
 
 
@@ -1653,8 +1653,8 @@ async def hosted_installer():
         Path(__file__).resolve().parent.parent / "scripts" / "hosted-install.sh"
     )
     script = installer_path.read_text(encoding="utf-8")
-    script = script.replace("__LLM_TRACKER_SERVER_URL__", shlex.quote(server_url))
-    script = script.replace("__LLM_TRACKER_INSTALL_COMMIT__", shlex.quote(""))
+    script = script.replace("__TOKENAGE_SERVER_URL__", shlex.quote(server_url))
+    script = script.replace("__TOKENAGE_INSTALL_COMMIT__", shlex.quote(""))
     return Response(script, media_type="text/x-shellscript")
 
 

@@ -1,4 +1,4 @@
-"""``llm-tracker setup`` — the client owns agent configuration.
+"""``tokenage setup`` — the client owns agent configuration.
 
 These tests run the real configure scripts, so they cover the whole path: the
 client decides the endpoint, shells out, and the scripts write only their own
@@ -23,11 +23,11 @@ def machine(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     home = tmp_path / "home"
     home.mkdir()
     monkeypatch.setenv("HOME", str(home))
-    monkeypatch.setenv("LLM_TRACKER_HOME", str(home / ".llm-tracker"))
-    monkeypatch.delenv("LLM_TRACKER_ROOT", raising=False)
-    monkeypatch.delenv("LLM_TRACKER_CONFIG", raising=False)
+    monkeypatch.setenv("TOKENAGE_HOME", str(home / ".tokenage"))
+    monkeypatch.delenv("TOKENAGE_ROOT", raising=False)
+    monkeypatch.delenv("TOKENAGE_CONFIG", raising=False)
     monkeypatch.delenv("OTEL_EXPORTER_OTLP_LOGS_ENDPOINT", raising=False)
-    monkeypatch.delenv("LLM_TRACKER_INGEST_TOKEN", raising=False)
+    monkeypatch.delenv("TOKENAGE_INGEST_TOKEN", raising=False)
     monkeypatch.setattr(
         setup.shutil,
         "which",
@@ -41,15 +41,15 @@ def machine(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
 
 def _sign_in(home: Path, endpoint: str = ENDPOINT) -> None:
-    path = home / ".llm-tracker" / "credentials.json"
+    path = home / ".tokenage" / "credentials.json"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
         json.dumps(
             {
                 "server_url": "https://app.example.com",
                 "email": "you@example.com",
-                "cli_token": "llmt_cli_x",
-                "ingest_token": "llmt_ingest_x",
+                "cli_token": "tokenage_cli_x",
+                "ingest_token": "tokenage_ingest_x",
                 "otlp_logs_endpoint": endpoint,
             }
         ),
@@ -71,12 +71,12 @@ def test_setup_wires_detected_agents_at_the_signed_in_collector(
     # The token is required for an authenticated collector.
     assert (
         claude["env"]["OTEL_EXPORTER_OTLP_HEADERS"]
-        == "x-llm-tracker-token=llmt_ingest_x"
+        == "x-tokenage-token=tokenage_ingest_x"
     )
 
     codex = (machine / ".codex" / "config.toml").read_text()
     assert ENDPOINT in codex
-    assert "llmt_ingest_x" in codex
+    assert "tokenage_ingest_x" in codex
 
 
 def test_setup_is_idempotent(machine: Path) -> None:
@@ -96,12 +96,12 @@ def test_setup_needs_a_collector(machine: Path, capsys) -> None:
 def test_setup_uses_the_local_collector_when_the_server_is_installed(
     machine: Path, capsys, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    server_root = machine / ".llm-tracker" / "src"
+    server_root = machine / ".tokenage" / "src"
     (server_root / ".venv" / "bin").mkdir(parents=True)
     (server_root / ".venv" / "bin" / "python").write_text("#!/bin/sh\n")
     (server_root / ".venv" / "bin" / "python").chmod(0o755)
-    monkeypatch.setenv("LLM_TRACKER_ROOT", str(server_root))
-    (machine / ".llm-tracker" / "config.yaml").write_text(
+    monkeypatch.setenv("TOKENAGE_ROOT", str(server_root))
+    (machine / ".tokenage" / "config.yaml").write_text(
         "server:\n  host: 127.0.0.1\n  otlp_port: 4102\n", encoding="utf-8"
     )
     assert setup.run_setup(disable=False) == 0
@@ -170,15 +170,15 @@ def test_setup_strips_a_stale_local_otlp_override(
 
 def _sign_in_without_collector(home: Path) -> None:
     """A login made before the client started recording the collector."""
-    path = home / ".llm-tracker" / "credentials.json"
+    path = home / ".tokenage" / "credentials.json"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
         json.dumps(
             {
                 "server_url": "https://app.example.com",
                 "email": "you@example.com",
-                "cli_token": "llmt_cli_x",
-                "ingest_token": "llmt_ingest_x",
+                "cli_token": "tokenage_cli_x",
+                "ingest_token": "tokenage_ingest_x",
             }
         ),
         encoding="utf-8",
@@ -213,9 +213,9 @@ def test_signed_in_client_asks_the_server_where_its_collector_is(
     claude = json.loads((machine / ".claude" / "settings.json").read_text())
     assert claude["env"]["OTEL_EXPORTER_OTLP_LOGS_ENDPOINT"] == ENDPOINT
     # And the answer is remembered, so later commands need no network.
-    remembered = json.loads(
-        (machine / ".llm-tracker" / "credentials.json").read_text()
-    )["otlp_logs_endpoint"]
+    remembered = json.loads((machine / ".tokenage" / "credentials.json").read_text())[
+        "otlp_logs_endpoint"
+    ]
     assert remembered == ENDPOINT
     monkeypatch.setattr(
         auth.httpx,
@@ -230,12 +230,12 @@ def test_status_never_guesses_a_local_collector_when_signed_in_remotely(
 ) -> None:
     """A local fallback here would point agents away from their own server."""
     _sign_in_without_collector(machine)
-    server_root = machine / ".llm-tracker" / "src"
+    server_root = machine / ".tokenage" / "src"
     (server_root / ".venv" / "bin").mkdir(parents=True)
     (server_root / ".venv" / "bin" / "python").write_text("#!/bin/sh\n")
     (server_root / ".venv" / "bin" / "python").chmod(0o755)
-    monkeypatch.setenv("LLM_TRACKER_ROOT", str(server_root))
-    (machine / ".llm-tracker" / "config.yaml").write_text(
+    monkeypatch.setenv("TOKENAGE_ROOT", str(server_root))
+    (machine / ".tokenage" / "config.yaml").write_text(
         "server:\n  host: 127.0.0.1\n  otlp_port: 4102\n", encoding="utf-8"
     )
 
@@ -261,7 +261,7 @@ def test_logout_unwires_with_the_collector_it_recorded(
 
     assert auth.logout(keep_agents=False) == 0
     assert "OTEL_EXPORTER_OTLP_LOGS_ENDPOINT" not in settings.read_text()
-    assert not (machine / ".llm-tracker" / "credentials.json").exists()
+    assert not (machine / ".tokenage" / "credentials.json").exists()
 
 
 def test_setup_uses_explicit_script_status(machine, monkeypatch):
@@ -326,7 +326,7 @@ def test_disable_unknown_collector_preserves_existing_settings(
     if legacy_login:
         assert auth.logout(keep_agents=False) == 0
         assert [path.read_bytes() for path in (claude, codex)] == before
-        assert not (machine / ".llm-tracker" / "credentials.json").exists()
+        assert not (machine / ".tokenage" / "credentials.json").exists()
 
 
 @pytest.mark.parametrize("failure", ["invalid", "timeout", "write"])
@@ -356,7 +356,7 @@ def test_logout_reports_cleanup_failure_after_removing_credentials(machine, caps
     (machine / ".codex" / "config.toml").write_text("[invalid")
     assert auth.logout(keep_agents=False) == 1
     assert "Signed out, but agent cleanup failed" in capsys.readouterr().err
-    assert not (machine / ".llm-tracker" / "credentials.json").exists()
+    assert not (machine / ".tokenage" / "credentials.json").exists()
 
 
 @pytest.mark.parametrize("disable", [False, True])

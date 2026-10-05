@@ -42,18 +42,18 @@ describe('onboarding 3-step funnel', () => {
       'Step 1 should reference bootstrap as the primary onboarding action'
     );
     assert.ok(
-      !area.includes('llm-tracker claude') &&
-      !area.includes('llm-tracker codex') &&
-      !area.includes('llm-tracker gemini'),
+      !area.includes('tokenage claude') &&
+      !area.includes('tokenage codex') &&
+      !area.includes('tokenage gemini'),
       'Step 1 should not include agent test command rows — that is Step 2'
     );
   });
 
-  it('Step 1 shows llm-tracker bootstrap as the primary command', () => {
+  it('Step 1 shows tokenage bootstrap as the primary command', () => {
     const area = sectionBetween(dashboardSrc, step1T, step2T);
     assert.ok(
-      area.includes('llm-tracker bootstrap'),
-      'Step 1 should show "llm-tracker bootstrap" as the primary command to copy'
+      area.includes('tokenage bootstrap'),
+      'Step 1 should show "tokenage bootstrap" as the primary command to copy'
     );
   });
 
@@ -68,7 +68,7 @@ describe('onboarding 3-step funnel', () => {
   it('Step 2 is run a test command (existing agent rows)', () => {
     const area = sectionBetween(dashboardSrc, step2T, step3T);
     assert.ok(
-      area.toLowerCase().includes('test command') || area.includes('llm-tracker claude'),
+      area.toLowerCase().includes('test command') || area.includes('tokenage claude'),
       'Step 2 should reference test commands or show agent command rows'
     );
   });

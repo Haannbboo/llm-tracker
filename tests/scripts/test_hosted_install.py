@@ -13,7 +13,7 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 INSTALLER = REPO_ROOT / "scripts" / "hosted-install.sh"
-SHARED_LAUNCHER = REPO_ROOT / "scripts" / "llm-tracker"
+SHARED_LAUNCHER = REPO_ROOT / "scripts" / "tokenage"
 REQUIREMENTS = REPO_ROOT / "client" / "requirements.txt"
 COMMIT = "a" * 40
 NEXT_COMMIT = "b" * 40
@@ -29,13 +29,13 @@ args = sys.argv[1:]
 if args[0] == '-c':
     os.replace(args[2], args[3])
     raise SystemExit(0)
-with open(os.environ['LLM_TRACKER_FAKE_PYTHON_LOG'], 'a') as log:
+with open(os.environ['TOKENAGE_FAKE_PYTHON_LOG'], 'a') as log:
     log.write(f"{' '.join(args)} tty={'yes' if sys.stdin.isatty() else 'no'}\\n")
     if 'login' in args:
         log.write(f"login-input={sys.stdin.readline().strip()}\\n")
-if 'check-server' in args and os.environ.get('LLM_TRACKER_FAKE_PROTOCOL_FAIL') == '1':
+if 'check-server' in args and os.environ.get('TOKENAGE_FAKE_PROTOCOL_FAIL') == '1':
     raise SystemExit(1)
-if 'setup' in args and os.environ.get('LLM_TRACKER_FAKE_SETUP_FAIL') == '1':
+if 'setup' in args and os.environ.get('TOKENAGE_FAKE_SETUP_FAIL') == '1':
     raise SystemExit(1)
 """
 
@@ -46,7 +46,7 @@ def _write_snapshot(source: Path) -> None:
     (source / "client" / "requirements.txt").write_text(REQUIREMENTS.read_text())
     (source / "scripts").mkdir()
     # The installer copies the shared launcher out of the snapshot.
-    (source / "scripts" / "llm-tracker").write_text(SHARED_LAUNCHER.read_text())
+    (source / "scripts" / "tokenage").write_text(SHARED_LAUNCHER.read_text())
 
 
 def _render_installer(
@@ -57,22 +57,22 @@ def _render_installer(
 ) -> str:
     return (
         (text if text is not None else INSTALLER.read_text())
-        .replace("__LLM_TRACKER_SERVER_URL__", shlex.quote(server_url))
-        .replace("__LLM_TRACKER_INSTALL_COMMIT__", shlex.quote(commit))
+        .replace("__TOKENAGE_SERVER_URL__", shlex.quote(server_url))
+        .replace("__TOKENAGE_INSTALL_COMMIT__", shlex.quote(commit))
     )
 
 
 def _fixture(tmp_path: Path, *, sha: str = COMMIT) -> tuple[Path, Path, Path]:
     home = tmp_path / "home with spaces"
     home.mkdir()
-    tracker_home = home / ".llm-tracker"
+    tracker_home = home / ".tokenage"
     tracker_home.mkdir()
     (tracker_home / "config.yaml").write_text("provider: keep\n")
     (tracker_home / "credentials.json").write_text('{"token":"keep"}\n')
     bin_dir = tmp_path / "fake-bin"
     bin_dir.mkdir()
     archive = tmp_path / "snapshot.tar.gz"
-    source = tmp_path / "source" / f"llm-tracker-{sha}"
+    source = tmp_path / "source" / f"tokenage-{sha}"
     _write_snapshot(source)
     with tarfile.open(archive, "w:gz") as tar:
         tar.add(source, arcname=source.name)
@@ -85,10 +85,10 @@ def _fixture(tmp_path: Path, *, sha: str = COMMIT) -> tuple[Path, Path, Path]:
         "url = next(arg for arg in args if arg.startswith('https://'))\n"
         "out = pathlib.Path(args[args.index('-o') + 1])\n"
         "if 'api.github.com' in url:\n"
-        "    if os.environ.get('LLM_TRACKER_FAKE_API_FAIL') == '1': sys.exit(79)\n"
+        "    if os.environ.get('TOKENAGE_FAKE_API_FAIL') == '1': sys.exit(79)\n"
         f"    out.write_text({json.dumps({'sha': sha})!r})\n"
         "else:\n"
-        "    out.write_bytes(pathlib.Path(os.environ['LLM_TRACKER_FIXTURE_ARCHIVE']).read_bytes())\n"
+        "    out.write_bytes(pathlib.Path(os.environ['TOKENAGE_FIXTURE_ARCHIVE']).read_bytes())\n"
     )
     curl.chmod(0o755)
 
@@ -103,7 +103,7 @@ def _fixture(tmp_path: Path, *, sha: str = COMMIT) -> tuple[Path, Path, Path]:
         "    python = bindir / 'python'\n"
         f"    python.write_text({FAKE_PYTHON!r})\n"
         "    python.chmod(0o755)\n"
-        "with open(os.environ['LLM_TRACKER_FAKE_UV_LOG'], 'a') as log:\n"
+        "with open(os.environ['TOKENAGE_FAKE_UV_LOG'], 'a') as log:\n"
         "    log.write(' '.join(args) + '\\n')\n"
     )
     uv.chmod(0o755)
@@ -123,9 +123,9 @@ def _run_install(
         **os.environ,
         "HOME": str(home),
         "PATH": f"{fake_bin}:/usr/bin:/bin",
-        "LLM_TRACKER_FIXTURE_ARCHIVE": str(archive),
-        "LLM_TRACKER_FAKE_UV_LOG": str(tmp_path / "uv.log"),
-        "LLM_TRACKER_FAKE_PYTHON_LOG": str(tmp_path / "python.log"),
+        "TOKENAGE_FIXTURE_ARCHIVE": str(archive),
+        "TOKENAGE_FAKE_UV_LOG": str(tmp_path / "uv.log"),
+        "TOKENAGE_FAKE_PYTHON_LOG": str(tmp_path / "python.log"),
     }
     result = subprocess.run(
         ["/bin/sh", str(script)],
@@ -141,7 +141,7 @@ def test_installs_sha_snapshot_and_preserves_user_state(tmp_path: Path) -> None:
     result, home, _ = _run_install(tmp_path)
 
     assert result.returncode == 0, result.stdout + result.stderr
-    tracker_home = home / ".llm-tracker"
+    tracker_home = home / ".tokenage"
     version_dir = tracker_home / "versions" / COMMIT
     assert (tracker_home / "current").resolve() == version_dir
     assert (version_dir / "client" / "COMMIT").read_text().strip() == COMMIT
@@ -156,7 +156,7 @@ def test_installs_sha_snapshot_and_preserves_user_state(tmp_path: Path) -> None:
         "-P -m client check-server --server https://host.example tty=no" in check_server
     )
     assert "No interactive terminal is available" in result.stdout
-    assert "LLM_TRACKER_CLIENT_COMMIT" in INSTALLER.read_text()
+    assert "TOKENAGE_CLIENT_COMMIT" in INSTALLER.read_text()
 
     config = tracker_home / "config.yaml"
     credentials = tracker_home / "credentials.json"
@@ -167,7 +167,7 @@ def test_installs_sha_snapshot_and_preserves_user_state(tmp_path: Path) -> None:
 def test_preview_uses_pinned_commit_without_looking_up_main(
     tmp_path: Path, monkeypatch
 ) -> None:
-    monkeypatch.setenv("LLM_TRACKER_FAKE_API_FAIL", "1")
+    monkeypatch.setenv("TOKENAGE_FAKE_API_FAIL", "1")
     result, home, _ = _run_install(
         tmp_path,
         sha=NEXT_COMMIT,
@@ -175,8 +175,8 @@ def test_preview_uses_pinned_commit_without_looking_up_main(
     )
 
     assert result.returncode == 0, result.stdout + result.stderr
-    assert (home / ".llm-tracker" / "current").resolve() == (
-        home / ".llm-tracker" / "versions" / NEXT_COMMIT
+    assert (home / ".tokenage" / "current").resolve() == (
+        home / ".tokenage" / "versions" / NEXT_COMMIT
     )
     assert "Resolving the latest client source" not in result.stdout
 
@@ -186,11 +186,11 @@ def test_launcher_runs_the_current_snapshot_and_failed_sha_keeps_it(
 ) -> None:
     result, home, fake_bin = _run_install(tmp_path)
     assert result.returncode == 0, result.stdout + result.stderr
-    tracker_home = home / ".llm-tracker"
+    tracker_home = home / ".tokenage"
     config = tracker_home / "config.yaml"
     credentials = tracker_home / "credentials.json"
 
-    launcher = home / ".local" / "bin" / "llm-tracker"
+    launcher = home / ".local" / "bin" / "tokenage"
     # The shared launcher, copied out of the snapshot — not a private shim.
     assert launcher.read_text() == SHARED_LAUNCHER.read_text()
     assert stat.S_IMODE(launcher.stat().st_mode) == 0o755
@@ -199,8 +199,8 @@ def test_launcher_runs_the_current_snapshot_and_failed_sha_keeps_it(
         **os.environ,
         "HOME": str(home),
         "PATH": f"{fake_bin}:/usr/bin:/bin",
-        "LLM_TRACKER_FAKE_UV_LOG": str(tmp_path / "uv.log"),
-        "LLM_TRACKER_FAKE_PYTHON_LOG": str(tmp_path / "python.log"),
+        "TOKENAGE_FAKE_UV_LOG": str(tmp_path / "uv.log"),
+        "TOKENAGE_FAKE_PYTHON_LOG": str(tmp_path / "python.log"),
     }
     # The fake interpreter exists only in the snapshot's own virtualenv, so a
     # logged call proves the launcher resolved `current` and used its client.
@@ -223,7 +223,7 @@ def test_launcher_runs_the_current_snapshot_and_failed_sha_keeps_it(
     invalid_script.write_text(_render_installer())
     env = {
         **launcher_env,
-        "LLM_TRACKER_SERVER": "https://host.example",
+        "TOKENAGE_SERVER": "https://host.example",
     }
     # The fake API response contains a short SHA; the installer must reject it before switching.
     curl = fake_bin / "curl"
@@ -253,11 +253,11 @@ def test_reinstall_checks_protocol_before_replacing_current_symlink(
 ) -> None:
     first, home, fake_bin = _run_install(tmp_path)
     assert first.returncode == 0, first.stdout + first.stderr
-    tracker_home = home / ".llm-tracker"
+    tracker_home = home / ".tokenage"
     current = tracker_home / "current"
     original_version = current.resolve()
 
-    next_source = tmp_path / "source" / f"llm-tracker-{NEXT_COMMIT}"
+    next_source = tmp_path / "source" / f"tokenage-{NEXT_COMMIT}"
     _write_snapshot(next_source)
     next_archive = tmp_path / "next-snapshot.tar.gz"
     with tarfile.open(next_archive, "w:gz") as tar:
@@ -272,17 +272,17 @@ def test_reinstall_checks_protocol_before_replacing_current_symlink(
         "if 'api.github.com' in url:\n"
         f"    out.write_text({json.dumps({'sha': NEXT_COMMIT})!r})\n"
         "else:\n"
-        "    out.write_bytes(pathlib.Path(os.environ['LLM_TRACKER_FIXTURE_ARCHIVE']).read_bytes())\n"
+        "    out.write_bytes(pathlib.Path(os.environ['TOKENAGE_FIXTURE_ARCHIVE']).read_bytes())\n"
     )
     curl.chmod(0o755)
     env = {
         **os.environ,
         "HOME": str(home),
         "PATH": f"{fake_bin}:/usr/bin:/bin",
-        "LLM_TRACKER_FIXTURE_ARCHIVE": str(next_archive),
-        "LLM_TRACKER_FAKE_UV_LOG": str(tmp_path / "uv.log"),
-        "LLM_TRACKER_FAKE_PYTHON_LOG": str(tmp_path / "python.log"),
-        "LLM_TRACKER_FAKE_PROTOCOL_FAIL": "1",
+        "TOKENAGE_FIXTURE_ARCHIVE": str(next_archive),
+        "TOKENAGE_FAKE_UV_LOG": str(tmp_path / "uv.log"),
+        "TOKENAGE_FAKE_PYTHON_LOG": str(tmp_path / "python.log"),
+        "TOKENAGE_FAKE_PROTOCOL_FAIL": "1",
     }
     command = ["/bin/sh", str(tmp_path / "hosted-install.sh")]
     incompatible = subprocess.run(
@@ -291,7 +291,7 @@ def test_reinstall_checks_protocol_before_replacing_current_symlink(
     assert incompatible.returncode != 0
     assert current.resolve() == original_version
 
-    env.pop("LLM_TRACKER_FAKE_PROTOCOL_FAIL")
+    env.pop("TOKENAGE_FAKE_PROTOCOL_FAIL")
     updated = subprocess.run(
         command, text=True, capture_output=True, env=env, timeout=30
     )
@@ -308,7 +308,7 @@ def test_refuses_to_overwrite_existing_self_hosted_launcher(tmp_path: Path) -> N
     home, fake_bin, _ = _fixture(tmp_path)
     bin_dir = home / ".local" / "bin"
     bin_dir.mkdir(parents=True)
-    foreign = bin_dir / "llm-tracker"
+    foreign = bin_dir / "tokenage"
     foreign.write_text("#!/bin/sh\nexit 0\n")
     script = tmp_path / "hosted-install.sh"
     script.write_text(_render_installer())
@@ -320,9 +320,9 @@ def test_refuses_to_overwrite_existing_self_hosted_launcher(tmp_path: Path) -> N
             **os.environ,
             "HOME": str(home),
             "PATH": f"{fake_bin}:/usr/bin:/bin",
-            "LLM_TRACKER_FIXTURE_ARCHIVE": str(tmp_path / "snapshot.tar.gz"),
-            "LLM_TRACKER_FAKE_UV_LOG": str(tmp_path / "uv.log"),
-            "LLM_TRACKER_FAKE_PYTHON_LOG": str(tmp_path / "python.log"),
+            "TOKENAGE_FIXTURE_ARCHIVE": str(tmp_path / "snapshot.tar.gz"),
+            "TOKENAGE_FAKE_UV_LOG": str(tmp_path / "uv.log"),
+            "TOKENAGE_FAKE_PYTHON_LOG": str(tmp_path / "python.log"),
         },
         timeout=10,
     )
@@ -330,7 +330,7 @@ def test_refuses_to_overwrite_existing_self_hosted_launcher(tmp_path: Path) -> N
     assert "already exists" in result.stderr
     # Refused before anything was written: the other installation still works.
     assert foreign.read_text() == "#!/bin/sh\nexit 0\n"
-    assert not (home / ".llm-tracker" / "current").exists()
+    assert not (home / ".tokenage" / "current").exists()
     assert not (tmp_path / "uv.log").exists()
 
 
@@ -338,7 +338,7 @@ def test_existing_current_directory_fails_before_installing_launcher(
     tmp_path: Path,
 ) -> None:
     home, fake_bin, _ = _fixture(tmp_path)
-    (home / ".llm-tracker" / "current").mkdir()
+    (home / ".tokenage" / "current").mkdir()
     script = tmp_path / "hosted-install.sh"
     script.write_text(_render_installer())
     result = subprocess.run(
@@ -350,7 +350,7 @@ def test_existing_current_directory_fails_before_installing_launcher(
     )
     assert result.returncode != 0
     assert "not a managed link" in result.stderr
-    assert not (home / ".local" / "bin" / "llm-tracker").exists()
+    assert not (home / ".local" / "bin" / "tokenage").exists()
     assert not (tmp_path / "uv.log").exists()
 
 
@@ -364,9 +364,9 @@ def test_login_reads_code_from_tty_when_installer_runs_from_pipe(
         **os.environ,
         "HOME": str(home),
         "PATH": f"{fake_bin}:/usr/bin:/bin",
-        "LLM_TRACKER_FIXTURE_ARCHIVE": str(archive),
-        "LLM_TRACKER_FAKE_UV_LOG": str(tmp_path / "uv.log"),
-        "LLM_TRACKER_FAKE_PYTHON_LOG": str(tmp_path / "python.log"),
+        "TOKENAGE_FIXTURE_ARCHIVE": str(archive),
+        "TOKENAGE_FAKE_UV_LOG": str(tmp_path / "uv.log"),
+        "TOKENAGE_FAKE_PYTHON_LOG": str(tmp_path / "python.log"),
     }
     pid, terminal = pty.fork()
     if pid == 0:
@@ -408,10 +408,10 @@ def test_updater_skip_login_mode_preserves_existing_credentials(
         **os.environ,
         "HOME": str(home),
         "PATH": f"{fake_bin}:/usr/bin:/bin",
-        "LLM_TRACKER_FIXTURE_ARCHIVE": str(archive),
-        "LLM_TRACKER_FAKE_UV_LOG": str(tmp_path / "uv.log"),
-        "LLM_TRACKER_FAKE_PYTHON_LOG": str(tmp_path / "python.log"),
-        "LLM_TRACKER_SKIP_LOGIN": "1",
+        "TOKENAGE_FIXTURE_ARCHIVE": str(archive),
+        "TOKENAGE_FAKE_UV_LOG": str(tmp_path / "uv.log"),
+        "TOKENAGE_FAKE_PYTHON_LOG": str(tmp_path / "python.log"),
+        "TOKENAGE_SKIP_LOGIN": "1",
     }
 
     result = subprocess.run(
@@ -428,7 +428,7 @@ def test_updater_skip_login_mode_preserves_existing_credentials(
     assert "-P -m client setup" in log
     assert "login" not in log
     assert "Existing credentials were preserved; sign-in skipped." in result.stdout
-    assert (home / ".llm-tracker" / "credentials.json").read_text() == (
+    assert (home / ".tokenage" / "credentials.json").read_text() == (
         '{"token":"keep"}\n'
     )
 
@@ -446,11 +446,11 @@ def test_updater_reports_agent_configuration_refresh_failure(tmp_path: Path) -> 
             **os.environ,
             "HOME": str(home),
             "PATH": f"{fake_bin}:/usr/bin:/bin",
-            "LLM_TRACKER_FIXTURE_ARCHIVE": str(archive),
-            "LLM_TRACKER_FAKE_UV_LOG": str(tmp_path / "uv.log"),
-            "LLM_TRACKER_FAKE_PYTHON_LOG": str(tmp_path / "python.log"),
-            "LLM_TRACKER_SKIP_LOGIN": "1",
-            "LLM_TRACKER_FAKE_SETUP_FAIL": "1",
+            "TOKENAGE_FIXTURE_ARCHIVE": str(archive),
+            "TOKENAGE_FAKE_UV_LOG": str(tmp_path / "uv.log"),
+            "TOKENAGE_FAKE_PYTHON_LOG": str(tmp_path / "python.log"),
+            "TOKENAGE_SKIP_LOGIN": "1",
+            "TOKENAGE_FAKE_SETUP_FAIL": "1",
         },
         timeout=30,
     )
@@ -460,7 +460,7 @@ def test_updater_reports_agent_configuration_refresh_failure(tmp_path: Path) -> 
     log = (tmp_path / "python.log").read_text()
     assert "-P -m client setup" in log
     assert "login" not in log
-    assert (home / ".llm-tracker" / "credentials.json").read_text() == (
+    assert (home / ".tokenage" / "credentials.json").read_text() == (
         '{"token":"keep"}\n'
     )
 

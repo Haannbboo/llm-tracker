@@ -1,19 +1,19 @@
-# llm-tracker CLI Reference
+# tokenage CLI Reference
 
-Reference for the CLI as it exists now. `llm-tracker summary` and the isolated
+Reference for the CLI as it exists now. `tokenage summary` and the isolated
 tracking mode are gone; this document describes what remains. Per-command
 behavior — including exit codes, the banner and the removed commands — is in
 [cli-refactor.md](cli-refactor.md).
 
 ## Overview
 
-`llm-tracker` is one command with two components. The client is always
+`tokenage` is one command with two components. The client is always
 installed; the server component is optional.
 
 - **Client** — the tracking wrapper, agent configuration, sign-in, the component
   report. Reports to whichever collector it is pointed at.
 - **Server** — the API, the OTLP collector, the proxy, the dashboard, the
-  evaluation worker. Reached through `llm-tracker server ...`.
+  evaluation worker. Reached through `tokenage server ...`.
 
 Anything that is not one of the subcommands below is run as a child command with
 usage tracking: the wrapper records the usage high-watermark, runs the child,
@@ -26,78 +26,78 @@ still the child's.
 ## Usage
 
 ```bash
-llm-tracker [options] <command> [args...]
-llm-tracker [options] -- <command> [args...]
-llm-tracker <subcommand> [subcommand options]
-llm-tracker server <command> [args...]
+tokenage [options] <command> [args...]
+tokenage [options] -- <command> [args...]
+tokenage <subcommand> [subcommand options]
+tokenage server <command> [args...]
 ```
 
 The `--` separator is optional for common agent commands. Use it after
-llm-tracker flags when the child command or its first argument could be parsed
+tokenage flags when the child command or its first argument could be parsed
 as a wrapper option.
 
 ## Commands
 
 | Command | Component | Effect |
 |---|---|---|
-| `llm-tracker login [--server URL] [--device-name NAME] [--no-browser]` | client | Register this machine and sign in; wires detected agents. Persists an installation key (survives logout) so re-login rotates the machine's tokens instead of duplicating it. Stores the server's `otlp_logs_endpoint`. |
-| `llm-tracker logout [--keep-agents]` | client | Delete this machine's credentials, then un-wire the agents. |
-| `llm-tracker setup [--disable]` | client | Point detected agents at a collector, or take llm-tracker's telemetry keys back off. |
-| `llm-tracker status [--json]` | either | Report installed components, whether they run, and where agents point. |
-| `llm-tracker update [--check\|--dry-run] [--scope all\|client\|server]` | either | Update installed components; `--check` checks server availability, while client availability is not published. |
-| `llm-tracker check-server --server URL` | client | Internal: verify reachability and wire protocol. Writes nothing. |
-| `llm-tracker <command> [args...]` | client | Run any command with usage tracking. |
-| `llm-tracker server bootstrap` | server | Install, build the dashboard, start, verify, restart the API. |
-| `llm-tracker server start` | server | Turn the services on. |
-| `llm-tracker server stop [program...]` | server | Stop all services, or the named ones. |
-| `llm-tracker server restart [--otlp-port N]` | server | Migrate, then reload the running services. |
-| `llm-tracker server status [program...]` | server | Supervisord table, ports, port check. |
-| `llm-tracker server token create --email EMAIL [--kind cli\|ingest\|web] [--name NAME]` | server | Mint an operator token on the server box. |
-| `llm-tracker --version` | either | Client version, plus the server release when it is installed. |
-| `llm-tracker --help`, `llm-tracker server --help` | either | Usage for the client and the service commands. |
+| `tokenage login [--server URL] [--device-name NAME] [--no-browser]` | client | Register this machine and sign in; wires detected agents. Persists an installation key (survives logout) so re-login rotates the machine's tokens instead of duplicating it. Stores the server's `otlp_logs_endpoint`. |
+| `tokenage logout [--keep-agents]` | client | Delete this machine's credentials, then un-wire the agents. |
+| `tokenage setup [--disable]` | client | Point detected agents at a collector, or take tokenage's telemetry keys back off. |
+| `tokenage status [--json]` | either | Report installed components, whether they run, and where agents point. |
+| `tokenage update [--check\|--dry-run] [--scope all\|client\|server]` | either | Update installed components; `--check` checks server availability, while client availability is not published. |
+| `tokenage check-server --server URL` | client | Internal: verify reachability and wire protocol. Writes nothing. |
+| `tokenage <command> [args...]` | client | Run any command with usage tracking. |
+| `tokenage server bootstrap` | server | Install, build the dashboard, start, verify, restart the API. |
+| `tokenage server start` | server | Turn the services on. |
+| `tokenage server stop [program...]` | server | Stop all services, or the named ones. |
+| `tokenage server restart [--otlp-port N]` | server | Migrate, then reload the running services. |
+| `tokenage server status [program...]` | server | Supervisord table, ports, port check. |
+| `tokenage server token create --email EMAIL [--kind cli\|ingest\|web] [--name NAME]` | server | Mint an operator token on the server box. |
+| `tokenage --version` | either | Client version, plus the server release when it is installed. |
+| `tokenage --help`, `tokenage server --help` | either | Usage for the client and the service commands. |
 
-`llm-tracker start`, `stop`, `restart`, `bootstrap` and `token` still work and
-forward to the matching `llm-tracker server` command, printing a one-line note
+`tokenage start`, `stop`, `restart`, `bootstrap` and `token` still work and
+forward to the matching `tokenage server` command, printing a one-line note
 on stderr. `status` is not one of them: it is the component report, and the
-service view is `llm-tracker server status`.
+service view is `tokenage server status`.
 
 ## Examples
 
 ```bash
 # Track an interactive Codex session
-llm-tracker codex
+tokenage codex
 
 # Track Claude Code
-llm-tracker claude
+tokenage claude
 
 # Track a single-shot Codex command
-llm-tracker codex exec "say hello in one sentence"
+tokenage codex exec "say hello in one sentence"
 
 # JSON summary
-llm-tracker --json -- codex
+tokenage --json -- codex
 
 # Machine-readable summary only (suppress child stdout/stderr)
-llm-tracker --usage-only --json -- codex exec "hello"
+tokenage --usage-only --json -- codex exec "hello"
 
 # Write summary to a file
-llm-tracker --summary-dest file --summary-file /tmp/llm-summary.json -- claude
+tokenage --summary-dest file --summary-file /tmp/llm-summary.json -- claude
 
 # Route through the long-running local proxy
-llm-tracker --proxy-env -- some-openai-compatible-cli
+tokenage --proxy-env -- some-openai-compatible-cli
 
 # Longer wait for late-arriving telemetry
-llm-tracker --wait-ms 5000 -- codex exec "hello"
+tokenage --wait-ms 5000 -- codex exec "hello"
 
 # No summary at all
-llm-tracker --no-summary -- codex exec "say hello"
+tokenage --no-summary -- codex exec "say hello"
 
 # What is installed, is it running, where do agents point
-llm-tracker status
-llm-tracker status --json
+tokenage status
+tokenage status --json
 
 # Wire the agents this machine has on PATH
-llm-tracker setup
-llm-tracker setup --disable
+tokenage setup
+tokenage setup --disable
 ```
 
 Status redacts credentials and private paths from displayed endpoints. When the
@@ -120,7 +120,7 @@ All tracking flags go before the child command; use `--` when they do.
 | `--poll-ms` | `250` | Milliseconds between poll attempts. |
 | `--proxy-env` | off | Replace `OPENAI_BASE_URL` and `ANTHROPIC_BASE_URL` for the child with the configured proxy. Refuse to launch if the proxy port is unreachable. |
 | `--no-summary` | off | Skip the summary; just run the command and return its exit code. |
-| `--no-banner` | off | Do not print the llm-tracker banner. Accepted by every subcommand too. |
+| `--no-banner` | off | Do not print the tokenage banner. Accepted by every subcommand too. |
 | `--version` | — | Print the client version, and the server release when the server component is installed. |
 
 ## Tracking Model
@@ -154,30 +154,30 @@ client alone does not provide a proxy.
 ## Service Management
 
 ```bash
-llm-tracker server status                              # supervisord table, ports, port check
-llm-tracker server status llm-tracker-api              # one program
-llm-tracker server start                               # services on; refuses if requirements.txt changed
-llm-tracker server stop                                # all services
-llm-tracker server stop llm-tracker-proxy              # one program
-llm-tracker server restart                             # migrate, then SIGHUP the running services
-llm-tracker server restart --otlp-port 5002            # persist a new OTLP port, then restart the collector
-llm-tracker server bootstrap                           # install, build, start, verify, restart the API
-llm-tracker server token create --email ops@example.com
+tokenage server status                              # supervisord table, ports, port check
+tokenage server status tokenage-api              # one program
+tokenage server start                               # services on; refuses if requirements.txt changed
+tokenage server stop                                # all services
+tokenage server stop tokenage-proxy              # one program
+tokenage server restart                             # migrate, then SIGHUP the running services
+tokenage server restart --otlp-port 5002            # persist a new OTLP port, then restart the collector
+tokenage server bootstrap                           # install, build, start, verify, restart the API
+tokenage server token create --email ops@example.com
 ```
 
-Valid program names: `llm-tracker-proxy`, `llm-tracker-api`, `llm-tracker-otlp`.
+Valid program names: `tokenage-proxy`, `tokenage-api`, `tokenage-otlp`.
 The same scripts are in the checkout as `scripts/start.sh`, `scripts/stop.sh`,
 `scripts/restart.sh`, `scripts/status.sh`, `scripts/bootstrap.sh` and
-`scripts/update.sh`; `llm-tracker server …` is the interface to use.
+`scripts/update.sh`; `tokenage server …` is the interface to use.
 
-`llm-tracker start`, `stop`, `restart`, `bootstrap` and `token` are still
+`tokenage start`, `stop`, `restart`, `bootstrap` and `token` are still
 accepted as aliases, with a one-line note on stderr.
 
 ## Exit Codes
 
 | Code | Meaning |
 |---|---|
-| 0 | Success, or the command ran and reported what it found. `llm-tracker status` exits 0 when nothing installed is broken; not being signed in is not a fault. |
+| 0 | Success, or the command ran and reported what it found. `tokenage status` exits 0 when nothing installed is broken; not being signed in is not a fault. |
 | 1 | Something installed is broken, or a check failed: a stopped service, a detected agent pointing at another collector, `setup` with no collector or nothing wireable, a failed sign-in or update, `logout` with no credentials. |
 | 2 | Argument validation error, a removed command (`summary`), or an unknown `server` subcommand. |
 | 126 | Child command is not executable. |
@@ -187,8 +187,8 @@ accepted as aliases, with a one-line note on stderr.
 
 ## Configuration
 
-Server config lives at `~/.llm-tracker/config.yaml` (override the path with
-`LLM_TRACKER_CONFIG`). A template is provided at `config.example.yaml`. The
+Server config lives at `~/.tokenage/config.yaml` (override the path with
+`TOKENAGE_CONFIG`). A template is provided at `config.example.yaml`. The
 client reads only the `server:` section, so a config written by a different
 version cannot break it.
 
@@ -213,15 +213,15 @@ server:
   otlp_port: 4002   # OTLP collector port
 
 db:
-  path: ~/.llm-tracker/usage.db   # SQLite (default)
+  path: ~/.tokenage/usage.db   # SQLite (default)
   # url: postgresql+psycopg://user:pass@host:5432/db
 ```
 
-`llm-tracker server start` merges missing defaults from `config.example.yaml`
-into the user config without overwriting existing values. `llm-tracker server
+`tokenage server start` merges missing defaults from `config.example.yaml`
+into the user config without overwriting existing values. `tokenage server
 restart` does not touch config at all, except to persist `--otlp-port`.
 
-Client state, all under `$LLM_TRACKER_HOME` (default `~/.llm-tracker`):
+Client state, all under `$TOKENAGE_HOME` (default `~/.tokenage`):
 
 | Path | Owner | Contents |
 |---|---|---|
@@ -236,21 +236,20 @@ Client state, all under `$LLM_TRACKER_HOME` (default `~/.llm-tracker`):
 
 | Variable | Description |
 |---|---|
-| `LLM_TRACKER_HOME` | Override the tracker home directory (default `~/.llm-tracker`). |
-| `LLM_TRACKER_ROOT` | Path to the server checkout. Overrides `$LLM_TRACKER_HOME/src`; used by worktrees and tests. |
-| `LLM_TRACKER_CONFIG` | Override the config file path. |
-| `LLM_TRACKER_BIN_DIR` | Where the launcher is installed (default `~/.local/bin`). |
-| `LLM_TRACKER_CLIENT_COMMIT` | Commit to report for the client, when the snapshot has no `COMMIT` file. |
-| `LLM_TRACKER_SKIP_BANNER` | Set by the launcher so a script it calls does not print a second banner. `bootstrap.sh` and `start.sh` honor it; `restart.sh`, `status.sh` and `update.sh` do not. |
-| `LLM_TRACKER_SKIP_INSTALL` | `1` makes `bootstrap` skip dependency installation and record the requirements stamp anyway. |
-| `LLM_TRACKER_SERVER` | Server URL `llm-tracker update` passes to the hosted installer, and the default the hosted installer reads instead of its baked-in server URL. |
-| `LLMTRACKER_SERVER` | Fallback server URL for `llm-tracker login` when `--server` is absent. |
-| `LLM_TRACKER_INGEST_TOKEN` | Set by `llm-tracker setup` on the agent configure scripts when signed in, so agents send the device ingest token. |
-| `LLM_TRACKER_DB_URL` | Override the database URL at runtime (server side; removed from the child's env by `--proxy-env`). |
-| `LLM_TRACKER_API_URL` | Frontend-only: override the API base URL used by the Vite dev server. |
+| `TOKENAGE_HOME` | Override the tracker home directory (default `~/.tokenage`). |
+| `TOKENAGE_ROOT` | Path to the server checkout. Overrides `$TOKENAGE_HOME/src`; used by worktrees and tests. |
+| `TOKENAGE_CONFIG` | Override the config file path. |
+| `TOKENAGE_BIN_DIR` | Where the launcher is installed (default `~/.local/bin`). |
+| `TOKENAGE_CLIENT_COMMIT` | Commit to report for the client, when the snapshot has no `COMMIT` file. |
+| `TOKENAGE_SKIP_BANNER` | Set by the launcher so a script it calls does not print a second banner. `bootstrap.sh` and `start.sh` honor it; `restart.sh`, `status.sh` and `update.sh` do not. |
+| `TOKENAGE_SKIP_INSTALL` | `1` makes `bootstrap` skip dependency installation and record the requirements stamp anyway. |
+| `TOKENAGE_SERVER` | Fallback server URL for `tokenage login` when `--server` is absent; passed by `tokenage update` to the hosted installer, which reads it instead of its baked-in server URL. |
+| `TOKENAGE_INGEST_TOKEN` | Set by `tokenage setup` on the agent configure scripts when signed in, so agents send the device ingest token. |
+| `TOKENAGE_DB_URL` | Override the database URL at runtime (server side; removed from the child's env by `--proxy-env`). |
+| `TOKENAGE_API_URL` | Frontend-only: override the API base URL used by the Vite dev server. |
 | `OPENAI_BASE_URL` | Set by `--proxy-env` to route OpenAI-compatible clients through the proxy. |
 | `ANTHROPIC_BASE_URL` | Set by `--proxy-env` to route Anthropic-compatible clients through the proxy. |
-| `OTEL_EXPORTER_OTLP_LOGS_ENDPOINT` | The agent telemetry endpoint. `llm-tracker setup` strips any pre-existing value before writing its own. |
+| `OTEL_EXPORTER_OTLP_LOGS_ENDPOINT` | The agent telemetry endpoint. `tokenage setup` strips any pre-existing value before writing its own. |
 | `NO_COLOR` | No color. The banner still prints. |
 
 ## API Endpoints
@@ -300,5 +299,5 @@ sends only `after_ts`, plus `until_ts` on the re-anchor pass.
 | `scripts/configure-opencode-plugin.py` | Configure the OpenCode plugin OTLP telemetry. |
 | `scripts/configure-kilo-plugin.py` | Configure the Kilo Code plugin OTLP telemetry. |
 
-The four `configure-*.py` scripts are the ones `llm-tracker setup` shells out to;
+The four `configure-*.py` scripts are the ones `tokenage setup` shells out to;
 they own the agent file formats. The server never calls them.

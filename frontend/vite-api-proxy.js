@@ -101,7 +101,7 @@ export function createApiProxyMiddleware({ env, trackerConfigPath } = {}) {
           detail:
             error instanceof Error
               ? error.message
-              : 'Failed to proxy request to llm-tracker API',
+              : 'Failed to proxy request to tokenage API',
         }),
       )
     }
@@ -110,7 +110,7 @@ export function createApiProxyMiddleware({ env, trackerConfigPath } = {}) {
 
 export function createApiProxyPlugin(options = {}) {
   return {
-    name: 'llm-tracker-api-proxy',
+    name: 'tokenage-api-proxy',
     configureServer(server) {
       server.middlewares.use(createApiProxyMiddleware(options))
     },

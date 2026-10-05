@@ -1,4 +1,4 @@
-"""``llm-tracker status`` — what is installed, is it running, where do agents point.
+"""``tokenage status`` — what is installed, is it running, where do agents point.
 
 Reads state only. Creates no files, starts no services, and works on a machine
 that has no config, no supervisord and no credentials.
@@ -31,9 +31,9 @@ from client.setup import (
 )
 
 SERVICES = (
-    ("proxy", "llm-tracker-proxy", "proxy_port"),
-    ("api", "llm-tracker-api", "api_port"),
-    ("otlp", "llm-tracker-otlp", "otlp_port"),
+    ("proxy", "tokenage-proxy", "proxy_port"),
+    ("api", "tokenage-api", "api_port"),
+    ("otlp", "tokenage-otlp", "otlp_port"),
 )
 
 _LABEL_WIDTH = 12
@@ -199,23 +199,23 @@ def _fix_hint(data: dict[str, Any]) -> str | None:
         agent["detected"] and agent["endpoint_matches"] is not True
         for agent in data["agents"]
     ):
-        return "run llm-tracker setup"
+        return "run tokenage setup"
     if data["server"]["installed"] and any(
         service["state"] == "down" for service in data["server"]["services"]
     ):
-        return "run llm-tracker server start"
+        return "run tokenage server start"
     if data["server"]["installed"] and any(
         service["state"] == "unknown" for service in data["server"]["services"]
     ):
         return "check the server collector configuration; its address is unknown"
     if not data["server"]["installed"] and not data["account"]["signed_in"]:
-        return "run llm-tracker login --server <url>"
+        return "run tokenage login --server <url>"
     return None
 
 
 def render(data: dict[str, Any]) -> str:
     lines: list[str] = []
-    head = f"llm-tracker {data['client']['version']}"
+    head = f"tokenage {data['client']['version']}"
     commit = data["client"]["commit"]
     if commit:
         head += f" (client {commit[:7]})"

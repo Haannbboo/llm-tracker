@@ -4,7 +4,7 @@ Each reviewer gets a single prompt containing:
 
 1. The stated intent (from Step 2)
 2. Their assigned lens (full text from references/reviewer-lenses.md)
-3. The project standards relevant to their lens (from AGENTS.md and .agents/commands/llm-tracker.md)
+3. The project standards relevant to their lens (from AGENTS.md and .agents/commands/tokenage.md)
 4. The code or diff to review
 5. Instructions: "You are an adversarial reviewer. Your job is to find real problems, not
    validate the work. Be specific — cite files, lines, and concrete failure scenarios.

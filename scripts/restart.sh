@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # scripts/restart.sh
-# Reload the running llm-tracker services so new backend code takes effect.
+# Reload the running tokenage services so new backend code takes effect.
 #
 # Deliberately narrow: no dependency install, no frontend build, no config sync,
 # no port check, and it never starts a service that is already down. Use
@@ -10,7 +10,7 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-CONFIG_DIR="${HOME}/.llm-tracker"
+CONFIG_DIR="${HOME}/.tokenage"
 CONFIG_PATH="${CONFIG_DIR}/config.yaml"
 SUPERVISORD_CONF="${CONFIG_DIR}/supervisord.conf"
 SUPERVISORCTL="${ROOT_DIR}/.venv/bin/supervisorctl"
@@ -26,12 +26,12 @@ banner
 step_header "Pre-flight checks"
 
 if [[ ! -x "${PYTHON}" ]]; then
-  fail "Virtual environment not found — run llm-tracker server bootstrap"
+  fail "Virtual environment not found — run tokenage server bootstrap"
   exit 1
 fi
 
 if [[ ! -f "${SUPERVISORD_CONF}" ]]; then
-  fail "Not running — run llm-tracker server start"
+  fail "Not running — run tokenage server start"
   exit 1
 fi
 
@@ -111,13 +111,13 @@ fi
 step_header "Reloading services"
 
 STOPPED=()
-for prog in llm-tracker-proxy llm-tracker-api llm-tracker-otlp; do
+for prog in tokenage-proxy tokenage-api tokenage-otlp; do
   status="$("${SUPERVISORCTL}" -c "${SUPERVISORD_CONF}" status "${prog}" 2>/dev/null | awk '{print $2}' || true)"
   if [[ "$status" != "RUNNING" ]]; then
     STOPPED+=("$prog")
     continue
   fi
-  if [[ "$prog" == "llm-tracker-otlp" && -n "$OTLP_PORT" ]]; then
+  if [[ "$prog" == "tokenage-otlp" && -n "$OTLP_PORT" ]]; then
     # The port is baked into the process, so a port change is a restart.
     info "Restarting ${prog} (port changed to ${OTLP_PORT})..."
     "${SUPERVISORCTL}" -c "${SUPERVISORD_CONF}" restart "${prog}"
@@ -134,7 +134,7 @@ if [[ ${#STOPPED[@]} -gt 0 ]]; then
   for prog in "${STOPPED[@]}"; do
     info "${prog}: not running, left stopped"
   done
-  info "run llm-tracker server start to bring them up"
+  info "run tokenage server start to bring them up"
 fi
 
 # ── Final status ────────────────────────────────────────────────────

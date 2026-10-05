@@ -1,6 +1,6 @@
 pricing:
   # Auto-fetch model pricing from the configured sources on startup and config
-  # refresh. Each source caches locally under ~/.llm-tracker/pricing/.
+  # refresh. Each source caches locally under ~/.tokenage/pricing/.
   # Set to false to disable and rely on YAML-only pricing.
   auto_fetch: true
   # Ranked price sources: earlier entries win collisions, later ones fill gaps.
@@ -104,7 +104,7 @@ server:
   api_port: 4001
 
 db:
-  path: ~/.llm-tracker/usage.db
+  path: ~/.tokenage/usage.db
   # For PostgreSQL/MySQL, use `url` instead of `path`, for example:
-  # url: postgresql+psycopg://user:password@db-host:5432/llm_tracker
-  # url: mysql+pymysql://user:password@db-host:3306/llm_tracker
+  # url: postgresql+psycopg://user:password@db-host:5432/tokenage
+  # url: mysql+pymysql://user:password@db-host:3306/tokenage

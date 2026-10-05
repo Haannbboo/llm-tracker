@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -e
 
-CONFIG="${LLM_TRACKER_CONFIG:-/root/.llm-tracker/config.yaml}"
+CONFIG="${TOKENAGE_CONFIG:-/root/.tokenage/config.yaml}"
 
 # Copy default config if none is mounted
 if [ ! -f "$CONFIG" ]; then

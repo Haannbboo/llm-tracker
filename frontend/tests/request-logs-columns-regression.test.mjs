@@ -15,7 +15,7 @@ if (!existsSync(controlPath)) {
 const controlSource = readFileSync(controlPath, 'utf-8')
 
 test('request log column hook provides a persisted registry with validation', () => {
-  assert.match(requestLogColumnsSource, /const REQUEST_LOG_COLUMN_KEY = 'llm-tracker-request-log-columns'/)
+  assert.match(requestLogColumnsSource, /const REQUEST_LOG_COLUMN_KEY = 'tokenage-request-log-columns'/)
   assert.match(requestLogColumnsSource, /export const DEFAULT_REQUEST_LOG_COLUMNS/)
   assert.match(requestLogColumnsSource, /localStorage\.getItem\(REQUEST_LOG_COLUMN_KEY\)/)
   assert.match(requestLogColumnsSource, /localStorage\.setItem\(REQUEST_LOG_COLUMN_KEY, JSON\.stringify/)

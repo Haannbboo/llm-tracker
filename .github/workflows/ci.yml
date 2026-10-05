@@ -44,8 +44,8 @@ jobs:
 
       - name: Create test config
         run: |
-          mkdir -p ~/.llm-tracker
-          cp config.example.yaml ~/.llm-tracker/config.yaml
+          mkdir -p ~/.tokenage
+          cp config.example.yaml ~/.tokenage/config.yaml
 
       - name: Ruff format and lint
         run: python -m ruff format --check . && python -m ruff check src/ client/ protocol/ scripts/ tests/

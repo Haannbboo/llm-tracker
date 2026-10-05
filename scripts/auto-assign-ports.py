@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Automatically move llm-tracker services to free ports when defaults are busy."""
+"""Automatically move tokenage services to free ports when defaults are busy."""
 
 from __future__ import annotations
 
@@ -159,7 +159,7 @@ def main(argv: list[str] | None = None) -> int:
 
     _write_config(config_path, config)
 
-    _info("Default service ports are busy; moved llm-tracker to free ports")
+    _info("Default service ports are busy; moved tokenage to free ports")
     for line in _service_port_summary(config):
         print(line)
     _info(f"Updated config at {config_path}")

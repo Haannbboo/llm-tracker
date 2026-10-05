@@ -1,4 +1,4 @@
-"""``llm-tracker status`` — the component report."""
+"""``tokenage status`` — the component report."""
 
 from __future__ import annotations
 
@@ -17,9 +17,9 @@ def tracker_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     home = tmp_path / "home"
     home.mkdir()
     monkeypatch.setenv("HOME", str(home))
-    monkeypatch.setenv("LLM_TRACKER_HOME", str(home / ".llm-tracker"))
-    monkeypatch.delenv("LLM_TRACKER_ROOT", raising=False)
-    monkeypatch.delenv("LLM_TRACKER_CONFIG", raising=False)
+    monkeypatch.setenv("TOKENAGE_HOME", str(home / ".tokenage"))
+    monkeypatch.delenv("TOKENAGE_ROOT", raising=False)
+    monkeypatch.delenv("TOKENAGE_CONFIG", raising=False)
     monkeypatch.setattr(setup.shutil, "which", lambda name: None)
 
     def runtime_version(*args, **kwargs):
@@ -51,7 +51,7 @@ def test_status_on_a_bare_client_only_machine(tracker_home: Path, capsys) -> Non
     # Not being signed in is a fact, not a fault: nothing installed is broken.
     assert code == 0
     assert "not signed in" in out
-    assert "run llm-tracker login --server <url>" in out
+    assert "run tokenage login --server <url>" in out
     assert "services" not in out  # no server component, so no service rows
     assert "dashboard" not in out
 
@@ -76,7 +76,7 @@ def test_status_json_shape(tracker_home: Path, capsys) -> None:
 def test_status_reports_a_signed_in_client(
     tracker_home: Path, capsys, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    credentials = tracker_home / ".llm-tracker" / "credentials.json"
+    credentials = tracker_home / ".tokenage" / "credentials.json"
     _write(
         credentials,
         json.dumps(
@@ -84,7 +84,7 @@ def test_status_reports_a_signed_in_client(
                 "server_url": "https://app.example.com",
                 "email": "you@example.com",
                 "device_name": "hanbo-macbook",
-                "cli_token": "llmt_cli_x",
+                "cli_token": "tokenage_cli_x",
                 "otlp_logs_endpoint": "https://app.example.com/v1/logs",
             }
         ),
@@ -105,12 +105,12 @@ def test_status_reports_agents_pointing_at_the_wrong_collector(
         lambda name: "/usr/bin/claude" if name == "claude" else None,
     )
     _write(
-        tracker_home / ".llm-tracker" / "credentials.json",
+        tracker_home / ".tokenage" / "credentials.json",
         json.dumps(
             {
                 "server_url": "https://app.example.com",
                 "email": "you@example.com",
-                "cli_token": "llmt_cli_x",
+                "cli_token": "tokenage_cli_x",
                 "otlp_logs_endpoint": "https://app.example.com/v1/logs",
             }
         ),
@@ -130,7 +130,7 @@ def test_status_reports_agents_pointing_at_the_wrong_collector(
     assert status.run_status(as_json=False) == 1
     out = capsys.readouterr().out
     assert "wrong collector" in out
-    assert "run llm-tracker setup" in out
+    assert "run tokenage setup" in out
 
 
 def test_status_lists_wired_agents_with_their_collector(
@@ -142,12 +142,12 @@ def test_status_lists_wired_agents_with_their_collector(
         lambda name: "/usr/bin/claude" if name == "claude" else None,
     )
     _write(
-        tracker_home / ".llm-tracker" / "credentials.json",
+        tracker_home / ".tokenage" / "credentials.json",
         json.dumps(
             {
                 "server_url": "https://app.example.com",
                 "email": "you@example.com",
-                "cli_token": "llmt_cli_x",
+                "cli_token": "tokenage_cli_x",
                 "otlp_logs_endpoint": "https://app.example.com/v1/logs",
             }
         ),
@@ -172,14 +172,14 @@ def test_status_lists_wired_agents_with_their_collector(
 def test_status_reports_stopped_server_services(
     tracker_home: Path, capsys, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    server_root = tracker_home / ".llm-tracker" / "src"
+    server_root = tracker_home / ".tokenage" / "src"
     (server_root / ".venv" / "bin").mkdir(parents=True)
     (server_root / ".venv" / "bin" / "python").write_text("#!/bin/sh\n")
     (server_root / ".venv" / "bin" / "python").chmod(0o755)
     (server_root / "VERSION").write_text("9.9.9\n", encoding="utf-8")
-    monkeypatch.setenv("LLM_TRACKER_ROOT", str(server_root))
+    monkeypatch.setenv("TOKENAGE_ROOT", str(server_root))
     _write(
-        tracker_home / ".llm-tracker" / "config.yaml",
+        tracker_home / ".tokenage" / "config.yaml",
         "server:\n  host: 127.0.0.1\n  port: 4000\n  api_port: 4001\n  otlp_port: 4002\n",
     )
     monkeypatch.setattr(status, "_supervisor_running", lambda program, root: False)
@@ -193,20 +193,20 @@ def test_status_reports_stopped_server_services(
     assert "proxy :4000 down" in out
     assert "api :4001 down" in out
     assert "otlp :4002 down" in out
-    assert "run llm-tracker server start" in out
+    assert "run tokenage server start" in out
 
 
 def test_status_reports_running_server_services(
     tracker_home: Path, capsys, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    server_root = tracker_home / ".llm-tracker" / "src"
+    server_root = tracker_home / ".tokenage" / "src"
     (server_root / ".venv" / "bin").mkdir(parents=True)
     (server_root / ".venv" / "bin" / "python").write_text("#!/bin/sh\n")
     (server_root / ".venv" / "bin" / "python").chmod(0o755)
     (server_root / "VERSION").write_text("9.9.9\n", encoding="utf-8")
-    monkeypatch.setenv("LLM_TRACKER_ROOT", str(server_root))
+    monkeypatch.setenv("TOKENAGE_ROOT", str(server_root))
     _write(
-        tracker_home / ".llm-tracker" / "config.yaml",
+        tracker_home / ".tokenage" / "config.yaml",
         "server:\n  host: 127.0.0.1\n  port: 4000\n  api_port: 4001\n  otlp_port: 4002\n",
     )
     monkeypatch.setattr(status, "_supervisor_running", lambda program, root: True)
@@ -223,12 +223,12 @@ def test_status_supervision_alone_is_not_enough(
     tracker_home: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A RUNNING supervisord program whose port is dead is not up."""
-    server_root = tracker_home / ".llm-tracker" / "src"
+    server_root = tracker_home / ".tokenage" / "src"
     (server_root / ".venv" / "bin").mkdir(parents=True)
     (server_root / ".venv" / "bin" / "python").write_text("#!/bin/sh\n")
     (server_root / ".venv" / "bin" / "python").chmod(0o755)
     (server_root / "VERSION").write_text("9.9.9\n", encoding="utf-8")
-    monkeypatch.setenv("LLM_TRACKER_ROOT", str(server_root))
+    monkeypatch.setenv("TOKENAGE_ROOT", str(server_root))
     monkeypatch.setattr(status, "_supervisor_running", lambda program, root: True)
     monkeypatch.setattr(
         status, "_port_listening", lambda host, port, timeout=1.0: False
@@ -253,12 +253,12 @@ def test_unknown_collector_is_not_reported_as_broken(
         lambda name: "/usr/bin/claude" if name == "claude" else None,
     )
     _write(
-        tracker_home / ".llm-tracker" / "credentials.json",
+        tracker_home / ".tokenage" / "credentials.json",
         json.dumps(
             {
                 "server_url": "https://app.example.com",
                 "email": "you@example.com",
-                "cli_token": "llmt_cli_x",
+                "cli_token": "tokenage_cli_x",
             }
         ),
     )
@@ -280,7 +280,7 @@ def test_unknown_collector_is_not_reported_as_broken(
     assert "wrong collector" not in out
     assert "none wired" not in out
     # It is still actionable: setup is what discovers the collector.
-    assert "run llm-tracker setup" in out
+    assert "run tokenage setup" in out
 
     data = status.collect()
     claude = next(agent for agent in data["agents"] if agent["name"] == "claude")
@@ -297,7 +297,7 @@ def test_known_collector_with_missing_agent_config_is_unhealthy(
         lambda name: "/usr/bin/codex" if name == "codex" else None,
     )
     _write(
-        tracker_home / ".llm-tracker" / "credentials.json",
+        tracker_home / ".tokenage" / "credentials.json",
         json.dumps(
             {
                 "server_url": "https://app.example.com",
@@ -325,13 +325,13 @@ def test_known_collector_with_missing_agent_config_is_unhealthy(
 def test_status_probes_actual_bind_addresses(
     tracker_home, monkeypatch, bind, expected_host, override
 ):
-    root = tracker_home / ".llm-tracker" / "src"
+    root = tracker_home / ".tokenage" / "src"
     _write(root / ".venv" / "bin" / "python", "#!/bin/sh\n")
     _write(
-        tracker_home / ".llm-tracker" / "config.yaml",
+        tracker_home / ".tokenage" / "config.yaml",
         f"server:\n  host: '{bind}'\n  base_url: https://public.example\n  port: 9100\n",
     )
-    monkeypatch.setenv("LLM_TRACKER_ROOT", str(root))
+    monkeypatch.setenv("TOKENAGE_ROOT", str(root))
     monkeypatch.delenv("OTEL_EXPORTER_OTLP_LOGS_ENDPOINT", raising=False)
     if override:
         monkeypatch.setenv("OTEL_EXPORTER_OTLP_LOGS_ENDPOINT", override)
@@ -397,7 +397,7 @@ def test_status_redacts_collector_secrets_in_all_output(
         lambda name: f"/usr/bin/{name}" if name == agent else None,
     )
     _write(
-        tracker_home / ".llm-tracker" / "credentials.json",
+        tracker_home / ".tokenage" / "credentials.json",
         json.dumps(
             {
                 "server_url": "https://user:secret@api.example?token=secret",
@@ -451,13 +451,13 @@ def test_status_does_not_guess_collector_port_when_api_omits_hint(
 ):
     from types import SimpleNamespace
 
-    root = tracker_home / ".llm-tracker" / "src"
+    root = tracker_home / ".tokenage" / "src"
     _write(root / ".venv" / "bin" / "python", "#!/bin/sh\n")
     _write(
-        tracker_home / ".llm-tracker" / "config.yaml",
+        tracker_home / ".tokenage" / "config.yaml",
         "server:\n  port: 9300\n  otlp_port: 9302\n",
     )
-    monkeypatch.setenv("LLM_TRACKER_ROOT", str(root))
+    monkeypatch.setenv("TOKENAGE_ROOT", str(root))
     monkeypatch.setattr(
         status.httpx,
         "get",
@@ -488,13 +488,13 @@ def test_status_uses_bind_metadata_independently_of_public_endpoint(
 ):
     from types import SimpleNamespace
 
-    root = tracker_home / ".llm-tracker" / "src"
+    root = tracker_home / ".tokenage" / "src"
     _write(root / ".venv" / "bin" / "python", "#!/bin/sh\n")
     _write(
-        tracker_home / ".llm-tracker" / "config.yaml",
+        tracker_home / ".tokenage" / "config.yaml",
         "server:\n  host: 127.0.0.1\n  base_url: https://nas.example\n  port: 9400\n  otlp_port: 9402\n",
     )
-    monkeypatch.setenv("LLM_TRACKER_ROOT", str(root))
+    monkeypatch.setenv("TOKENAGE_ROOT", str(root))
     actual_host = "nas.example" if public_hint else "127.0.0.1"
     payload = {"collector_bind": {"host": actual_host, "port": 9205}}
     if public_hint:
@@ -520,9 +520,9 @@ def test_status_uses_bind_metadata_independently_of_public_endpoint(
 
 
 def test_unavailable_api_leaves_collector_address_unknown(tracker_home, monkeypatch):
-    root = tracker_home / ".llm-tracker" / "src"
+    root = tracker_home / ".tokenage" / "src"
     _write(root / ".venv" / "bin" / "python", "#!/bin/sh\n")
-    monkeypatch.setenv("LLM_TRACKER_ROOT", str(root))
+    monkeypatch.setenv("TOKENAGE_ROOT", str(root))
 
     def unavailable(*args, **kwargs):
         raise httpx.ConnectError("local API unavailable")
@@ -549,4 +549,4 @@ def test_unavailable_api_leaves_collector_address_unknown(tracker_home, monkeypa
     assert "collector address unknown" in rendered
     assert "(not reachable)" not in rendered
     data["server"]["services"][0]["state"] = "down"
-    assert status._fix_hint(data) == "run llm-tracker server start"
+    assert status._fix_hint(data) == "run tokenage server start"

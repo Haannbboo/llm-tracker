@@ -3,24 +3,24 @@
 # The API replaces the server and optional preview-commit placeholders.
 set -eu
 
-LLM_TRACKER_INSTALL_SERVER=__LLM_TRACKER_SERVER_URL__
-LLM_TRACKER_INSTALL_COMMIT=__LLM_TRACKER_INSTALL_COMMIT__
-REPOSITORY=Haannbboo/llm-tracker
-PYTHON_VERSION=${LLM_TRACKER_PYTHON_VERSION:-3.13}
+TOKENAGE_INSTALL_SERVER=__TOKENAGE_SERVER_URL__
+TOKENAGE_INSTALL_COMMIT=__TOKENAGE_INSTALL_COMMIT__
+REPOSITORY=Haannbboo/tokenage
+PYTHON_VERSION=${TOKENAGE_PYTHON_VERSION:-3.13}
 
 say() {
-  printf 'llm-tracker: %s\n' "$*"
+  printf 'tokenage: %s\n' "$*"
 }
 
 fail() {
-  printf 'llm-tracker: error: %s\n' "$*" >&2
+  printf 'tokenage: error: %s\n' "$*" >&2
   exit 1
 }
 
 : "${HOME:?HOME must be set}"
-SERVER_URL=${LLM_TRACKER_SERVER:-$LLM_TRACKER_INSTALL_SERVER}
+SERVER_URL=${TOKENAGE_SERVER:-$TOKENAGE_INSTALL_SERVER}
 case "$SERVER_URL" in
-  ''|__LLM_TRACKER_SERVER_URL"__") fail 'the installer has no hosted server URL' ;;
+  ''|__TOKENAGE_SERVER_URL"__") fail 'the installer has no hosted server URL' ;;
   https://?*) ;;
   http://localhost|http://localhost:*|http://localhost/*|http://localhost\?*|http://localhost\#*) ;;
   http://127.0.0.1|http://127.0.0.1:*|http://127.0.0.1/*|http://127.0.0.1\?*|http://127.0.0.1\#*) ;;
@@ -43,16 +43,16 @@ for command_name in curl tar sed awk mktemp mkdir mv ln rm cp chmod readlink cat
   command -v "$command_name" >/dev/null 2>&1 || fail "required command not found: $command_name"
 done
 
-TRACKER_HOME=${LLM_TRACKER_HOME:-$HOME/.llm-tracker}
+TRACKER_HOME=${TOKENAGE_HOME:-$HOME/.tokenage}
 VERSIONS_DIR=$TRACKER_HOME/versions
-BIN_DIR=${LLM_TRACKER_BIN_DIR:-$HOME/.local/bin}
+BIN_DIR=${TOKENAGE_BIN_DIR:-$HOME/.local/bin}
 ORIGINAL_PATH=${PATH:-}
 OS_NAME=$(uname -s)
 case "$OS_NAME" in
   Darwin|Linux) ;;
   *) fail "unsupported operating system: $OS_NAME (use macOS or Linux)" ;;
 esac
-LAUNCHER=$BIN_DIR/llm-tracker
+LAUNCHER=$BIN_DIR/tokenage
 if [ -e "$TRACKER_HOME/current" ] && [ ! -L "$TRACKER_HOME/current" ]; then
   fail "$TRACKER_HOME/current already exists and is not a managed link; move it aside before installing"
 fi
@@ -61,13 +61,13 @@ fi
 # carries. A symlink is refused: that is the self-hosted install's launcher, and
 # replacing it would silently detach the machine from its own server checkout.
 if [ -e "$LAUNCHER" ] || [ -L "$LAUNCHER" ]; then
-  if [ -L "$LAUNCHER" ] || ! grep -q '^# llm-tracker launcher$' "$LAUNCHER" 2>/dev/null; then
+  if [ -L "$LAUNCHER" ] || ! grep -q '^# tokenage launcher$' "$LAUNCHER" 2>/dev/null; then
     fail "$LAUNCHER already exists; move it aside to keep that installation, then run this installer again"
   fi
 fi
 
 TMP_ROOT=${TMPDIR:-/tmp}
-WORK_DIR=$(mktemp -d "$TMP_ROOT/llm-tracker-install.XXXXXX") || fail 'could not create temporary directory'
+WORK_DIR=$(mktemp -d "$TMP_ROOT/tokenage-install.XXXXXX") || fail 'could not create temporary directory'
 STAGING_DIR=
 cleanup() {
   rm -rf "$WORK_DIR"
@@ -95,8 +95,8 @@ command -v uv >/dev/null 2>&1 || fail 'uv installation did not provide the uv co
 say "Installing Python $PYTHON_VERSION..."
 uv python install "$PYTHON_VERSION"
 
-if [ -n "$LLM_TRACKER_INSTALL_COMMIT" ]; then
-  COMMIT=$LLM_TRACKER_INSTALL_COMMIT
+if [ -n "$TOKENAGE_INSTALL_COMMIT" ]; then
+  COMMIT=$TOKENAGE_INSTALL_COMMIT
 else
   say 'Resolving the latest client source...'
   curl -fsSL -H 'Accept: application/vnd.github+json' \
@@ -116,7 +116,7 @@ if [ ! -x "$VERSION_DIR/.venv/bin/python" ]; then
     -o "$WORK_DIR/source.tar.gz" || fail 'could not download the source snapshot'
   mkdir "$WORK_DIR/extracted"
   tar -xzf "$WORK_DIR/source.tar.gz" -C "$WORK_DIR/extracted" || fail 'could not extract the source snapshot'
-  SOURCE_DIR=$WORK_DIR/extracted/llm-tracker-$COMMIT
+  SOURCE_DIR=$WORK_DIR/extracted/tokenage-$COMMIT
   [ -d "$SOURCE_DIR/client" ] || fail 'source snapshot does not contain the client package'
   [ -f "$SOURCE_DIR/client/requirements.txt" ] || fail 'client runtime requirements are missing'
 
@@ -139,15 +139,15 @@ fi
 if [ ! -f "$VERSION_DIR/client/COMMIT" ]; then
   printf '%s\n' "$COMMIT" > "$VERSION_DIR/client/COMMIT"
 fi
-LLM_TRACKER_CLIENT_COMMIT=$COMMIT PYTHONPATH=$VERSION_DIR \
+TOKENAGE_CLIENT_COMMIT=$COMMIT PYTHONPATH=$VERSION_DIR \
   "$VERSION_DIR/.venv/bin/python" -P -m client check-server --server "$SERVER_URL"
 
-# Install the shared launcher. It is the same scripts/llm-tracker the all-in-one
+# Install the shared launcher. It is the same scripts/tokenage the all-in-one
 # install symlinks, and resolves the client (and the server, when one is
-# installed) from $LLM_TRACKER_HOME on every run.
-[ -f "$VERSION_DIR/scripts/llm-tracker" ] || fail 'the source snapshot is missing scripts/llm-tracker'
-LAUNCHER_TMP=$BIN_DIR/.llm-tracker-$$
-cp "$VERSION_DIR/scripts/llm-tracker" "$LAUNCHER_TMP"
+# installed) from $TOKENAGE_HOME on every run.
+[ -f "$VERSION_DIR/scripts/tokenage" ] || fail 'the source snapshot is missing scripts/tokenage'
+LAUNCHER_TMP=$BIN_DIR/.tokenage-$$
+cp "$VERSION_DIR/scripts/tokenage" "$LAUNCHER_TMP"
 chmod 755 "$LAUNCHER_TMP"
 mv -f "$LAUNCHER_TMP" "$LAUNCHER"
 
@@ -157,20 +157,20 @@ ln -s "versions/$COMMIT" "$CURRENT_TMP"
 "$VERSION_DIR/.venv/bin/python" -c 'import os, sys; os.replace(sys.argv[1], sys.argv[2])' \
   "$CURRENT_TMP" "$TRACKER_HOME/current"
 
-if [ "${LLM_TRACKER_SKIP_LOGIN:-0}" = 1 ]; then
+if [ "${TOKENAGE_SKIP_LOGIN:-0}" = 1 ]; then
   say "Refreshing agent configuration with the updated client..."
-  if ! LLM_TRACKER_CLIENT_COMMIT=$COMMIT PYTHONPATH=$VERSION_DIR \
+  if ! TOKENAGE_CLIENT_COMMIT=$COMMIT PYTHONPATH=$VERSION_DIR \
     "$VERSION_DIR/.venv/bin/python" -P -m client setup; then
     fail 'client update installed, but agent configuration refresh failed'
   fi
-  say "Installed llm-tracker $COMMIT. Existing credentials were preserved; sign-in skipped."
+  say "Installed tokenage $COMMIT. Existing credentials were preserved; sign-in skipped."
 else
-  say "Installed llm-tracker $COMMIT. Starting sign-in..."
+  say "Installed tokenage $COMMIT. Starting sign-in..."
   if ( : </dev/tty ) >/dev/null 2>&1; then
-    LLM_TRACKER_CLIENT_COMMIT=$COMMIT PYTHONPATH=$VERSION_DIR \
+    TOKENAGE_CLIENT_COMMIT=$COMMIT PYTHONPATH=$VERSION_DIR \
       "$VERSION_DIR/.venv/bin/python" -P -m client login --server "$SERVER_URL" </dev/tty
   else
-    say "No interactive terminal is available. Finish setup with: $BIN_DIR/llm-tracker login --server $SERVER_URL"
+    say "No interactive terminal is available. Finish setup with: $BIN_DIR/tokenage login --server $SERVER_URL"
   fi
 fi
 
@@ -178,6 +178,6 @@ fi
 case ":${ORIGINAL_PATH}:" in
   *":$BIN_DIR:"*) ;;
   *)
-    printf '\nAdd this directory to your shell PATH to run llm-tracker from anywhere:\n  export PATH="%s:$PATH"\n' "$BIN_DIR"
+    printf '\nAdd this directory to your shell PATH to run tokenage from anywhere:\n  export PATH="%s:$PATH"\n' "$BIN_DIR"
     ;;
 esac

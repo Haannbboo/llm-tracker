@@ -32,9 +32,7 @@ def load_settings(path: Path) -> dict[str, Any]:
 def load_ingest_token() -> str | None:
     try:
         credentials = json.loads(
-            (Path.home() / ".llm-tracker" / "credentials.json").read_text(
-                encoding="utf-8"
-            )
+            (Path.home() / ".tokenage" / "credentials.json").read_text(encoding="utf-8")
         )
     except (OSError, UnicodeError, json.JSONDecodeError):
         return None
@@ -73,10 +71,10 @@ _OWNED_ENV_KEYS = (
 
 
 def _disable(settings_path: Path, expected_endpoint: str | None) -> int:
-    """Remove llm-tracker's telemetry keys and its tool-call hooks.
+    """Remove tokenage's telemetry keys and its tool-call hooks.
 
     A hand-written collector config is left alone: the OTLP keys are only removed
-    while the endpoint is the one llm-tracker wrote. The hooks are identified by
+    while the endpoint is the one tokenage wrote. The hooks are identified by
     script path, so they can only be ours.
     """
     if not expected_endpoint:
@@ -106,7 +104,7 @@ def _disable(settings_path: Path, expected_endpoint: str | None) -> int:
         remaining = [
             part
             for part in headers.split(",")
-            if part.strip().partition("=")[0] != "x-llm-tracker-token"
+            if part.strip().partition("=")[0] != "x-tokenage-token"
         ]
         if len(remaining) != len(headers.split(",")):
             if remaining:
@@ -151,7 +149,7 @@ def _disable(settings_path: Path, expected_endpoint: str | None) -> int:
             settings.pop("hooks", None)
 
     if not changed:
-        _info(f"No llm-tracker telemetry in {settings_path}")
+        _info(f"No tokenage telemetry in {settings_path}")
         return 2
     save_settings(settings_path, settings)
     _info(f"Claude Code telemetry removed from {settings_path}")
@@ -171,10 +169,10 @@ def _is_tracker_hook(hook: object) -> bool:
         return False
     root = path.parent.parent
     try:
-        launcher = (root / "scripts" / "llm-tracker").read_text(encoding="utf-8")
+        launcher = (root / "scripts" / "tokenage").read_text(encoding="utf-8")
     except (OSError, UnicodeError):
         return False
-    return "# llm-tracker launcher" in launcher.splitlines() and (
+    return "# tokenage launcher" in launcher.splitlines() and (
         (root / "client").is_dir() or (root / "src").is_dir()
     )
 
@@ -199,7 +197,7 @@ def _main() -> int:
 
     settings_path = Path(argv[0]).expanduser()
     if disable:
-        # ENDPOINT is the one llm-tracker wrote; anything else is the user's.
+        # ENDPOINT is the one tokenage wrote; anything else is the user's.
         return _disable(settings_path, argv[1] if len(argv) >= 2 else None)
     otlp_port = argv[1] if len(argv) >= 2 else "4002"
     host = argv[2] if len(argv) >= 3 else "localhost"
@@ -207,7 +205,7 @@ def _main() -> int:
     token = (
         argv[4]
         if len(argv) >= 5
-        else os.environ.get("LLM_TRACKER_INGEST_TOKEN") or load_ingest_token()
+        else os.environ.get("TOKENAGE_INGEST_TOKEN") or load_ingest_token()
     )
 
     settings = load_settings(settings_path)
@@ -222,7 +220,7 @@ def _main() -> int:
         ),
     }
     if token:
-        desired_env["OTEL_EXPORTER_OTLP_HEADERS"] = f"x-llm-tracker-token={token}"
+        desired_env["OTEL_EXPORTER_OTLP_HEADERS"] = f"x-tokenage-token={token}"
 
     changed = False
     for k, v in desired_env.items():

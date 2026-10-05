@@ -35,7 +35,7 @@ test('shouldProxyApiRequest matches config, usage and session routes', () => {
 })
 
 test('resolveProxyRequestUrl re-reads tracker config for each request', () => {
-  const root = mkdtempSync(join(tmpdir(), 'llm-tracker-vite-api-proxy-'))
+  const root = mkdtempSync(join(tmpdir(), 'tokenage-vite-api-proxy-'))
   const configPath = join(root, 'config.yaml')
 
   try {
@@ -73,7 +73,7 @@ test('resolveProxyRequestUrl ignores an incoming absolute frontend origin', () =
   assert.equal(
     resolveProxyRequestUrl('http://localhost:5173/config?x=1', {
       env: {
-        LLM_TRACKER_API_URL: 'http://127.0.0.1:4004',
+        TOKENAGE_API_URL: 'http://127.0.0.1:4004',
       },
     }),
     'http://127.0.0.1:4004/config?x=1',
@@ -97,7 +97,7 @@ test('apiProxyMiddleware relays a 302 with Location and Set-Cookie instead of fo
   const backendPort = backend.address().port
 
   const middleware = createApiProxyMiddleware({
-    env: { LLM_TRACKER_API_URL: `http://127.0.0.1:${backendPort}` },
+    env: { TOKENAGE_API_URL: `http://127.0.0.1:${backendPort}` },
   })
   const frontend = createServer((req, res) => {
     middleware(req, res, () => {

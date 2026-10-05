@@ -71,9 +71,9 @@ def _install_fake_httpx(monkeypatch, fake: FakeHttpx) -> None:
 def client_home(tmp_path, monkeypatch):
     """Credentials and agent config never touch real $HOME."""
     monkeypatch.setenv("HOME", str(tmp_path))
-    monkeypatch.setenv("LLM_TRACKER_HOME", str(tmp_path / "home"))
-    monkeypatch.setenv("LLM_TRACKER_CLIENT_COMMIT", "a" * 40)
-    monkeypatch.delenv("LLMTRACKER_SERVER", raising=False)
+    monkeypatch.setenv("TOKENAGE_HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("TOKENAGE_CLIENT_COMMIT", "a" * 40)
+    monkeypatch.delenv("TOKENAGE_SERVER", raising=False)
     # Nothing is detected on PATH, so a login wires no real agent config.
     monkeypatch.setattr(setup.shutil, "which", lambda _name: None)
 

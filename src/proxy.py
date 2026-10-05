@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-llm-tracker: pass-through proxy for OpenAI-compatible providers with usage logging.
+tokenage: pass-through proxy for OpenAI-compatible providers with usage logging.
 Supports both /v1/chat/completions and /v1/responses endpoints.
 """
 
@@ -530,7 +530,7 @@ async def lifespan(app: FastAPI):
     yield
 
 
-app = FastAPI(title="llm-tracker-proxy", lifespan=lifespan)
+app = FastAPI(title="tokenage-proxy", lifespan=lifespan)
 
 
 def proxy_metadata() -> dict[str, Any]:

@@ -79,7 +79,7 @@ completed successfully and found no remaining must-fix issue.
   that exception command arguments do not escape into diagnostics.
 - CI caught the launcher contract tests leaning on the developer checkout's
   bootstrap venv: they now ship their own client snapshot (client, protocol,
-  scripts/lib, commit stamp) and scrub `HOME`, `LLM_TRACKER_ROOT`, and
-  `LLM_TRACKER_SKIP_BANNER` from the inherited environment, so the same tests
+  scripts/lib, commit stamp) and scrub `HOME`, `TOKENAGE_ROOT`, and
+  `TOKENAGE_SKIP_BANNER` from the inherited environment, so the same tests
   exercise identical launcher routing on every machine. The banner-suppression
   case that CI caught is also covered on a real tty now, not just under pipes.

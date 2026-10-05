@@ -238,7 +238,8 @@ export const zh: Record<string, string> = {
   'unknown': '未知',
 
   // Empty state / onboarding (P0-6)
-  'Welcome to llm-tracker': '欢迎使用 llm-tracker',
+  'Welcome to tokenage': '欢迎使用 tokenage',
+  'tokenage Settings': 'tokenage 设置',
   'Your local dashboard for AI coding agents': '你的本地 AI 编程代理仪表盘',
   'Track Claude Code, Codex, and OpenAI-compatible traffic in one place — usage, cost, latency.': '在一个地方追踪 Claude Code、Codex 和 OpenAI 兼容流量 — 用量、费用、延迟。',
   'Get Started': '开始使用',
@@ -274,7 +275,7 @@ export const zh: Record<string, string> = {
 
   // Empty state / onboarding (Commit 1 reframe)
   'No traffic tracked yet': '暂无流量追踪记录',
-  'Run one test command below. When llm-tracker sees the request, usage, cost, and latency will appear here.': '运行下面的测试命令。当 llm-tracker 收到请求后，用量、费用和延迟将显示在这里。',
+  'Run one test command below. When tokenage sees the request, usage, cost, and latency will appear here.': '运行下面的测试命令。当 tokenage 收到请求后，用量、费用和延迟将显示在这里。',
   'Step 1: Bootstrap': '步骤 1：bootstrap 初始化',
   'Step 2: Run a test command': '步骤 2：运行测试命令',
   'Step 3: Wait for event': '步骤 3：等待事件',
@@ -329,7 +330,7 @@ export const zh: Record<string, string> = {
   'request': '个请求',
   'failed': '失败',
   'No sessions yet.': '还没有会话。',
-  'Run llm-tracker codex or llm-tracker claude to create your first tracked session.': '运行 llm-tracker codex 或 llm-tracker claude 来创建你的第一个追踪会话。',
+  'Run tokenage codex or tokenage claude to create your first tracked session.': '运行 tokenage codex 或 tokenage claude 来创建你的第一个追踪会话。',
   'No sessions found for the selected filters.': '未找到符合筛选条件的会话。',
   'sessions': '条会话',
   'Session Details': '会话详情',
@@ -447,7 +448,7 @@ export const zh: Record<string, string> = {
 
   // Auth (Google OAuth)
   'Sign in required': '需要登录',
-  'Sign in with your Google account to continue using llm-tracker.': '请使用 Google 账户登录以继续使用 llm-tracker。',
+  'Sign in with your Google account to continue using tokenage.': '请使用 Google 账户登录以继续使用 tokenage。',
   'Sign in with Google': '使用 Google 登录',
   'This sign-in link was invalid or expired. Please try again.': '登录链接无效或已过期，请重试。',
   'Your Google account email is not verified.': '您的 Google 账户邮箱尚未验证。',

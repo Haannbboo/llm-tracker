@@ -9,7 +9,7 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 STATE_FILE="${ROOT_DIR}/.dev-env.json"
-MAIN_DB="${HOME}/.llm-tracker/usage.db"
+MAIN_DB="${HOME}/.tokenage/usage.db"
 VENV_DIR="${ROOT_DIR}/.venv"
 PYTHON="${VENV_DIR}/bin/python"
 REQS_STAMP="${VENV_DIR}/.requirements.sha256"
@@ -64,7 +64,7 @@ API_PORT="$(find_port)"
 VITE_PORT="$(find_port)"
 
 # --- Create ephemeral work dir and copy DB ---
-WORK_DIR="$(mktemp -d -t llm-tracker-dev-)"
+WORK_DIR="$(mktemp -d -t tokenage-dev-)"
 DB_PATH="${WORK_DIR}/usage.db"
 DB_URL="sqlite:///${DB_PATH}"
 
@@ -91,7 +91,7 @@ cleanup() {
 trap cleanup EXIT INT TERM
 
 # --- Start API server ---
-LLM_TRACKER_DB_URL="${DB_URL}" "${PYTHON}" -m uvicorn src.api:app \
+TOKENAGE_DB_URL="${DB_URL}" "${PYTHON}" -m uvicorn src.api:app \
   --host 127.0.0.1 --port "${API_PORT}" --log-level warning --reload &
 API_PID=$!
 
@@ -112,7 +112,7 @@ fi
 
 # --- Start frontend dev server ---
 cd "${ROOT_DIR}/frontend"
-LLM_TRACKER_API_URL="http://127.0.0.1:${API_PORT}" \
+TOKENAGE_API_URL="http://127.0.0.1:${API_PORT}" \
   npx vite --port "${VITE_PORT}" --strict-port &
 VITE_PID=$!
 

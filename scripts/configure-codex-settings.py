@@ -27,9 +27,7 @@ def _write_private(path: Path, content: str) -> None:
 def load_ingest_token() -> str | None:
     try:
         credentials = json.loads(
-            (Path.home() / ".llm-tracker" / "credentials.json").read_text(
-                encoding="utf-8"
-            )
+            (Path.home() / ".tokenage" / "credentials.json").read_text(encoding="utf-8")
         )
     except (OSError, UnicodeError, json.JSONDecodeError):
         return None
@@ -68,9 +66,9 @@ def update_existing_otel_config(
     headers = http.get("headers")
     headers = dict(headers) if isinstance(headers, dict) else {}
     if token:
-        headers["x-llm-tracker-token"] = token
+        headers["x-tokenage-token"] = token
     else:
-        headers.pop("x-llm-tracker-token", None)
+        headers.pop("x-tokenage-token", None)
     if headers:
         http["headers"] = headers
     else:
@@ -242,7 +240,7 @@ def _disable(config_path: Path, expected_endpoint: str | None) -> int:
     exporter = otel.get("exporter") if isinstance(otel, dict) else None
     http = exporter.get("otlp-http") if isinstance(exporter, dict) else None
     if not isinstance(http, dict) or not http.get("endpoint"):
-        _info(f"No llm-tracker telemetry in {config_path}")
+        _info(f"No tokenage telemetry in {config_path}")
         return 2
     if expected_endpoint and http["endpoint"] != expected_endpoint:
         print(f"{config_path} points at another collector; left alone", file=sys.stderr)
@@ -285,7 +283,7 @@ def _main():
 
     config_path = Path(argv[0]).expanduser()
     if disable:
-        # ENDPOINT is the one llm-tracker wrote; anything else is the user's.
+        # ENDPOINT is the one tokenage wrote; anything else is the user's.
         return _disable(config_path, argv[1] if len(argv) >= 2 else None)
     otlp_port = argv[1] if len(argv) >= 2 else "4002"
     host = argv[2] if len(argv) >= 3 else "localhost"
@@ -293,7 +291,7 @@ def _main():
     token = (
         argv[4]
         if len(argv) >= 5
-        else os.environ.get("LLM_TRACKER_INGEST_TOKEN") or load_ingest_token()
+        else os.environ.get("TOKENAGE_INGEST_TOKEN") or load_ingest_token()
     )
 
     if not config_path.parent.exists():

@@ -1,6 +1,6 @@
 [English](README.md) | [中文](README_CN.md)
 
-# llm-tracker 仪表盘
+# tokenage 仪表盘
 
 用于可视化不同提供商和代理的 LLM 使用量、费用趋势和性能指标的前端应用。
 
@@ -19,17 +19,17 @@
 
 2. **配置说明**：
    Vite 开发服务器按以下顺序在每次代理请求时解析后端 API URL：
-   1. `LLM_TRACKER_API_URL`
-   2. `LLM_TRACKER_BACKEND_URL`
-   3. `~/.llm-tracker/config.yaml` 中的 `server.host` 和 `server.api_port`
+   1. `TOKENAGE_API_URL`
+   2. `TOKENAGE_BACKEND_URL`
+   3. `~/.tokenage/config.yaml` 中的 `server.host` 和 `server.api_port`
    4. 回退到 `http://localhost:4001`
 
    配置覆盖示例：
    ```bash
-   LLM_TRACKER_API_URL=http://localhost:4011 npm run dev
+   TOKENAGE_API_URL=http://localhost:4011 npm run dev
    ```
 
-   如果在开发服务器运行期间修改了 `~/.llm-tracker/config.yaml`，后续的前端 API 请求会自动使用更新后的 `server.api_port`。
+   如果在开发服务器运行期间修改了 `~/.tokenage/config.yaml`，后续的前端 API 请求会自动使用更新后的 `server.api_port`。
 
 ## 开发
 

@@ -13,7 +13,6 @@ import { useVersion } from '../hooks/useVersion'
 
 const DEVICE_KIND_LABELS: Record<string, string> = {
   client: 'Machine',
-  web: 'Browser',
   cli: 'CLI',
   ingest: 'Ingest',
 }
@@ -101,7 +100,7 @@ export function SettingsPage() {
           }}
         >
           {[
-            { id: 'tracker', label: t('LLM-Tracker Settings') },
+            { id: 'tracker', label: t('tokenage Settings') },
             { id: 'pricing', label: t('Pricing') },
             { id: 'services', label: t('Services') },
             { id: 'connectivity', label: t('Connectivity Test') },

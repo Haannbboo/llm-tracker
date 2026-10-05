@@ -89,7 +89,7 @@ export function OverviewTab({
               {t('No traffic tracked yet')}
             </div>
             <div style={{ fontSize: '15px', color: 'var(--text-secondary)', lineHeight: 1.6 }}>
-              {t('Run one test command below. When llm-tracker sees the request, usage, cost, and latency will appear here.')}
+              {t('Run one test command below. When tokenage sees the request, usage, cost, and latency will appear here.')}
             </div>
           </div>
 
@@ -107,9 +107,9 @@ export function OverviewTab({
               background: 'var(--surface-hover)',
               border: '1px solid var(--border-color)',
             }}>
-              <code style={{ fontSize: '13px', fontFamily: 'var(--font-mono)', color: 'var(--text-primary)' }}>llm-tracker bootstrap</code>
+              <code style={{ fontSize: '13px', fontFamily: 'var(--font-mono)', color: 'var(--text-primary)' }}>tokenage bootstrap</code>
               <CopyButton
-                text="llm-tracker bootstrap"
+                text="tokenage bootstrap"
                 style={{ fontSize: '11px', padding: '4px 10px', whiteSpace: 'nowrap' }}
                 idleLabel={`📋 ${t('Copy')}`}
                 copiedLabel={`✓ ${t('Copied!')}`}
@@ -124,8 +124,8 @@ export function OverviewTab({
             </div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
               {[
-                { cmd: 'llm-tracker claude', source: 'Claude Code' },
-                { cmd: 'llm-tracker codex exec "hello"', source: 'Codex' },
+                { cmd: 'tokenage claude', source: 'Claude Code' },
+                { cmd: 'tokenage codex exec "hello"', source: 'Codex' },
               ].map(({ cmd, source }) => (
                 <div key={cmd} style={{
                   display: 'flex',

@@ -1461,14 +1461,14 @@ def test_single_model_pricing_rejects_empty_model(api_module, monkeypatch):
 def test_patch_config_applies_patches_and_refreshes_runtime(
     api_module, isolated_home, monkeypatch
 ):
-    config_path = isolated_home / ".llm-tracker" / "config.yaml"
+    config_path = isolated_home / ".tokenage" / "config.yaml"
     config_path.write_text(
         """# tracker config
 server:
   host: 127.0.0.1
   port: 4000
 db:
-  path: ~/.llm-tracker/usage.db
+  path: ~/.tokenage/usage.db
 models:
   test-model:
     cost:
@@ -1551,7 +1551,7 @@ def test_patch_config_rejects_numeric_string_set_value(api_module, isolated_home
 def test_patch_config_rejects_null_set_value_without_persisting(
     api_module, isolated_home
 ):
-    config_path = isolated_home / ".llm-tracker" / "config.yaml"
+    config_path = isolated_home / ".tokenage" / "config.yaml"
     original_content = config_path.read_text(encoding="utf-8")
 
     response = TestClient(api_module.app).patch(
@@ -1574,7 +1574,7 @@ def test_patch_config_rejects_null_set_value_without_persisting(
 def test_patch_config_rejects_missing_set_value_without_persisting(
     api_module, isolated_home
 ):
-    config_path = isolated_home / ".llm-tracker" / "config.yaml"
+    config_path = isolated_home / ".tokenage" / "config.yaml"
     original_content = config_path.read_text(encoding="utf-8")
 
     response = TestClient(api_module.app).patch(

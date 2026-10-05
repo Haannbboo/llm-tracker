@@ -1,4 +1,4 @@
-"""The client half of ``llm-tracker``.
+"""The client half of ``tokenage``.
 
 One command, two components. This module is the client: the tracking wrapper,
 agent configuration, sign-in, and the component report. It never imports the
@@ -7,7 +7,7 @@ server, so it runs on a machine that has only a client — a dependency on
 enforces it.
 
 The server component is reached through the launcher, which routes
-``llm-tracker server ...`` to the shell scripts in the server checkout.
+``tokenage server ...`` to the shell scripts in the server checkout.
 """
 
 from __future__ import annotations
@@ -18,7 +18,7 @@ import sys
 from client import auth, setup, status, track, update
 from client.paths import client_version
 
-PROG = "llm-tracker"
+PROG = "tokenage"
 
 SUBCOMMANDS = ("login", "logout", "setup", "status", "update", "check-server")
 
@@ -32,18 +32,18 @@ commands:
   server <command>          start, stop, restart, bootstrap, status, token
                             (requires the server component)
 
-anything else is run with usage tracking, e.g. `llm-tracker codex exec "hi"`
+anything else is run with usage tracking, e.g. `tokenage codex exec "hi"`
 tracking options go before the command; use -- when they do:
-  llm-tracker --json -- codex exec "hi"
+  tokenage --json -- codex exec "hi"
 """
 
 REMOVED = {
     "summary": (
-        "llm-tracker: 'summary' is no longer a command. Evaluations now run in "
+        "tokenage: 'summary' is no longer a command. Evaluations now run in "
         "the background; see the dashboard."
     ),
     "server": (
-        "llm-tracker: 'server' commands are handled by the launcher script, "
+        "tokenage: 'server' commands are handled by the launcher script, "
         "which resolves the server component."
     ),
 }
@@ -51,7 +51,7 @@ REMOVED = {
 
 def _add_banner_flag(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
-        "--no-banner", action="store_true", help="do not print the llm-tracker banner"
+        "--no-banner", action="store_true", help="do not print the tokenage banner"
     )
 
 
@@ -144,7 +144,7 @@ def _build_subcommand(name: str) -> argparse.ArgumentParser:
         parser.add_argument(
             "--disable",
             action="store_true",
-            help="remove llm-tracker's telemetry settings instead of writing them",
+            help="remove tokenage's telemetry settings instead of writing them",
         )
         _add_banner_flag(parser)
         return parser
@@ -248,7 +248,7 @@ def main(argv: list[str] | None = None) -> int:
             return _run_subcommand(first, raw)
         return _run_tracking(raw)
     except ValueError as exc:
-        print(f"llm-tracker: {exc}", file=sys.stderr)
+        print(f"tokenage: {exc}", file=sys.stderr)
         return 1
 
 

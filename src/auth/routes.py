@@ -30,8 +30,8 @@ from .tokens import (
 
 logger = logging.getLogger(__name__)
 
-SESSION_COOKIE_NAME = "llm_tracker_session"
-OAUTH_STATE_COOKIE_NAME = "llm_tracker_oauth_state"
+SESSION_COOKIE_NAME = "tokenage_session"
+OAUTH_STATE_COOKIE_NAME = "tokenage_oauth_state"
 _NO_STORE = {"Cache-Control": "no-store"}
 
 router = APIRouter()
@@ -262,6 +262,9 @@ async def auth_google_callback(request: Request):
         # like the web path does.
         code_response.delete_cookie(OAUTH_STATE_COOKIE_NAME)
         return code_response
+    # One live browser session per user: the new login retires the old cookie.
+    user = get_or_create_user(email)
+    _retire_web_sessions(user.id)
     plaintext_token, user = mint_token(email, kind="web", device_name="browser")
     update_user_name(user.id, str(claims.get("name") or "").strip() or None)
     response = _frontend_redirect(origin)
@@ -290,7 +293,11 @@ def auth_logout(request: Request, user: User | None = Depends(get_current_user))
 
 @router.get("/auth/devices")
 def auth_devices(request: Request, user: User | None = Depends(get_current_user)):
-    """List installed machines, plus browser and operator-minted sessions."""
+    """List installed machines and the caller's unlinked tokens.
+
+    Browser sessions are deliberately absent: signing in again retires the
+    previous one, so a stale browser entry is never left to manage here.
+    """
     if user is None:
         raise HTTPException(status_code=404, detail="not found")
     auth_token = getattr(request.state, "auth_token", None)
@@ -322,7 +329,7 @@ def auth_devices(request: Request, user: User | None = Depends(get_current_user)
                 "current": device.id == current_id,
             }
             for device in list_user_tokens(user.id)
-            if device.device_id is None
+            if device.device_id is None and device.kind != "web"
         ]
     }
 
@@ -372,6 +379,19 @@ def _sanitize_device_name(raw: str | None) -> str:
     return cleaned[:64] or _DEFAULT_DEVICE_NAME
 
 
+def _retire_web_sessions(user_id: str) -> None:
+    """Retire the user's existing browser sessions so a new login is the only one.
+
+    Keeps the session list from growing one indistinguishable entry per login,
+    and makes a sign-in from a new browser take over the old one. Called before
+    minting, so the fresh token is never a candidate.
+    """
+    # ponytail: one UPDATE per stale row; a single UPDATE if that ever matters.
+    for stale in list_user_tokens(user_id):
+        if stale.kind == "web":
+            revoke_token(stale.id, user_id)
+
+
 def _normalize_cli_code(raw: str) -> str:
     """Uppercase, strip whitespace and hyphens (what a human may retype)."""
     return "".join(raw.split()).upper().replace("-", "")
@@ -403,11 +423,11 @@ def _mint_cli_code(user: User, device_name: str, code_challenge: str) -> str:
 
 def _confirm_page(user: User, device_name: str, code_challenge: str) -> str:
     return f"""<!doctype html>
-<html><head><title>llm-tracker CLI login</title></head>
+<html><head><title>tokenage CLI login</title></head>
 <body style="font-family: system-ui, sans-serif; max-width: 32rem; margin: 4rem auto;">
 <h2>CLI login request</h2>
 <p>A CLI on device <b>{html.escape(device_name)}</b> is requesting access to
-llm-tracker as <b>{html.escape(user.email)}</b>.</p>
+tokenage as <b>{html.escape(user.email)}</b>.</p>
 <p><b>Only approve logins you started in a terminal you are looking at.</b></p>
 <form method="post" action="/auth/cli/start">
 <input type="hidden" name="code_challenge" value="{html.escape(code_challenge, quote=True)}">
@@ -420,7 +440,7 @@ llm-tracker as <b>{html.escape(user.email)}</b>.</p>
 
 def _code_page(code: str, device_name: str) -> str:
     return f"""<!doctype html>
-<html><head><title>llm-tracker CLI login</title></head>
+<html><head><title>tokenage CLI login</title></head>
 <body style="font-family: system-ui, sans-serif; max-width: 32rem; margin: 4rem auto;">
 <h2>CLI login code</h2>
 <p>Paste this code into your terminal

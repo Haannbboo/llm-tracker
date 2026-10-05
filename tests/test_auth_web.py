@@ -17,7 +17,7 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import text
 
-SESSION_COOKIE = "llm_tracker_session"
+SESSION_COOKIE = "tokenage_session"
 
 
 def _routes_module():
@@ -120,7 +120,7 @@ def test_state_store_roundtrip(api_module, isolated_home):
 def test_state_store_rejects_expired_and_missing(api_module, isolated_home):
     auth_google = _routes_module().auth_google
     auth_google.store_oauth_state("old", {"nonce": "n", "redirect_uri": "u"})
-    state_path = Path(isolated_home) / ".llm-tracker" / "oauth_state.json"
+    state_path = Path(isolated_home) / ".tokenage" / "oauth_state.json"
     stored = json.loads(state_path.read_text())
     stored["old"]["exp"] = time.time() - 1
     state_path.write_text(json.dumps(stored))
@@ -132,7 +132,7 @@ def test_state_store_rejects_expired_and_missing(api_module, isolated_home):
 def test_state_store_prunes_expired_on_insert(api_module, isolated_home):
     auth_google = _routes_module().auth_google
     auth_google.store_oauth_state("a", {"nonce": "n", "redirect_uri": "u"})
-    state_path = Path(isolated_home) / ".llm-tracker" / "oauth_state.json"
+    state_path = Path(isolated_home) / ".tokenage" / "oauth_state.json"
     stored = json.loads(state_path.read_text())
     stored["a"]["exp"] = time.time() - 1
     state_path.write_text(json.dumps(stored))
@@ -149,7 +149,7 @@ def test_state_store_caps_pending_entries(api_module, isolated_home, monkeypatch
     for i in range(4):
         auth_google.store_oauth_state(f"s{i}", {"nonce": "n", "redirect_uri": "u"})
 
-    state_path = Path(isolated_home) / ".llm-tracker" / "oauth_state.json"
+    state_path = Path(isolated_home) / ".tokenage" / "oauth_state.json"
     stored = json.loads(state_path.read_text())
     assert len(stored) == 3
     assert "s0" not in stored  # oldest evicted to make room
@@ -198,7 +198,7 @@ def test_google_callback_happy_path(api_module, monkeypatch, fresh_db):
     assert callback.headers["location"] == "/"
 
     cookie = callback.cookies.get(SESSION_COOKIE)
-    assert cookie and cookie.startswith("llmt_web_")
+    assert cookie and cookie.startswith("tokenage_web_")
 
     me = client.get("/auth/me")
     assert me.status_code == 200
@@ -207,6 +207,28 @@ def test_google_callback_happy_path(api_module, monkeypatch, fresh_db):
     assert body["user"]["email"] == "a@example.com"
     assert body["user"]["name"] == "Alice"
     assert body["token"] == {"kind": "web", "device_name": "browser"}
+
+
+def test_second_login_retires_the_previous_web_session(
+    api_module, monkeypatch, fresh_db
+):
+    """One live browser session per user: the new login revokes the old cookie."""
+    _enable_auth(monkeypatch)
+    _mock_google_flow(api_module, monkeypatch)
+    first = TestClient(api_module.app)
+    state = _start_login(api_module, monkeypatch, first)
+    first.get(f"/auth/google/callback?code=the-code&state={state}")
+    assert first.get("/auth/me").status_code == 200
+
+    second = TestClient(api_module.app)
+    state = _start_login(api_module, monkeypatch, second)
+    second.get(f"/auth/google/callback?code=the-code&state={state}")
+    assert second.get("/auth/me").status_code == 200
+
+    assert first.get("/auth/me").status_code == 401
+
+    # The surviving session is a cookie, not a listed device.
+    assert second.get("/auth/devices").json()["devices"] == []
 
 
 def test_google_callback_state_replay(api_module, monkeypatch, fresh_db):
@@ -312,7 +334,7 @@ def test_google_callback_rejects_non_ascii_state_cookie(
     callback = client.get(
         f"/auth/google/callback?code=the-code&state={state}",
         follow_redirects=False,
-        headers=[(b"cookie", b"llm_tracker_oauth_state=" + bytes([0xE9, 0xE9]))],
+        headers=[(b"cookie", b"tokenage_oauth_state=" + bytes([0xE9, 0xE9]))],
     )
     assert callback.status_code == 302
     assert callback.headers["location"] == "/?auth_error=invalid_state"
@@ -458,6 +480,7 @@ def test_logout_revokes_token_and_clears_cookie(api_module, monkeypatch, fresh_d
 
     logout = client.post("/auth/logout")
     assert logout.status_code == 204
+    assert logout.cookies.get(SESSION_COOKIE) is None
 
     me = client.get("/auth/me")
     assert me.status_code == 401
@@ -636,21 +659,20 @@ def test_devices_list_marks_current(api_module, monkeypatch, fresh_db):
     token_a, _ = mint_token(
         "a@example.com", kind="cli", device_name="old-laptop", db_path=fresh_db.db_path
     )
-    token_b, _ = mint_token(
+    mint_token(
         "a@example.com", kind="web", device_name="browser", db_path=fresh_db.db_path
     )
     client = TestClient(api_module.app)
     devices = client.get(
-        "/auth/devices", headers={"Authorization": f"Bearer {token_b}"}
+        "/auth/devices", headers={"Authorization": f"Bearer {token_a}"}
     )
     assert devices.status_code == 200
     body = devices.json()["devices"]
-    assert len(body) == 2
-    by_name = {device["device_name"]: device for device in body}
-    assert by_name["browser"]["current"] is True
-    assert by_name["old-laptop"]["current"] is False
-    assert by_name["old-laptop"]["kind"] == "cli"
-    assert by_name["old-laptop"]["created_at"] > 0
+    # The browser session is not a device: a new login replaces it.
+    assert [device["device_name"] for device in body] == ["old-laptop"]
+    assert body[0]["current"] is True
+    assert body[0]["kind"] == "cli"
+    assert body[0]["created_at"] > 0
 
 
 def test_devices_revoke_own_token(api_module, monkeypatch, fresh_db):
@@ -671,7 +693,7 @@ def test_devices_revoke_own_token(api_module, monkeypatch, fresh_db):
     assert revoked.status_code == 204
 
     remaining = client.get("/auth/devices", headers=headers).json()["devices"]
-    assert [device["device_name"] for device in remaining] == ["browser"]
+    assert remaining == []
 
     assert resolve_token(token_a, db_path=fresh_db.db_path) is None
 
@@ -708,22 +730,6 @@ def test_devices_revoke_unknown_id_is_404(api_module, monkeypatch, fresh_db):
         headers={"Authorization": f"Bearer {token_b}"},
     )
     assert response.status_code == 404
-
-
-def test_devices_revoke_current_token_401s_next_request(
-    api_module, monkeypatch, fresh_db
-):
-    _enable_auth(monkeypatch)
-    _mock_google_flow(api_module, monkeypatch)
-    client = TestClient(api_module.app)
-    state = _start_login(api_module, monkeypatch, client)
-    client.get(f"/auth/google/callback?code=the-code&state={state}")
-
-    devices = client.get("/auth/devices").json()["devices"]
-    current = next(device for device in devices if device["current"])
-
-    assert client.post(f"/auth/devices/{current['id']}/revoke").status_code == 204
-    assert client.get("/usage").status_code == 401
 
 
 # ---------------------------------------------------------------- database

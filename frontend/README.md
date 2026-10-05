@@ -1,6 +1,6 @@
 [English](README.md) | [中文](README_CN.md)
 
-# llm-tracker Dashboard
+# tokenage Dashboard
 
 The frontend for visualizing LLM usage, cost trends, and performance metrics across different providers and agents.
 
@@ -19,17 +19,17 @@ The frontend for visualizing LLM usage, cost trends, and performance metrics acr
 
 2. **Configuration**:
    The Vite dev server resolves the backend API URL in this order on each proxied request:
-   1. `LLM_TRACKER_API_URL`
-   2. `LLM_TRACKER_BACKEND_URL`
-   3. `~/.llm-tracker/config.yaml` using `server.host` and `server.api_port`
+   1. `TOKENAGE_API_URL`
+   2. `TOKENAGE_BACKEND_URL`
+   3. `~/.tokenage/config.yaml` using `server.host` and `server.api_port`
    4. Fallback to `http://localhost:4001`
 
    Example override:
    ```bash
-   LLM_TRACKER_API_URL=http://localhost:4011 npm run dev
+   TOKENAGE_API_URL=http://localhost:4011 npm run dev
    ```
 
-   If you change `~/.llm-tracker/config.yaml` while the dev server is running, subsequent frontend API requests will use the updated `server.api_port` automatically.
+   If you change `~/.tokenage/config.yaml` while the dev server is running, subsequent frontend API requests will use the updated `server.api_port` automatically.
 
 ## Development
 

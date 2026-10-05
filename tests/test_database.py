@@ -739,7 +739,7 @@ def test_get_db_url_prefers_env_override_without_explicit_db(
     database_module, isolated_home, monkeypatch
 ):
     override = f"sqlite:///{isolated_home / 'run.db'}"
-    monkeypatch.setenv("LLM_TRACKER_DB_URL", override)
+    monkeypatch.setenv("TOKENAGE_DB_URL", override)
 
     assert database_module.get_db_url() == override
 
@@ -749,7 +749,7 @@ def test_get_db_url_explicit_path_wins_over_env_override(
 ):
     override = f"sqlite:///{isolated_home / 'run.db'}"
     explicit = isolated_home / "main.db"
-    monkeypatch.setenv("LLM_TRACKER_DB_URL", override)
+    monkeypatch.setenv("TOKENAGE_DB_URL", override)
 
     assert database_module.get_db_url(str(explicit)) == f"sqlite:///{explicit}"
 
@@ -759,7 +759,7 @@ def test_get_db_url_explicit_url_wins_over_env_override(
 ):
     override = f"sqlite:///{isolated_home / 'run.db'}"
     explicit = f"sqlite:///{isolated_home / 'main.db'}"
-    monkeypatch.setenv("LLM_TRACKER_DB_URL", override)
+    monkeypatch.setenv("TOKENAGE_DB_URL", override)
 
     assert database_module.get_db_url(explicit) == explicit
 

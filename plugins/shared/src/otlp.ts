@@ -22,7 +22,7 @@ export function buildOtlpPayload(
   serviceName: string,
 ): Record<string, any> {
   const eventName = `${serviceName}.message_completed`
-  const scopeName = `${serviceName}-llm-tracker`
+  const scopeName = `${serviceName}-tokenage`
   const timeUnixNano = String(params.timestampMs * 1_000_000)
   const severityNumber = params.errorName != null || (params.statusCode != null && params.statusCode >= 400) ? 17 : 9
 
@@ -101,7 +101,7 @@ export function buildToolEventPayload(
   serviceName: string,
 ): Record<string, any> {
   const eventName = `${serviceName}.tool_decision`
-  const scopeName = `${serviceName}-llm-tracker`
+  const scopeName = `${serviceName}-tokenage`
   const timeUnixNano = String(params.timestampMs * 1_000_000)
   const attributes: Array<Record<string, any>> = [
     { key: "event.name", value: { stringValue: eventName } },
@@ -159,16 +159,16 @@ export async function emitOtlp(
       signal: controller.signal,
     })
     if (!response.ok) {
-      console.error(`[llm-tracker] OTLP emission failed: collector returned ${response.status}`)
+      console.error(`[tokenage] OTLP emission failed: collector returned ${response.status}`)
       return false
     }
     return true
   } catch (err) {
     if (err instanceof DOMException && err.name === "AbortError") {
-      console.error(`[llm-tracker] OTLP emission timed out after ${timeoutMs}ms`)
+      console.error(`[tokenage] OTLP emission timed out after ${timeoutMs}ms`)
       return false
     }
-    console.error("[llm-tracker] OTLP emission failed:", err)
+    console.error("[tokenage] OTLP emission failed:", err)
     return false
   } finally {
     clearTimeout(timeoutId)

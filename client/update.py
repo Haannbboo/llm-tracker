@@ -1,8 +1,8 @@
-"""``llm-tracker update`` — update whichever components are installed.
+"""``tokenage update`` — update whichever components are installed.
 
 The server component is a git clone, so it updates with a fast-forward pull and a
 bootstrap. The client component is a source snapshot under
-``$LLM_TRACKER_HOME/versions``, so it updates by asking its server for the
+``$TOKENAGE_HOME/versions``, so it updates by asking its server for the
 installer and letting that install a new snapshot. Both paths reuse the code
 that is already tested rather than reimplementing it here.
 """
@@ -29,7 +29,7 @@ def _server_version(root: Path) -> str | None:
 
 
 def _bin_dir() -> Path:
-    return Path(os.environ.get("LLM_TRACKER_BIN_DIR", "~/.local/bin")).expanduser()
+    return Path(os.environ.get("TOKENAGE_BIN_DIR", "~/.local/bin")).expanduser()
 
 
 def _run(command: list[str], env: dict[str, str] | None = None) -> int:
@@ -39,11 +39,11 @@ def _run(command: list[str], env: dict[str, str] | None = None) -> int:
 def update_server(*, check: bool, dry_run: bool) -> int:
     root = server_root()
     if root is None:
-        print("llm-tracker: the server component is not installed on this machine.")
+        print("tokenage: the server component is not installed on this machine.")
         return 0
     script = root / "scripts" / "update.sh"
     if not script.is_file():
-        print(f"llm-tracker: update script not found: {script}", file=sys.stderr)
+        print(f"tokenage: update script not found: {script}", file=sys.stderr)
         return 1
     command = ["bash", str(script)]
     if check:
@@ -64,39 +64,37 @@ def update_client() -> int:
         server_url = None
     if not server_url:
         print(
-            "llm-tracker: cannot update the client without a server; run "
-            "llm-tracker login --server <url> first.",
+            "tokenage: cannot update the client without a server; run "
+            "tokenage login --server <url> first.",
             file=sys.stderr,
         )
         return 1
-    with tempfile.TemporaryDirectory(prefix="llm-tracker-update-") as work:
+    with tempfile.TemporaryDirectory(prefix="tokenage-update-") as work:
         installer = Path(work) / "install.sh"
         curl = shutil.which("curl")
         if curl is None:
-            print(
-                "llm-tracker: curl is required to update the client.", file=sys.stderr
-            )
+            print("tokenage: curl is required to update the client.", file=sys.stderr)
             return 1
         if _run([curl, "-fsSL", f"{server_url}{INSTALLER_PATH}", "-o", str(installer)]):
             print(
-                f"llm-tracker: could not download the installer from {server_url}.",
+                f"tokenage: could not download the installer from {server_url}.",
                 file=sys.stderr,
             )
             return 1
         installer.chmod(0o700)
         env = os.environ.copy()
-        env["LLM_TRACKER_SERVER"] = str(server_url)
-        env["LLM_TRACKER_BIN_DIR"] = str(_bin_dir())
-        env["LLM_TRACKER_SKIP_LOGIN"] = "1"
+        env["TOKENAGE_SERVER"] = str(server_url)
+        env["TOKENAGE_BIN_DIR"] = str(_bin_dir())
+        env["TOKENAGE_SKIP_LOGIN"] = "1"
         if _run(["sh", str(installer)], env=env):
-            print("llm-tracker: client update failed.", file=sys.stderr)
+            print("tokenage: client update failed.", file=sys.stderr)
             return 1
     return 0
 
 
 def run_update(*, check: bool, dry_run: bool, scope: str) -> int:
     if scope not in ("all", "client", "server"):
-        print("llm-tracker: --scope must be all, client or server.", file=sys.stderr)
+        print("tokenage: --scope must be all, client or server.", file=sys.stderr)
         return 2
 
     root = server_root()
@@ -113,7 +111,7 @@ def run_update(*, check: bool, dry_run: bool, scope: str) -> int:
             f"(commit {client_commit() or 'unknown'})"
         )
     if not has_server and not has_client:
-        print("llm-tracker: nothing to update on this machine.")
+        print("tokenage: nothing to update on this machine.")
         return 0
 
     if check:
@@ -149,5 +147,5 @@ def run_update(*, check: bool, dry_run: bool, scope: str) -> int:
             return 1
 
     print("")
-    print("  ✓ llm-tracker is up to date")
+    print("  ✓ tokenage is up to date")
     return 0

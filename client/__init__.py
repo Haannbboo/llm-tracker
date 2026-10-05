@@ -1,1 +1,1 @@
-"""Standalone hosted llm-tracker client."""
+"""Standalone hosted tokenage client."""

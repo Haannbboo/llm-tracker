@@ -1,6 +1,6 @@
 ---
 name: Bug Report
-about: Report a bug in llm-tracker
+about: Report a bug in tokenage
 title: '[BUG] '
 labels: ['needs-triage']
 assignees: []

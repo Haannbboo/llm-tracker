@@ -1,7 +1,7 @@
 """Endpoint-argument tests for the configure-* wiring scripts (PR 3).
 
 Each script accepts an optional trailing full-endpoint argument (contains
-"://") that overrides PORT/HOST composition — used by `llm-tracker login`
+"://") that overrides PORT/HOST composition — used by `tokenage login`
 to wire agents at a hosted HTTPS OTLP endpoint. Legacy argv must behave
 identically to before.
 """
@@ -90,7 +90,7 @@ def test_claude_env_var_wins_over_endpoint_arg(tmp_path):
 
 
 def test_claude_wire_argv_shape_with_placeholder_port(tmp_path):
-    # `llm-tracker login` wiring passes [SETTINGS, "0", "localhost", ENDPOINT]
+    # `tokenage login` wiring passes [SETTINGS, "0", "localhost", ENDPOINT]
     # — the endpoint must override the placeholder port/host, not compose
     # with them.
     settings = tmp_path / "settings.json"
@@ -128,17 +128,17 @@ def test_codex_token_arg_writes_otlp_header(tmp_path):
     )
     assert result.returncode == 0, result.stderr
     content = config.read_text()
-    assert 'headers = { "x-llm-tracker-token" = "ingest-secret" }' in content
+    assert 'headers = { "x-tokenage-token" = "ingest-secret" }' in content
     parsed = tomllib.loads(content)
     assert (
-        parsed["otel"]["exporter"]["otlp-http"]["headers"]["x-llm-tracker-token"]
+        parsed["otel"]["exporter"]["otlp-http"]["headers"]["x-tokenage-token"]
         == "ingest-secret"
     )
 
 
 def test_codex_missing_config_dir_announces_the_skip(tmp_path):
     # A machine with `codex` on PATH but no ~/.codex yet: the script must say
-    # it skipped, or `llm-tracker login` reports the agent as wired.
+    # it skipped, or `tokenage login` reports the agent as wired.
     config = tmp_path / "missing" / "config.toml"
     result = _run(
         "configure-codex-settings.py",
@@ -162,7 +162,7 @@ protocol = "json"
 timeout_ms = 8000
 [otel.exporter.otlp-http.headers] # user headers
 x-custom = "keep"
-x-llm-tracker-token = "old-token"
+x-tokenage-token = "old-token"
 [otel.trace_exporter.otlp-http]
 endpoint = "https://traces.example"
 """)
@@ -170,9 +170,9 @@ endpoint = "https://traces.example"
     http = expected["otel"]["exporter"]["otlp-http"]
     http["endpoint"] = ENDPOINT
     if token:
-        http["headers"]["x-llm-tracker-token"] = token
+        http["headers"]["x-tokenage-token"] = token
     else:
-        http["headers"].pop("x-llm-tracker-token")
+        http["headers"].pop("x-tokenage-token")
 
     result = _run(
         "configure-codex-settings.py",
@@ -446,7 +446,7 @@ endpoint = "https://provider.example/v1"
 [otel]
 environment = "production"
 log_user_prompt = false
-exporter = { otlp-http = { endpoint = "https://api.example.com:4005/v1/logs", protocol = "json", timeout_ms = 8000, headers = { "x-llm-tracker-token" = "secret", "x-custom" = "keep" } }, otlp-grpc = { endpoint = "https://other.example" } }
+exporter = { otlp-http = { endpoint = "https://api.example.com:4005/v1/logs", protocol = "json", timeout_ms = 8000, headers = { "x-tokenage-token" = "secret", "x-custom" = "keep" } }, otlp-grpc = { endpoint = "https://other.example" } }
 [otel.trace_exporter.otlp-http]
 endpoint = "https://traces.example"
 [otel_extra]
@@ -471,7 +471,7 @@ environment = "production"
 endpoint = "{ENDPOINT}"
 protocol = "json"
 timeout_ms = 8000
-headers = {{ "x-llm-tracker-token" = "secret", "x-custom" = "keep" }}
+headers = {{ "x-tokenage-token" = "secret", "x-custom" = "keep" }}
 [otel.trace_exporter.otlp-http]
 endpoint = "https://traces.example"
 ''')
@@ -508,7 +508,7 @@ def test_claude_disable_preserves_user_hooks_in_shared_entry(tmp_path):
     user_root = tmp_path / "user-project"
     (user_root / "scripts").mkdir(parents=True)
     (user_root / "src").mkdir()
-    (user_root / "scripts" / "llm-tracker").write_text("# user launcher\n")
+    (user_root / "scripts" / "tokenage").write_text("# user launcher\n")
     similar_hook = {
         "type": "command",
         "command": str(user_root / "scripts" / "claude-hook.sh"),
@@ -516,13 +516,13 @@ def test_claude_disable_preserves_user_hooks_in_shared_entry(tmp_path):
     old_root = tmp_path / "old-tracker"
     (old_root / "scripts").mkdir(parents=True)
     (old_root / "src").mkdir()
-    (old_root / "scripts" / "llm-tracker").write_text("# llm-tracker launcher\n")
+    (old_root / "scripts" / "tokenage").write_text("# tokenage launcher\n")
     settings.write_text(
         json.dumps(
             {
                 "env": {
                     "OTEL_EXPORTER_OTLP_LOGS_ENDPOINT": ENDPOINT,
-                    "OTEL_EXPORTER_OTLP_HEADERS": "x-custom=keep,x-llm-tracker-token=secret",
+                    "OTEL_EXPORTER_OTLP_HEADERS": "x-custom=keep,x-tokenage-token=secret",
                 },
                 "hooks": {
                     "PreToolUse": [

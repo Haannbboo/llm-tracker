@@ -6,8 +6,8 @@ import { join } from 'node:path'
 
 import { resolveApiUrl } from './vite-api-url.js'
 
-test('resolveApiUrl prefers LLM_TRACKER_API_URL over config', () => {
-  const root = mkdtempSync(join(tmpdir(), 'llm-tracker-vite-api-url-'))
+test('resolveApiUrl prefers TOKENAGE_API_URL over config', () => {
+  const root = mkdtempSync(join(tmpdir(), 'tokenage-vite-api-url-'))
   const configPath = join(root, 'config.yaml')
   writeFileSync(
     configPath,
@@ -24,8 +24,8 @@ test('resolveApiUrl prefers LLM_TRACKER_API_URL over config', () => {
     assert.equal(
       resolveApiUrl({
         env: {
-          LLM_TRACKER_API_URL: 'http://localhost:4011',
-          LLM_TRACKER_BACKEND_URL: 'http://localhost:4999',
+          TOKENAGE_API_URL: 'http://localhost:4011',
+          TOKENAGE_BACKEND_URL: 'http://localhost:4999',
         },
         trackerConfigPath: configPath,
       }),
@@ -37,7 +37,7 @@ test('resolveApiUrl prefers LLM_TRACKER_API_URL over config', () => {
 })
 
 test('resolveApiUrl falls back to tracker config api_port', () => {
-  const root = mkdtempSync(join(tmpdir(), 'llm-tracker-vite-api-url-'))
+  const root = mkdtempSync(join(tmpdir(), 'tokenage-vite-api-url-'))
   const configPath = join(root, 'config.yaml')
   writeFileSync(
     configPath,
@@ -68,7 +68,7 @@ test('resolveApiUrl falls back to default localhost api port when config is miss
   assert.equal(
     resolveApiUrl({
       env: {},
-      trackerConfigPath: join(tmpdir(), 'missing-llm-tracker-config.yaml'),
+      trackerConfigPath: join(tmpdir(), 'missing-tokenage-config.yaml'),
     }),
     'http://localhost:4001',
   )

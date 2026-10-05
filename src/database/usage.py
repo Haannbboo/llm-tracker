@@ -100,7 +100,7 @@ def _avg_effective_price_per_million_expr(
 DEDUP_WINDOW_MICROS = 15_000_000
 
 # `provider` is not a reliable match field: OTLP's opencode/kilo parser
-# reports the agent's own configured provider alias (e.g. "llm-tracker
+# reports the agent's own configured provider alias (e.g. "tokenage
 # proxy" when opencode points at the local proxy), while the proxy reports
 # the real resolved upstream (e.g. "Volce") for the same request. So dedup
 # matches on client_source family + model + tokens only.

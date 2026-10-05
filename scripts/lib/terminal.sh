@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # scripts/lib/terminal.sh
-# Shared terminal output helpers for llm-tracker scripts.
+# Shared terminal output helpers for tokenage scripts.
 # Source this file; do not execute directly.
 
 # ── Color detection ─────────────────────────────────────────────────
@@ -35,36 +35,19 @@ _term_width() {
 
 # ── Banner ──────────────────────────────────────────────────────────
 banner() {
-  # The launcher prints the banner and exports LLM_TRACKER_SKIP_BANNER=1, so a
+  # The launcher prints the banner and exports TOKENAGE_SKIP_BANNER=1, so a
   # script it called does not print a second one.
-  [[ -n "${LLM_TRACKER_SKIP_BANNER:-}" ]] && return 0
-
-  local width
-  width="$(_term_width)"
+  [[ -n "${TOKENAGE_SKIP_BANNER:-}" ]] && return 0
 
   printf "\n"
   printf "%b" "${_T_PURPLE}${_T_BOLD}"
 
-  if [[ ${width} -ge 95 ]]; then
-    # Full ASCII art banner
-    printf '  ██╗      ██╗      ███╗   ███╗    ████████╗██████╗  █████╗  ██████╗██╗  ██╗███████╗██████╗ \n'
-    printf '  ██║      ██║      ████╗ ████║    ╚══██╔══╝██╔══██╗██╔══██╗██╔════╝██║ ██╔╝██╔════╝██╔══██╗\n'
-    printf '  ██║      ██║      ██╔████╔██║       ██║   ██████╔╝███████║██║     █████╔╝ █████╗  ██████╔╝\n'
-    printf '  ██║      ██║      ██║╚██╔╝██║       ██║   ██╔══██╗██╔══██║██║     ██╔═██╗ ██╔══╝  ██╔══██╗\n'
-    printf '  ███████╗ ███████╗ ██║ ╚═╝ ██║       ██║   ██║  ██║██║  ██║╚██████╗██║  ██╗███████╗██║  ██║\n'
-    printf '  ╚══════╝ ╚══════╝ ╚═╝     ╚═╝       ╚═╝   ╚═╝  ╚═╝╚═╝  ╚═╝ ╚═════╝╚═╝  ╚═╝╚══════╝╚═╝  ╚═╝\n'
-  else
-    # Compact banner for narrow terminals
-    printf '  █╔╗    █╔╗ ███╗   ███╗\n'
-    printf '  █║║    █║║ ████╗ ████║\n'
-    printf '  █║║    █║║ ██╔████╔██║\n'
-    printf '  █║║    █║║ ██║╚██╔╝██║\n'
-    printf '  █║╚════█║╝ ██║ ╚═╝ ██║\n'
-    printf '  ╚══════╝╚╝ ╚═╝     ╚═╝\n'
-    printf "%b" "${_T_RESET}"
-    printf "%b" "${_T_PURPLE}${_T_BOLD}"
-    printf '  ── tracker ──\n'
-  fi
+  printf '%b\n' \
+    '  ████████  ██████  ██   ██ ███████ ███    ██  █████   ██████  ███████ ' \
+    '     ██    ██    ██ ██  ██  ██      ████   ██ ██   ██ ██       ██      ' \
+    '     ██    ██    ██ █████   █████   ██ ██  ██ ███████ ██   ███ █████   ' \
+    '     ██    ██    ██ ██  ██  ██      ██  ██ ██ ██   ██ ██    ██ ██      ' \
+    '     ██     ██████  ██   ██ ███████ ██   ████ ██   ██  ██████  ███████  '
 
   printf "%b" "${_T_RESET}"
   printf "\n"
@@ -247,9 +230,9 @@ final_status_ok() {
   printf "\n"
   separator
   if [[ ${_T_COLORS_ENABLED} -eq 1 ]]; then
-    printf "  ${_T_GREEN}${_T_BOLD}🚀 llm-tracker is LIVE${_T_RESET} → ${_T_PURPLE}%s${_T_RESET}\n\n" "${url}"
+    printf "  ${_T_GREEN}${_T_BOLD}🚀 tokenage is LIVE${_T_RESET} → ${_T_PURPLE}%s${_T_RESET}\n\n" "${url}"
   else
-    printf "  🚀 llm-tracker is LIVE → %s\n\n" "${url}"
+    printf "  🚀 tokenage is LIVE → %s\n\n" "${url}"
   fi
 }
 
@@ -259,9 +242,9 @@ final_status_warn() {
   printf "\n"
   separator
   if [[ ${_T_COLORS_ENABLED} -eq 1 ]]; then
-    printf "  ${_T_AMBER}${_T_BOLD}⚠  llm-tracker started with %s issue(s)${_T_RESET} → ${_T_PURPLE}%s${_T_RESET}\n\n" "${issues}" "${url}"
+    printf "  ${_T_AMBER}${_T_BOLD}⚠  tokenage started with %s issue(s)${_T_RESET} → ${_T_PURPLE}%s${_T_RESET}\n\n" "${issues}" "${url}"
   else
-    printf "  ⚠  llm-tracker started with %s issue(s) → %s\n\n" "${issues}" "${url}"
+    printf "  ⚠  tokenage started with %s issue(s) → %s\n\n" "${issues}" "${url}"
   fi
 }
 
@@ -269,8 +252,8 @@ final_status_fail() {
   printf "\n"
   separator
   if [[ ${_T_COLORS_ENABLED} -eq 1 ]]; then
-    printf "%b" "  ${_T_RED}${_T_BOLD}✗ llm-tracker bootstrap failed${_T_RESET}\n\n"
+    printf "%b" "  ${_T_RED}${_T_BOLD}✗ tokenage bootstrap failed${_T_RESET}\n\n"
   else
-    printf "  ✗ llm-tracker bootstrap failed\n\n"
+    printf "  ✗ tokenage bootstrap failed\n\n"
   fi
 }

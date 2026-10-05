@@ -10,7 +10,7 @@ reviewers — those run on *your own* model, which defeats the purpose.
 
 ## Step 1 — Load Context
 
-Read `AGENTS.md` and `.agents/commands/llm-tracker.md`. These govern reviewer judgments.
+Read `AGENTS.md` and `.agents/commands/tokenage.md`. These govern reviewer judgments.
 
 ## Step 2 — Determine Scope and Intent
 

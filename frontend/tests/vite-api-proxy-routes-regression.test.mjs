@@ -25,7 +25,7 @@ for (const route of proxiedRoutes) {
   assert.equal(
     shouldProxyApiRequest(route),
     true,
-    `${route} should be proxied to the llm-tracker API`,
+    `${route} should be proxied to the tokenage API`,
   )
 }
 

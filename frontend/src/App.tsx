@@ -25,9 +25,9 @@ function AppLayout() {
 
   const handleNavigateToLogs = useCallback((filters?: { sessionFilter?: string }) => {
     if (filters?.sessionFilter) {
-      sessionStorage.setItem('llm-tracker-logs-filters', JSON.stringify(filters))
+      sessionStorage.setItem('tokenage-logs-filters', JSON.stringify(filters))
     } else {
-      sessionStorage.removeItem('llm-tracker-logs-filters')
+      sessionStorage.removeItem('tokenage-logs-filters')
     }
     navigate('/logs')
   }, [navigate])

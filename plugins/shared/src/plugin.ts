@@ -122,7 +122,7 @@ export function createPlugin(clientSource: string) {
   return async (input: any, options?: Record<string, any>) => {
     const endpoint = getEndpoint(options) ?? DEFAULT_ENDPOINT
     const token = typeof options?.token === "string" ? options.token : undefined
-    const headers = token ? { "x-llm-tracker-token": token } : undefined
+    const headers = token ? { "x-tokenage-token": token } : undefined
 
     return {
       event: async ({ event }: { event: { type: string; properties?: Record<string, any> } }) => {

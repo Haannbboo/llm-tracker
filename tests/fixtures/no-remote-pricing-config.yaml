@@ -5,6 +5,6 @@ server:
   port: 4000
   api_port: 4001
 db:
-  path: /tmp/llm-tracker-test-collection.db
+  path: /tmp/tokenage-test-collection.db
 models: {}
 providers: {}

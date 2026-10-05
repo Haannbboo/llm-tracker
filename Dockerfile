@@ -18,7 +18,7 @@ COPY frontend/dist/ frontend/dist/
 COPY config.example.yaml VERSION ./
 
 # Create directories for runtime
-RUN mkdir -p /root/.llm-tracker/logs
+RUN mkdir -p /root/.tokenage/logs
 
 # Copy entrypoint
 COPY docker/entrypoint.sh /entrypoint.sh
@@ -29,6 +29,6 @@ COPY docker/supervisord.conf /etc/supervisor/supervisord.conf
 
 EXPOSE 4000 4001 4002
 
-ENV LLM_TRACKER_CONFIG=/root/.llm-tracker/config.yaml
+ENV TOKENAGE_CONFIG=/root/.tokenage/config.yaml
 
 ENTRYPOINT ["/entrypoint.sh"]

@@ -1,6 +1,6 @@
 """User and auth-token operations.
 
-Tokens are opaque (`llmt_<kind>_<hex>`), shown once at mint time, and stored
+Tokens are opaque (`tokenage_<kind>_<hex>`), shown once at mint time, and stored
 only as sha256 hashes.
 """
 
@@ -100,7 +100,7 @@ def mint_token(
         raise ValueError(
             f"invalid token kind: {kind!r} (expected one of {TOKEN_KINDS})"
         )
-    token = f"llmt_{kind}_{secrets.token_hex(24)}"
+    token = f"tokenage_{kind}_{secrets.token_hex(24)}"
     user = get_or_create_user(email, db_path)
     engine = get_engine(db_path)
     with Session(engine, expire_on_commit=False) as session:
@@ -244,8 +244,8 @@ def mint_device_tokens(
     engine = get_engine(db_path)
     for attempt in range(2):
         now = _now_micros()
-        cli_token = f"llmt_cli_{secrets.token_hex(24)}"
-        ingest_token = f"llmt_ingest_{secrets.token_hex(24)}"
+        cli_token = f"tokenage_cli_{secrets.token_hex(24)}"
+        ingest_token = f"tokenage_ingest_{secrets.token_hex(24)}"
         try:
             with Session(engine, expire_on_commit=False) as session:
                 _set_auth_statement_timeout(session)

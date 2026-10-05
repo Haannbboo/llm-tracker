@@ -9,7 +9,7 @@ from ..utils import replace_contents as _replace_contents
 from . import merge as merge_helpers
 from .models import ProviderConfig, expand_path, get_tracker_home
 
-CONFIG_ENV_VAR = "LLM_TRACKER_CONFIG"
+CONFIG_ENV_VAR = "TOKENAGE_CONFIG"
 
 merge_missing_config_defaults = merge_helpers.merge_missing_config_defaults
 sync_config_file_with_defaults = merge_helpers.sync_config_file_with_defaults
@@ -47,12 +47,12 @@ def load_config(path: str | None = None) -> dict[str, Any]:
     auth = config.setdefault("auth", {})
     auth.setdefault("enabled", False)
     auth.setdefault("allowlist", [])
-    # Google OAuth credentials are env-only, never YAML (by decision in
-    # docs/design/specs/pr1-auth-foundation.md); env always wins.
-    auth["google_client_id"] = os.environ.get("LLMTRACKER_AUTH__GOOGLE_CLIENT_ID", "")
-    auth["google_client_secret"] = os.environ.get(
-        "LLMTRACKER_AUTH__GOOGLE_CLIENT_SECRET", ""
-    )
+    # Google OAuth credentials: config.yaml by default (0600, alongside the
+    # provider api_keys), with TOKENAGE_AUTH__GOOGLE_CLIENT_* overriding when
+    # set — so a deployment can still inject them without touching the file.
+    for key in ("google_client_id", "google_client_secret"):
+        env_value = os.environ.get(f"TOKENAGE_AUTH__{key.upper()}")
+        auth[key] = env_value or str(auth.get(key, "") or "")
 
     otlp = config.setdefault("otlp", {})
     otlp.setdefault("max_body_bytes", 2_000_000)  # 2 MB

@@ -46,9 +46,9 @@ test('detected agent rows include detected path or unknown fallback', () => {
 
 test('no-agent fallback remains actionable with test commands', () => {
   assert.match(detectedAgentsBlock, /No local Agent/)
-  assert.match(dashboardSource, /llm-tracker codex exec/)
-  assert.match(dashboardSource, /llm-tracker claude/)
-  assert.doesNotMatch(dashboardSource, /llm-tracker --/)
+  assert.match(dashboardSource, /tokenage codex exec/)
+  assert.match(dashboardSource, /tokenage claude/)
+  assert.doesNotMatch(dashboardSource, /tokenage --/)
 })
 
 test('settings page has separate detected local agents status section', () => {

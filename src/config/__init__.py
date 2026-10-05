@@ -1,1 +1,1 @@
-"""Runtime configuration modules for llm-tracker."""
+"""Runtime configuration modules for tokenage."""

@@ -27,7 +27,7 @@ This is a lightweight pre-flight gate, not a replacement for the independent rev
 Before writing the PR body, compare the diff against:
 
 - `AGENTS.md`
-- `.agents/commands/llm-tracker.md`
+- `.agents/commands/tokenage.md`
 - `.agents/commands/pre-pr.md`
 - `.agents/commands/review/SKILL.md`
 

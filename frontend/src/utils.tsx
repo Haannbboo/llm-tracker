@@ -2,7 +2,7 @@ import type { DateRangeOption, DailyUsage } from './types'
 import type { Lang } from './i18n/index.ts'
 import { getTheme, type Theme } from './theme'
 
-const TIMEZONE_KEY = 'llm-tracker-timezone'
+const TIMEZONE_KEY = 'tokenage-timezone'
 
 export const TIMEZONES: Record<string, string[]> = {
   'Americas': [

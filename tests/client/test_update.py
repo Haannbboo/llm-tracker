@@ -103,8 +103,8 @@ def test_client_update_runs_installer_with_login_skipped(
     install_command, installer_env = calls[1]
     assert install_command[0] == "sh"
     assert installer_env is not None
-    assert installer_env["LLM_TRACKER_SKIP_LOGIN"] == "1"
-    assert installer_env["LLM_TRACKER_SERVER"] == "https://host.test"
+    assert installer_env["TOKENAGE_SKIP_LOGIN"] == "1"
+    assert installer_env["TOKENAGE_SERVER"] == "https://host.test"
 
 
 def test_client_update_rejects_invalid_stored_server_url(monkeypatch) -> None:

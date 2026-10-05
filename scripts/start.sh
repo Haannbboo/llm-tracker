@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 # scripts/start.sh
-# Start llm-tracker services via supervisord.
+# Start tokenage services via supervisord.
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-RUNTIME_DIR="${HOME}/.llm-tracker/run"
-CONFIG_DIR="${HOME}/.llm-tracker"
+RUNTIME_DIR="${HOME}/.tokenage/run"
+CONFIG_DIR="${HOME}/.tokenage"
 CONFIG_PATH="${CONFIG_DIR}/config.yaml"
 SUPERVISORD_CONF="${CONFIG_DIR}/supervisord.conf"
 SUPERVISORD_PID="${RUNTIME_DIR}/supervisord.pid"
@@ -21,7 +21,7 @@ AUTO_PORT_ASSIGNER="${ROOT_DIR}/scripts/auto-assign-ports.py"
 source "${ROOT_DIR}/scripts/lib/terminal.sh"
 
 # Show banner only when run standalone (not from bootstrap.sh)
-if [[ -z "${LLM_TRACKER_SKIP_BANNER:-}" ]]; then
+if [[ -z "${TOKENAGE_SKIP_BANNER:-}" ]]; then
   banner
   step_header "Starting services"
 fi
@@ -39,13 +39,13 @@ fi
 source "${ROOT_DIR}/scripts/lib/requirements.sh"
 if ! requirements_are_current "${VENV_DIR}" "${ROOT_DIR}/requirements.txt"; then
   fail "Dependencies are out of date (requirements.txt changed)"
-  info "run llm-tracker server bootstrap"
+  info "run tokenage server bootstrap"
   exit 1
 fi
 pass "Dependencies up to date"
 
-if [[ ! -x "${HOME}/.local/bin/llm-tracker" ]]; then
-  info "NOTE: llm-tracker is not on PATH — run scripts/bootstrap.sh to set it up"
+if [[ ! -x "${HOME}/.local/bin/tokenage" ]]; then
+  info "NOTE: tokenage is not on PATH — run scripts/bootstrap.sh to set it up"
 fi
 
 mkdir -p "${ROOT_DIR}/logs" "${RUNTIME_DIR}"
@@ -91,8 +91,8 @@ else
   pass "Port check passed"
 fi
 
-# Agent telemetry is the client's job now. `llm-tracker setup` points detected
-# agents at this collector, and `llm-tracker server bootstrap` reports when one is
+# Agent telemetry is the client's job now. `tokenage setup` points detected
+# agents at this collector, and `tokenage server bootstrap` reports when one is
 # installed but not wired. The server never edits user agent settings.
 
 # ── Schema migrations ───────────────────────────────────────────────
@@ -116,7 +116,7 @@ supervisor.rpcinterface_factory = supervisor.rpcinterface:make_main_rpcinterface
 [supervisorctl]
 serverurl=unix://${SOCKET_PATH}
 
-[program:llm-tracker-proxy]
+[program:tokenage-proxy]
 command=${PYTHON} -m gunicorn -c ${ROOT_DIR}/src/config/proxy.conf.py src.proxy:app
 environment=OBJC_DISABLE_INITIALIZE_FORK_SAFETY=YES
 directory=${ROOT_DIR}
@@ -128,7 +128,7 @@ killasgroup=true
 stdout_logfile=${ROOT_DIR}/logs/proxy.stdout.log
 stderr_logfile=${ROOT_DIR}/logs/proxy.stderr.log
 
-[program:llm-tracker-api]
+[program:tokenage-api]
 command=${PYTHON} -m gunicorn -c ${ROOT_DIR}/src/config/api.conf.py src.api:app
 environment=OBJC_DISABLE_INITIALIZE_FORK_SAFETY=YES
 directory=${ROOT_DIR}
@@ -140,7 +140,7 @@ killasgroup=true
 stdout_logfile=${ROOT_DIR}/logs/api.stdout.log
 stderr_logfile=${ROOT_DIR}/logs/api.stderr.log
 
-[program:llm-tracker-otlp]
+[program:tokenage-otlp]
 command=${PYTHON} -m gunicorn -c ${ROOT_DIR}/src/config/otlp.conf.py src.otlp:app
 environment=OBJC_DISABLE_INITIALIZE_FORK_SAFETY=YES
 directory=${ROOT_DIR}
@@ -175,7 +175,7 @@ else
 fi
 
 # ── Start any programs not yet running ──────────────────────────────
-for prog in llm-tracker-proxy llm-tracker-api llm-tracker-otlp; do
+for prog in tokenage-proxy tokenage-api tokenage-otlp; do
   status="$("${SUPERVISORCTL}" -c "${SUPERVISORD_CONF}" status "${prog}" 2>/dev/null | awk '{print $2}' || true)"
   case "${status}" in
     RUNNING)  pass "${prog}: running" ;;

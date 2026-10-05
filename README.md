@@ -1,10 +1,10 @@
 [English](README.md) | [中文](README_CN.md)
 
-# llm-tracker
+# tokenage
 
 **Local-first observability for command-line LLM agents.**
 
-`llm-tracker` shows what your coding agents are doing: requests, token usage, cost estimates, latency, TTFT, models, sources, and session IDs across **Claude Code**, **Codex**, **OpenCode**, **Kilo Code**, and OpenAI/Anthropic-compatible traffic.
+`tokenage` shows what your coding agents are doing: requests, token usage, cost estimates, latency, TTFT, models, sources, and session IDs across **Claude Code**, **Codex**, **OpenCode**, **Kilo Code**, and OpenAI/Anthropic-compatible traffic.
 
 It is built for people who run multiple LLM agents locally and want one place to answer:
 
@@ -13,27 +13,27 @@ It is built for people who run multiple LLM agents locally and want one place to
 - How much did this coding session cost?
 - Which requests were slow, streamed, cached, or reasoning-heavy?
 
-The default setup is local: config in `~/.llm-tracker/config.yaml`, usage data in SQLite at `~/.llm-tracker/usage.db`, and services bound to loopback ports.
+The default setup is local: config in `~/.tokenage/config.yaml`, usage data in SQLite at `~/.tokenage/usage.db`, and services bound to loopback ports.
 
 ## What it does
 
 - **Tracks popular coding agents**: Claude Code, Codex, OpenCode, and Kilo Code through local OTLP telemetry.
 - **Tracks OpenAI/Anthropic-compatible clients**: route clients through the optional local proxy.
 - **Shows a dashboard**: usage, cost, latency, models, sources, request logs, setup health, and first-event onboarding.
-- **Prints command summaries**: run an agent through `llm-tracker` and get usage for that run.
+- **Prints command summaries**: run an agent through `tokenage` and get usage for that run.
 - **Keeps setup inspectable**: plain YAML config, SQLite by default, logs in `logs/`, no hosted backend required.
 - **Supports SQL databases**: keep SQLite locally or point `db.url` at PostgreSQL/MySQL through SQLAlchemy.
 
 ## How collection works
 
-`llm-tracker` collects usage in two complementary ways:
+`tokenage` collects usage in two complementary ways:
 
 ```text
 Claude Code / Codex / OpenCode / Kilo Code
         │
         │ OTLP telemetry
         ▼
-llm-tracker OTLP collector ──► database ──► dashboard / API / summaries
+tokenage OTLP collector ──► database ──► dashboard / API / summaries
 ```
 
 ```text
@@ -41,7 +41,7 @@ OpenAI-compatible or Anthropic-compatible client
         │
         │ HTTP
         ▼
-llm-tracker proxy ──► upstream provider
+tokenage proxy ──► upstream provider
         │
         ▼
      database
@@ -68,8 +68,8 @@ Bootstrap does the boring crap for you:
 
 1. installs Python dependencies into `.venv`
 2. builds the dashboard when Node/npm are available
-3. creates a CLI symlink at `~/.local/bin/llm-tracker`
-4. creates `~/.llm-tracker/config.yaml` if needed
+3. creates a CLI symlink at `~/.local/bin/tokenage`
+4. creates `~/.tokenage/config.yaml` if needed
 5. starts proxy, API, and OTLP services with Supervisor
 6. verifies service ports, the dashboard, and agent setup health
 7. restarts the API so the freshly built dashboard is served
@@ -98,12 +98,12 @@ Bootstrap reports agent setup health but does not configure agents any more. Tha
 is the client's job:
 
 ```bash
-llm-tracker setup
+tokenage setup
 ```
 
 It points the agents installed on this machine at the local OTLP collector, and
-leaves every setting it does not own alone. `llm-tracker setup --disable` takes
-them back off again. `llm-tracker status` shows what is installed, whether it
+leaves every setting it does not own alone. `tokenage setup --disable` takes
+them back off again. `tokenage status` shows what is installed, whether it
 runs, and where the agents point.
 
 ### 4. Generate your first tracked event
@@ -111,15 +111,15 @@ runs, and where the agents point.
 After bootstrap, run one of the commands shown by the dashboard, or use one of these directly:
 
 ```bash
-llm-tracker codex exec "hello"
-llm-tracker claude
+tokenage codex exec "hello"
+tokenage claude
 ```
 
 Repo-local fallback, useful before the symlink is on your `PATH`:
 
 ```bash
-./scripts/llm-tracker codex exec "hello"
-./scripts/llm-tracker claude
+./scripts/tokenage codex exec "hello"
+./scripts/tokenage claude
 ```
 
 The empty dashboard automatically checks for your first event. No fake demo data, no manual seeding.
@@ -134,38 +134,38 @@ The wrapper runs a child command, captures usage while it runs, then prints a su
 
 ```bash
 # Interactive agents
-llm-tracker codex
-llm-tracker claude
+tokenage codex
+tokenage claude
 
 # One-shot commands
-llm-tracker codex exec "say hello in one sentence"
+tokenage codex exec "say hello in one sentence"
 
 # Installed CLI
-llm-tracker codex exec "say hello in one sentence"
+tokenage codex exec "say hello in one sentence"
 ```
 
 The same command also covers everything that is not a tracked run:
 
 ```bash
 # Components, services, agents
-llm-tracker status
-llm-tracker setup
-llm-tracker update --check
+tokenage status
+tokenage setup
+tokenage update --check
 
 # A remote server instead of a local one
-llm-tracker login --server https://app.example.com
-llm-tracker logout
+tokenage login --server https://app.example.com
+tokenage logout
 ```
 
-Use `--` when passing flags to `llm-tracker` itself:
+Use `--` when passing flags to `tokenage` itself:
 
 ```bash
-llm-tracker --json -- codex
-llm-tracker --usage-only -- codex exec "say hello in one sentence"
-llm-tracker --wait-ms 5000 -- codex exec "say hello in one sentence"
-llm-tracker --summary-dest file --summary-file /tmp/llm-summary.json -- claude
-llm-tracker --proxy-env -- some-openai-compatible-cli
-llm-tracker --no-summary -- codex exec "say hello"
+tokenage --json -- codex
+tokenage --usage-only -- codex exec "say hello in one sentence"
+tokenage --wait-ms 5000 -- codex exec "say hello in one sentence"
+tokenage --summary-dest file --summary-file /tmp/llm-summary.json -- claude
+tokenage --proxy-env -- some-openai-compatible-cli
+tokenage --no-summary -- codex exec "say hello"
 ```
 
 See [docs/cli-reference.md](docs/cli-reference.md) for all flags, the tracking model, exit codes, service commands, API endpoints, and environment variables. Per-command behavior is in [docs/cli-refactor.md](docs/cli-refactor.md).
@@ -184,9 +184,9 @@ The dashboard gives you:
 
 By default, the backend API serves the built dashboard at `http://localhost:4001`. The frontend dev server resolves the API URL in this order:
 
-1. `LLM_TRACKER_API_URL`
-2. `LLM_TRACKER_BACKEND_URL`
-3. `~/.llm-tracker/config.yaml` using `server.host` and `server.api_port`
+1. `TOKENAGE_API_URL`
+2. `TOKENAGE_BACKEND_URL`
+3. `~/.tokenage/config.yaml` using `server.host` and `server.api_port`
 4. `http://localhost:4001`
 
 Frontend-specific notes live in [frontend/README.md](frontend/README.md).
@@ -202,24 +202,24 @@ Frontend-specific notes live in [frontend/README.md](frontend/README.md).
 Service commands:
 
 ```bash
-llm-tracker server status
-llm-tracker server restart
-llm-tracker server stop
+tokenage server status
+tokenage server restart
+tokenage server stop
 ```
 
-`llm-tracker server start` turns the services on, and `llm-tracker server
+`tokenage server start` turns the services on, and `tokenage server
 bootstrap` reinstalls, rebuilds the dashboard and restarts the API so the new
-bundle is served. `llm-tracker status` is a different command: it reports the
+bundle is served. `tokenage status` is a different command: it reports the
 installed components and whether they run.
 
-Runtime files live under `~/.llm-tracker/run/`. Logs are written to `logs/`.
+Runtime files live under `~/.tokenage/run/`. Logs are written to `logs/`.
 
 ## Configuration
 
 Main config:
 
 ```text
-~/.llm-tracker/config.yaml
+~/.tokenage/config.yaml
 ```
 
 Minimal provider and database config:
@@ -245,17 +245,17 @@ server:
   otlp_port: 4002
 
 db:
-  path: ~/.llm-tracker/usage.db
+  path: ~/.tokenage/usage.db
 ```
 
 To use PostgreSQL or MySQL instead of SQLite, set `db.url`:
 
 ```yaml
 db:
-  url: postgresql+psycopg://user:password@db-host:5432/llm_tracker?sslmode=require
+  url: postgresql+psycopg://user:password@db-host:5432/tokenage?sslmode=require
 ```
 
-`llm-tracker server start` merges missing defaults from `config.example.yaml` into your user config without overwriting existing values.
+`tokenage server start` merges missing defaults from `config.example.yaml` into your user config without overwriting existing values.
 
 ## Point clients at the proxy
 
@@ -286,7 +286,7 @@ providers:
 Or let the wrapper set both for one child process:
 
 ```bash
-llm-tracker --proxy-env -- some-openai-compatible-cli
+tokenage --proxy-env -- some-openai-compatible-cli
 ```
 
 Supported proxy paths include:
@@ -314,7 +314,7 @@ For streamed responses, the proxy records TTFT as time until the first upstream 
 
 TTFT is an operational signal, not a billing-grade metric. Each agent exposes different timing data.
 
-OpenCode and Kilo Code tracking is provided by local plugins (`plugins/opencode` and `plugins/kilo`) that emit one OTLP log record for each completed assistant message. `llm-tracker setup` runs `scripts/configure-opencode-plugin.py` when `opencode` is installed and `scripts/configure-kilo-plugin.py` when `kilo` is installed, registering each built plugin with the local OTLP logs endpoint.
+OpenCode and Kilo Code tracking is provided by local plugins (`plugins/opencode` and `plugins/kilo`) that emit one OTLP log record for each completed assistant message. `tokenage setup` runs `scripts/configure-opencode-plugin.py` when `opencode` is installed and `scripts/configure-kilo-plugin.py` when `kilo` is installed, registering each built plugin with the local OTLP logs endpoint.
 
 ## API
 
@@ -367,11 +367,11 @@ That check runs `scripts/bootstrap.sh` in a fresh Docker or Apple `container` en
 
 ## Privacy and security notes
 
-- `llm-tracker` is intended to run locally.
-- Usage is stored in `~/.llm-tracker/usage.db` by default.
+- `tokenage` is intended to run locally.
+- Usage is stored in `~/.tokenage/usage.db` by default.
 - If you configure `db.url`, usage data is written to that database instead.
 - The proxy forwards auth headers unchanged.
-- API keys are not managed by `llm-tracker`.
+- API keys are not managed by `tokenage`.
 - OTLP payloads are emitted by the agents themselves; review agent telemetry settings if you need strict metadata control.
 
 ## Contributing
@@ -384,7 +384,7 @@ Issues and PRs are welcome. Good contributions usually include:
 - frontend tests under `frontend/tests/` when changing dashboard behavior
 - updated docs when commands, setup, or behavior changes
 
-Please keep examples consistent: plain agent invocations should use `llm-tracker codex` or `llm-tracker claude`; reserve `--` for cases where `llm-tracker` flags are present.
+Please keep examples consistent: plain agent invocations should use `tokenage codex` or `tokenage claude`; reserve `--` for cases where `tokenage` flags are present.
 
 ## License
 

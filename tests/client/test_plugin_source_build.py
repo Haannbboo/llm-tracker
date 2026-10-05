@@ -29,7 +29,7 @@ def test_hosted_plugin_builds_from_source_with_npm(agent, tmp_path):
     npm.write_text(
         f"#!{sys.executable}\n"
         "import os, pathlib, sys\n"
-        "with open(os.environ['LLM_TRACKER_NPM_LOG'], 'a') as log:\n"
+        "with open(os.environ['TOKENAGE_NPM_LOG'], 'a') as log:\n"
         "    log.write(' '.join(sys.argv[1:]) + '\\n')\n"
         "if sys.argv[1:] == ['ci']:\n"
         "    (pathlib.Path.cwd() / 'node_modules').mkdir()\n"
@@ -49,8 +49,8 @@ def test_hosted_plugin_builds_from_source_with_npm(agent, tmp_path):
         **os.environ,
         "HOME": str(home),
         "PATH": str(fake_bin),
-        "LLM_TRACKER_HOSTED_CLIENT": "1",
-        "LLM_TRACKER_NPM_LOG": str(npm_log),
+        "TOKENAGE_HOSTED_CLIENT": "1",
+        "TOKENAGE_NPM_LOG": str(npm_log),
     }
     script = ROOT / "scripts" / f"configure-{agent}-plugin.py"
     result = subprocess.run(
@@ -117,8 +117,8 @@ def test_hosted_login_removes_old_server_plugin_and_token(agent, tmp_path):
         env={
             **os.environ,
             "HOME": str(home),
-            "LLM_TRACKER_HOSTED_CLIENT": "1",
-            "LLM_TRACKER_INGEST_TOKEN": "new-secret",
+            "TOKENAGE_HOSTED_CLIENT": "1",
+            "TOKENAGE_INGEST_TOKEN": "new-secret",
         },
         text=True,
         capture_output=True,
@@ -143,8 +143,8 @@ def test_hosted_claude_setup_does_not_register_versioned_hook(tmp_path):
     env = {
         **os.environ,
         "HOME": str(home),
-        "LLM_TRACKER_HOSTED_CLIENT": "1",
-        "LLM_TRACKER_INGEST_TOKEN": "new-secret",
+        "TOKENAGE_HOSTED_CLIENT": "1",
+        "TOKENAGE_INGEST_TOKEN": "new-secret",
     }
     command = [
         sys.executable,
@@ -163,7 +163,5 @@ def test_hosted_claude_setup_does_not_register_versioned_hook(tmp_path):
     assert data["env"]["OTEL_EXPORTER_OTLP_LOGS_ENDPOINT"] == (
         "https://new.test/v1/logs"
     )
-    assert data["env"]["OTEL_EXPORTER_OTLP_HEADERS"] == (
-        "x-llm-tracker-token=new-secret"
-    )
+    assert data["env"]["OTEL_EXPORTER_OTLP_HEADERS"] == "x-tokenage-token=new-secret"
     assert "hooks" not in data

@@ -28,7 +28,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--db-url",
         default=CONFIG["db"]["url"],
-        help="Target SQLAlchemy URL. Defaults to db.url from ~/.llm-tracker/config.yaml.",
+        help="Target SQLAlchemy URL. Defaults to db.url from ~/.tokenage/config.yaml.",
     )
     parser.add_argument(
         "--dry-run",
