@@ -37,14 +37,16 @@ type Model = { name: string } & PricingEntry
 const PAGE_SIZE = 200
 
 export function PricingPage() {
-  const { configParsed, configStatus } = useApp()
+  const { configStatus } = useApp()
   const {
     selectedPricingProvider,
     setSelectedPricingProvider,
+    providerOptions,
     pricingSearch,
     setPricingSearch,
     filteredPricingModels,
     hasPricingEdits,
+    activeCost,
     handleCostChange,
     handleSavePricing,
   } = usePricingData()
@@ -90,18 +92,9 @@ export function PricingPage() {
 
   const pricingMultiplier = selectedPricingProvider === 'global'
     ? 1
-    : filteredPricingModels.find((m) => typeof m.multiplier === 'number')?.multiplier
-      ?? Number(configParsed?.providers?.[selectedPricingProvider]?.price_multiplier ?? 1)
+    : filteredPricingModels.find((m) => typeof m.multiplier === 'number')?.multiplier ?? 1
 
   const formatPrice = (v: number | null | undefined) => (typeof v === 'number' ? v.toFixed(3) : '—')
-
-  const activeCost = (name: string) => {
-    const providerCost = selectedPricingProvider !== 'global'
-      ? configParsed?.providers?.[selectedPricingProvider]?.models?.[name]?.cost
-      : null
-    if (providerCost && Object.keys(providerCost).length > 0) return providerCost
-    return configParsed?.models?.[name]?.cost || {}
-  }
 
   const modelPrice = (model: Model, field: string) => {
     if (field === 'cacheRead') return model.cache_read
@@ -113,7 +106,7 @@ export function PricingPage() {
 
   const inputProps = (model: Model, field: string) => {
     const price = modelPrice(model, field)
-    const active = activeCost(model.name)
+    const active = activeCost(model)
     return {
       type: 'number' as const,
       step: '0.001',
@@ -195,8 +188,8 @@ export function PricingPage() {
   }
 
   const sourceOrder = useMemo(
-    () => pricingSourceOrder(configParsed, filteredPricingModels.map((m) => m.source)),
-    [configParsed, filteredPricingModels],
+    () => pricingSourceOrder(filteredPricingModels.map((m) => m.source)),
+    [filteredPricingModels],
   )
 
   return (
@@ -220,7 +213,7 @@ export function PricingPage() {
               }}
             >
               <option value="global">{t('Global Default')}</option>
-              {configParsed?.providers && Object.keys(configParsed.providers).map((p) => (
+              {providerOptions.map((p) => (
                 <option key={p} value={p}>{t('Provider:')} {p}</option>
               ))}
             </select>

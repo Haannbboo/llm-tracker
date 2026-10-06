@@ -234,79 +234,6 @@ def test_usage_ingest_route_is_not_available(api_module):
     assert response.status_code == 405
 
 
-def test_get_config_returns_raw_content_for_malformed_yaml(
-    api_module, isolated_home, monkeypatch
-):
-    config_path = isolated_home / ".tokenage" / "broken.yaml"
-    config_path.write_text("providers:\n  broken: [\n", encoding="utf-8")
-    monkeypatch.setattr(api_module, "CONFIG_PATH", str(config_path))
-
-    result = asyncio.run(api_module.get_config())
-
-    assert result["content"] == "providers:\n  broken: [\n"
-    assert result["parsed"] == {}
-    assert result["runtime"]["evaluation"]["evaluator"] == "codex"
-
-
-def test_get_config_surfaces_runtime_evaluator(api_module, isolated_home, monkeypatch):
-    config_path = isolated_home / ".tokenage" / "config.yaml"
-    config_path.parent.mkdir(parents=True, exist_ok=True)
-    config_path.write_text(
-        """
-evaluation:
-  evaluator: claude
-""".lstrip(),
-        encoding="utf-8",
-    )
-    monkeypatch.setattr(api_module, "CONFIG_PATH", str(config_path))
-
-    result = asyncio.run(api_module.get_config())
-
-    assert result["parsed"]["evaluation"]["evaluator"] == "claude"
-    assert result["runtime"]["evaluation"]["evaluator"] == "claude"
-
-
-def test_update_config_refreshes_runtime_config(
-    api_module, config_module, isolated_home
-):
-    config_path = isolated_home / ".tokenage" / "config.yaml"
-    api_module.CONFIG_PATH = str(config_path)
-
-    result = asyncio.run(
-        api_module.update_config(
-            api_module.ConfigUpdate(
-                content="""
-pricing:
-  auto_fetch: false
-server:
-  host: 0.0.0.0
-  port: 4000
-db:
-  path: ~/.tokenage/usage.db
-models:
-  new-model: {}
-providers:
-  new-provider:
-    base_url: https://new.example/v1
-    models:
-      new-model: {}
-"""
-            )
-        )
-    )
-
-    assert result == {"status": "success"}
-    assert config_module.CONFIG["server"]["host"] == "0.0.0.0"
-    assert config_module.PROVIDER_MAP["new-provider"] == config_module.ProviderConfig(
-        name="new-provider",
-        base_url="https://new.example/v1",
-    )
-    assert config_module.MODEL_MAP["new-model"] == config_module.ProviderConfig(
-        name="new-provider",
-        base_url="https://new.example/v1",
-    )
-
-
 def test_usage_endpoint_passes_client_source(api_module, monkeypatch):
     captured = {}
 
@@ -457,29 +384,6 @@ def test_usage_endpoint_does_not_include_cors_for_untrusted_origin(
     )
 
     assert response.status_code == 200
-    assert "access-control-allow-origin" not in response.headers
-
-
-def test_config_endpoint_does_not_include_cors_for_localhost_origin(api_module):
-    response = TestClient(api_module.app).get(
-        "/config",
-        headers={"Origin": "http://localhost:3000"},
-    )
-
-    assert response.status_code == 200
-    assert "access-control-allow-origin" not in response.headers
-
-
-def test_config_endpoint_preflight_does_not_allow_localhost_origin(api_module):
-    response = TestClient(api_module.app).options(
-        "/config",
-        headers={
-            "Origin": "http://localhost:3000",
-            "Access-Control-Request-Method": "GET",
-        },
-    )
-
-    assert response.status_code == 405
     assert "access-control-allow-origin" not in response.headers
 
 
@@ -1753,8 +1657,6 @@ LOCAL_ONLY_ROUTES = [
 ]
 
 ADMIN_ONLY_ROUTES = [
-    ("GET", "/config"),
-    ("PUT", "/config"),
     ("PATCH", "/config"),
     ("PATCH", "/config/evaluation"),
 ]

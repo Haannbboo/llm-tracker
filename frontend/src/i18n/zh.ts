@@ -165,15 +165,9 @@ export const zh: Record<string, string> = {
   'Jump:': '跳转：',
   '/ page': '/ 页',
 
-  // Settings - Active Providers
-  'Active Providers': '活跃供应商',
-  'Base URL': '基础 URL',
-  'Models': '模型',
-  'No providers configured in config.yaml.': 'config.yaml 中未配置供应商。',
-  'Cost Override': '费用覆盖',
-
   // Settings - Model Pricing
   'Model Pricing': '模型定价',
+  'Models': '模型',
   'Scope:': '范围：',
   'Global Default': '全局默认',
   'Provider:': '供应商：',
@@ -181,15 +175,8 @@ export const zh: Record<string, string> = {
   'Output (per 1M)': '输出（每百万）',
   'Cache Read (per 1M)': '缓存读取（每百万）',
   'Cache Write (per 1M)': '缓存写入（每百万）',
-  'No global models configured in config.yaml.': 'config.yaml 中未配置全局模型。',
-  'Provider Override': '供应商覆盖',
 
-  // Settings - Configuration
-  'Configuration (YAML)': '配置（YAML）',
-  'Directly edit your <code>config.yaml</code>. Providers and routing are defined here.': '直接编辑 <code>config.yaml</code>。供应商和路由在此定义。',
   'Configuration saved successfully': '配置保存成功',
-  'Save Configuration': '保存配置',
-  'Saving...': '保存中...',
 
   'Copy': '复制',
   'Latency': '延迟',
@@ -199,8 +186,6 @@ export const zh: Record<string, string> = {
   'Failed to fetch log data': '获取日志数据失败',
   'Unknown error': '未知错误',
   'Failed to save config': '保存配置失败',
-  'Failed to refresh config after save': '保存后刷新配置失败',
-  'Config root must be a YAML mapping': '配置根节点必须是 YAML 映射',
   'Connection error while saving config': '保存配置时连接错误',
   'Test failed': '测试失败',
 
@@ -214,7 +199,6 @@ export const zh: Record<string, string> = {
 
   // Empty state / onboarding (P0-6)
   'Welcome to tokenage': '欢迎使用 tokenage',
-  'tokenage Settings': 'tokenage 设置',
   'Your local dashboard for AI coding agents': '你的本地 AI 编程代理仪表盘',
   'Track Claude Code, Codex, and OpenAI-compatible traffic in one place — usage, cost, latency.': '在一个地方追踪 Claude Code、Codex 和 OpenAI 兼容流量 — 用量、费用、延迟。',
   'Get Started': '开始使用',

@@ -161,7 +161,7 @@ describe('Session evaluation UI', () => {
   test('settings exposes an immediate evaluator default selector', () => {
     assert.match(settings, /evaluation-default-selector/)
     assert.match(settingsHook, /handleEvaluationEvaluatorChange/)
-    assert.match(settingsHook, /evaluation\.evaluator/)
+    assert.match(settingsHook, /\/config\/evaluation/)
     assert.match(settingsHook, /setEvaluationEvaluator/)
   })
 })

@@ -11,7 +11,6 @@ from urllib.parse import urlparse, urlsplit
 
 import httpx
 import tomllib
-import yaml
 from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response
 from fastapi.responses import JSONResponse
 from fastapi.routing import APIRoute
@@ -119,10 +118,6 @@ AUTH_GATE_PUBLIC_PATHS = ("/auth/me", "/version", "/install.sh")
 AUTH_GATE_EXTRA_GATED_PATHS = ("/docs", "/redoc", "/openapi.json")
 
 
-class ConfigUpdate(BaseModel):
-    content: str
-
-
 class ConfigPatch(BaseModel):
     path: list[str]
     op: Literal["set", "delete"]
@@ -150,16 +145,6 @@ def _request_user_id(request: Request) -> str | None:
 
 class ConfigPatchUpdate(BaseModel):
     patches: list[ConfigPatch]
-
-
-def _runtime_config_payload(parsed_config: dict | None) -> dict:
-    worker_config = load_evaluation_worker_config(parsed_config or {})
-    return {
-        "evaluation": {
-            "evaluator": worker_config.evaluator,
-            "evaluators": list_evaluator_agents(),
-        },
-    }
 
 
 def _evaluation_metadata_payload() -> dict:
@@ -901,34 +886,6 @@ async def get_session_tool_calls_summary(request: Request, session_id: str):
     return summary
 
 
-@app.get("/config", dependencies=[Depends(_require_local_profile)])
-async def get_config():
-    path = os.path.expanduser(CONFIG_PATH)
-    if not os.path.exists(path):
-        parsed: dict = {}
-        return {
-            "content": "",
-            "parsed": parsed,
-            "runtime": _runtime_config_payload(parsed),
-        }
-    try:
-        with open(path, encoding="utf-8") as f:
-            content = f.read()
-        try:
-            parsed = yaml.safe_load(content) or {}
-        except yaml.YAMLError:
-            parsed = {}
-        if not isinstance(parsed, dict):
-            parsed = {}
-        return {
-            "content": content,
-            "parsed": parsed,
-            "runtime": _runtime_config_payload(parsed),
-        }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
 async def _notify_proxy_refresh() -> None:
     """Ask the proxy process to reload its runtime config.
 
@@ -943,25 +900,6 @@ async def _notify_proxy_refresh() -> None:
         logging.getLogger(__name__).warning(
             "Failed to notify proxy to refresh config", exc_info=True
         )
-
-
-@app.put("/config", dependencies=[Depends(_require_local_profile)])
-async def update_config(update: ConfigUpdate):
-    path = os.path.expanduser(CONFIG_PATH)
-    try:
-        # Validate YAML
-        yaml.safe_load(update.content)
-
-        os.makedirs(os.path.dirname(path), exist_ok=True)
-        with open(path, "w", encoding="utf-8") as f:
-            f.write(update.content)
-        await asyncio.to_thread(refresh_runtime_config, path)
-        asyncio.create_task(_notify_proxy_refresh())
-        return {"status": "success"}
-    except yaml.YAMLError as e:
-        raise HTTPException(status_code=400, detail=f"Invalid YAML: {str(e)}")
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.patch("/config", dependencies=[Depends(_require_local_profile)])

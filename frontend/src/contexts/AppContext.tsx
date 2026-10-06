@@ -21,16 +21,12 @@ type AppContextType = {
   auth: AuthState
   signOut: () => Promise<void>
 
-  configContent: string
-  setConfigContent: (c: string) => void
-  configParsed: Record<string, any> | null
-  setConfigParsed: (c: Record<string, any> | null) => void
+  configStatus: 'idle' | 'saving' | 'saved' | 'error'
+  setConfigStatus: (s: 'idle' | 'saving' | 'saved' | 'error') => void
   evaluationEvaluator: EvaluatorType
   setEvaluationEvaluator: (e: EvaluatorType) => void
   evaluationEvaluators: EvaluatorOption[]
   setEvaluationEvaluators: (e: EvaluatorOption[]) => void
-  configStatus: 'idle' | 'saving' | 'saved' | 'error'
-  setConfigStatus: (s: 'idle' | 'saving' | 'saved' | 'error') => void
 
   pricingData: PricingMap | null
   setPricingData: (p: PricingMap | null) => void
@@ -82,8 +78,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [theme, setTheme] = useState<'light' | 'dark'>(getTheme)
   const { lang, setLang } = useLang()
   const [auth, setAuth] = useState<AuthState>({ status: 'loading', enabled: false, user: null })
-  const [configContent, setConfigContent] = useState('')
-  const [configParsed, setConfigParsed] = useState<Record<string, any> | null>(null)
   const [evaluationEvaluator, setEvaluationEvaluator] = useState<EvaluatorType>('codex')
   const [evaluationEvaluators, setEvaluationEvaluators] = useState<EvaluatorOption[]>([])
   const [configStatus, setConfigStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle')
@@ -187,22 +181,23 @@ export function AppProvider({ children }: { children: ReactNode }) {
     return () => { window.fetch = originalFetch }
   }, [auth.enabled, markLoggedOut])
 
-  // Fetch config on mount. Settings owns pricing fetches because pricing scope
-  // depends on the selected provider.
+  // Seed the global evaluator from the local evaluation metadata on mount.
+  // Settings owns pricing fetches because pricing scope depends on the
+  // selected provider.
   useEffect(() => {
     const controller = new AbortController()
     async function fetchInitialData() {
       try {
-        const configResp = await fetch('/config', { signal: controller.signal })
-        if (configResp.ok) {
-          const data = await configResp.json()
-          setConfigContent(data.content)
-          setConfigParsed(data.parsed)
-          const runtimeEvaluator = data.runtime?.evaluation?.evaluator
-          setEvaluationEvaluator(typeof runtimeEvaluator === 'string' ? runtimeEvaluator as EvaluatorType : 'codex')
-          if (Array.isArray(data.runtime?.evaluation?.evaluators)) {
-            setEvaluationEvaluators(data.runtime.evaluation.evaluators)
-          }
+        const response = await fetch('/local/evaluation-jobs/active', {
+          signal: controller.signal,
+        })
+        if (!response.ok) return
+        const data = await response.json()
+        if (typeof data.global_evaluator_type === 'string') {
+          setEvaluationEvaluator(data.global_evaluator_type as EvaluatorType)
+        }
+        if (Array.isArray(data.evaluators)) {
+          setEvaluationEvaluators(data.evaluators)
         }
       } catch (err) {
         console.error('Failed to load initial data:', err)
@@ -217,7 +212,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       theme, toggleThemeHandler,
       lang, setLang,
       auth, signOut,
-      configContent, setConfigContent, configParsed, setConfigParsed, configStatus, setConfigStatus,
+      configStatus, setConfigStatus,
       evaluationEvaluator, setEvaluationEvaluator, evaluationEvaluators, setEvaluationEvaluators,
       pricingData, setPricingData,
       showToast,
