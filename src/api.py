@@ -4,7 +4,6 @@ import logging
 import os
 import re
 import shlex
-import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Literal
@@ -106,7 +105,6 @@ _SPA_API_PREFIXES = (
     "/config",
     "/pricing",
     "/local/",
-    "/test-connectivity",
     "/version",
     "/install.sh",
 )
@@ -177,14 +175,6 @@ def _evaluation_metadata_payload() -> dict:
         "global_evaluator_type": default_evaluator,
         "global_evaluator_available": default_available,
     }
-
-
-class ConnectivityTest(BaseModel):
-    base_url: str
-    api_key: str
-    format: str  # "openai", "anthropic", "responses"
-    model: str | None = None
-    message: str | None = None
 
 
 class SessionEvaluationUpdate(BaseModel):
@@ -1297,78 +1287,6 @@ async def reprice_estimated_usage(
         model_cost_sources=model_cost_sources,
         provider_model_cost_sources=provider_model_cost_sources,
     )
-
-
-@app.post("/test-connectivity")
-async def test_connectivity(test: ConnectivityTest):
-    url = test.base_url.rstrip("/")
-    headers = {}
-    payload = {}
-
-    # Normalize: ensure /v1 is in the path
-    if "/v1" not in url:
-        url = f"{url}/v1"
-
-    if test.format == "openai":
-        if not url.endswith("/chat/completions"):
-            url = f"{url}/chat/completions"
-        headers = {"Authorization": f"Bearer {test.api_key}"}
-        payload = {
-            "model": test.model or "gpt-5.4",
-            "messages": [{"role": "user", "content": test.message or "What is 2 + 3?"}],
-            "max_tokens": 10,
-        }
-    elif test.format == "anthropic":
-        if not url.endswith("/messages"):
-            url = f"{url}/messages"
-        headers = {
-            "x-api-key": test.api_key,
-            "anthropic-version": "2023-06-01",
-            "content-type": "application/json",
-        }
-        payload = {
-            "model": test.model or "gpt-5.4",
-            "messages": [{"role": "user", "content": test.message or "What is 2 + 3?"}],
-            "max_tokens": 10,
-        }
-    elif test.format == "responses":
-        if not url.endswith("/responses"):
-            url = f"{url}/responses"
-        headers = {"Authorization": f"Bearer {test.api_key}"}
-        payload = {
-            "model": test.model or "gpt-5.4",
-            "messages": [{"role": "user", "content": test.message or "What is 2 + 3?"}],
-            "max_tokens": 10,
-        }
-    else:
-        raise HTTPException(
-            status_code=400, detail=f"Unsupported format: {test.format}"
-        )
-
-    start_time = time.monotonic()
-    try:
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            response = await client.post(url, headers=headers, json=payload)
-            latency_ms = int((time.monotonic() - start_time) * 1000)
-
-            try:
-                body = response.json()
-            except Exception:
-                body = response.text
-
-            return {
-                "status_code": response.status_code,
-                "latency_ms": latency_ms,
-                "body": body,
-                "url": url,
-            }
-    except Exception as e:
-        return {
-            "status_code": 0,
-            "latency_ms": int((time.monotonic() - start_time) * 1000),
-            "error": str(e),
-            "url": url,
-        }
 
 
 @app.get("/local/agents", dependencies=[Depends(_require_local_profile)])

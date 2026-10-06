@@ -11,7 +11,6 @@ export function shouldProxyApiRequest(requestUrl) {
     pathname.startsWith('/auth/') ||
     pathname === '/usage' ||
     pathname.startsWith('/usage/') ||
-    pathname === '/test-connectivity' ||
     pathname.startsWith('/local/') ||
     pathname === '/model-effectiveness' ||
     pathname === '/sessions' ||

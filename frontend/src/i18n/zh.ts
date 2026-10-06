@@ -3,7 +3,6 @@ export const zh: Record<string, string> = {
   'Dashboard': '仪表盘',
   'Request Logs': '请求日志',
   'Settings': '设置',
-  'Connectivity Test': '连通性测试',
 
   // Theme
   'Switch to light mode': '切换到亮色模式',
@@ -192,32 +191,8 @@ export const zh: Record<string, string> = {
   'Save Configuration': '保存配置',
   'Saving...': '保存中...',
 
-  // Connectivity Test
-  'Upstream Connectivity Test': '上游连通性测试',
-  'The upstream API root URL, e.g. https://api.openai.com/v1': '上游 API 根 URL，例如 https://api.openai.com/v1',
-  'API Key': 'API 密钥',
-  'Format': '格式',
-  'OpenAI': 'OpenAI',
-  'Chat Completion': '聊天补全',
-  'Anthropic': 'Anthropic',
-  'Claude': 'Claude',
-  'Codex': 'Codex',
-  'Responses': 'Responses',
-  'Custom:': '自定义：',
-  'Message': '消息',
-  'Testing...': '测试中...',
-  'Run Connectivity Test': '运行连通性测试',
-  'Manual curl equivalent': '等效 curl 命令',
   'Copy': '复制',
-  'Copied': '已复制',
-  'Test Result': '测试结果',
-  'Results will appear here after testing': '测试后结果将显示在此处',
-  'Status Code': '状态码',
-  'Error': '错误',
   'Latency': '延迟',
-  'Response': '响应',
-  'Upstream returned HTML -- check that base_url points to an API endpoint': '上游返回了 HTML — 请检查 base_url 是否指向 API 端点',
-  'Response Body': '响应体',
 
   // Error messages
   'Failed to fetch dashboard data': '获取仪表盘数据失败',

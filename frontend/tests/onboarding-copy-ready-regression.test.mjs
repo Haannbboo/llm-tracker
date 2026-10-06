@@ -8,7 +8,6 @@ const here = join(dirname(fileURLToPath(import.meta.url)), '..')
 const copyButtonSource = readFileSync(join(here, 'src', 'components', 'CopyButton.tsx'), 'utf-8')
 const useOnboardingSource = readFileSync(join(here, 'src', 'hooks', 'useOnboarding.ts'), 'utf-8')
 const dashboardSource = readFileSync(join(here, 'src', 'pages', 'DashboardPage.tsx'), 'utf-8')
-const settingsSource = readFileSync(join(here, 'src', 'pages', 'SettingsPage.tsx'), 'utf-8')
 const zhSource = readFileSync(join(here, 'src', 'i18n', 'zh.ts'), 'utf-8')
 
 const onboardingCommandsStart = dashboardSource.indexOf('{/* Step 2: Run a test command */}')
@@ -23,12 +22,6 @@ const onboardingCommandsBlock = dashboardSource.slice(onboardingCommandsStart, v
 const detectedAgentsStart = dashboardSource.indexOf('{/* Detected agents */}', verifyStart)
 assert.notEqual(detectedAgentsStart, -1)
 const verifyBlock = dashboardSource.slice(verifyStart, detectedAgentsStart)
-
-const manualCurlCopyStart = settingsSource.indexOf('text={manualCurlEquivalent}')
-assert.notEqual(manualCurlCopyStart, -1)
-const manualCurlCopyEnd = settingsSource.indexOf('/>', manualCurlCopyStart)
-assert.notEqual(manualCurlCopyEnd, -1)
-const manualCurlCopyBlock = settingsSource.slice(manualCurlCopyStart, manualCurlCopyEnd)
 
 test('shared copy button supports success-only copy callbacks', () => {
   assert.match(copyButtonSource, /onCopied\?: \(\) => void/)
@@ -74,12 +67,6 @@ test('verify panel shows compact auto-check hints without manual first-run CTA',
   assert.doesNotMatch(verifyBlock, /Copy bootstrap command/)
   assert.doesNotMatch(verifyBlock, /onClick=\{handleVerifyEvent\}/)
   assert.doesNotMatch(verifyBlock, />\s*\{t\('Check for Event'\)\}\s*</)
-})
-
-test('connectivity test copy does not trigger onboarding ready state', () => {
-  assert.doesNotMatch(manualCurlCopyBlock, /onCopied/)
-  assert.doesNotMatch(manualCurlCopyBlock, /setCopiedOnboardingCommand/)
-  assert.doesNotMatch(manualCurlCopyBlock, /Agent command copied/)
 })
 
 test('auto-check hints have natural Chinese translations', () => {

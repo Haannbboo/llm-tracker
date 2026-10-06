@@ -172,7 +172,6 @@ Dashboard 提供：
 - latency 和 TTFT 趋势
 - 请求日志
 - 已检测到的 Agent 和 setup health
-- connectivity test
 
 默认情况下，后端 API 会在 `http://localhost:4001` 提供构建后的 Dashboard。前端 dev server 按下面顺序解析 API URL：
 

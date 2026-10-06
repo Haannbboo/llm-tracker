@@ -1614,51 +1614,6 @@
   background: #16a34a !important;
 }
 
-.model-chip {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 2px;
-  padding: 10px 8px;
-  background: var(--input-bg);
-  color: var(--text-primary);
-  border: 1.5px solid var(--border-color);
-  border-radius: 10px;
-  cursor: pointer;
-  transition: all 0.15s ease;
-}
-.model-chip:hover {
-  border-color: var(--color-blue);
-  background: var(--card-bg);
-}
-.model-chip-active {
-  border-color: var(--color-blue);
-  background: rgba(59, 130, 246, 0.08);
-  box-shadow: 0 0 0 1px var(--color-blue);
-}
-
-.format-chip {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 10px 12px;
-  background: var(--input-bg);
-  color: var(--text-primary);
-  border: 1.5px solid var(--border-color);
-  border-radius: 10px;
-  cursor: pointer;
-  transition: all 0.15s ease;
-}
-.format-chip:hover {
-  border-color: var(--color-blue);
-  background: var(--card-bg);
-}
-.format-chip-active {
-  border-color: var(--color-blue);
-  background: rgba(59, 130, 246, 0.08);
-  box-shadow: 0 0 0 1px var(--color-blue);
-}
-
 .pagination-btn {
   padding: 6px 12px;
   background: var(--input-bg);

@@ -74,7 +74,6 @@ export function isApiPath(pathname: string): boolean {
     pathname === '/pricing' ||
     pathname.startsWith('/pricing/') ||
     pathname.startsWith('/local/') ||
-    pathname === '/test-connectivity' ||
     pathname === '/version'
   )
 }

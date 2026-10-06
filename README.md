@@ -180,7 +180,6 @@ The dashboard gives you:
 - latency and TTFT trends
 - request logs
 - detected agents and setup health
-- connectivity testing
 
 By default, the backend API serves the built dashboard at `http://localhost:4001`. The frontend dev server resolves the API URL in this order:
 

@@ -7,7 +7,6 @@ const proxiedRoutes = [
   '/usage/count',
   '/usage/logs?limit=1',
   '/usage/tools',
-  '/test-connectivity',
   '/local/agents',
   '/local/setup-health',
   '/model-effectiveness?group_by=model',

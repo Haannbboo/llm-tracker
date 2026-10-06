@@ -58,20 +58,8 @@ test('overview tab content renders dashboard charts', () => {
   assert.match(dashboardSource, /\{dashboardTab === 'overview' && \(<>/)
 })
 
-// Connectivity test moved into settings
-test('connectivity test panel is inside settings view', () => {
-  assert.match(settingsSource, /t\('Upstream Connectivity Test'\)/)
-})
-
 test('standalone test view block is removed', () => {
   assert.doesNotMatch(appSource, /\{view === 'test' && \(/)
-})
-
-test('connectivity test form fields exist in settings', () => {
-  assert.match(settingsSource, /t\('Base URL'\)/)
-  assert.match(settingsSource, /t\('API Key'\)/)
-  assert.match(settingsSource, /t\('Run Connectivity Test'\)/)
-  assert.match(settingsSource, /t\('Manual curl equivalent'\)/)
 })
 
 // CSS for dashboard tabs

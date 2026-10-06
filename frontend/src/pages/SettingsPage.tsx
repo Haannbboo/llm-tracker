@@ -4,7 +4,6 @@ import { PricingPage } from './PricingPage'
 import { useApp } from '../contexts/AppContext'
 import { useSettingsData } from '../hooks/useSettingsData'
 import { useDevices } from '../hooks/useDevices'
-import { CopyButton } from '../components/CopyButton'
 import { t } from '../i18n/index.ts'
 import { FIXED_PROVIDER_COLORS, getProviderColor, getAgentDisplayName, formatTime } from '../utils'
 import { TimezoneSelector } from '../components/TimezoneSelector'
@@ -20,7 +19,7 @@ const DEVICE_KIND_LABELS: Record<string, string> = {
 export function SettingsPage() {
   const [searchParams, setSearchParams] = useSearchParams()
   const section = searchParams.get('section')
-  const activeSection = section && ['tracker', 'pricing', 'services', 'connectivity', 'devices'].includes(section) ? section : 'tracker'
+  const activeSection = section && ['tracker', 'pricing', 'services', 'devices'].includes(section) ? section : 'tracker'
   const colors = FIXED_PROVIDER_COLORS
   const {
     configParsed, configContent, setConfigContent,
@@ -51,11 +50,7 @@ export function SettingsPage() {
   }
 
   const {
-    testBaseUrl, setTestBaseUrl, testApiKey, setTestApiKey,
-    testFormat, setTestFormat, testModel, setTestModel,
-    testMessage, setTestMessage, testResult, isTesting,
-    handleSaveConfig, handleRunTest, handleEvaluationEvaluatorChange,
-    manualCurlEquivalent,
+    handleSaveConfig, handleEvaluationEvaluatorChange,
     evaluationEvaluator, evaluationEvaluators,
   } = useSettingsData()
 
@@ -103,7 +98,6 @@ export function SettingsPage() {
             { id: 'tracker', label: t('tokenage Settings') },
             { id: 'pricing', label: t('Pricing') },
             { id: 'services', label: t('Services') },
-            { id: 'connectivity', label: t('Connectivity Test') },
             ...(auth.enabled && auth.user ? [{ id: 'devices', label: t('Devices') }] : []),
           ].map((section) => (
             <button
@@ -430,200 +424,6 @@ export function SettingsPage() {
         </div>
       </div>
         </>
-      )}
-
-      {activeSection === 'connectivity' && (
-        <div className="panel">
-        <div className="panel-tabs">
-          <div className="tab active"><span>🔌</span> {t('Upstream Connectivity Test')}</div>
-        </div>
-        <div className="panel-content" style={{ padding: '24px' }}>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '24px' }}>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-              <div className="filter-group">
-                <div className="filter-label">{t('Base URL')}</div>
-                <input
-                  type="text"
-                  className="input-plain"
-                  placeholder="https://api.openai.com/v1"
-                  value={testBaseUrl}
-                  onChange={(e) => setTestBaseUrl(e.target.value)}
-                  style={{ width: '100%' }}
-                />
-                <div style={{ fontSize: '10px', color: 'var(--text-muted)', marginTop: '4px' }}>
-                  {t('The upstream API root URL, e.g. https://api.openai.com/v1')}
-                </div>
-              </div>
-
-              <div className="filter-group">
-                <div className="filter-label">{t('API Key')}</div>
-                <input
-                  type="password"
-                  className="input-plain"
-                  placeholder="sk-..."
-                  value={testApiKey}
-                  onChange={(e) => setTestApiKey(e.target.value)}
-                  style={{ width: '100%' }}
-                />
-              </div>
-
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
-                <div className="filter-group">
-                  <div className="filter-label">{t('Format')}</div>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                    {[
-                      { id: 'openai', label: t('OpenAI'), sub: t('Chat Completion') },
-                      { id: 'anthropic', label: t('Anthropic'), sub: t('Claude') },
-                      { id: 'responses', label: t('Codex'), sub: t('Responses') },
-                    ].map((f) => (
-                      <button
-                        key={f.id}
-                        type="button"
-                        className={`format-chip${testFormat === f.id ? ' format-chip-active' : ''}`}
-                        onClick={() => setTestFormat(f.id)}
-                      >
-                        <span style={{ fontWeight: 700, fontSize: '12px' }}>{f.label}</span>
-                        <span style={{ fontSize: '10px', color: 'var(--text-muted)' }}>{f.sub}</span>
-                      </button>
-                    ))}
-                  </div>
-                </div>
-                <div className="filter-group">
-                  <div className="filter-label">{t('Model')}</div>
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '8px' }}>
-                    {[
-                      { id: 'gpt-5.5', label: 'GPT-5.5', sub: 'OpenAI' },
-                      { id: 'gpt-5.4', label: 'GPT-5.4', sub: 'OpenAI' },
-                      { id: 'claude-opus-4-7', label: 'Claude Opus 4.7', sub: 'Anthropic' },
-                      { id: 'claude-sonnet-4-6', label: 'Claude Sonnet 4.6', sub: 'Anthropic' },
-                    ].map((m) => (
-                      <button
-                        key={m.id}
-                        type="button"
-                        className={`model-chip${testModel === m.id ? ' model-chip-active' : ''}`}
-                        onClick={() => setTestModel(testModel === m.id ? '' : m.id)}
-                      >
-                        <span style={{ fontWeight: 700, fontSize: '12px' }}>{m.label}</span>
-                        <span style={{ fontSize: '10px', color: 'var(--text-muted)' }}>{m.sub}</span>
-                      </button>
-                    ))}
-                  </div>
-                  <div style={{ marginTop: '8px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <span style={{ fontSize: '11px', color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>{t('Custom:')}</span>
-                    <input
-                      type="text"
-                      className="input-plain"
-                      placeholder="model-id"
-                      value={!['gpt-5.5','gpt-5.4','claude-opus-4-7','claude-sonnet-4-6'].includes(testModel) ? testModel : ''}
-                      onChange={(e) => setTestModel(e.target.value)}
-                      style={{ flex: 1 }}
-                    />
-                  </div>
-                </div>
-                <div className="filter-group" style={{ marginTop: '12px', gridColumn: '1 / -1' }}>
-                  <div className="filter-label">{t('Message')}</div>
-                  <textarea
-                    className="input-plain"
-                    rows={2}
-                    value={testMessage}
-                    onChange={(e) => setTestMessage(e.target.value)}
-                    style={{ width: '100%', resize: 'vertical', fontFamily: 'var(--font-mono)', fontSize: '12px' }}
-                  />
-                </div>
-              </div>
-
-              <button
-                className="btn-primary"
-                onClick={handleRunTest}
-                disabled={isTesting || !testBaseUrl || !testApiKey}
-                style={{ marginTop: '8px' }}
-              >
-                {isTesting ? `⌛ ${t('Testing...')}` : `🚀 ${t('Run Connectivity Test')}`}
-              </button>
-
-              <div style={{ marginTop: '16px', padding: '16px', background: 'var(--surface-hover)', borderRadius: '8px', border: '1px solid var(--border-color)' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
-                  <div style={{ fontSize: '11px', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase' }}>{t('Manual curl equivalent')}</div>
-                  <CopyButton
-                    className="btn-copy"
-                    text={manualCurlEquivalent}
-                    idleLabel={`📋 ${t('Copy')}`}
-                    copiedLabel={`✓ ${t('Copied')}`}
-                    timeoutMs={800}
-                  />
-                </div>
-                <pre style={{ margin: 0, fontSize: '11px', whiteSpace: 'pre-wrap', wordBreak: 'break-all', color: 'var(--text-secondary)' }}>
-                  {manualCurlEquivalent}
-                </pre>
-              </div>
-            </div>
-
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-              <div className="filter-label">{t('Test Result')}</div>
-              {!testResult ? (
-                <div style={{
-                  flex: 1,
-                  display: 'flex',
-                  flexDirection: 'column',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  color: 'var(--text-muted)',
-                  border: '2px dashed var(--border-color)',
-                  borderRadius: '12px',
-                  minHeight: '300px'
-                }}>
-                  <span style={{ fontSize: '32px', marginBottom: '12px' }}>⚡</span>
-                  <span>{t('Results will appear here after testing')}</span>
-                </div>
-              ) : (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
-                    <div className="widget" style={{ padding: '16px', background: testResult.error || testResult.status_code >= 400 ? 'var(--icon-pink-bg)' : 'var(--icon-green-bg)' }}>
-                      <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{t('Status Code')}</div>
-                      <div style={{ fontSize: '24px', fontWeight: 800, color: testResult.error || testResult.status_code >= 400 ? '#e11d48' : '#16a34a' }}>
-                        {testResult.error ? t('Error') : testResult.status_code}
-                      </div>
-                    </div>
-                    <div className="widget" style={{ padding: '16px' }}>
-                      <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{t('Latency')}</div>
-                      <div style={{ fontSize: '24px', fontWeight: 800 }}>{testResult.latency_ms}ms</div>
-                    </div>
-                  </div>
-
-                  {typeof testResult.body === 'string' && testResult.body.trim().startsWith('<') ? (
-                    <div className="widget" style={{ padding: '16px', background: 'var(--icon-yellow-bg)' }}>
-                      <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginBottom: '4px' }}>{t('Response')}</div>
-                      <div style={{ fontSize: '12px', color: '#b45309', fontWeight: 600, marginBottom: '8px' }}>
-                        {t('Upstream returned HTML -- check that base_url points to an API endpoint')}
-                      </div>
-                      <div style={{ fontSize: '11px', color: 'var(--text-secondary)', fontFamily: 'var(--font-mono)', whiteSpace: 'pre-wrap', wordBreak: 'break-all', maxHeight: '200px', overflow: 'auto' }}>
-                        {testResult.body.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 1000)}
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="widget" style={{ padding: '16px' }}>
-                      <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginBottom: '8px' }}>{t('Response Body')}</div>
-                      <pre style={{
-                        margin: 0,
-                        fontSize: '12px',
-                        fontFamily: 'var(--font-mono)',
-                        lineHeight: '1.5',
-                        whiteSpace: 'pre-wrap',
-                        wordBreak: 'break-all',
-                        color: 'var(--text-primary)',
-                        maxHeight: '400px',
-                        overflow: 'auto'
-                      }}>
-                        {typeof testResult.body === 'object' ? JSON.stringify(testResult.body, null, 2) : testResult.body || testResult.error}
-                      </pre>
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-        </div>
       )}
 
       {activeSection === 'devices' && (
