@@ -37,7 +37,12 @@ from src.config.server_config import (
 from src.pricing.models import ResolvedCost
 
 from ._version import get_version
-from .auth import _auth_enabled, _require_local_profile, _resolve_request_user
+from .auth import (
+    _auth_enabled,
+    _require_local_profile,
+    _resolve_request_user,
+    get_current_user,
+)
 from .auth import router as auth_router
 from .database import (
     VALID_OUTCOMES,
@@ -141,8 +146,8 @@ class ConfigPatch(BaseModel):
 
 
 def _request_user_id(request: Request) -> str | None:
-    user = getattr(request.state, "user", None)
-    return getattr(user, "id", None)
+    user = get_current_user(request)
+    return user.id if user is not None else None
 
 
 class ConfigPatchUpdate(BaseModel):
@@ -266,8 +271,8 @@ def _is_public_path(path: str) -> bool:
 
 class AuthGateMiddleware(BaseHTTPMiddleware):
     """Require a valid session (cookie or bearer) for all API routes when auth
-    is enabled, except the public allowlist. This gates "is anyone logged in";
-    it is not per-user data scoping."""
+    is enabled, except the public allowlist. Data routes pass the authenticated
+    user ID to database queries for per-user scoping."""
 
     async def dispatch(self, request: Request, call_next):
         if not _auth_enabled():
@@ -330,6 +335,7 @@ async def usage_read_cors(request: Request, call_next):
 
 @app.get("/usage")
 async def get_usage(
+    request: Request,
     limit: int = Query(100, ge=0, le=USAGE_QUERY_LIMIT_MAX),
     offset: int = Query(0, ge=0),
     provider: str | None = None,
@@ -344,9 +350,11 @@ async def get_usage(
     status_4xx: bool = False,
     status_5xx: bool = False,
 ):
+    user_id = _request_user_id(request)
     return await asyncio.to_thread(
         lambda: enrich_rows(
             fetch_recent_usage(
+                user_id=user_id,
                 limit=limit,
                 offset=offset,
                 provider=provider,
@@ -367,6 +375,7 @@ async def get_usage(
 
 @app.get("/usage/count")
 async def get_usage_count(
+    request: Request,
     provider: str | None = None,
     model: str | None = None,
     client_source: str | None = None,
@@ -377,6 +386,7 @@ async def get_usage_count(
 ):
     return {
         "total": count_usage(
+            user_id=_request_user_id(request),
             provider=provider,
             model=model,
             client_source=client_source,
@@ -389,28 +399,35 @@ async def get_usage_count(
 
 
 @app.get("/usage/high-watermark")
-async def usage_high_watermark():
-    return {"ts": get_usage_high_watermark_ts()}
+async def usage_high_watermark(request: Request):
+    return {"ts": get_usage_high_watermark_ts(user_id=_request_user_id(request))}
 
 
 @app.get("/usage/sources")
 async def usage_sources(
+    request: Request,
     since: str | None = None,
     until: str | None = None,
 ):
-    return distinct_client_sources(since=since, until=until)
+    return distinct_client_sources(
+        user_id=_request_user_id(request), since=since, until=until
+    )
 
 
 @app.get("/usage/tools")
 async def usage_tools(
+    request: Request,
     since: str | None = None,
     until: str | None = None,
 ):
-    return distinct_tool_names(since=since, until=until)
+    return distinct_tool_names(
+        user_id=_request_user_id(request), since=since, until=until
+    )
 
 
 @app.get("/usage/run-summary")
 async def usage_run_summary(
+    request: Request,
     after_ts: int = 0,
     until_ts: int | None = None,
     since: str | None = None,
@@ -422,6 +439,7 @@ async def usage_run_summary(
     include_rows: bool = False,
 ):
     return summarize_usage_window(
+        user_id=_request_user_id(request),
         after_ts=after_ts,
         until_ts=until_ts,
         since=since,
@@ -436,6 +454,7 @@ async def usage_run_summary(
 
 @app.get("/usage/summary")
 async def usage_summary(
+    request: Request,
     since: str | None = None,
     until: str | None = None,
     provider: str | None = None,
@@ -443,6 +462,7 @@ async def usage_summary(
     client_source: str | None = None,
 ):
     return summarize_usage_daily(
+        user_id=_request_user_id(request),
         since=since,
         until=until,
         provider=provider,
@@ -453,6 +473,7 @@ async def usage_summary(
 
 @app.get("/usage/by-source")
 async def usage_by_source(
+    request: Request,
     since: str | None = None,
     until: str | None = None,
     provider: str | None = None,
@@ -460,6 +481,7 @@ async def usage_by_source(
     client_source: str | None = None,
 ):
     return summarize_usage_by_source(
+        user_id=_request_user_id(request),
         since=since,
         until=until,
         provider=provider,
@@ -470,6 +492,7 @@ async def usage_by_source(
 
 @app.get("/usage/by-tool")
 async def usage_by_tool(
+    request: Request,
     since: str | None = None,
     until: str | None = None,
     provider: str | None = None,
@@ -481,6 +504,7 @@ async def usage_by_tool(
     status_5xx: bool = False,
 ):
     return summarize_tool_calls(
+        user_id=_request_user_id(request),
         since=since,
         until=until,
         provider=provider,
@@ -495,6 +519,7 @@ async def usage_by_tool(
 
 @app.get("/usage/by-provider")
 async def usage_by_provider(
+    request: Request,
     since: str | None = None,
     until: str | None = None,
     provider: str | None = None,
@@ -502,6 +527,7 @@ async def usage_by_provider(
     client_source: str | None = None,
 ):
     return summarize_usage_by_provider(
+        user_id=_request_user_id(request),
         since=since,
         until=until,
         provider=provider,
@@ -512,6 +538,7 @@ async def usage_by_provider(
 
 @app.get("/usage/daily")
 async def usage_daily(
+    request: Request,
     since: str | None = None,
     until: str | None = None,
     provider: str | None = None,
@@ -521,6 +548,7 @@ async def usage_daily(
     tz_offset: str = "+00:00",
 ):
     return aggregate_usage_by_period(
+        user_id=_request_user_id(request),
         since=since,
         until=until,
         provider=provider,
@@ -533,6 +561,7 @@ async def usage_daily(
 
 @app.get("/usage/daily-by-dimension")
 async def usage_daily_by_dimension(
+    request: Request,
     dimension: str = "model",
     since: str | None = None,
     until: str | None = None,
@@ -541,6 +570,7 @@ async def usage_daily_by_dimension(
     client_source: str | None = None,
 ):
     return aggregate_daily_by_dimension(
+        user_id=_request_user_id(request),
         dimension=dimension,
         since=since,
         until=until,
@@ -552,6 +582,7 @@ async def usage_daily_by_dimension(
 
 @app.get("/sessions")
 async def get_sessions(
+    request: Request,
     client_source: str | None = None,
     since: str | None = None,
     until: str | None = None,
@@ -562,6 +593,7 @@ async def get_sessions(
     offset: int = 0,
     hide_noop: bool = False,
 ):
+    user_id = _request_user_id(request)
     if view not in {"summary", "selector"}:
         raise HTTPException(
             status_code=400,
@@ -571,6 +603,7 @@ async def get_sessions(
     if view == "selector":
         return {
             "sessions": fetch_session_selector_rows(
+                user_id=user_id,
                 client_source=client_source,
                 since=since,
                 until=until,
@@ -584,6 +617,7 @@ async def get_sessions(
         }
 
     sessions = fetch_sessions(
+        user_id=user_id,
         client_source=client_source,
         since=since,
         until=until,
@@ -594,6 +628,7 @@ async def get_sessions(
         hide_noop=hide_noop,
     )
     total = count_sessions(
+        user_id=user_id,
         client_source=client_source,
         since=since,
         until=until,
@@ -604,12 +639,14 @@ async def get_sessions(
 
 @app.get("/sessions/summary")
 async def get_sessions_summary(
+    request: Request,
     client_source: str | None = None,
     since: str | None = None,
     until: str | None = None,
     hide_noop: bool = False,
 ):
     return summarize_sessions(
+        user_id=_request_user_id(request),
         client_source=client_source,
         since=since,
         until=until,
@@ -619,6 +656,7 @@ async def get_sessions_summary(
 
 @app.get("/model-effectiveness")
 async def model_effectiveness(
+    request: Request,
     since: str | None = None,
     until: str | None = None,
     client_source: str | None = None,
@@ -631,6 +669,7 @@ async def model_effectiveness(
             detail="Invalid group_by. Must be one of ['model', 'provider', 'source']",
         )
     return aggregate_model_effectiveness(
+        user_id=_request_user_id(request),
         group_by=group_by,
         since=since,
         until=until,
@@ -640,9 +679,11 @@ async def model_effectiveness(
 
 
 @app.get("/sessions/daily-effectiveness")
-async def sessions_daily_effectiveness(date: str):
+async def sessions_daily_effectiveness(request: Request, date: str):
     try:
-        return daily_session_effectiveness_report(date=date)
+        return daily_session_effectiveness_report(
+            date=date, user_id=_request_user_id(request)
+        )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -1170,7 +1211,7 @@ async def get_model_pricing(model: str, provider: str | None = None):
 
 
 @app.post("/usage/{usage_id}/recalculate-cost")
-async def recalculate_usage_cost_route(usage_id: str):
+async def recalculate_usage_cost_route(request: Request, usage_id: str):
     """Recompute one usage row's cost against current pricing.
 
     Uses the same live-resolved pricing snapshot as /pricing/{model} (config
@@ -1179,6 +1220,7 @@ async def recalculate_usage_cost_route(usage_id: str):
     provider/model no longer resolves against current pricing, rather than
     overwriting with a zeroed fallback cost.
     """
+    user_id = _request_user_id(request)
     (
         _config_snapshot,
         _resolved,
@@ -1193,6 +1235,7 @@ async def recalculate_usage_cost_route(usage_id: str):
 
     result = recalculate_usage_cost(
         usage_id,
+        user_id=user_id,
         model_costs=model_costs,
         provider_model_costs=provider_model_costs,
         model_cost_sources=model_cost_sources,

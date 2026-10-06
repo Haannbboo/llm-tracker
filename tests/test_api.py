@@ -38,16 +38,6 @@ def test_api_defines_bounded_evaluation_worker_shutdown(api_module):
     assert hasattr(api_module, "_stop_evaluation_worker")
 
 
-def test_usage_high_watermark_endpoint(api_module, monkeypatch):
-    monkeypatch.setattr(
-        api_module, "get_usage_high_watermark_ts", lambda: 1718000000000000
-    )
-
-    result = asyncio.run(api_module.usage_high_watermark())
-
-    assert result == {"ts": 1718000000000000}
-
-
 def test_reprice_estimated_usage_endpoint_passes_filters(api_module, monkeypatch):
     from types import SimpleNamespace
 
@@ -127,21 +117,23 @@ def test_usage_run_summary_endpoint_passes_filters(api_module, monkeypatch):
 
     monkeypatch.setattr(api_module, "summarize_usage_window", fake_summary)
 
-    result = asyncio.run(
-        api_module.usage_run_summary(
-            after_ts=1718000000000000,
-            until_ts=1718100000000000,
-            since="2026-04-17T00:00:00+00:00",
-            until="2026-04-18T00:00:00+00:00",
-            client_source="codex",
-            session_id="conv-1",
-            provider="openai",
-            model="gpt-test",
-            include_rows=True,
-        )
+    response = TestClient(api_module.app).get(
+        "/usage/run-summary",
+        params={
+            "after_ts": 1718000000000000,
+            "until_ts": 1718100000000000,
+            "since": "2026-04-17T00:00:00+00:00",
+            "until": "2026-04-18T00:00:00+00:00",
+            "client_source": "codex",
+            "session_id": "conv-1",
+            "provider": "openai",
+            "model": "gpt-test",
+            "include_rows": True,
+        },
     )
 
     assert captured == {
+        "user_id": None,
         "after_ts": 1718000000000000,
         "until_ts": 1718100000000000,
         "since": "2026-04-17T00:00:00+00:00",
@@ -152,12 +144,13 @@ def test_usage_run_summary_endpoint_passes_filters(api_module, monkeypatch):
         "model": "gpt-test",
         "include_rows": True,
     }
-    assert result["summary"]["requests"] == 1
+    assert response.status_code == 200
+    assert response.json()["summary"]["requests"] == 1
 
 
 def test_usage_high_watermark_route(api_module, monkeypatch):
     monkeypatch.setattr(
-        api_module, "get_usage_high_watermark_ts", lambda: 1718000000000000
+        api_module, "get_usage_high_watermark_ts", lambda **kwargs: 1718000000000000
     )
 
     response = TestClient(api_module.app).get("/usage/high-watermark")
@@ -202,6 +195,7 @@ def test_usage_run_summary_route_parses_query_filters(api_module, monkeypatch):
 
     assert response.status_code == 200
     assert captured == {
+        "user_id": None,
         "after_ts": 1718000000000000,
         "until_ts": 1718100000000000,
         "since": "2026-04-17T00:00:00+00:00",
@@ -681,6 +675,7 @@ def test_usage_by_provider_endpoint_includes_avg_effective_price_per_million(
     assert response.status_code == 200
     assert response.json()[0]["avg_effective_price_per_million_usd"] == 10.0
     assert captured == {
+        "user_id": None,
         "since": None,
         "until": None,
         "provider": "openai",
@@ -866,6 +861,7 @@ def test_daily_by_dimension_endpoint_passes_all_filters(api_module, monkeypatch)
     )
     assert response.status_code == 200
     assert captured == {
+        "user_id": None,
         "dimension": "provider",
         "since": "2026-05-01T00:00:00Z",
         "until": "2026-05-08T00:00:00Z",
@@ -1230,6 +1226,7 @@ def test_model_effectiveness_endpoint_passes_filters(api_module, monkeypatch):
     data = response.json()
     assert data["groups"][0]["key"] == "gpt-5.5"
     assert captured == {
+        "user_id": None,
         "group_by": "model",
         "since": "2026-05-01T00:00:00Z",
         "until": "2026-05-11T23:59:59Z",
@@ -1288,7 +1285,7 @@ def test_daily_effectiveness_endpoint_passes_date(api_module, monkeypatch):
     )
 
     assert response.status_code == 200
-    assert captured == {"date": "2026-05-10"}
+    assert captured == {"date": "2026-05-10", "user_id": None}
     assert response.json()["date"] == "2026-05-10"
 
 
