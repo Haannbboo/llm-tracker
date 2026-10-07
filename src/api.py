@@ -41,7 +41,7 @@ from .auth import (
     get_current_user,
 )
 from .auth import router as auth_router
-from .auth.tokens import list_user_devices
+from .auth.tokens import list_user_devices, set_device_status
 from .database import (
     VALID_OUTCOMES,
     VALID_SOURCES,
@@ -65,7 +65,6 @@ from .database import (
     get_usage_high_watermark_ts,
     init_db,
     list_active_evaluation_jobs_with_progress,
-    list_device_statuses,
     list_session_evaluation_jobs_with_progress,
     recalculate_usage_cost,
     reprice_estimated_rows,
@@ -77,7 +76,6 @@ from .database import (
     summarize_usage_daily,
     summarize_usage_window,
     update_queued_evaluation_job_evaluator,
-    upsert_device_status,
     upsert_session_evaluation,
 )
 from .evaluation import (
@@ -189,7 +187,9 @@ class EvaluationConfigUpdate(BaseModel):
     evaluator: str
 
 
-def _parse_device_status_json(raw: str) -> dict | None:
+def _parse_device_status_json(raw: str | None) -> dict | None:
+    if raw is None:
+        return None
     try:
         status = json.loads(raw)
     except (TypeError, ValueError):
@@ -672,17 +672,15 @@ async def sessions_daily_effectiveness(request: Request, date: str):
         raise HTTPException(status_code=400, detail=str(e))
 
 
-def _device_status_entry(row, device: Device | None = None) -> dict:
-    """One device_status row as the GET response entry, tolerating bad JSON."""
-    status = _parse_device_status_json(row.status_json)
+def _device_status_entry(device: Device) -> dict:
+    """One device as the GET response entry, tolerating bad JSON."""
+    status = _parse_device_status_json(device.status_json)
     return {
-        "device_id": device.id if device is not None else None,
-        "device_name": device.device_name
-        if device is not None
-        else (status or {}).get("device_name"),
+        "device_id": device.id,
+        "device_name": device.device_name,
         "client_version": (status or {}).get("client_version"),
         "client_commit": (status or {}).get("client_commit"),
-        "reported_at": row.reported_at,
+        "reported_at": device.status_reported_at,
         "status": status,
     }
 
@@ -705,8 +703,8 @@ def post_device_status(
     )
     if device is None:
         raise HTTPException(status_code=400, detail="device token required")
-    upsert_device_status(
-        device.installation_hash,
+    set_device_status(
+        device.id,
         json.dumps(report.model_dump(mode="json"), sort_keys=True),
     )
     return Response(status_code=204)
@@ -715,17 +713,10 @@ def post_device_status(
 @app.get("/devices/status")
 def get_devices_status(user: User = Depends(get_current_user)):
     """Latest report per device, for the caller's devices only."""
-    devices = list_user_devices(user.id)
-    reports = {
-        row.installation_hash: row
-        for row in list_device_statuses(
-            [device.installation_hash for device in devices]
-        )
-    }
     entries = [
-        _device_status_entry(report, device)
-        for device in devices
-        if (report := reports.get(device.installation_hash)) is not None
+        _device_status_entry(device)
+        for device in list_user_devices(user.id)
+        if device.status_json is not None
     ]
     entries.sort(key=lambda entry: entry["reported_at"], reverse=True)
     return {"devices": entries}

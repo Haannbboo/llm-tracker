@@ -209,7 +209,6 @@ _TRUNCATE_TABLES = [
     "sessions",
     "usage",
     "base_urls",
-    "device_status",
     "auth_tokens",
     "devices",
     "users",

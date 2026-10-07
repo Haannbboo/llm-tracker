@@ -628,19 +628,6 @@ def _create_price_snapshots_table(engine: Engine) -> None:
         connection.execute(text(create_sql))
 
 
-def _create_device_status_table(engine: Engine) -> None:
-    # postgresql and sqlite accept the same DDL here.
-    create_sql = """
-        CREATE TABLE device_status (
-            installation_hash TEXT PRIMARY KEY,
-            status_json TEXT NOT NULL,
-            reported_at BIGINT NOT NULL
-        )
-    """
-    with engine.begin() as connection:
-        connection.execute(text(create_sql))
-
-
 def _migrate_price_snapshots(engine: Engine) -> list[str]:
     applied: list[str] = []
     table = "price_snapshots"
@@ -780,13 +767,30 @@ def migrate_database(db_path: str | None = None) -> list[str]:
             connection.execute(text(create_sql))
         applied.append("evaluation_jobs.create")
 
-    # Device status reports: one row per installation; local servers have no
-    # user/device row, so it is keyed by the installation hash value alone.
-    if not _table_exists(engine, "device_status"):
-        _create_device_status_table(engine)
-        applied.append("device_status.create")
-
     init_db(db_path)
+
+    # The status report lives on `devices`; the hash-keyed table was unreleased.
+    if _table_exists(engine, "device_status"):
+        with engine.begin() as connection:
+            connection.execute(text("DROP TABLE device_status"))
+        applied.append("device_status.drop")
+    if _table_exists(engine, "devices"):
+        if _ensure_column(
+            engine,
+            "devices",
+            "status_json",
+            sqlite_definition="TEXT",
+            postgresql_definition="TEXT",
+        ):
+            applied.append("devices.status_json")
+        if _ensure_column(
+            engine,
+            "devices",
+            "status_reported_at",
+            sqlite_definition="BIGINT",
+            postgresql_definition="BIGINT",
+        ):
+            applied.append("devices.status_reported_at")
 
     if _table_exists(engine, "auth_tokens") and _ensure_column(
         engine,

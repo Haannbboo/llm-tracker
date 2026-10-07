@@ -58,9 +58,8 @@ def _device_client(api_module, fresh_db, email="a@example.com", key="d" * 43):
 
 
 def test_post_persists_and_get_returns_the_report(api_module, fresh_db):
-    from src.database import list_device_statuses
-
     client, _, device = _device_client(api_module, fresh_db)
+    assert client.get("/devices/status").json()["devices"] == []
     assert client.post("/devices/status", json=_report()).status_code == 204
 
     devices = client.get("/devices/status").json()["devices"]
@@ -74,14 +73,9 @@ def test_post_persists_and_get_returns_the_report(api_module, fresh_db):
     assert entry["status"]["agents"]["claude"]["expected_endpoint"] == ENDPOINT
     assert entry["status"]["agents"]["claude"]["status"] == "ready"
 
-    rows = list_device_statuses(db_path=fresh_db.db_path)
-    assert [row.installation_hash for row in rows] == [device.installation_hash]
-
 
 def test_post_has_no_installation_key_path(api_module, fresh_db):
     """Tokenless callers are rejected and a body installation_key is ignored."""
-    from src.database import list_device_statuses
-
     anonymous = TestClient(
         api_module.app, client=("203.0.113.9", 5), base_url="http://tracker.example"
     )
@@ -99,9 +93,9 @@ def test_post_has_no_installation_key_path(api_module, fresh_db):
         ).status_code
         == 204
     )
-    rows = list_device_statuses(db_path=fresh_db.db_path)
-    assert [row.installation_hash for row in rows] == [device.installation_hash]
-    assert "installation_key" not in rows[0].status_json
+    (entry,) = client.get("/devices/status").json()["devices"]
+    assert entry["device_id"] == device.id
+    assert "installation_key" not in entry["status"]
 
 
 def test_post_rejects_tokens_without_a_device(api_module, fresh_db, monkeypatch):
@@ -196,10 +190,10 @@ def test_post_rejects_overlong_strings_and_oversized_maps(api_module, fresh_db):
 
 
 def test_get_returns_null_status_for_corrupt_stored_json(api_module, fresh_db):
-    from src.database import upsert_device_status
+    from src.auth.tokens import set_device_status
 
     client, _, device = _device_client(api_module, fresh_db)
-    upsert_device_status(device.installation_hash, "not-json", db_path=fresh_db.db_path)
+    set_device_status(device.id, "not-json", db_path=fresh_db.db_path)
 
     devices = client.get("/devices/status").json()["devices"]
     assert len(devices) == 1

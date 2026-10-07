@@ -5049,22 +5049,26 @@ def test_migrate_database_creates_evaluation_jobs_table(
     )
 
 
-def test_migrate_database_creates_device_status_table(
+def test_migrate_database_moves_device_status_onto_devices(
     database_module, schema_migrations_module, isolated_home
 ):
+    from sqlalchemy import text
+
     db_path = str(isolated_home / "usage.db")
     engine = database_module.get_engine(db_path)
-    database_module.metadata.drop_all(engine)
+    schema_migrations_module.migrate_database(db_path)
+    with engine.begin() as connection:
+        connection.execute(text("CREATE TABLE device_status (x TEXT)"))
+        connection.execute(text("ALTER TABLE devices DROP COLUMN status_json"))
+        connection.execute(text("ALTER TABLE devices DROP COLUMN status_reported_at"))
 
     applied = schema_migrations_module.migrate_database(db_path)
 
-    assert "device_status.create" in applied
-    assert schema_migrations_module._table_exists(engine, "device_status")
-    assert {
-        "installation_hash",
-        "status_json",
-        "reported_at",
-    }.issubset(schema_migrations_module._table_column_names(engine, "device_status"))
+    assert "device_status.drop" in applied
+    assert not schema_migrations_module._table_exists(engine, "device_status")
+    assert {"status_json", "status_reported_at"}.issubset(
+        schema_migrations_module._table_column_names(engine, "devices")
+    )
 
 
 def test_migrate_database_adds_session_selector_indexes(
