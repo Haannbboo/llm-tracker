@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import os
 import shutil
 import subprocess
@@ -27,14 +26,9 @@ def _make_fake_bootstrap_repo(
         repo_root / "scripts" / "lib" / "requirements.sh", lib_dir / "requirements.sh"
     )
 
-    # Create CLI wrapper directly (install logic is now inline in bootstrap.sh)
+    # Any call into the launcher is recorded: bootstrap must never make one.
     (scripts_dir / "tokenage").write_text(
-        "#!/usr/bin/env bash\n"
-        'if [ "${1:-}" = "client" ]; then\n'
-        '  [ "${2:-}" = "start" ] && exit 0\n'
-        "fi\n"
-        'if [ "${1:-}" = "status" ]; then exec cat "${HOME}/health.json"; fi\n'
-        "echo tokenage fake cli\n",
+        f'#!/usr/bin/env bash\necho "$@" >> "{home}/launcher-calls"\n',
         encoding="utf-8",
     )
     (scripts_dir / "tokenage").chmod(0o755)
@@ -100,26 +94,12 @@ def _make_fake_curl(tmp_path: Path, *, open_ports: set[int]) -> Path:
     return bin_dir
 
 
-def _health_file(home: Path, setup_health: dict) -> None:
-    home.mkdir(parents=True, exist_ok=True)
-    (home / "health.json").write_text(json.dumps(setup_health), encoding="utf-8")
-
-
-def _add_fake_agent(bin_dir: Path, name: str) -> None:
-    agent_path = bin_dir / name
-    agent_path.write_text("#!/usr/bin/env sh\nexit 0\n", encoding="utf-8")
-    agent_path.chmod(0o755)
-
-
 def _run_bootstrap(
     fake_repo: Path,
     home: Path,
     bin_dir: Path,
     extra_env: dict[str, str] | None = None,
-    setup_health: dict | None = None,
 ) -> subprocess.CompletedProcess:
-    if setup_health is not None:
-        _health_file(home, setup_health)
     env = {
         **os.environ,
         "HOME": str(home),
@@ -138,83 +118,13 @@ def _run_bootstrap(
     )
 
 
-def _agent_health(
-    *,
-    status: str,
-    expected_endpoint: str,
-    configured_endpoint: str | None = None,
-) -> dict:
-    configured = configured_endpoint is not None
-    return {
-        "configured": configured,
-        "endpoint_matches": status == "ready",
-        "configured_endpoint": configured_endpoint,
-        "expected_endpoint": expected_endpoint,
-        "status": status,
-    }
-
-
-def _setup_health(
-    *,
-    otlp_port: int,
-    claude: dict,
-    codex: dict,
-    opencode: dict | None = None,
-    kilo: dict | None = None,
-) -> dict:
-    expected_logs_endpoint = f"http://localhost:{otlp_port}/v1/logs"
-    expected_endpoint = f"http://localhost:{otlp_port}"
-    opencode = opencode or _agent_health(
-        status="missing_config",
-        expected_endpoint=expected_logs_endpoint,
-    )
-    kilo = kilo or _agent_health(
-        status="missing_config",
-        expected_endpoint=expected_logs_endpoint,
-    )
-    return {
-        "expected": {
-            "otlp_endpoint": expected_endpoint,
-            "otlp_logs_endpoint": expected_logs_endpoint,
-        },
-        "summary": {
-            "total_agents": 4,
-            "configured_agents": sum(
-                1 for agent in (claude, codex, opencode, kilo) if agent["configured"]
-            ),
-            "matching_agents": sum(
-                1
-                for agent in (claude, codex, opencode, kilo)
-                if agent["endpoint_matches"]
-            ),
-        },
-        "agents": {
-            "claude": claude,
-            "codex": codex,
-            "opencode": opencode,
-            "kilo": kilo,
-        },
-    }
-
-
-def test_bootstrap_succeeds_when_install_start_and_post_checks_pass(tmp_path):
+def test_bootstrap_verifies_the_server_only_and_never_touches_a_client(tmp_path):
     home = tmp_path / "home"
     home.mkdir()
     ports = (4100, 4101, 4102)
-    setup_health = _setup_health(
-        otlp_port=ports[2],
-        claude=_agent_health(
-            status="missing_config",
-            expected_endpoint=f"http://localhost:{ports[2]}/v1/logs",
-        ),
-        codex=_agent_health(
-            status="missing_config",
-            expected_endpoint=f"http://localhost:{ports[2]}/v1/logs",
-        ),
-    )
     fake_repo = _make_fake_bootstrap_repo(tmp_path, home, ports=ports)
     bin_dir = _make_fake_curl(tmp_path, open_ports=set(ports))
-    result = _run_bootstrap(fake_repo, home, bin_dir, setup_health=setup_health)
+    result = _run_bootstrap(fake_repo, home, bin_dir)
 
     output = result.stdout + result.stderr
     assert result.returncode == 0, output
@@ -223,116 +133,25 @@ def test_bootstrap_succeeds_when_install_start_and_post_checks_pass(tmp_path):
     assert f"Proxy listening: http://127.0.0.1:{ports[0]}" in output
     assert f"OTLP listening: http://127.0.0.1:{ports[2]}" in output
     assert f"Dashboard: http://127.0.0.1:{ports[1]}" in output
+    assert "agent" not in output.lower()
+    assert not (home / "launcher-calls").exists()
+    assert (home / ".local" / "bin" / "tokenage").is_symlink()
 
 
-def test_bootstrap_reports_local_setup_health_ready_and_skipped_agents(tmp_path):
+def test_bootstrap_leaves_an_existing_launcher_alone(tmp_path):
     home = tmp_path / "home"
-    home.mkdir()
-    ports = (4200, 4201, 4202)
-    setup_health = _setup_health(
-        otlp_port=ports[2],
-        claude=_agent_health(
-            status="missing_config",
-            expected_endpoint=f"http://localhost:{ports[2]}/v1/logs",
-        ),
-        codex=_agent_health(
-            status="missing_config",
-            expected_endpoint=f"http://localhost:{ports[2]}/v1/logs",
-        ),
-        kilo=_agent_health(
-            status="ready",
-            expected_endpoint=f"http://localhost:{ports[2]}/v1/logs",
-            configured_endpoint=f"http://localhost:{ports[2]}/v1/logs",
-        ),
-    )
+    ports = (4110, 4111, 4112)
+    launcher = home / ".local" / "bin" / "tokenage"
+    launcher.parent.mkdir(parents=True)
+    launcher.write_text("# tokenage launcher\n")
     fake_repo = _make_fake_bootstrap_repo(tmp_path, home, ports=ports)
     bin_dir = _make_fake_curl(tmp_path, open_ports=set(ports))
 
-    _add_fake_agent(bin_dir, "kilo")
+    result = _run_bootstrap(fake_repo, home, bin_dir)
 
-    result = _run_bootstrap(fake_repo, home, bin_dir, setup_health=setup_health)
-
-    output = result.stdout + result.stderr
-    assert result.returncode == 0, output
-    assert "Verifying agent tracking" in output
-    assert "Claude: skipped" in output
-    assert "Codex: skipped" in output
-    assert "OpenCode: skipped" in output
-    assert "Kilo: ready" in output
-    assert "Agents: 1 ready, 3 skipped, 0 failed" in output
-
-
-def test_bootstrap_skips_agent_check_when_client_has_no_server(tmp_path):
-    home = tmp_path / "home"
-    home.mkdir()
-    ports = (4200, 4201, 4202)
-    unsigned = {
-        **_agent_health(status="missing_config", expected_endpoint="x"),
-        "expected_endpoint": None,
-    }
-    setup_health = _setup_health(otlp_port=ports[2], claude=unsigned, codex=unsigned)
-    fake_repo = _make_fake_bootstrap_repo(tmp_path, home, ports=ports)
-    bin_dir = _make_fake_curl(tmp_path, open_ports=set(ports))
-    _add_fake_agent(bin_dir, "claude")
-
-    result = _run_bootstrap(fake_repo, home, bin_dir, setup_health=setup_health)
-
-    output = result.stdout + result.stderr
-    assert result.returncode == 0, output
-    assert "no server configured" in output
-
-
-def test_bootstrap_fails_when_detected_agent_setup_health_is_not_ready(tmp_path):
-    home = tmp_path / "home"
-    home.mkdir()
-    claude_settings = home / ".claude" / "settings.json"
-    codex_config = home / ".codex" / "config.toml"
-    claude_settings.parent.mkdir(parents=True)
-    codex_config.parent.mkdir(parents=True)
-    claude_settings.write_text('{"env": {}}\n', encoding="utf-8")
-    codex_config.write_text(
-        textwrap.dedent(
-            """
-            [otel]
-            enabled = true
-            [otel.exporter.otlp-http]
-            endpoint = "https://secret-token@example.invalid/v1/logs"
-            """
-        ).strip()
-        + "\n",
-        encoding="utf-8",
-    )
-
-    secret_endpoint = "https://secret-token@example.invalid/v1/logs"
-    ports = (4300, 4301, 4302)
-    setup_health = _setup_health(
-        otlp_port=ports[2],
-        claude=_agent_health(
-            status="missing_config",
-            expected_endpoint=f"http://localhost:{ports[2]}/v1/logs",
-        ),
-        codex=_agent_health(
-            status="wrong_endpoint",
-            expected_endpoint=f"http://localhost:{ports[2]}/v1/logs",
-            configured_endpoint=secret_endpoint,
-        ),
-    )
-    fake_repo = _make_fake_bootstrap_repo(tmp_path, home, ports=ports)
-    bin_dir = _make_fake_curl(tmp_path, open_ports=set(ports))
-    _add_fake_agent(bin_dir, "claude")
-    _add_fake_agent(bin_dir, "codex")
-
-    result = _run_bootstrap(fake_repo, home, bin_dir, setup_health=setup_health)
-
-    output = result.stdout + result.stderr
-    assert result.returncode != 0, output
-    assert "Verifying agent tracking" in output
-    assert "Claude: OTLP not configured" in output
-    assert "Codex: endpoint mismatch" in output
-    assert "OpenCode: skipped" in output
-    assert "Kilo: skipped" in output
-    assert "Agents: 0 ready, 2 skipped, 2 failed" in output
-    assert secret_endpoint not in output
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert not launcher.is_symlink()
+    assert launcher.read_text() == "# tokenage launcher\n"
 
 
 def test_bootstrap_exits_nonzero_when_post_start_checks_fail(tmp_path):
@@ -373,36 +192,3 @@ def test_bootstrap_exits_nonzero_when_post_start_checks_fail(tmp_path):
     assert "Proxy listening: http://127.0.0.1:4400 (not responding)" in output
     assert "OTLP listening: http://127.0.0.1:4402 (not responding)" in output
     assert sleep_log.read_text(encoding="utf-8").splitlines() == ["1"] * 30
-
-
-def test_bootstrap_skips_undetected_agent_even_when_setup_health_is_ready(tmp_path):
-    home = tmp_path / "home"
-    home.mkdir()
-    ports = (4600, 4601, 4602)
-    setup_health = _setup_health(
-        otlp_port=ports[2],
-        claude=_agent_health(
-            status="missing_config",
-            expected_endpoint=f"http://localhost:{ports[2]}/v1/logs",
-        ),
-        codex=_agent_health(
-            status="missing_config",
-            expected_endpoint=f"http://localhost:{ports[2]}/v1/logs",
-        ),
-        kilo=_agent_health(
-            status="ready",
-            expected_endpoint=f"http://localhost:{ports[2]}/v1/logs",
-            configured_endpoint=f"http://localhost:{ports[2]}/v1/logs",
-        ),
-    )
-    fake_repo = _make_fake_bootstrap_repo(tmp_path, home, ports=ports)
-    bin_dir = _make_fake_curl(tmp_path, open_ports=set(ports))
-
-    result = _run_bootstrap(fake_repo, home, bin_dir, setup_health=setup_health)
-
-    output = result.stdout + result.stderr
-    assert result.returncode == 0, output
-    assert "Kilo: skipped" in output
-    assert "Kilo: ready" not in output
-    assert "OpenCode: skipped" in output
-    assert "Agents: 0 ready, 4 skipped, 0 failed" in output

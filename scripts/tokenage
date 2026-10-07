@@ -3,11 +3,11 @@
 # The one installed command. This marker line lets an installer recognise a
 # launcher it previously wrote, and replace it.
 #
-# The client is mandatory; the server component is optional. This script
-# discovers both from $TOKENAGE_HOME and routes to whichever one the
-# arguments call for. It is installed either as a symlink into the server clone
-# (all-in-one) or as a copy in ~/.local/bin (client-only), so it must not depend
-# on its own location for anything but the dev fallback.
+# Either component may be installed alone. This script finds each under
+# $TOKENAGE_HOME (client: `current`, server: `src`) and routes to whichever one
+# the arguments call for. The server install links it into its clone; the client
+# install copies it to ~/.local/bin, so it must not depend on its own location
+# for anything but the server dev fallback.
 set -euo pipefail
 
 TRACKER_HOME="${TOKENAGE_HOME:-$HOME/.tokenage}"
@@ -64,16 +64,14 @@ client_root() {
   printf '%s' "$resolved"
 }
 
-# Choose one client source, with its own interpreter. An explicit checkout wins,
-# then the installed snapshot, then the server checkout for all-in-one installs.
+# Choose one client source, with its own interpreter: an explicit checkout, else
+# the installed snapshot. The client never runs from the server clone.
 active_client_root() {
   local candidate
   if [[ -n "${TOKENAGE_ROOT:-}" ]]; then
     candidate="$TOKENAGE_ROOT"
-  elif candidate="$(client_root)"; then
-    :
   else
-    candidate="$(server_root)" || return 1
+    candidate="$(client_root)" || return 1
   fi
   [[ -d "${candidate}/client" && -x "${candidate}/.venv/bin/python" ]] || return 1
   printf '%s' "$candidate"
@@ -89,11 +87,22 @@ client_commit() {
 }
 
 missing_client() {
-  cat >&2 <<EOF
+  local root keep=""
+  if root="$(server_root 2>/dev/null)" && [[ -f "${root}/install.sh" ]]; then
+    # An existing sign-in is kept; a fresh machine signs in.
+    [[ -f "${TRACKER_HOME}/credentials.json" ]] && keep="TOKENAGE_SKIP_LOGIN=1 "
+    cat >&2 <<EOF
+tokenage: the client is not installed. It no longer runs from the server clone;
+install it, pointed at this machine's server, with:
+  ${keep}bash "${root}/install.sh" --client
+EOF
+  else
+    cat >&2 <<EOF
 tokenage: the client component is not installed on this machine.
 Install it with:
   curl -fsSL https://YOUR_SERVER/install.sh | sh
 EOF
+  fi
   exit 1
 }
 
@@ -101,8 +110,8 @@ missing_server() {
   cat >&2 <<EOF
 tokenage: the server component is not installed on this machine.
 This machine has the client only, which reports to a remote server.
-To run a local server, install the all-in-one release:
-  curl -fsSL https://raw.githubusercontent.com/${REPOSITORY}/main/install.sh | bash
+To run a local server, install it:
+  curl -fsSL https://raw.githubusercontent.com/${REPOSITORY}/main/install.sh | bash -s -- --server
 EOF
   exit 1
 }

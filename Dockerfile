@@ -15,7 +15,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY src/ src/
 COPY scripts/ scripts/
 COPY frontend/dist/ frontend/dist/
-COPY config.example.yaml VERSION ./
+COPY config.example.yaml VERSION install.sh ./
 
 # Create directories for runtime
 RUN mkdir -p /root/.tokenage/logs

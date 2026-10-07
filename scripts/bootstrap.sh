@@ -19,16 +19,6 @@ CLI_SYMLINK="${HOME}/.local/bin/tokenage"
 source "${SCRIPTS_DIR}/lib/terminal.sh"
 
 # ── Helpers ─────────────────────────────────────────────────────────
-_python_cmd() {
-  if [[ -x "${ROOT_DIR}/.venv/bin/python" ]]; then
-    echo "${ROOT_DIR}/.venv/bin/python"
-  elif command -v python3 >/dev/null 2>&1; then
-    command -v python3
-  else
-    return 1
-  fi
-}
-
 _port_listening() {
   local host="$1" port="$2"
   if command -v curl >/dev/null 2>&1; then
@@ -58,11 +48,20 @@ except Exception:
 # shellcheck source=scripts/lib/requirements.sh
 source "${SCRIPTS_DIR}/lib/requirements.sh"
 
+# The launcher is shared with the client install: whichever component installs
+# first places it, and the client install later replaces it with its own copy.
+# An existing launcher is left alone so this never repoints a client's command.
+_link_launcher() {
+  chmod +x "${CLI_WRAPPER}"
+  if [[ ! -e "${CLI_SYMLINK}" && ! -L "${CLI_SYMLINK}" ]]; then
+    ln -s "${CLI_WRAPPER}" "${CLI_SYMLINK}"
+  fi
+}
+
 _install_deps() {
   if [[ "${TOKENAGE_SKIP_INSTALL:-0}" == "1" ]]; then
     mkdir -p "${HOME}/.local/bin" "${HOME}/.tokenage"
-    ln -sf "${SCRIPTS_DIR}/tokenage" "${HOME}/.local/bin/tokenage"
-    chmod +x "${SCRIPTS_DIR}/tokenage"
+    _link_launcher
     # `server start` refuses when this stamp is missing or stale, so record it
     # even on the skip path — the flag asserts deps are current by fiat.
     record_requirements_stamp "${ROOT_DIR}/.venv" "${ROOT_DIR}/requirements.txt"
@@ -73,8 +72,6 @@ _install_deps() {
   local python_version="${TOKENAGE_PYTHON_VERSION:-3.13}"
   local venv_dir="${ROOT_DIR}/.venv"
   local bin_dir="${HOME}/.local/bin"
-  local cli_link="${bin_dir}/tokenage"
-  local cli_source="${SCRIPTS_DIR}/tokenage"
   local frontend_dir="${ROOT_DIR}/frontend"
 
   info "Setting up tokenage environment..."
@@ -131,8 +128,7 @@ _install_deps() {
   # 5. CLI Setup
   info "Setting up CLI symlink..."
   mkdir -p "${bin_dir}"
-  ln -sf "${cli_source}" "${cli_link}"
-  chmod +x "${cli_source}"
+  _link_launcher
 
   # 6. PATH Check & Notification
   if [[ ":$PATH:" != *":${bin_dir}:"* ]]; then
@@ -153,152 +149,6 @@ _install_deps() {
   fi
 
   info "Installation complete! You can now use 'tokenage' (if in PATH) or 'scripts/start.sh'."
-}
-
-_verify_agent_setup_health() {
-  local health_json
-  local python
-  local claude_detected=0
-  local codex_detected=0
-  local opencode_detected=0
-  local kilo_detected=0
-
-  step_header "Verifying agent tracking"
-
-  python="$(_python_cmd)" || {
-    fail "Agent tracking: Python not available"
-    CHECKS_FAIL=$((CHECKS_FAIL + 1))
-    return
-  }
-
-  # status exits 1 for a miswired agent; the verdict below reads the JSON.
-  health_json="$(TOKENAGE_ROOT="${ROOT_DIR}" TOKENAGE_SKIP_BANNER=1 \
-      "${CLI_SYMLINK}" status --json 2>/dev/null)" || true
-  if [[ -z "${health_json}" ]]; then
-    fail "Agent tracking: could not read the client status"
-    CHECKS_FAIL=$((CHECKS_FAIL + 1))
-    return
-  fi
-
-  command -v claude >/dev/null 2>&1 && claude_detected=1
-  command -v codex >/dev/null 2>&1 && codex_detected=1
-  command -v opencode >/dev/null 2>&1 && opencode_detected=1
-  command -v kilo >/dev/null 2>&1 && kilo_detected=1
-
-  if printf "%s" "${health_json}" \
-      | TOKENAGE_CLAUDE_DETECTED="${claude_detected}" \
-        TOKENAGE_CODEX_DETECTED="${codex_detected}" \
-        TOKENAGE_OPENCODE_DETECTED="${opencode_detected}" \
-        TOKENAGE_KILO_DETECTED="${kilo_detected}" \
-        TOKENAGE_GREEN="${_T_GREEN}" \
-        TOKENAGE_RED="${_T_RED}" \
-        TOKENAGE_RESET="${_T_RESET}" \
-        "${python}" -c '
-import json
-import os
-import sys
-
-GREEN = os.environ.get("TOKENAGE_GREEN", "")
-RED = os.environ.get("TOKENAGE_RED", "")
-RESET = os.environ.get("TOKENAGE_RESET", "")
-
-try:
-    data = json.loads(sys.stdin.read())
-except Exception:
-    print(f"  {RED}✗{RESET} Agent tracking: invalid setup-health response")
-    sys.exit(1)
-
-agents = data.get("agents")
-if not isinstance(agents, dict):
-    print(f"  {RED}✗{RESET} Agent tracking: setup-health response is missing agents")
-    sys.exit(1)
-
-ready = 0
-skipped = 0
-failed = 0
-for key, label in (
-    ("claude", "Claude"),
-    ("codex", "Codex"),
-    ("opencode", "OpenCode"),
-    ("kilo", "Kilo"),
-):
-    agent = agents.get(key)
-    if not isinstance(agent, dict):
-        failed += 1
-        print(f"  {RED}✗{RESET} {label}: setup health unavailable")
-        continue
-
-    status = agent.get("status")
-    configured = agent.get("configured") is True
-    endpoint_matches = agent.get("endpoint_matches") is True
-    detected = os.environ.get(f"TOKENAGE_{key.upper()}_DETECTED") == "1"
-
-    if not detected:
-        skipped += 1
-        print(f"  {GREEN}✓{RESET} {label}: skipped")
-    elif agent.get("expected_endpoint") is None:
-        skipped += 1
-        print(f"  {GREEN}✓{RESET} {label}: skipped (no server configured; run tokenage login --server URL)")
-    elif status == "ready" and endpoint_matches:
-        ready += 1
-        print(f"  {GREEN}✓{RESET} {label}: ready")
-    elif status == "wrong_endpoint" or (configured and not endpoint_matches):
-        failed += 1
-        print(f"  {RED}✗{RESET} {label}: endpoint mismatch")
-    elif status == "missing_config":
-        failed += 1
-        print(f"  {RED}✗{RESET} {label}: OTLP not configured")
-    else:
-        failed += 1
-        print(f"  {RED}✗{RESET} {label}: setup health unavailable")
-
-if failed == 0:
-    print(f"  {GREEN}✓{RESET} Agents: {ready} ready, {skipped} skipped, {failed} failed")
-else:
-    print(f"  {RED}✗{RESET} Agents: {ready} ready, {skipped} skipped, {failed} failed")
-sys.exit(1 if failed else 0)
-'
-  then
-    CHECKS_PASS=$((CHECKS_PASS + 1))
-  else
-    CHECKS_FAIL=$((CHECKS_FAIL + 1))
-  fi
-}
-
-_start_client_service() {
-  step_header "Starting client service"
-  if [[ ! -x "${CLI_SYMLINK}" ]]; then
-    fail "Client service: ${CLI_SYMLINK} not found"
-    CHECKS_FAIL=$((CHECKS_FAIL + 1))
-    return
-  fi
-  if TOKENAGE_ROOT="${ROOT_DIR}" TOKENAGE_SKIP_BANNER=1 \
-      "${CLI_SYMLINK}" client start >/dev/null; then
-    pass "Client service running"
-    CHECKS_PASS=$((CHECKS_PASS + 1))
-  else
-    # No usable service manager (containers, no user bus) is not a server
-    # failure; the user can run `tokenage client run` themselves.
-    info "Client service not started; see tokenage client start"
-  fi
-}
-
-# The local provider signs a loopback request in as the owner, so no Google or
-# token is needed. The client only has to be told which server to talk to.
-_sign_in_client() {
-  step_header "Signing in the client"
-  local login_url="http://127.0.0.1:${API_PORT}"
-  if [[ -t 0 && -t 1 ]]; then
-    if TOKENAGE_ROOT="${ROOT_DIR}" TOKENAGE_SKIP_BANNER=1 \
-        "${CLI_SYMLINK}" login --server "${login_url}"; then
-      pass "Client signed in to ${login_url}"
-      CHECKS_PASS=$((CHECKS_PASS + 1))
-    else
-      info "Client sign-in did not finish; run: tokenage login --server ${login_url}"
-    fi
-  else
-    info "Not interactive; sign the client in with: tokenage login --server ${login_url}"
-  fi
 }
 
 # ── Banner ──────────────────────────────────────────────────────────
@@ -389,12 +239,12 @@ else
   CHECKS_FAIL=$((CHECKS_FAIL + 1))
 fi
 
-# CLI symlink
-if [[ -L "${CLI_SYMLINK}" ]]; then
-  pass "CLI symlink: ${CLI_SYMLINK}"
+# Launcher (a symlink here, or the client install's copy)
+if [[ -e "${CLI_SYMLINK}" ]]; then
+  pass "Launcher: ${CLI_SYMLINK}"
   CHECKS_PASS=$((CHECKS_PASS + 1))
 else
-  fail "CLI symlink: ${CLI_SYMLINK} (not found)"
+  fail "Launcher: ${CLI_SYMLINK} (not found)"
   CHECKS_FAIL=$((CHECKS_FAIL + 1))
 fi
 
@@ -447,10 +297,6 @@ else
   pass "Dashboard: ${DISPLAY_SCHEME}://${DISPLAY_HOST}:${API_PORT} (curl not available, skipped)"
   CHECKS_PASS=$((CHECKS_PASS + 1))
 fi
-
-_start_client_service
-_sign_in_client
-_verify_agent_setup_health
 
 # ── Final report ────────────────────────────────────────────────────
 if [[ "${CHECKS_FAIL}" -eq 0 ]]; then

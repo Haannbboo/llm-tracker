@@ -12,7 +12,7 @@ import time
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-INSTALLER = REPO_ROOT / "scripts" / "hosted-install.sh"
+INSTALLER = REPO_ROOT / "install.sh"
 SHARED_LAUNCHER = REPO_ROOT / "scripts" / "tokenage"
 REQUIREMENTS = REPO_ROOT / "client" / "requirements.txt"
 COMMIT = "a" * 40
@@ -117,7 +117,7 @@ def _run_install(
     sha: str = COMMIT,
 ) -> tuple[subprocess.CompletedProcess[str], Path, Path]:
     home, fake_bin, archive = _fixture(tmp_path, sha=sha)
-    script = tmp_path / "hosted-install.sh"
+    script = tmp_path / "install.sh"
     script.write_text(_render_installer(installer_text))
     env = {
         **os.environ,
@@ -284,7 +284,7 @@ def test_reinstall_checks_protocol_before_replacing_current_symlink(
         "TOKENAGE_FAKE_PYTHON_LOG": str(tmp_path / "python.log"),
         "TOKENAGE_FAKE_PROTOCOL_FAIL": "1",
     }
-    command = ["/bin/sh", str(tmp_path / "hosted-install.sh")]
+    command = ["/bin/sh", str(tmp_path / "install.sh")]
     incompatible = subprocess.run(
         command, text=True, capture_output=True, env=env, timeout=30
     )
@@ -304,13 +304,13 @@ def test_reinstall_checks_protocol_before_replacing_current_symlink(
     assert (tracker_home / "credentials.json").read_text() == '{"token":"keep"}\n'
 
 
-def test_refuses_to_overwrite_existing_self_hosted_launcher(tmp_path: Path) -> None:
+def test_refuses_to_overwrite_a_foreign_launcher(tmp_path: Path) -> None:
     home, fake_bin, _ = _fixture(tmp_path)
     bin_dir = home / ".local" / "bin"
     bin_dir.mkdir(parents=True)
     foreign = bin_dir / "tokenage"
     foreign.write_text("#!/bin/sh\nexit 0\n")
-    script = tmp_path / "hosted-install.sh"
+    script = tmp_path / "install.sh"
     script.write_text(_render_installer())
     result = subprocess.run(
         ["/bin/sh", str(script)],
@@ -339,7 +339,7 @@ def test_existing_current_directory_fails_before_installing_launcher(
 ) -> None:
     home, fake_bin, _ = _fixture(tmp_path)
     (home / ".tokenage" / "current").mkdir()
-    script = tmp_path / "hosted-install.sh"
+    script = tmp_path / "install.sh"
     script.write_text(_render_installer())
     result = subprocess.run(
         ["/bin/sh", str(script)],
@@ -358,7 +358,7 @@ def test_login_reads_code_from_tty_when_installer_runs_from_pipe(
     tmp_path: Path,
 ) -> None:
     home, fake_bin, archive = _fixture(tmp_path)
-    script = tmp_path / "hosted-install.sh"
+    script = tmp_path / "install.sh"
     script.write_text(_render_installer())
     env = {
         **os.environ,
@@ -402,7 +402,7 @@ def test_updater_skip_login_mode_preserves_existing_credentials(
     tmp_path: Path,
 ) -> None:
     home, fake_bin, archive = _fixture(tmp_path)
-    script = tmp_path / "hosted-install.sh"
+    script = tmp_path / "install.sh"
     script.write_text(_render_installer())
     env = {
         **os.environ,
@@ -435,7 +435,7 @@ def test_updater_skip_login_mode_preserves_existing_credentials(
 
 def test_updater_reports_agent_configuration_refresh_failure(tmp_path: Path) -> None:
     home, fake_bin, archive = _fixture(tmp_path)
-    script = tmp_path / "hosted-install.sh"
+    script = tmp_path / "install.sh"
     script.write_text(_render_installer())
 
     result = subprocess.run(
@@ -468,17 +468,17 @@ def test_updater_reports_agent_configuration_refresh_failure(tmp_path: Path) -> 
 def test_rejects_unrendered_or_insecure_server_url_before_install(
     tmp_path: Path,
 ) -> None:
-    script = tmp_path / "hosted-install.sh"
+    script = tmp_path / "install.sh"
     script.write_text(INSTALLER.read_text())
     result = subprocess.run(
-        ["/bin/sh", str(script)],
+        ["/bin/sh", str(script), "--client"],
         text=True,
         capture_output=True,
         env={**os.environ, "HOME": str(tmp_path), "PATH": "/usr/bin:/bin"},
         timeout=10,
     )
     assert result.returncode != 0
-    assert "no hosted server URL" in result.stderr
+    assert "no server URL" in result.stderr
 
     script.write_text(_render_installer(server_url="http://remote.example"))
     result = subprocess.run(
@@ -490,3 +490,112 @@ def test_rejects_unrendered_or_insecure_server_url_before_install(
     )
     assert result.returncode != 0
     assert "must use HTTPS" in result.stderr
+
+
+def _both_fixture(tmp_path: Path, *, api_port: int = 4123):
+    """A fake server clone, bootstrap and git next to the client fixtures."""
+    home, fake_bin, archive = _fixture(tmp_path)
+    src = home / ".tokenage" / "src"
+    (src / ".git").mkdir(parents=True)
+    (src / "scripts").mkdir()
+    (src / "scripts" / "bootstrap.sh").write_text(
+        "#!/bin/bash\n"
+        'echo "bootstrap $*" >> "$TOKENAGE_FAKE_PYTHON_LOG.server"\n'
+        f'printf "server:\\n  api_port: {api_port}\\n" > "$HOME/.tokenage/config.yaml"\n'
+        'mkdir -p "$HOME/.local/bin"\n'
+        'ln -sf "$HOME/.tokenage/src/scripts/tokenage" "$HOME/.local/bin/tokenage"\n'
+    )
+    (src / "scripts" / "tokenage").write_text(SHARED_LAUNCHER.read_text())
+    git = fake_bin / "git"
+    git.write_text(
+        "#!/bin/sh\n"
+        'case "$*" in\n'
+        f'  *"remote get-url"*) echo https://github.com/Haannbboo/tokenage.git ;;\n'
+        f'  *rev-parse*) echo {COMMIT} ;;\n'
+        "esac\n"
+    )
+    git.chmod(0o755)
+    env = {
+        **os.environ,
+        "HOME": str(home),
+        "PATH": f"{fake_bin}:/usr/bin:/bin",
+        "TOKENAGE_FIXTURE_ARCHIVE": str(archive),
+        "TOKENAGE_FAKE_UV_LOG": str(tmp_path / "uv.log"),
+        "TOKENAGE_FAKE_PYTHON_LOG": str(tmp_path / "python.log"),
+    }
+    return home, env
+
+
+def _run_raw(tmp_path: Path, env: dict, *args: str):
+    return subprocess.run(
+        ["/bin/sh", str(INSTALLER), *args],
+        text=True,
+        capture_output=True,
+        env=env,
+        timeout=30,
+    )
+
+
+def test_default_install_is_server_then_client_pointed_at_it(tmp_path: Path) -> None:
+    home, env = _both_fixture(tmp_path)
+
+    result = _run_raw(tmp_path, env, "--otlp-port", "9")
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    # Extra arguments reach the server bootstrap.
+    assert (tmp_path / "python.log.server").read_text() == "bootstrap --otlp-port 9\n"
+    tracker_home = home / ".tokenage"
+    # The client has its own snapshot, and the launcher no longer points into the
+    # server clone.
+    assert (tracker_home / "current").resolve() == tracker_home / "versions" / COMMIT
+    launcher = home / ".local" / "bin" / "tokenage"
+    assert not launcher.is_symlink()
+    log = (tmp_path / "python.log").read_text()
+    assert "check-server --server http://127.0.0.1:4123" in log
+    assert "No interactive terminal is available" in result.stdout
+    assert "tokenage login --server http://127.0.0.1:4123" in result.stdout
+    assert "-P -m client client start" in log
+
+
+def test_server_only_installs_no_client(tmp_path: Path) -> None:
+    home, env = _both_fixture(tmp_path)
+
+    result = _run_raw(tmp_path, env, "--server")
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert (tmp_path / "python.log.server").exists()
+    assert not (home / ".tokenage" / "current").exists()
+    assert not (tmp_path / "uv.log").exists()
+    assert (home / ".local" / "bin" / "tokenage").is_symlink()
+
+
+def test_client_install_replaces_the_server_launcher_and_migrates_a_local_server(
+    tmp_path: Path,
+) -> None:
+    # An all-in-one machine from before the split: server clone, config, a
+    # launcher symlinked into the clone, no client snapshot.
+    home, env = _both_fixture(tmp_path, api_port=4555)
+    (home / ".tokenage" / "config.yaml").write_text("server:\n  api_port: 4555\n")
+    launcher = home / ".local" / "bin" / "tokenage"
+    launcher.parent.mkdir(parents=True)
+    launcher.symlink_to(home / ".tokenage" / "src" / "scripts" / "tokenage")
+    env["TOKENAGE_SKIP_LOGIN"] = "1"
+
+    result = _run_raw(tmp_path, env, "--client")
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert not (tmp_path / "python.log.server").exists()
+    assert not launcher.is_symlink()
+    assert (home / ".tokenage" / "current").is_symlink()
+    assert "check-server --server http://127.0.0.1:4555" in (
+        tmp_path / "python.log"
+    ).read_text()
+
+
+def test_unknown_option_is_refused_for_a_client_install(tmp_path: Path) -> None:
+    _, env = _both_fixture(tmp_path)
+
+    result = _run_raw(tmp_path, env, "--client", "--bogus")
+
+    assert result.returncode != 0
+    assert "unknown option: --bogus" in result.stderr

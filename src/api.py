@@ -1334,7 +1334,7 @@ async def version():
 
 @app.get("/install.sh")
 async def hosted_installer():
-    """Publish the client installer pointed at this server's configured API."""
+    """Publish the installer preset to this server: it installs the client."""
     server_url = resolve_server_urls(CONFIG)["api_url"]
     try:
         parsed = urlsplit(server_url)
@@ -1361,9 +1361,7 @@ async def hosted_installer():
         raise HTTPException(
             503, "configure an HTTPS API origin before client installation"
         )
-    installer_path = (
-        Path(__file__).resolve().parent.parent / "scripts" / "hosted-install.sh"
-    )
+    installer_path = Path(__file__).resolve().parent.parent / "install.sh"
     script = installer_path.read_text(encoding="utf-8")
     script = script.replace("__TOKENAGE_SERVER_URL__", shlex.quote(server_url))
     script = script.replace("__TOKENAGE_INSTALL_COMMIT__", shlex.quote(""))

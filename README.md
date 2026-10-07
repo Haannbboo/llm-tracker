@@ -58,20 +58,31 @@ Agent telemetry is best for agent-specific fields such as sessions and tool/reas
 - Node.js 18+ if you want the dashboard built and served
 - Optional: `claude`, `codex`, `opencode`, or `kilo` installed locally
 
-### 1. Bootstrap everything
+### 1. Install
+
+Pick the components this machine needs. With no flag the installer does both:
 
 ```bash
-bash scripts/bootstrap.sh
+curl -fsSL https://raw.githubusercontent.com/Haannbboo/tokenage/main/install.sh | bash                # server + client
+curl -fsSL https://raw.githubusercontent.com/Haannbboo/tokenage/main/install.sh | bash -s -- --server # server only
+curl -fsSL https://YOUR_SERVER/install.sh | sh                                                         # client only, for that server
 ```
 
-Bootstrap does the boring crap for you:
+The server is a git clone in `~/.tokenage/src`. The client is a separate snapshot
+and virtualenv under `~/.tokenage/versions`, even on the machine that runs the
+server; the two talk only over HTTP. Installing both is the server install
+followed by the client install pointed at `http://127.0.0.1:<api_port>`. The
+`tokenage` launcher in `~/.local/bin` is shared. `tokenage update` updates the
+client and `tokenage server update` the server.
+
+From a checkout, `bash scripts/bootstrap.sh` is the server install alone. It:
 
 1. installs Python dependencies into `.venv`
 2. builds the dashboard when Node/npm are available
-3. creates a CLI symlink at `~/.local/bin/tokenage`
+3. creates a launcher symlink at `~/.local/bin/tokenage` if there is none
 4. creates `~/.tokenage/config.yaml` if needed
 5. starts proxy, API, and OTLP services with Supervisor
-6. verifies service ports, the dashboard, and agent setup health
+6. verifies service ports and the dashboard
 7. restarts the API so the freshly built dashboard is served
 
 If `~/.local/bin` is not on your `PATH`, the installer prints the shell command to add it.
@@ -94,8 +105,8 @@ Then open [http://localhost:5173](http://localhost:5173).
 
 ### 3. Point your agents at the collector
 
-Bootstrap reports agent setup health but does not configure agents any more. That
-is the client's job:
+The server install never configures agents. That is the client's job (the
+both-install runs the sign-in for you):
 
 ```bash
 tokenage setup

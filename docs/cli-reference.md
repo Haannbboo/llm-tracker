@@ -7,8 +7,9 @@ behavior — including exit codes, the banner and the removed commands — is in
 
 ## Overview
 
-`tokenage` is one command with two components. The client is always
-installed; the server component is optional.
+`tokenage` is one command with two components, and a machine can have either
+or both. They are installed separately and share only the launcher; the client
+never runs from the server clone, even on the same machine.
 
 - **Client** — the tracking wrapper, agent configuration, sign-in, the component
   report. Reports to whichever collector it is pointed at.
@@ -159,6 +160,28 @@ The API being unreachable is not an error: the child runs, the exit code is the
 child's, and the wrapper says so on stderr before the child starts and once more
 after it.
 
+## Installing
+
+One installer, `install.sh`, installs the components you name:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Haannbboo/tokenage/main/install.sh | bash                # both (default)
+curl -fsSL https://raw.githubusercontent.com/Haannbboo/tokenage/main/install.sh | bash -s -- --server # server only
+curl -fsSL https://raw.githubusercontent.com/Haannbboo/tokenage/main/install.sh | bash -s -- --client # client only (set TOKENAGE_SERVER=URL)
+curl -fsSL https://YOUR_SERVER/install.sh | sh                                                         # client for that server
+```
+
+`GET /install.sh` on a server serves the same script preset to that server, so
+it installs the client. The server install is a clone in `~/.tokenage/src` plus
+`scripts/bootstrap.sh`, which never starts or configures a client. The client
+install is a snapshot and virtualenv under `~/.tokenage/versions` with a
+`current` link. Both = server, then client pointed at
+`http://127.0.0.1:<api_port>`: interactive sign-in (otherwise the command to run
+is printed), then `tokenage client start`, which may fail without being fatal.
+Either install may place the launcher first; the client install replaces the
+server's symlink with its own copy. A machine whose client used to run from the
+server clone has no snapshot: `tokenage` prints the one command that installs it.
+
 ## Service Management
 
 ```bash
@@ -252,7 +275,7 @@ Client state, all under `$TOKENAGE_HOME` (default `~/.tokenage`):
 | `TOKENAGE_CLIENT_COMMIT` | Commit to report for the client, when the snapshot has no `COMMIT` file. |
 | `TOKENAGE_SKIP_BANNER` | Set by the launcher so a script it calls does not print a second banner. `bootstrap.sh` and `start.sh` honor it; `restart.sh`, `status.sh` and `update.sh` do not. |
 | `TOKENAGE_SKIP_INSTALL` | `1` makes `bootstrap` skip dependency installation and record the requirements stamp anyway. |
-| `TOKENAGE_SERVER` | Fallback server URL for `tokenage login` when `--server` is absent; passed by `tokenage update` to the hosted installer, which reads it instead of its baked-in server URL. |
+| `TOKENAGE_SERVER` | Fallback server URL for `tokenage login` when `--server` is absent; passed by `tokenage update` to `install.sh`, which reads it instead of its baked-in server URL. |
 | `TOKENAGE_DB_URL` | Override the database URL at runtime (server side). |
 | `TOKENAGE_API_URL` | Frontend-only: override the API base URL used by the Vite dev server. |
 | `OTEL_EXPORTER_OTLP_LOGS_ENDPOINT` | The agent telemetry endpoint. `tokenage setup` strips any pre-existing value before writing its own. |

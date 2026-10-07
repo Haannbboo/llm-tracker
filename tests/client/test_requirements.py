@@ -4,7 +4,9 @@ from pathlib import Path
 
 
 def test_client_requirements_stay_small() -> None:
-    requirements = (Path(__file__).resolve().parents[2] / "client" / "requirements.txt").read_text(encoding="utf-8")
+    requirements = (
+        Path(__file__).resolve().parents[2] / "client" / "requirements.txt"
+    ).read_text(encoding="utf-8")
     names = {
         line.split(">=")[0].split("==")[0].split("<")[0].strip().lower()
         for line in requirements.splitlines()

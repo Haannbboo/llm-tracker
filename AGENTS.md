@@ -70,7 +70,7 @@ Version format: `MAJOR.MINOR.PATCH` (e.g. `0.1.180`).
 
 - `MAJOR`: bumped manually for breaking changes — edit first field in the file.
 - `MINOR`: bumped manually for feature releases — edit second field in the file.
-- `PATCH`: auto-incremented on PR branches targeting `main` by `.github/workflows/bump-version.yml`; the bump commit becomes part of the PR before squash merge, so `main` gets a single squashed commit. The workflow raises only the files the diff touched: `client/`, `plugins/` and `scripts/hosted-install.sh` bump the client, `src/`, `frontend/`, `scripts/`, `VERSION` and friends bump the server, and `protocol/` bumps both.
+- `PATCH`: auto-incremented on PR branches targeting `main` by `.github/workflows/bump-version.yml`; the bump commit becomes part of the PR before squash merge, so `main` gets a single squashed commit. The workflow raises only the files the diff touched: `client/` and `plugins/` bump the client, `install.sh` bumps both, `src/`, `frontend/`, `scripts/`, `VERSION` and friends bump the server, and `protocol/` bumps both.
 
 `tokenage --version` prints the client version and commit, and appends `· server <VERSION>` when the server component is installed.
 
@@ -123,7 +123,7 @@ Use targeted tests during iteration, but before commit/PR run the relevant full 
 
 ## Bootstrap architecture
 
-There is one installed command: `scripts/tokenage`. Both installers write it, and the `# tokenage launcher` marker line is how each recognises a launcher it previously wrote. The all-in-one installer symlinks it from the server clone into `~/.local/bin`; the hosted client installer copies it there. It resolves the two components out of `$TOKENAGE_HOME` — `current` for the client snapshot, `src` for the server clone — and routes to whichever one the arguments name.
+There is one installed command: `scripts/tokenage`. Whichever component installs first places it, and the `# tokenage launcher` marker line is how an install recognises a launcher it previously wrote. The server install symlinks it from the clone into `~/.local/bin` unless one exists; the client install replaces it with a copy from its snapshot. It resolves the two components out of `$TOKENAGE_HOME` — `current` for the client snapshot, `src` for the server clone — and routes to whichever one the arguments name. The client runs only from `current` (or `TOKENAGE_ROOT`), never from the server clone, even on one machine.
 
 - `client/` — the client: tracking wrapper, agent configuration, sign-in, component report. It must never import `src`.
 - `src/`, `scripts/` — the server component: API, OTLP collector, proxy, dashboard, evaluation worker.
@@ -132,7 +132,8 @@ Command surface:
 
 ```bash
 tokenage status            # this client: sign-in, agents, wiring
-tokenage setup             # agent configuration, in both installation modes
+tokenage setup             # agent configuration
+tokenage update            # update the client
 tokenage client start      # install + start the OS-supervised client service (systemd --user / launchd)
 tokenage client status     # whether the OS manager runs it, last report
 tokenage server start      # turn the services on
@@ -155,17 +156,18 @@ TOKENAGE_ROOT="$PWD" tokenage server bootstrap  # build THIS checkout's dashboar
 
 It also makes the client import this checkout instead of a snapshot. Repair agent settings with `TOKENAGE_ROOT="$PWD" tokenage setup`.
 
-The all-in-one install is still a three-script chain:
+There is one installer, `install.sh` at the repo root (POSIX sh, also served by `GET /install.sh` with the server URL and commit placeholders filled). Components are chosen by flag: `--server`, `--client`, or neither/both. With no flag it installs both, unless it was served by a server (preset URL), in which case it installs the client. Unrecognised arguments go to the server bootstrap.
 
 ```txt
-install.sh (root) → scripts/bootstrap.sh → scripts/start.sh
+server: install.sh → clone to ~/.tokenage/src → scripts/bootstrap.sh → scripts/start.sh
+client: install.sh → snapshot + venv under ~/.tokenage/versions/<commit>, `current` link, launcher copy
+both:   server, then client pointed at http://127.0.0.1:<api_port>: sign-in, `client start` (not fatal)
 ```
 
-- `install.sh` — curl-pipe-bash entrypoint at repo root. Checks prerequisites (git, bash, curl), clones/updates repo to `~/.tokenage/src`, delegates to `scripts/bootstrap.sh`.
-- `bootstrap.sh` — installs deps (via embedded `_install_deps()`), builds the dashboard, starts services via `start.sh`, runs post-start verification, then restarts the API so the new `frontend/dist` is served. Only the command that builds restarts the API, because the mount happens at import time.
+- `install.sh` — the server step checks git/bash, clones/updates `~/.tokenage/src`, runs `scripts/bootstrap.sh`. The client step needs `TOKENAGE_SERVER` or the served URL (or a local `config.yaml`, which is how a pre-split all-in-one machine installs its missing client: `TOKENAGE_SKIP_LOGIN=1 bash ~/.tokenage/src/install.sh --client`). `TOKENAGE_SKIP_LOGIN=1` runs `setup` instead of signing in; `tokenage update` uses it.
+- `bootstrap.sh` — the server install only: installs deps (via embedded `_install_deps()`), builds the dashboard, starts services via `start.sh`, verifies server ports and the dashboard, then restarts the API so the new `frontend/dist` is served. It never starts, signs in or configures a client. Only the command that builds restarts the API, because the mount happens at import time.
 - `start.sh` — config, port check, schema migrations, supervisord. Refuses with "run tokenage server bootstrap" when `requirements.txt` changed. Never touches agent settings.
 - `scripts/restart.sh` — migrations, then `SIGHUP` to the running services. Nothing else; `--otlp-port N` is its only flag and persists the port.
-- The hosted client install is `scripts/hosted-install.sh`, served from `GET /install.sh`. It writes a client snapshot under `~/.tokenage/versions` and flips `~/.tokenage/current`.
 
 Quick backend iteration: `TOKENAGE_ROOT="$PWD" tokenage server restart` (see `scripts/restart.sh`) reloads the supervisord-managed services to pick up backend changes locally.
 

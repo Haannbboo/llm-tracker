@@ -58,20 +58,30 @@ Agent telemetry 更适合拿到 session、tool/reasoning metadata 等 agent-spec
 - Node.js 18+，用于构建和提供 Dashboard
 - 可选：本地已安装 `claude`、`codex`、`opencode` 或 `kilo`
 
-### 1. 一键 Bootstrap
+### 1. 安装
+
+按这台机器的需要选择组件，不带参数时两个都装：
 
 ```bash
-bash scripts/bootstrap.sh
+curl -fsSL https://raw.githubusercontent.com/Haannbboo/tokenage/main/install.sh | bash                # server + client
+curl -fsSL https://raw.githubusercontent.com/Haannbboo/tokenage/main/install.sh | bash -s -- --server # 只装 server
+curl -fsSL https://YOUR_SERVER/install.sh | sh                                                         # 只装 client，连接该 server
 ```
 
-Bootstrap 会帮你处理这些烦人的东西：
+Server 是 `~/.tokenage/src` 里的 git clone。Client 是 `~/.tokenage/versions` 下独立的
+snapshot 和 virtualenv，即使与 server 在同一台机器上也一样，两者只通过 HTTP 通信。
+两个都装就是先装 server，再装指向 `http://127.0.0.1:<api_port>` 的 client。
+`~/.local/bin` 里的 `tokenage` launcher 是共享的。`tokenage update` 更新 client，
+`tokenage server update` 更新 server。
+
+在 checkout 里，`bash scripts/bootstrap.sh` 只是 server 安装：
 
 1. 把 Python 依赖安装到 `.venv`
 2. Node/npm 可用时构建 Dashboard
-3. 在 `~/.local/bin/tokenage` 创建 CLI symlink
+3. 没有 launcher 时在 `~/.local/bin/tokenage` 创建 symlink
 4. 按需创建 `~/.tokenage/config.yaml`
 5. 用 Supervisor 启动 proxy、API 和 OTLP 服务
-6. 检查服务端口、Dashboard 和 Agent setup health
+6. 检查服务端口和 Dashboard
 7. 重启 API，让刚构建出来的 Dashboard 生效
 
 如果 `~/.local/bin` 不在 `PATH` 里，安装脚本会打印该加到 shell profile 的命令。
@@ -94,7 +104,7 @@ npm run dev
 
 ### 3. 把 Agent 指向 collector
 
-Bootstrap 只检查 Agent setup health，不再配置 Agent。改 Agent 是 client 的职责：
+Server 安装不会配置 Agent。改 Agent 是 client 的职责（同时安装两者时安装脚本会带你登录）：
 
 ```bash
 tokenage setup

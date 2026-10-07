@@ -50,8 +50,12 @@ def test_bump_version_workflow_bumps_only_changed_packages_from_base_version():
     assert "github.base_ref" not in bump_step["run"]
     assert 'git fetch origin "$BASE_REF" --depth=1' in bump_step["run"]
     assert 'git diff --name-only "origin/$BASE_REF...HEAD"' in bump_step["run"]
-    assert "client/*|plugins/*|scripts/hosted-install.sh)" in bump_step["run"]
+    assert "client/*|plugins/*)" in bump_step["run"]
     assert "server/*|src/*|frontend/*" in bump_step["run"]
+    # The one installer ships in both components.
+    assert "install.sh) BUMP_SERVER=true BUMP_CLIENT=true" in " ".join(
+        bump_step["run"].split()
+    )
     assert "protocol/*)" in bump_step["run"]
     assert 'git show "origin/$BASE_REF:$FILE"' in bump_step["run"]
     assert "bump_file VERSION" in bump_step["run"]

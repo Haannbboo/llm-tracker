@@ -397,12 +397,13 @@ def test_tokenage_identity_defaults_and_env_overrides_agree_with_launcher(
     assert result.stdout == "tokenage 4.5.6 (client bbbbbbb)\n"
 
 
-def test_relative_launcher_symlink_uses_its_checkout(tmp_path):
+def test_client_never_runs_from_the_server_clone(tmp_path):
     checkout = tmp_path / "checkout"
     _client_install(checkout, "checkout", "1.2.3", "a" * 40)
     scripts = checkout / "scripts"
     scripts.mkdir()
     (checkout / "src").mkdir()
+    (checkout / "install.sh").write_text("")
     launcher = scripts / "tokenage"
     launcher.write_text(LAUNCHER.read_text())
     launcher.chmod(0o755)
@@ -422,8 +423,10 @@ def test_relative_launcher_symlink_uses_its_checkout(tmp_path):
         capture_output=True,
         text=True,
     )
-    assert result.returncode == 0, result.stderr
-    assert json.loads(result.stdout)["root"] == str(checkout)
+    # The clone has a client and an environment, but without a snapshot the
+    # launcher names the one command that installs it.
+    assert result.returncode == 1
+    assert 'install.sh" --client' in result.stderr
 
 
 def test_hosted_launcher_does_not_use_unrelated_home_virtualenv_as_server(tmp_path):
