@@ -327,7 +327,7 @@ curl http://127.0.0.1:4001/config
 Device status and agent wiring live on the client, not the API:
 
 ```bash
-tokenage client health --json
+tokenage status --json
 ```
 
 Query params for `/usage`: `limit`, `offset`, `provider`, `model`, `since`, `until`.

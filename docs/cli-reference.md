@@ -43,11 +43,10 @@ as a wrapper option.
 | `tokenage login [--server URL] [--device-name NAME] [--no-browser]` | client | Register this machine and sign in; wires detected agents. Persists an installation key (survives logout) so re-login rotates the machine's tokens instead of duplicating it. Stores the server's `otlp_logs_endpoint`. |
 | `tokenage logout [--keep-agents]` | client | Delete this machine's credentials, then un-wire the agents. |
 | `tokenage setup [--disable]` | client | Point detected agents at a collector, or take tokenage's telemetry keys back off. |
-| `tokenage status [--json]` | client | Report this client: version, sign-in (server URL), and where agents point. The service view is `tokenage server status`. |
+| `tokenage status [--json]` | client | Report this client: version, sign-in (server URL), detected agents and where they point. `--json` is the device status report the client service sends to the server, plus `account`. Exits 1 when a detected agent points at the wrong collector. The service view is `tokenage server status`. |
 | `tokenage client start\|stop\|restart` | client | Install and start the client service under systemd `--user` (Linux) or launchd (macOS), so it also starts at login. `stop` stops it and disables start at login; `start` re-enables. Elsewhere these exit 1: run `tokenage client run` under your own supervisor. |
 | `tokenage client status [--json]` | client | Ask the OS service manager whether the client service runs (exit 0 running, 1 not), plus its last check and report. |
 | `tokenage client run` | client | Run the client service in the foreground; the unit/agent executes this. |
-| `tokenage client health [--json]` | client | Report this device's detected agents and collector wiring. |
 | `tokenage update [--check\|--dry-run]` | client | Update the client snapshot from the signed-in server; client availability is not published. The server clone updates with `tokenage server update`. |
 | `tokenage check-server --server URL` | client | Internal: verify reachability and wire protocol. Writes nothing. |
 | `tokenage <command> [args...]` | client | Run any command with usage tracking. |
@@ -277,7 +276,7 @@ curl http://127.0.0.1:4001/version
 Device status and agent wiring come from the client service, not the API:
 
 ```bash
-tokenage client health --json
+tokenage status --json
 ```
 
 `/version` is public, and carries the wire protocol range,

@@ -16,7 +16,7 @@ from pathlib import Path
 import httpx
 import pytest
 
-from client import cli, service, setup
+from client import service, setup
 from protocol.device_status import DeviceStatusReport
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -556,13 +556,6 @@ def test_run_foreground_daemon_writes_state_and_stops_on_sigterm(
         if process.poll() is None:
             process.kill()
             process.wait()
-
-
-def test_cli_client_health_json(device_home: Path, capsys) -> None:
-    assert cli.main(["client", "health", "--json"]) == 0
-    payload = json.loads(capsys.readouterr().out)
-    assert payload["agents"]["claude"]["status"] == "missing_config"
-    assert set(payload["detected"]) == {"claude", "codex", "opencode", "kilo"}
 
 
 # ------------------------------------------------------------------- reporting

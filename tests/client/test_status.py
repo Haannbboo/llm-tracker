@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from client import setup, status
+from client import service, setup, status
 
 
 @pytest.fixture
@@ -38,19 +38,15 @@ def test_status_on_a_bare_client_only_machine(tracker_home: Path, capsys) -> Non
     assert "services" not in out  # the service view is `tokenage server status`
 
 
-def test_status_json_shape(tracker_home: Path, capsys) -> None:
+def test_status_json_is_the_service_report_plus_account(
+    tracker_home: Path, capsys, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("time.time", lambda: 1000.0)
     status.run_status(as_json=True)
     data = json.loads(capsys.readouterr().out.strip())
-    assert data["client"]["version"]
-    assert "commit" in data["client"]
-    assert data["account"]["signed_in"] is False
-    assert [agent["name"] for agent in data["agents"]] == [
-        "codex",
-        "claude",
-        "opencode",
-        "kilo",
-    ]
-    assert all(agent["detected"] is False for agent in data["agents"])
+    assert data.pop("account")["signed_in"] is False
+    assert data == service.health_payload()
+    assert all(found["found"] is False for found in data["detected"].values())
 
 
 def test_status_reports_a_signed_in_client(
@@ -190,7 +186,7 @@ def test_unknown_collector_is_not_reported_as_broken(
     assert "run tokenage setup" in out
 
     data = status.collect()
-    claude = next(agent for agent in data["agents"] if agent["name"] == "claude")
+    claude = data["agents"]["claude"]
     assert claude["endpoint_matches"] is None
     assert claude["configured"] is True
 
@@ -214,7 +210,7 @@ def test_known_collector_with_missing_agent_config_is_unhealthy(
     )
     assert status.run_status(as_json=True) == 1
     data = json.loads(capsys.readouterr().out)
-    codex = next(agent for agent in data["agents"] if agent["name"] == "codex")
+    codex = data["agents"]["codex"]
     assert codex["configured"] is False
     assert codex["endpoint_matches"] is False
 

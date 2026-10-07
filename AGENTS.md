@@ -134,7 +134,6 @@ Command surface:
 tokenage status            # this client: sign-in, agents, wiring
 tokenage setup             # agent configuration, in both installation modes
 tokenage client start      # install + start the OS-supervised client service (systemd --user / launchd)
-tokenage client health     # device status and agent wiring, from the client
 tokenage client status     # whether the OS manager runs it, last report
 tokenage server start      # turn the services on
 tokenage server restart    # reload running code

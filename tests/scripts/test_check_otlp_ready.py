@@ -19,7 +19,7 @@ def test_script_exits_zero_when_otlp_unreachable_and_client_absent():
     module = _load_script()
 
     with patch("httpx.get", side_effect=Exception("Connection refused")):
-        with patch.object(module, "client_health_payload", return_value=None):
+        with patch.object(module, "status_payload", return_value=None):
             assert module.main() == 0
 
 
@@ -51,7 +51,7 @@ def test_script_exits_zero_when_otlp_healthy_even_with_unwired_agents():
         mock_get.return_value = MagicMock(
             status_code=200, json=lambda: {"status": "ok"}
         )
-        with patch.object(module, "client_health_payload") as payload:
+        with patch.object(module, "status_payload") as payload:
             assert module.main() == 0
     payload.assert_not_called()
 
@@ -63,7 +63,7 @@ def test_script_fails_when_detected_agent_not_ready():
         mock_get.return_value = MagicMock(status_code=503)
         with patch.object(
             module,
-            "client_health_payload",
+            "status_payload",
             return_value={
                 "detected": {"claude": {"found": True}, "codex": {"found": False}},
                 "agents": {"claude": {"status": "missing_config"}},
@@ -79,7 +79,7 @@ def test_script_passes_when_detected_agents_ready():
         mock_get.return_value = MagicMock(status_code=503)
         with patch.object(
             module,
-            "client_health_payload",
+            "status_payload",
             return_value={
                 "detected": {"claude": {"found": True}, "codex": {"found": False}},
                 "agents": {"claude": {"status": "ready"}},
@@ -95,7 +95,7 @@ def test_script_ignores_undetected_agents():
         mock_get.return_value = MagicMock(status_code=503)
         with patch.object(
             module,
-            "client_health_payload",
+            "status_payload",
             return_value={
                 "detected": {"claude": {"found": False}},
                 "agents": {"claude": {"status": "missing_config"}},

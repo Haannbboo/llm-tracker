@@ -307,7 +307,7 @@ curl http://127.0.0.1:4001/config
 设备状态和 agent 配置检查属于 client：
 
 ```bash
-tokenage client health --json
+tokenage status --json
 ```
 
 `/usage` query params：`limit`、`offset`、`provider`、`model`、`since`、`until`。

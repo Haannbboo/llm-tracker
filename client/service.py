@@ -32,7 +32,7 @@ from typing import Any
 import httpx
 
 from client.auth import save_private_object
-from client.paths import client_commit, client_version, tracker_home
+from client.paths import client_commit, client_version, display_endpoint, tracker_home
 from client.setup import AGENT_MODULES, agent_path, intended_endpoint, read_agent_states
 from protocol.device_status import DeviceStatusReport
 
@@ -279,8 +279,8 @@ def health_payload() -> dict[str, Any]:
     """The device's status: build, detected agents and collector wiring.
 
     The same payload is printed locally and sent to the server, wherever that
-    runs. It carries no local file paths, so nothing about this machine's
-    layout leaves it.
+    runs. Endpoints are redacted (no credentials or private paths), so nothing
+    about this machine's layout leaves it.
     """
     states = read_agent_states(intended_endpoint())
     report = DeviceStatusReport.model_validate(
@@ -289,7 +289,18 @@ def health_payload() -> dict[str, Any]:
             "client_version": client_version(),
             "client_commit": client_commit(),
             "collected_at": int(time.time()),
-            "agents": {name: states[name] for name in AGENT_MODULES},
+            "agents": {
+                name: {
+                    **states[name],
+                    "configured_endpoint": display_endpoint(
+                        states[name].get("configured_endpoint")
+                    ),
+                    "expected_endpoint": display_endpoint(
+                        states[name].get("expected_endpoint")
+                    ),
+                }
+                for name in AGENT_MODULES
+            },
             "detected": {
                 name: {"found": agent_path(name) is not None} for name in AGENT_MODULES
             },
@@ -417,29 +428,3 @@ def run_status(*, as_json: bool) -> int:
     else:
         print("tokenage client service is not running")
     return 0 if data["running"] else 1
-
-
-def _render_health(payload: dict[str, Any]) -> str:
-    lines = [
-        f"tokenage {payload['client_version']}"
-        + (
-            f" (client {payload['client_commit'][:7]})"
-            if payload["client_commit"]
-            else ""
-        )
-    ]
-    for name in AGENT_MODULES:
-        agent = payload["agents"][name]
-        detected = payload["detected"][name]["found"]
-        state = "not detected" if not detected else agent["status"]
-        lines.append(f"  {name:<10}{state}")
-    return "\n".join(lines) + "\n"
-
-
-def run_health(*, as_json: bool) -> int:
-    payload = health_payload()
-    if as_json:
-        print(json.dumps(payload, separators=(",", ":"), sort_keys=True))
-    else:
-        print(_render_health(payload), end="")
-    return 0

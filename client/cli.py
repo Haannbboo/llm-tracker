@@ -184,12 +184,6 @@ def _build_subcommand(name: str) -> argparse.ArgumentParser:
             "--json", action="store_true", help="print one compact JSON line"
         )
         subparsers.add_parser("run", help="run the service in the foreground")
-        client_health = subparsers.add_parser(
-            "health", help="report this device's status and agent wiring"
-        )
-        client_health.add_argument(
-            "--json", action="store_true", help="print one compact JSON line"
-        )
         _add_banner_flag(parser)
         return parser
     # check-server is internal: the installer uses it to refuse an incompatible box.
@@ -256,8 +250,6 @@ def _run_subcommand(name: str, argv: list[str]) -> int:
             return service.restart()
         if args.action == "status":
             return service.run_status(as_json=args.json)
-        if args.action == "health":
-            return service.run_health(as_json=args.json)
         return service.run_foreground()
     try:
         server = auth.normalize_server_url(args.server)

@@ -49,22 +49,21 @@ def check_otlp_health(otlp_url):
     return False
 
 
-def client_health_payload():
-    """Ask the installed client service for this machine's agent wiring."""
+def status_payload():
+    """Ask the installed client for this machine's agent wiring."""
     launcher = shutil.which("tokenage")
     if launcher is None:
         return None
     try:
         result = subprocess.run(
-            [launcher, "client", "health", "--json"],
+            [launcher, "status", "--json"],
             capture_output=True,
             text=True,
             timeout=15,
         )
     except (OSError, subprocess.TimeoutExpired):
         return None
-    if result.returncode != 0:
-        return None
+    # Exit 1 means a miswired agent; the JSON still names it.
     try:
         payload = json.loads(result.stdout)
     except json.JSONDecodeError:
@@ -82,7 +81,7 @@ def main():
         return 0
 
     # Otherwise let the local client name the detected agents that are unwired.
-    payload = client_health_payload()
+    payload = status_payload()
     if payload is None:
         return 0
     detected = payload.get("detected")

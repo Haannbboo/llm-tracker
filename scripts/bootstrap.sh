@@ -171,9 +171,11 @@ _verify_agent_setup_health() {
     return
   }
 
-  if ! health_json="$(TOKENAGE_ROOT="${ROOT_DIR}" TOKENAGE_SKIP_BANNER=1 \
-      "${CLI_SYMLINK}" client health --json 2>/dev/null)"; then
-    fail "Agent tracking: could not read the client service health"
+  # status exits 1 for a miswired agent; the verdict below reads the JSON.
+  health_json="$(TOKENAGE_ROOT="${ROOT_DIR}" TOKENAGE_SKIP_BANNER=1 \
+      "${CLI_SYMLINK}" status --json 2>/dev/null)" || true
+  if [[ -z "${health_json}" ]]; then
+    fail "Agent tracking: could not read the client status"
     CHECKS_FAIL=$((CHECKS_FAIL + 1))
     return
   fi

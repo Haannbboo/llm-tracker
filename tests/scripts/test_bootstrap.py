@@ -31,11 +31,9 @@ def _make_fake_bootstrap_repo(
     (scripts_dir / "tokenage").write_text(
         "#!/usr/bin/env bash\n"
         'if [ "${1:-}" = "client" ]; then\n'
-        '  case "${2:-}" in\n'
-        "    start) exit 0 ;;\n"
-        '    health) exec cat "${HOME}/health.json" ;;\n'
-        "  esac\n"
+        '  [ "${2:-}" = "start" ] && exit 0\n'
         "fi\n"
+        'if [ "${1:-}" = "status" ]; then exec cat "${HOME}/health.json"; fi\n'
         "echo tokenage fake cli\n",
         encoding="utf-8",
     )
