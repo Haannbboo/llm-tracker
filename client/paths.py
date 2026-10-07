@@ -25,7 +25,6 @@ import yaml
 # scripts live in <root>/scripts, so the client needs the snapshot on disk, not
 # just the client package.
 PACKAGE_ROOT = Path(__file__).resolve().parent.parent
-SCRIPTS_DIR = PACKAGE_ROOT / "scripts"
 
 VERSION_FILE = Path(__file__).resolve().parent / "VERSION"
 COMMIT_FILE = Path(__file__).resolve().parent / "COMMIT"

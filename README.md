@@ -313,7 +313,7 @@ For streamed responses, the proxy records TTFT as time until the first upstream 
 
 TTFT is an operational signal, not a billing-grade metric. Each agent exposes different timing data.
 
-OpenCode and Kilo Code tracking is provided by local plugins (`plugins/opencode` and `plugins/kilo`) that emit one OTLP log record for each completed assistant message. `tokenage setup` runs `scripts/configure-opencode-plugin.py` when `opencode` is installed and `scripts/configure-kilo-plugin.py` when `kilo` is installed, registering each built plugin with the local OTLP logs endpoint.
+OpenCode and Kilo Code tracking is provided by local plugins (`plugins/opencode` and `plugins/kilo`) that emit one OTLP log record for each completed assistant message. `tokenage setup` registers each built plugin (when `opencode` or `kilo` is installed) with the local OTLP logs endpoint, using `client/agents/`.
 
 ## API
 

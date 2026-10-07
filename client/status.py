@@ -24,7 +24,7 @@ from client.paths import (
     tracker_home,
 )
 from client.setup import (
-    AGENT_SCRIPTS,
+    AGENT_MODULES,
     installed_agents,
     intended_endpoint,
     read_agent_states,
@@ -143,18 +143,18 @@ def collect() -> dict[str, Any]:
 
     expected = intended_endpoint()
     states = read_agent_states(expected)
+    detected = installed_agents()
     agents = [
         {
             "name": name,
-            "installed": name in AGENT_SCRIPTS,
-            "detected": name in installed_agents(),
+            "detected": name in detected,
             "configured": states.get(name, {}).get("configured", False),
             "endpoint_matches": states.get(name, {}).get("endpoint_matches", False),
             "endpoint": display_endpoint(
                 states.get(name, {}).get("configured_endpoint")
             ),
         }
-        for name in AGENT_SCRIPTS
+        for name in AGENT_MODULES
     ]
 
     server: dict[str, Any] = {"installed": root is not None}

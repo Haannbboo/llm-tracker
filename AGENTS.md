@@ -70,7 +70,7 @@ Version format: `MAJOR.MINOR.PATCH` (e.g. `0.1.180`).
 
 - `MAJOR`: bumped manually for breaking changes — edit first field in the file.
 - `MINOR`: bumped manually for feature releases — edit second field in the file.
-- `PATCH`: auto-incremented on PR branches targeting `main` by `.github/workflows/bump-version.yml`; the bump commit becomes part of the PR before squash merge, so `main` gets a single squashed commit. The workflow raises only the files the diff touched: `client/`, `plugins/` and `scripts/hosted-install.sh` bump the client, `src/`, `frontend/`, `scripts/`, `VERSION` and friends bump the server, and `protocol/` and `scripts/configure-*` bump both.
+- `PATCH`: auto-incremented on PR branches targeting `main` by `.github/workflows/bump-version.yml`; the bump commit becomes part of the PR before squash merge, so `main` gets a single squashed commit. The workflow raises only the files the diff touched: `client/`, `plugins/` and `scripts/hosted-install.sh` bump the client, `src/`, `frontend/`, `scripts/`, `VERSION` and friends bump the server, and `protocol/` bumps both.
 
 `tokenage --version` prints the client version and commit, and appends `· server <VERSION>` when the server component is installed.
 
@@ -133,9 +133,9 @@ Command surface:
 ```bash
 tokenage status            # installed components, agents, whether things run
 tokenage setup             # agent configuration, in both installation modes
-tokenage client start      # start this device's background client service
+tokenage client start      # install + start the OS-supervised client service (systemd --user / launchd)
 tokenage client health     # device status and agent wiring, from the client
-tokenage client status     # whether the client service runs
+tokenage client status     # whether the OS manager runs it, last report
 tokenage server start      # turn the services on
 tokenage server restart    # reload running code
 tokenage server bootstrap  # install, build the dashboard, start, verify
@@ -153,13 +153,7 @@ TOKENAGE_ROOT="$PWD" tokenage server restart    # reload THIS checkout's code
 TOKENAGE_ROOT="$PWD" tokenage server bootstrap  # build THIS checkout's dashboard
 ```
 
-It also makes the client import this checkout instead of a snapshot. Repair agent settings with the scheme intact:
-
-```bash
-EP="$(python scripts/read-otlp-config.py ~/.tokenage/config.yaml --endpoint)"
-python scripts/configure-claude-settings.py ~/.claude/settings.json 0 localhost "$EP"
-python scripts/configure-codex-settings.py ~/.codex/config.toml      0 localhost "$EP"
-```
+It also makes the client import this checkout instead of a snapshot. Repair agent settings with `TOKENAGE_ROOT="$PWD" tokenage setup`.
 
 The all-in-one install is still a three-script chain:
 

@@ -529,82 +529,43 @@ def test_usage_client_401_surfaces_relogin_message(monkeypatch):
 # ------------------------------------------------------------------ wiring
 
 
-def test_wire_agents_for_hosted_invokes_scripts(monkeypatch):
+def _fake_agents(monkeypatch, code=0):
     calls = []
 
-    def fake_which(name):
-        return f"/usr/bin/{name}" if name in ("codex", "claude") else None
+    class Fake:
+        def __init__(self, name):
+            self.name = name
 
-    def fake_run(cmd, **kwargs):
-        calls.append(cmd)
-        return SimpleNamespace(returncode=0, stdout="", stderr="")
+        def configure(self, target, endpoint, token):
+            calls.append((self.name, target, endpoint, token))
+            return code
 
-    monkeypatch.setattr(setup.shutil, "which", fake_which)
-    monkeypatch.setattr(setup.subprocess, "run", fake_run)
+    monkeypatch.setattr(setup.shutil, "which", lambda name: "/usr/bin/" + name)
+    monkeypatch.setattr(
+        setup, "AGENT_MODULES", {n: Fake(n) for n in setup.AGENT_MODULES}
+    )
+    return calls
+
+
+def test_wire_agents_configures_each_detected_agent_in_process(monkeypatch):
+    calls = _fake_agents(monkeypatch)
+    monkeypatch.setattr(
+        setup.shutil,
+        "which",
+        lambda name: f"/usr/bin/{name}" if name in ("codex", "claude") else None,
+    )
 
     wired = setup.wire_agents(
-        logs_endpoint="https://api.example.com:4005/v1/logs",
-        token=None,
+        logs_endpoint="https://api.example.com:4005/v1/logs", token="ingest-secret"
     )
     assert wired == ["codex", "claude"]
-    assert len(calls) == 2
-    assert calls[0][-1] == "https://api.example.com:4005/v1/logs"
-    assert calls[1][-1] == "https://api.example.com:4005/v1/logs"
-    for cmd in calls:
-        assert cmd[1].endswith("configure-codex-settings.py") or cmd[1].endswith(
-            "configure-claude-settings.py"
-        )
+    assert [(n, e, t) for n, _, e, t in calls] == [
+        ("codex", "https://api.example.com:4005/v1/logs", "ingest-secret"),
+        ("claude", "https://api.example.com:4005/v1/logs", "ingest-secret"),
+    ]
 
 
-def test_wire_agents_passes_ingest_token_via_environment(monkeypatch):
-    calls = []
-
-    monkeypatch.setattr(setup.shutil, "which", lambda name: "/usr/bin/" + name)
-
-    def fake_run(cmd, **kwargs):
-        calls.append((cmd, kwargs))
-        return SimpleNamespace(returncode=0, stdout="", stderr="")
-
-    monkeypatch.setattr(setup.subprocess, "run", fake_run)
-
-    wired = setup.wire_agents(
-        logs_endpoint="https://api.example.com:4005/v1/logs",
-        token="ingest-secret",
-    )
-
-    assert wired == ["codex", "claude", "opencode", "kilo"]
-    assert calls
-    for cmd, kwargs in calls:
-        assert all("ingest-secret" not in str(arg) for arg in cmd)
-        assert kwargs["env"]["TOKENAGE_INGEST_TOKEN"] == "ingest-secret"
-
-
-def test_wire_agents_strips_otel_env_var(monkeypatch):
-    envs = []
-
-    def fake_run(cmd, **kwargs):
-        envs.append(kwargs.get("env") or {})
-        return SimpleNamespace(returncode=0, stdout="", stderr="")
-
-    monkeypatch.setattr(setup.shutil, "which", lambda name: "/usr/bin/" + name)
-    monkeypatch.setattr(setup.subprocess, "run", fake_run)
-    monkeypatch.setenv("OTEL_EXPORTER_OTLP_LOGS_ENDPOINT", "http://local:4005/v1/logs")
-
-    setup.wire_agents(logs_endpoint="https://api.example.com/v1/logs", token=None)
-    assert envs
-    assert all("OTEL_EXPORTER_OTLP_LOGS_ENDPOINT" not in env for env in envs)
-    assert all("PATH" in env for env in envs)
-
-
-def test_wire_agents_timeout_warns_and_skips(monkeypatch, capsys):
-    def fake_run(cmd, **kwargs):
-        raise setup.subprocess.TimeoutExpired(cmd, kwargs.get("timeout"))
-
-    monkeypatch.setattr(setup.shutil, "which", lambda name: "/usr/bin/" + name)
-    monkeypatch.setattr(setup.subprocess, "run", fake_run)
-
-    wired = setup.wire_agents(
-        logs_endpoint="https://api.example.com/v1/logs", token=None
-    )
-    assert wired == []
-    assert "timed out" in capsys.readouterr().err
+def test_wire_agents_warns_when_an_agent_is_not_wired(monkeypatch, capsys):
+    _fake_agents(monkeypatch, code=1)
+    assert setup.wire_agents(logs_endpoint="https://x/v1/logs", token=None) == []
+    assert "wiring codex failed" in capsys.readouterr().err

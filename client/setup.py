@@ -1,16 +1,14 @@
 """Agent configuration: the client's job, in both installation modes.
 
 The server never edits agent settings. This module points detected agents at a
-collector and takes them back off again, by shelling out to the four
-``scripts/configure-*.py`` helpers that own the file formats.
+collector and takes them back off again, through the ``client.agents`` modules
+that own the file formats.
 """
 
 from __future__ import annotations
 
 import json
-import os
 import shutil
-import subprocess
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -18,20 +16,15 @@ from typing import Any
 
 import tomllib
 
+from client.agents import DONE, SKIPPED, claude, codex, kilo, opencode
 from client.paths import (
     PACKAGE_ROOT,
-    SCRIPTS_DIR,
     display_endpoint,
     local_server_info,
     server_root,
 )
 
-AGENT_SCRIPTS: dict[str, str] = {
-    "codex": "configure-codex-settings.py",
-    "claude": "configure-claude-settings.py",
-    "opencode": "configure-opencode-plugin.py",
-    "kilo": "configure-kilo-plugin.py",
-}
+AGENT_MODULES = {"codex": codex, "claude": claude, "opencode": opencode, "kilo": kilo}
 
 PLUGIN_SUFFIX = {
     "opencode": "plugins/opencode/dist/index.js",
@@ -40,7 +33,8 @@ PLUGIN_SUFFIX = {
 
 
 def agent_targets() -> dict[str, str]:
-    """Agent name -> the first positional argument for its configure script.
+    """Agent name -> the target its module configures: a settings file, or the
+    project root a plugin is built from.
 
     Resolved on every call so a test (or a changed HOME) is honoured.
     """
@@ -61,14 +55,19 @@ def plugin_configs() -> dict[str, Path]:
     }
 
 
-# A cold `npm install` inside the plugin scripts can take minutes. This bounds a
-# hang, not slow work.
-BUILD_TIMEOUT = 300
-SIMPLE_TIMEOUT = 30
+def agent_path(name: str) -> str | None:
+    """Where the agent's command lives, or None when it is not installed."""
+    path = shutil.which(name)
+    if path is None and name == "kilo":
+        # Kilo's installer only adds ~/.kilo/bin to PATH via the shell rc file,
+        # which a background service never sources.
+        fallback = Path.home() / ".kilo" / "bin" / "kilo"
+        path = str(fallback) if fallback.exists() else None
+    return path
 
 
 def installed_agents() -> list[str]:
-    return [name for name in AGENT_SCRIPTS if shutil.which(name)]
+    return [name for name in AGENT_MODULES if agent_path(name)]
 
 
 def intended_endpoint() -> str | None:
@@ -207,60 +206,22 @@ def read_agent_states(expected_endpoint: str | None) -> dict[str, dict[str, Any]
     return states
 
 
-def _run(script: str, args: list[str], env: dict[str, str], timeout: int):
-    return subprocess.run(
-        [sys.executable, str(SCRIPTS_DIR / script), *args],
-        capture_output=True,
-        text=True,
-        env=env,
-        timeout=timeout,
-    )
-
-
-def _child_env(*, token: str | None, disable: bool) -> dict[str, str]:
-    env = os.environ.copy()
-    # A pre-existing local OTLP override would silently beat the endpoint we are
-    # wiring, so it is always stripped.
-    env.pop("OTEL_EXPORTER_OTLP_LOGS_ENDPOINT", None)
-    if not disable and token:
-        env["TOKENAGE_INGEST_TOKEN"] = token
-    else:
-        env.pop("TOKENAGE_INGEST_TOKEN", None)
-    return env
-
-
 def wire_agents(
     *, logs_endpoint: str, token: str | None, agents: list[str] | None = None
 ) -> list[str]:
     """Point detected agents at a collector. Returns the agents that were wired."""
     if not logs_endpoint:
         return []
-    env = _child_env(token=token, disable=False)
     wired: list[str] = []
     for name in agents if agents is not None else installed_agents():
-        script, target = AGENT_SCRIPTS[name], agent_targets()[name]
-        try:
-            result = _run(
-                script,
-                [target, logs_endpoint],
-                env,
-                BUILD_TIMEOUT if name in PLUGIN_SUFFIX else SIMPLE_TIMEOUT,
-            )
-        except (OSError, subprocess.TimeoutExpired) as exc:
-            reason = (
-                "helper timed out"
-                if isinstance(exc, subprocess.TimeoutExpired)
-                else "helper could not start"
-            )
-            print(f"warning: wiring {name} failed: {reason}", file=sys.stderr)
-            continue
-        # Script exit statuses: 0 configured, 2 skipped, 1 failed.
-        if result.returncode == 0:
+        code = AGENT_MODULES[name].configure(
+            agent_targets()[name], logs_endpoint, token
+        )
+        if code == DONE:
             wired.append(name)
         else:
-            detail = result.stderr.strip() or result.stdout.strip()
-            status = "skipped" if result.returncode == 2 else "failed"
-            print(f"warning: wiring {name} {status}: {detail}", file=sys.stderr)
+            status = "skipped" if code == SKIPPED else "failed"
+            print(f"warning: wiring {name} {status}", file=sys.stderr)
     return wired
 
 
@@ -277,7 +238,6 @@ def disable_agents(*, expected_endpoint: str | None = None) -> DisableResult:
     Remove settings only when their collector matches this installation's known
     endpoint. Unknown ownership leaves the configuration untouched.
     """
-    env = _child_env(token=None, disable=True)
     outcome = DisableResult()
     agents = installed_agents()
     if not expected_endpoint:
@@ -289,31 +249,11 @@ def disable_agents(*, expected_endpoint: str | None = None) -> DisableResult:
             )
         return outcome
     for name in agents:
-        script, target = AGENT_SCRIPTS[name], agent_targets()[name]
-        args = [target, "--disable"]
-        if expected_endpoint:
-            args.append(expected_endpoint)
-        try:
-            result = _run(script, args, env, SIMPLE_TIMEOUT)
-        except (OSError, subprocess.TimeoutExpired) as exc:
-            reason = (
-                "helper timed out"
-                if isinstance(exc, subprocess.TimeoutExpired)
-                else "helper could not start"
-            )
-            print(f"warning: un-wiring {name} failed: {reason}", file=sys.stderr)
-            outcome.failed.append(name)
-            continue
-        if result.returncode == 0:
+        code = AGENT_MODULES[name].disable(agent_targets()[name], expected_endpoint)
+        if code == DONE:
             outcome.removed.append(name)
         else:
-            (outcome.skipped if result.returncode == 2 else outcome.failed).append(name)
-            print(
-                f"warning: un-wiring {name} "
-                f"{'skipped' if result.returncode == 2 else 'failed'}: "
-                f"{result.stderr.strip() or result.stdout.strip()}",
-                file=sys.stderr,
-            )
+            (outcome.skipped if code == SKIPPED else outcome.failed).append(name)
     return outcome
 
 

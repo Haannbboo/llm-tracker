@@ -1,38 +1,51 @@
-"""Endpoint-argument tests for the configure-* wiring scripts (PR 3).
+"""Agent configuration modules: endpoint handling, disable-only-when-matching,
+refusing unsafe edits, plugin registration.
 
-Each script accepts an optional trailing full-endpoint argument (contains
-"://") that overrides PORT/HOST composition — used by `tokenage login`
-to wire agents at a hosted HTTPS OTLP endpoint. Legacy argv must behave
-identically to before.
+``_run`` calls the module functions in-process and mimics a finished process
+(returncode, stdout, stderr) so each case reads as a before/after on one file.
 """
 
 from __future__ import annotations
 
+import contextlib
+import io
 import json
 import os
 import subprocess
-import sys
 from pathlib import Path
+from types import SimpleNamespace
+from unittest import mock
 
 import pytest
 import tomllib
 
-SCRIPTS_DIR = Path(__file__).resolve().parents[2] / "scripts"
+from client.agents import claude, codex, kilo, opencode
 
 ENDPOINT = "https://api.example.com:4005/v1/logs"
+AGENTS = {"claude": claude, "codex": codex, "opencode": opencode, "kilo": kilo}
 
 
-def _run(script: str, args: list[str], home: Path, extra_env=None):
-    env = {**os.environ, "HOME": str(home)}
-    env.pop("OTEL_EXPORTER_OTLP_LOGS_ENDPOINT", None)
-    if extra_env:
-        env.update(extra_env)
-    return subprocess.run(
-        [sys.executable, str(SCRIPTS_DIR / script), *args],
-        env=env,
-        text=True,
-        capture_output=True,
-        timeout=20,
+@pytest.fixture(autouse=True)
+def _home(tmp_path, monkeypatch):
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.delenv("OTEL_EXPORTER_OTLP_LOGS_ENDPOINT", raising=False)
+
+
+def _run(agent: str, args: list[str], home: Path | None = None):
+    """``[target, ENDPOINT[, TOKEN]]`` configures; ``[target, "--disable"[, ENDPOINT]]`` disables."""
+    module, (target, *rest) = AGENTS[agent], args
+    out, err = io.StringIO(), io.StringIO()
+    with (
+        mock.patch.dict(os.environ, {"HOME": str(home)} if home else {}),
+        contextlib.redirect_stdout(out),
+        contextlib.redirect_stderr(err),
+    ):
+        if rest[:1] == ["--disable"]:
+            code = module.disable(target, rest[1] if len(rest) > 1 else None)
+        else:
+            code = module.configure(target, rest[0], rest[1] if len(rest) > 1 else None)
+    return SimpleNamespace(
+        returncode=code, stdout=out.getvalue(), stderr=err.getvalue()
     )
 
 
@@ -52,8 +65,8 @@ def _make_built_plugin_root(tmp_path: Path, name: str) -> Path:
 def test_claude_endpoint_arg(tmp_path):
     settings = tmp_path / "settings.json"
     result = _run(
-        "configure-claude-settings.py",
-        [str(settings), "4002", "localhost", ENDPOINT],
+        "claude",
+        [str(settings), ENDPOINT],
         home=tmp_path,
     )
     assert result.returncode == 0, result.stderr
@@ -61,42 +74,14 @@ def test_claude_endpoint_arg(tmp_path):
     assert env["OTEL_EXPORTER_OTLP_LOGS_ENDPOINT"] == ENDPOINT
 
 
-def test_claude_legacy_host_port(tmp_path):
+def test_claude_ignores_ambient_otlp_env_var(tmp_path, monkeypatch):
+    monkeypatch.setenv(
+        "OTEL_EXPORTER_OTLP_LOGS_ENDPOINT", "http://env.example:9/v1/logs"
+    )
     settings = tmp_path / "settings.json"
     result = _run(
-        "configure-claude-settings.py",
-        [str(settings), "4102", "otlp.example.com"],
-        home=tmp_path,
-    )
-    assert result.returncode == 0, result.stderr
-    env = json.loads(settings.read_text())["env"]
-    assert (
-        env["OTEL_EXPORTER_OTLP_LOGS_ENDPOINT"]
-        == "http://otlp.example.com:4102/v1/logs"
-    )
-
-
-def test_claude_env_var_wins_over_endpoint_arg(tmp_path):
-    settings = tmp_path / "settings.json"
-    result = _run(
-        "configure-claude-settings.py",
-        [str(settings), "4002", "localhost", ENDPOINT],
-        home=tmp_path,
-        extra_env={"OTEL_EXPORTER_OTLP_LOGS_ENDPOINT": "http://env.example:9/v1/logs"},
-    )
-    assert result.returncode == 0, result.stderr
-    env = json.loads(settings.read_text())["env"]
-    assert env["OTEL_EXPORTER_OTLP_LOGS_ENDPOINT"] == "http://env.example:9/v1/logs"
-
-
-def test_claude_wire_argv_shape_with_placeholder_port(tmp_path):
-    # `tokenage login` wiring passes [SETTINGS, "0", "localhost", ENDPOINT]
-    # — the endpoint must override the placeholder port/host, not compose
-    # with them.
-    settings = tmp_path / "settings.json"
-    result = _run(
-        "configure-claude-settings.py",
-        [str(settings), "0", "localhost", ENDPOINT],
+        "claude",
+        [str(settings), ENDPOINT],
         home=tmp_path,
     )
     assert result.returncode == 0, result.stderr
@@ -110,8 +95,8 @@ def test_claude_wire_argv_shape_with_placeholder_port(tmp_path):
 def test_codex_endpoint_arg(tmp_path):
     config = tmp_path / "config.toml"
     result = _run(
-        "configure-codex-settings.py",
-        [str(config), "4002", "localhost", ENDPOINT],
+        "codex",
+        [str(config), ENDPOINT],
         home=tmp_path,
     )
     assert result.returncode == 0, result.stderr
@@ -122,8 +107,8 @@ def test_codex_endpoint_arg(tmp_path):
 def test_codex_token_arg_writes_otlp_header(tmp_path):
     config = tmp_path / "config.toml"
     result = _run(
-        "configure-codex-settings.py",
-        [str(config), "4002", "localhost", ENDPOINT, "ingest-secret"],
+        "codex",
+        [str(config), ENDPOINT, "ingest-secret"],
         home=tmp_path,
     )
     assert result.returncode == 0, result.stderr
@@ -141,8 +126,8 @@ def test_codex_missing_config_dir_announces_the_skip(tmp_path):
     # it skipped, or `tokenage login` reports the agent as wired.
     config = tmp_path / "missing" / "config.toml"
     result = _run(
-        "configure-codex-settings.py",
-        [str(config), "4002", "localhost", ENDPOINT],
+        "codex",
+        [str(config), ENDPOINT],
         home=tmp_path,
     )
     assert result.returncode == 2, result.stderr
@@ -175,8 +160,8 @@ endpoint = "https://traces.example"
         http["headers"].pop("x-tokenage-token")
 
     result = _run(
-        "configure-codex-settings.py",
-        [str(config), "4002", "localhost", ENDPOINT, token],
+        "codex",
+        [str(config), ENDPOINT, token],
         tmp_path,
     )
 
@@ -195,8 +180,8 @@ timeout_ms = 8000""")
     expected["otel"]["exporter"]["otlp-http"].update(endpoint=ENDPOINT, protocol="json")
 
     result = _run(
-        "configure-codex-settings.py",
-        [str(config), "4002", "localhost", ENDPOINT, ""],
+        "codex",
+        [str(config), ENDPOINT, ""],
         tmp_path,
     )
 
@@ -212,8 +197,8 @@ exporter = "none"
 """)
 
     result = _run(
-        "configure-codex-settings.py",
-        [str(config), "4002", "localhost", ENDPOINT, ""],
+        "codex",
+        [str(config), ENDPOINT, ""],
         tmp_path,
     )
 
@@ -249,7 +234,7 @@ x-custom = "keep"
 
     for _ in range(2):
         result = _run(
-            "configure-codex-settings.py",
+            "codex",
             [str(config), "--disable", ENDPOINT],
             tmp_path,
         )
@@ -258,8 +243,8 @@ x-custom = "keep"
         assert "[otel] # user settings" in config.read_text()
 
         result = _run(
-            "configure-codex-settings.py",
-            [str(config), "4002", "localhost", ENDPOINT, ""],
+            "codex",
+            [str(config), ENDPOINT, ""],
             tmp_path,
         )
         assert result.returncode == 0, result.stderr
@@ -289,8 +274,8 @@ def test_codex_configure_refuses_unsafe_edit_without_changing_file(tmp_path, con
     tomllib.loads(content)
 
     result = _run(
-        "configure-codex-settings.py",
-        [str(config), "4002", "localhost", ENDPOINT, "ingest-secret"],
+        "codex",
+        [str(config), ENDPOINT, "ingest-secret"],
         tmp_path,
     )
 
@@ -307,7 +292,7 @@ def test_codex_invalid_config_reports_failure_without_traceback(tmp_path, disabl
     config.write_text(content)
     args = [str(config), "--disable", ENDPOINT] if disable else [str(config), ENDPOINT]
 
-    result = _run("configure-codex-settings.py", args, tmp_path)
+    result = _run("codex", args, tmp_path)
 
     assert result.returncode == 1
     assert "left unchanged" in result.stderr
@@ -323,8 +308,8 @@ def test_opencode_endpoint_arg(tmp_path):
     home.mkdir()
     project_root = _make_built_plugin_root(tmp_path, "opencode")
     result = _run(
-        "configure-opencode-plugin.py",
-        [str(project_root), "4005", "localhost", ENDPOINT],
+        "opencode",
+        [str(project_root), ENDPOINT],
         home=home,
     )
     assert result.returncode == 0, result.stderr
@@ -338,8 +323,8 @@ def test_kilo_endpoint_arg(tmp_path):
     home.mkdir()
     project_root = _make_built_plugin_root(tmp_path, "kilo")
     result = _run(
-        "configure-kilo-plugin.py",
-        [str(project_root), "4005", "localhost", ENDPOINT],
+        "kilo",
+        [str(project_root), ENDPOINT],
         home=home,
     )
     assert result.returncode == 0, result.stderr
@@ -366,7 +351,7 @@ def test_plugin_disable_preserves_foreign_collector_and_user_plugins(tmp_path, n
     )
 
     result = _run(
-        f"configure-{name}-plugin.py",
+        name,
         [str(project_root), "--disable", ENDPOINT],
         tmp_path,
     )
@@ -379,7 +364,7 @@ def test_plugin_disable_preserves_foreign_collector_and_user_plugins(tmp_path, n
     assert "foreign-secret" not in result.stdout + result.stderr
     before = config.read_bytes()
     result = _run(
-        f"configure-{name}-plugin.py",
+        name,
         [str(project_root), "--disable", ENDPOINT],
         tmp_path,
     )
@@ -402,7 +387,7 @@ def test_plugin_disable_checks_runtime_default_for_bare_entry(tmp_path, name, ma
     endpoint = "http://localhost:4005/v1/logs" if matching else ENDPOINT
 
     result = _run(
-        f"configure-{name}-plugin.py",
+        name,
         [str(project_root), "--disable", endpoint],
         tmp_path,
     )
@@ -412,30 +397,6 @@ def test_plugin_disable_checks_runtime_default_for_bare_entry(tmp_path, name, ma
         assert "plugin" not in json.loads(config.read_text())
     else:
         assert config.read_bytes() == before
-
-
-def test_plugin_scripts_reject_extra_args(tmp_path):
-    home = tmp_path / "home"
-    home.mkdir()
-    for script, name in (
-        ("configure-opencode-plugin.py", "opencode"),
-        ("configure-kilo-plugin.py", "kilo"),
-    ):
-        project_root = _make_built_plugin_root(tmp_path, name)
-        result = _run(
-            script,
-            [
-                str(project_root),
-                "4005",
-                "localhost",
-                ENDPOINT,
-                "token",
-                "extra",
-            ],
-            home=home,
-        )
-        assert result.returncode == 1
-        assert "usage" in result.stderr
 
 
 def test_codex_disable_preserves_other_telemetry_and_uses_actual_endpoint(tmp_path):
@@ -453,9 +414,7 @@ endpoint = "https://traces.example"
 keep = true
 """)
     before = tomllib.loads(config.read_text())
-    result = _run(
-        "configure-codex-settings.py", [str(config), "--disable", ENDPOINT], tmp_path
-    )
+    result = _run("codex", [str(config), "--disable", ENDPOINT], tmp_path)
     assert result.returncode == 0, result.stderr
     after = tomllib.loads(config.read_text())
     before["otel"]["exporter"].pop("otlp-http")
@@ -475,9 +434,7 @@ headers = {{ "x-tokenage-token" = "secret", "x-custom" = "keep" }}
 [otel.trace_exporter.otlp-http]
 endpoint = "https://traces.example"
 ''')
-    result = _run(
-        "configure-codex-settings.py", [str(config), "--disable", ENDPOINT], tmp_path
-    )
+    result = _run("codex", [str(config), "--disable", ENDPOINT], tmp_path)
     assert result.returncode == 0, result.stderr
     after = tomllib.loads(config.read_text())
     assert after["otel"]["exporter"] == "none"
@@ -495,9 +452,7 @@ endpoint = "{ENDPOINT}"
 exporter = {{ otlp-http = {{ endpoint = "https://foreign.example/v1/logs" }} }}
 '''
     config.write_text(content)
-    result = _run(
-        "configure-codex-settings.py", [str(config), "--disable", ENDPOINT], tmp_path
-    )
+    result = _run("codex", [str(config), "--disable", ENDPOINT], tmp_path)
     assert result.returncode == 2
     assert config.read_text() == content
 
@@ -545,9 +500,7 @@ def test_claude_disable_preserves_user_hooks_in_shared_entry(tmp_path):
             }
         )
     )
-    result = _run(
-        "configure-claude-settings.py", [str(settings), "--disable", ENDPOINT], tmp_path
-    )
+    result = _run("claude", [str(settings), "--disable", ENDPOINT], tmp_path)
     assert result.returncode == 0, result.stderr
     after = json.loads(settings.read_text())
     assert after["env"] == {"OTEL_EXPORTER_OTLP_HEADERS": "x-custom=keep"}
@@ -572,9 +525,7 @@ def test_claude_disable_requires_actual_matching_endpoint_without_echoing_secret
         env["OTEL_EXPORTER_OTLP_LOGS_ENDPOINT"] = current
     content = json.dumps({"env": env})
     settings.write_text(content)
-    result = _run(
-        "configure-claude-settings.py", [str(settings), "--disable", ENDPOINT], tmp_path
-    )
+    result = _run("claude", [str(settings), "--disable", ENDPOINT], tmp_path)
     assert result.returncode == 2
     assert "secret" not in result.stdout + result.stderr
     assert settings.read_text() == content
@@ -585,13 +536,8 @@ def test_claude_disable_requires_actual_matching_endpoint_without_echoing_secret
 def test_plugin_build_rereads_concurrent_config_edits(
     tmp_path, monkeypatch, agent, edit
 ):
-    import importlib.util
+    from client.agents import plugin
 
-    monkeypatch.setenv("HOME", str(tmp_path))
-    script = SCRIPTS_DIR / f"configure-{agent}-plugin.py"
-    spec = importlib.util.spec_from_file_location("configure_plugin", script)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
     root = _make_built_plugin_root(tmp_path, agent)
     (root / "plugins" / agent / "dist" / "index.js").unlink()
     config_path = tmp_path / ".config" / agent / "opencode.json"
@@ -614,9 +560,8 @@ def test_plugin_build_rereads_concurrent_config_edits(
         (plugin_dir / "dist" / "index.js").write_text("built plugin")
         return subprocess.CompletedProcess(args, 0, stdout="", stderr="")
 
-    monkeypatch.setattr(module, "run_npm", build)
-    monkeypatch.setattr(sys, "argv", [str(script), str(root), ENDPOINT])
-    assert module.main() == (0 if edit == "valid" else 1)
+    monkeypatch.setattr(plugin, "run_npm", build)
+    assert AGENTS[agent].configure(root, ENDPOINT) == (0 if edit == "valid" else 1)
     if edit == "valid":
         after = json.loads(config_path.read_text())
         assert after["model"] == "new"
@@ -629,7 +574,7 @@ def test_plugin_build_rereads_concurrent_config_edits(
 
 def test_compact_endpoint_input_and_no_claude_hook_registration(tmp_path):
     settings = tmp_path / "settings.json"
-    result = _run("configure-claude-settings.py", [str(settings), ENDPOINT], tmp_path)
+    result = _run("claude", [str(settings), ENDPOINT], tmp_path)
     assert result.returncode == 0, result.stderr
     after = json.loads(settings.read_text())
     assert after["env"]["OTEL_EXPORTER_OTLP_LOGS_ENDPOINT"] == ENDPOINT
@@ -641,10 +586,10 @@ def test_configure_helpers_do_not_echo_endpoint_credentials(tmp_path, agent):
     endpoint = "https://user:secret@collector.example/secret/v1/logs?token=secret"
     if agent in {"opencode", "kilo"}:
         target = _make_built_plugin_root(tmp_path, agent)
-        script = f"configure-{agent}-plugin.py"
+        script = agent
     else:
         target = tmp_path / ("config.toml" if agent == "codex" else "settings.json")
-        script = f"configure-{agent}-settings.py"
+        script = agent
     result = _run(script, [str(target), endpoint], tmp_path)
     assert result.returncode == 0, result.stderr
     assert "secret" not in result.stdout + result.stderr
@@ -663,17 +608,17 @@ def test_disable_without_expected_collector_preserves_config(tmp_path, agent):
                 "model": "keep",
             }
         )
-        script = f"configure-{agent}-plugin.py"
+        script = agent
     elif agent == "codex":
         target = path = tmp_path / "config.toml"
         content = f'[otel.exporter.otlp-http]\nendpoint = "{ENDPOINT}"\n'
-        script = "configure-codex-settings.py"
+        script = "codex"
     else:
         target = path = tmp_path / "settings.json"
         content = json.dumps(
             {"env": {"OTEL_EXPORTER_OTLP_LOGS_ENDPOINT": ENDPOINT}, "model": "keep"}
         )
-        script = "configure-claude-settings.py"
+        script = "claude"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(content)
     result = _run(script, [str(target), "--disable"], tmp_path)
@@ -691,11 +636,11 @@ def test_disable_without_expected_collector_preserves_config(tmp_path, agent):
 def test_json_config_errors_preserve_original_file(tmp_path, agent, content, disable):
     if agent == "claude":
         target = path = tmp_path / "settings.json"
-        script = "configure-claude-settings.py"
+        script = "claude"
     else:
         target = _make_built_plugin_root(tmp_path, agent)
         path = tmp_path / ".config" / agent / "opencode.json"
-        script = f"configure-{agent}-plugin.py"
+        script = agent
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(content)
     args = [str(target), "--disable", ENDPOINT] if disable else [str(target), ENDPOINT]
@@ -713,15 +658,13 @@ def test_codex_disable_supports_implicit_otel_parent(tmp_path, prefix):
     path.write_text(
         f'{prefix}[otel.exporter.otlp-http]\nendpoint = "{ENDPOINT}"\n[profiles.work]\nmodel = "keep"\n'
     )
-    result = _run(
-        "configure-codex-settings.py", [str(path), "--disable", ENDPOINT], tmp_path
-    )
+    result = _run("codex", [str(path), "--disable", ENDPOINT], tmp_path)
     assert result.returncode == 0, result.stderr
     assert tomllib.loads(path.read_text()) == {
         "otel": {"exporter": "none"},
         "profiles": {"work": {"model": "keep"}},
     }
-    result = _run("configure-codex-settings.py", [str(path), ENDPOINT], tmp_path)
+    result = _run("codex", [str(path), ENDPOINT], tmp_path)
     assert result.returncode == 0, result.stderr
     assert (
         tomllib.loads(path.read_text())["otel"]["exporter"]["otlp-http"]["endpoint"]

@@ -1,8 +1,8 @@
 """``tokenage setup`` — the client owns agent configuration.
 
-These tests run the real configure scripts, so they cover the whole path: the
-client decides the endpoint, shells out, and the scripts write only their own
-keys. The server scripts deliberately do not do this any more.
+These tests run the real ``client.agents`` modules, so they cover the whole path:
+the client decides the endpoint and the modules write only their own keys. The
+server deliberately does not do this any more.
 """
 
 from __future__ import annotations
@@ -33,7 +33,7 @@ def machine(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
         "which",
         lambda name: f"/usr/bin/{name}" if name in {"codex", "claude"} else None,
     )
-    # An installed agent has its config directory. configure-codex-settings.py
+    # An installed agent has its config directory. the codex module
     # deliberately refuses to create it.
     (home / ".codex").mkdir()
     (home / ".claude").mkdir()
@@ -264,27 +264,17 @@ def test_logout_unwires_with_the_collector_it_recorded(
     assert not (machine / ".tokenage" / "credentials.json").exists()
 
 
-def test_setup_uses_explicit_script_status(machine, monkeypatch):
-    import subprocess
+def test_setup_uses_explicit_agent_status(machine, monkeypatch):
+    class Fake:
+        code = 0
 
-    monkeypatch.setattr(
-        setup,
-        "_run",
-        lambda *args: subprocess.CompletedProcess(
-            args,
-            0,
-            stdout="a diagnostic mentioning skipping something unrelated",
-            stderr="",
-        ),
-    )
+        def configure(self, *args):
+            return self.code
+
+    fake = Fake()
+    monkeypatch.setattr(setup, "AGENT_MODULES", {"codex": fake, "claude": fake})
     assert setup.wire_agents(logs_endpoint=ENDPOINT, token=None) == ["codex", "claude"]
-    monkeypatch.setattr(
-        setup,
-        "_run",
-        lambda *args: subprocess.CompletedProcess(
-            args, 2, stdout="agent configuration unavailable", stderr=""
-        ),
-    )
+    fake.code = 2
     assert setup.wire_agents(logs_endpoint=ENDPOINT, token=None) == []
 
 
@@ -329,22 +319,10 @@ def test_disable_unknown_collector_preserves_existing_settings(
         assert not (machine / ".tokenage" / "credentials.json").exists()
 
 
-@pytest.mark.parametrize("failure", ["invalid", "timeout", "write"])
-def test_disable_reports_helper_failures(machine, monkeypatch, capsys, failure):
-    import subprocess
-
+def test_disable_reports_agent_failures(machine, capsys):
     _sign_in(machine)
-    if failure == "invalid":
-        (machine / ".codex" / "config.toml").write_text("[invalid")
-        (machine / ".claude" / "settings.json").write_text("{invalid")
-    else:
-
-        def fail(*args):
-            if failure == "timeout":
-                raise subprocess.TimeoutExpired("configure", 30)
-            raise OSError("write denied")
-
-        monkeypatch.setattr(setup, "_run", fail)
+    (machine / ".codex" / "config.toml").write_text("[invalid")
+    (machine / ".claude" / "settings.json").write_text("{invalid")
     assert setup.run_setup(disable=True) == 1
     output = capsys.readouterr()
     assert "un-wiring failed: codex, claude" in output.err
@@ -357,30 +335,3 @@ def test_logout_reports_cleanup_failure_after_removing_credentials(machine, caps
     assert auth.logout(keep_agents=False) == 1
     assert "Signed out, but agent cleanup failed" in capsys.readouterr().err
     assert not (machine / ".tokenage" / "credentials.json").exists()
-
-
-@pytest.mark.parametrize("disable", [False, True])
-@pytest.mark.parametrize("failure", ["timeout", "oserror"])
-def test_helper_exceptions_never_echo_collector_arguments(
-    machine, monkeypatch, capsys, disable, failure
-):
-    import subprocess
-
-    endpoint = "https://user:secret@collector.example/secret/v1/logs?token=secret"
-    _sign_in(machine, endpoint)
-
-    def fail(script, args, env, timeout):
-        command = [script, *args]
-        if failure == "timeout":
-            raise subprocess.TimeoutExpired(command, timeout)
-        raise OSError(f"failed command: {command}")
-
-    monkeypatch.setattr(setup, "_run", fail)
-    assert setup.run_setup(disable=disable) == 1
-    output = capsys.readouterr()
-    assert "secret" not in output.out + output.err
-    assert (
-        "helper timed out" in output.err
-        if failure == "timeout"
-        else "helper could not start" in output.err
-    )

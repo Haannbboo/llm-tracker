@@ -272,8 +272,9 @@ _start_client_service() {
     pass "Client service running"
     CHECKS_PASS=$((CHECKS_PASS + 1))
   else
-    fail "Client service: could not start"
-    CHECKS_FAIL=$((CHECKS_FAIL + 1))
+    # No usable service manager (containers, no user bus) is not a server
+    # failure; the user can run `tokenage client run` themselves.
+    info "Client service not started; see tokenage client start"
   fi
 }
 

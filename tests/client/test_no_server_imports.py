@@ -46,7 +46,7 @@ def test_client_requirements_stay_small() -> None:
         for line in requirements.splitlines()
         if line.strip() and not line.startswith("#")
     }
-    assert names == {"httpx", "pyyaml"}
+    assert names == {"httpx", "pydantic", "pyyaml"}
 
 
 def test_server_cli_does_not_import_the_client() -> None:

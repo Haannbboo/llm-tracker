@@ -44,9 +44,9 @@ as a wrapper option.
 | `tokenage logout [--keep-agents]` | client | Delete this machine's credentials, then un-wire the agents. |
 | `tokenage setup [--disable]` | client | Point detected agents at a collector, or take tokenage's telemetry keys back off. |
 | `tokenage status [--json]` | either | Report installed components, whether they run, and where agents point. |
-| `tokenage client start\|stop\|restart` | client | Manage this device's background client service. |
-| `tokenage client status [--json]` | client | Report whether the client service runs. |
-| `tokenage client run` | client | Run the client service in the foreground. |
+| `tokenage client start\|stop\|restart` | client | Install and start the client service under systemd `--user` (Linux) or launchd (macOS), so it also starts at login. `stop` stops it and disables start at login; `start` re-enables. Elsewhere these exit 1: run `tokenage client run` under your own supervisor. |
+| `tokenage client status [--json]` | client | Ask the OS service manager whether the client service runs (exit 0 running, 1 not), plus its last check and report. |
+| `tokenage client run` | client | Run the client service in the foreground; the unit/agent executes this. |
 | `tokenage client health [--json]` | client | Report this device's detected agents and collector wiring. |
 | `tokenage update [--check\|--dry-run] [--scope all\|client\|server]` | either | Update installed components; `--check` checks server availability, while client availability is not published. |
 | `tokenage check-server --server URL` | client | Internal: verify reachability and wire protocol. Writes nothing. |
@@ -248,7 +248,6 @@ Client state, all under `$TOKENAGE_HOME` (default `~/.tokenage`):
 | `TOKENAGE_SKIP_BANNER` | Set by the launcher so a script it calls does not print a second banner. `bootstrap.sh` and `start.sh` honor it; `restart.sh`, `status.sh` and `update.sh` do not. |
 | `TOKENAGE_SKIP_INSTALL` | `1` makes `bootstrap` skip dependency installation and record the requirements stamp anyway. |
 | `TOKENAGE_SERVER` | Fallback server URL for `tokenage login` when `--server` is absent; passed by `tokenage update` to the hosted installer, which reads it instead of its baked-in server URL. |
-| `TOKENAGE_INGEST_TOKEN` | Set by `tokenage setup` on the agent configure scripts when signed in, so agents send the device ingest token. |
 | `TOKENAGE_DB_URL` | Override the database URL at runtime (server side; removed from the child's env by `--proxy-env`). |
 | `TOKENAGE_API_URL` | Frontend-only: override the API base URL used by the Vite dev server. |
 | `OPENAI_BASE_URL` | Set by `--proxy-env` to route OpenAI-compatible clients through the proxy. |
@@ -303,10 +302,3 @@ sends only `after_ts`, plus `until_ts` on the re-anchor pass.
 | `scripts/migrate_schema.py` | Apply database schema migrations. Run by `server start` and `server restart`. |
 | `scripts/check-service-ports.py` | Detect port conflicts before starting services. |
 | `scripts/auto-assign-ports.py` | Pick free ports on a first run. |
-| `scripts/configure-claude-settings.py` | Configure Claude Code OTLP telemetry. |
-| `scripts/configure-codex-settings.py` | Configure Codex OTLP telemetry. |
-| `scripts/configure-opencode-plugin.py` | Configure the OpenCode plugin OTLP telemetry. |
-| `scripts/configure-kilo-plugin.py` | Configure the Kilo Code plugin OTLP telemetry. |
-
-The four `configure-*.py` scripts are the ones `tokenage setup` shells out to;
-they own the agent file formats. The server never calls them.

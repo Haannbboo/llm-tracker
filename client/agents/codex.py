@@ -1,6 +1,6 @@
-#!/usr/bin/env python3
+"""Codex: the OTLP logs exporter in ``~/.codex/config.toml``."""
+
 import json
-import os
 import re
 import sys
 from copy import deepcopy
@@ -8,43 +8,17 @@ from pathlib import Path
 
 import tomllib
 
-_GRAY = "\033[38;2;102;102;102m" if sys.stdout.isatty() else ""
-_RESET = "\033[0m" if sys.stdout.isatty() else ""
-
-
-def _info(msg: str) -> None:
-    print(f"  {_GRAY}{msg}{_RESET}")
-
-
-def _write_private(path: Path, content: str) -> None:
-    if path.exists():
-        path.chmod(0o600)
-    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-    with os.fdopen(fd, "w", encoding="utf-8") as handle:
-        handle.write(content)
-
-
-def load_ingest_token() -> str | None:
-    try:
-        credentials = json.loads(
-            (Path.home() / ".tokenage" / "credentials.json").read_text(encoding="utf-8")
-        )
-    except (OSError, UnicodeError, json.JSONDecodeError):
-        return None
-    token = credentials.get("ingest_token") if isinstance(credentials, dict) else None
-    return token if isinstance(token, str) and token else None
-
-
-def resolve_otlp_logs_endpoint(
-    otlp_port: str, host: str = "localhost", endpoint: str | None = None
-) -> str:
-    """Return explicit OTLP logs endpoint override or localhost port default."""
-    env_endpoint = os.environ.get("OTEL_EXPORTER_OTLP_LOGS_ENDPOINT")
-    if env_endpoint:
-        return env_endpoint
-    if endpoint and "://" in endpoint:
-        return endpoint
-    return f"http://{host}:{otlp_port}/v1/logs"
+from client.agents import (
+    DONE,
+    FAILED,
+    SKIPPED,
+)
+from client.agents import (
+    info as _info,
+)
+from client.agents import (
+    write_private as _write_private,
+)
 
 
 def update_existing_otel_config(
@@ -226,25 +200,25 @@ def _remove_http_exporter(content: str, exporter) -> str:
 def _disable(config_path: Path, expected_endpoint: str | None) -> int:
     if not expected_endpoint:
         print("collector unknown; Codex configuration left unchanged", file=sys.stderr)
-        return 2
+        return SKIPPED
     if not config_path.exists():
         _info(f"No Codex config at {config_path}")
-        return 2
+        return SKIPPED
     content = config_path.read_text(encoding="utf-8")
     try:
         parsed = tomllib.loads(content)
     except tomllib.TOMLDecodeError:
         print("invalid Codex TOML configuration; left unchanged", file=sys.stderr)
-        return 1
+        return FAILED
     otel = parsed.get("otel")
     exporter = otel.get("exporter") if isinstance(otel, dict) else None
     http = exporter.get("otlp-http") if isinstance(exporter, dict) else None
     if not isinstance(http, dict) or not http.get("endpoint"):
         _info(f"No tokenage telemetry in {config_path}")
-        return 2
+        return SKIPPED
     if expected_endpoint and http["endpoint"] != expected_endpoint:
         print(f"{config_path} points at another collector; left alone", file=sys.stderr)
-        return 2
+        return SKIPPED
     desired = deepcopy(parsed)
     remaining = desired["otel"]["exporter"]
     remaining.pop("otlp-http")
@@ -257,77 +231,46 @@ def _disable(config_path: Path, expected_endpoint: str | None) -> int:
             raise ValueError("unsupported Codex HTTP exporter layout; left unchanged")
     except (ValueError, TypeError, AttributeError) as exc:
         print(str(exc), file=sys.stderr)
-        return 1
+        return FAILED
     _write_private(config_path, new_content)
     _info(f"Codex OTLP telemetry removed from {config_path}")
-    return 0
+    return DONE
 
 
-# Exit status contract: 0 configured/removed, 2 skipped, 1 failed.
-def _main():
-    argv = sys.argv[1:]
-    # Compact client API; retain PORT/HOST positional inputs for direct callers.
-    if len(argv) == 2 and "://" in argv[1]:
-        argv = [argv[0], "", "", argv[1]]
-    disable = False
-    if "--disable" in argv:
-        disable = True
-        argv = [arg for arg in argv if arg != "--disable"]
-    if len(argv) not in (1, 2, 3, 4, 5):
-        print(
-            "usage: configure-codex-settings.py CONFIG_PATH "
-            "[--disable [ENDPOINT]] | ENDPOINT | [OTLP_PORT] [HOST] [ENDPOINT] [TOKEN]",
-            file=sys.stderr,
-        )
-        return 1
-
-    config_path = Path(argv[0]).expanduser()
-    if disable:
-        # ENDPOINT is the one tokenage wrote; anything else is the user's.
-        return _disable(config_path, argv[1] if len(argv) >= 2 else None)
-    otlp_port = argv[1] if len(argv) >= 2 else "4002"
-    host = argv[2] if len(argv) >= 3 else "localhost"
-    endpoint = argv[3] if len(argv) >= 4 else None
-    token = (
-        argv[4]
-        if len(argv) >= 5
-        else os.environ.get("TOKENAGE_INGEST_TOKEN") or load_ingest_token()
-    )
-
+def configure(target: str | Path, logs_endpoint: str, token: str | None = None) -> int:
+    config_path = Path(target).expanduser()
     if not config_path.parent.exists():
         print(
             f"WARNING: {config_path.parent} does not exist; skipping Codex configuration",
             file=sys.stderr,
         )
-        return 2
-
-    content = ""
-    if config_path.exists():
-        content = config_path.read_text(encoding="utf-8")
-
-    endpoint = resolve_otlp_logs_endpoint(otlp_port, host, endpoint)
-
+        return SKIPPED
     try:
-        new_content = update_existing_otel_config(content, endpoint, token)
-    except (ValueError, TypeError, AttributeError):
-        print("unsupported Codex HTTP exporter layout; left unchanged", file=sys.stderr)
-        return 1
-    if new_content != content:
-        _write_private(config_path, new_content)
-        _info(f"Codex OTLP telemetry updated in {config_path}")
-    else:
-        _info(f"Codex OTLP telemetry already up-to-date in {config_path}")
-
-    return 0
-
-
-def main():
-    try:
-        return _main()
+        content = (
+            config_path.read_text(encoding="utf-8") if config_path.exists() else ""
+        )
+        try:
+            new_content = update_existing_otel_config(content, logs_endpoint, token)
+        except (ValueError, TypeError, AttributeError):
+            print(
+                "unsupported Codex HTTP exporter layout; left unchanged",
+                file=sys.stderr,
+            )
+            return FAILED
+        if new_content != content:
+            _write_private(config_path, new_content)
+            _info(f"Codex OTLP telemetry updated in {config_path}")
+        else:
+            _info(f"Codex OTLP telemetry already up-to-date in {config_path}")
     except (OSError, UnicodeError):
         print("cannot update Codex configuration; left unchanged", file=sys.stderr)
-        return 1
+        return FAILED
+    return DONE
 
 
-if __name__ == "__main__":
-    sys.exit(main())
+def disable(target: str | Path, expected_endpoint: str | None) -> int:
+    try:
+        return _disable(Path(target).expanduser(), expected_endpoint)
+    except (OSError, UnicodeError):
+        print("cannot update Codex configuration; left unchanged", file=sys.stderr)
+        return FAILED

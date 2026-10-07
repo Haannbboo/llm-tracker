@@ -41,7 +41,7 @@ jobs:
           fi
           while IFS= read -r FILE; do
             case "$FILE" in
-              protocol/*|scripts/configure-*)
+              protocol/*)
                 BUMP_SERVER=true
                 BUMP_CLIENT=true
                 ;;

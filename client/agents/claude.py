@@ -1,18 +1,14 @@
-#!/usr/bin/env python3
+"""Claude Code: telemetry env keys in ``~/.claude/settings.json``."""
+
 from __future__ import annotations
 
 import json
-import os
 import sys
 from pathlib import Path
 from typing import Any
 
-_GRAY = "\033[38;2;102;102;102m" if sys.stdout.isatty() else ""
-_RESET = "\033[0m" if sys.stdout.isatty() else ""
-
-
-def _info(msg: str) -> None:
-    print(f"  {_GRAY}{msg}{_RESET}")
+from client.agents import DONE, FAILED, SKIPPED, write_private
+from client.agents import info as _info
 
 
 def load_settings(path: Path) -> dict[str, Any]:
@@ -27,38 +23,6 @@ def load_settings(path: Path) -> dict[str, Any]:
     ):
         raise ValueError("invalid Claude configuration; left unchanged")
     return data
-
-
-def load_ingest_token() -> str | None:
-    try:
-        credentials = json.loads(
-            (Path.home() / ".tokenage" / "credentials.json").read_text(encoding="utf-8")
-        )
-    except (OSError, UnicodeError, json.JSONDecodeError):
-        return None
-    token = credentials.get("ingest_token") if isinstance(credentials, dict) else None
-    return token if isinstance(token, str) and token else None
-
-
-def save_settings(path: Path, settings: dict[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    content = json.dumps(settings, indent=2) + "\n"
-    if path.exists():
-        path.chmod(0o600)
-    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-    with os.fdopen(fd, "w", encoding="utf-8") as handle:
-        handle.write(content)
-
-
-def resolve_otlp_logs_endpoint(
-    otlp_port: str, host: str = "localhost", endpoint: str | None = None
-) -> str:
-    env_endpoint = os.environ.get("OTEL_EXPORTER_OTLP_LOGS_ENDPOINT")
-    if env_endpoint:
-        return env_endpoint
-    if endpoint and "://" in endpoint:
-        return endpoint
-    return f"http://{host}:{otlp_port}/v1/logs"
 
 
 # Only these keys are ever written by this script, so only these are removed.
@@ -79,10 +43,10 @@ def _disable(settings_path: Path, expected_endpoint: str | None) -> int:
     """
     if not expected_endpoint:
         print("collector unknown; Claude configuration left unchanged", file=sys.stderr)
-        return 2
+        return SKIPPED
     if not settings_path.exists():
         _info(f"No Claude Code settings at {settings_path}")
-        return 2
+        return SKIPPED
     settings = load_settings(settings_path)
     env = settings.get("env")
     env = env if isinstance(env, dict) else {}
@@ -92,7 +56,7 @@ def _disable(settings_path: Path, expected_endpoint: str | None) -> int:
             f"{settings_path} has no matching collector; left alone",
             file=sys.stderr,
         )
-        return 2
+        return SKIPPED
 
     changed = False
     for key in _OWNED_ENV_KEYS:
@@ -150,10 +114,10 @@ def _disable(settings_path: Path, expected_endpoint: str | None) -> int:
 
     if not changed:
         _info(f"No tokenage telemetry in {settings_path}")
-        return 2
-    save_settings(settings_path, settings)
+        return SKIPPED
+    write_private(settings_path, json.dumps(settings, indent=2) + "\n")
     _info(f"Claude Code telemetry removed from {settings_path}")
-    return 0
+    return DONE
 
 
 def _is_tracker_hook(hook: object) -> bool:
@@ -177,76 +141,44 @@ def _is_tracker_hook(hook: object) -> bool:
     )
 
 
-# Exit status contract: 0 configured/removed, 2 skipped, 1 failed.
-def _main() -> int:
-    argv = sys.argv[1:]
-    # Compact client API; retain PORT/HOST positional inputs for direct callers.
-    if len(argv) == 2 and "://" in argv[1]:
-        argv = [argv[0], "", "", argv[1]]
-    disable = False
-    if "--disable" in argv:
-        disable = True
-        argv = [arg for arg in argv if arg != "--disable"]
-    if len(argv) not in (1, 2, 3, 4, 5):
-        print(
-            "usage: configure-claude-settings.py SETTINGS_PATH "
-            "[--disable [ENDPOINT]] | ENDPOINT | [OTLP_PORT] [HOST] [ENDPOINT] [TOKEN]",
-            file=sys.stderr,
-        )
-        return 1
-
-    settings_path = Path(argv[0]).expanduser()
-    if disable:
-        # ENDPOINT is the one tokenage wrote; anything else is the user's.
-        return _disable(settings_path, argv[1] if len(argv) >= 2 else None)
-    otlp_port = argv[1] if len(argv) >= 2 else "4002"
-    host = argv[2] if len(argv) >= 3 else "localhost"
-    endpoint = argv[3] if len(argv) >= 4 else None
-    token = (
-        argv[4]
-        if len(argv) >= 5
-        else os.environ.get("TOKENAGE_INGEST_TOKEN") or load_ingest_token()
-    )
-
-    settings = load_settings(settings_path)
-    env = settings.setdefault("env", {})
-
-    desired_env = {
-        "CLAUDE_CODE_ENABLE_TELEMETRY": "1",
-        "OTEL_LOGS_EXPORTER": "otlp",
-        "OTEL_EXPORTER_OTLP_LOGS_PROTOCOL": "http/json",
-        "OTEL_EXPORTER_OTLP_LOGS_ENDPOINT": resolve_otlp_logs_endpoint(
-            otlp_port, host, endpoint
-        ),
-    }
-    if token:
-        desired_env["OTEL_EXPORTER_OTLP_HEADERS"] = f"x-tokenage-token={token}"
-
-    changed = False
-    for k, v in desired_env.items():
-        if env.get(k) != v:
-            env[k] = v
-            changed = True
-    if not token and "OTEL_EXPORTER_OTLP_HEADERS" in env:
-        del env["OTEL_EXPORTER_OTLP_HEADERS"]
-        changed = True
-
-    if changed:
-        save_settings(settings_path, settings)
-        _info(f"Claude Code telemetry configured in {settings_path}")
-    else:
-        _info(f"Claude Code telemetry already up-to-date in {settings_path}")
-
-    return 0
-
-
-def main() -> int:
+def configure(target: str | Path, logs_endpoint: str, token: str | None = None) -> int:
+    settings_path = Path(target).expanduser()
     try:
-        return _main()
+        settings = load_settings(settings_path)
+        env = settings.setdefault("env", {})
+
+        desired_env = {
+            "CLAUDE_CODE_ENABLE_TELEMETRY": "1",
+            "OTEL_LOGS_EXPORTER": "otlp",
+            "OTEL_EXPORTER_OTLP_LOGS_PROTOCOL": "http/json",
+            "OTEL_EXPORTER_OTLP_LOGS_ENDPOINT": logs_endpoint,
+        }
+        if token:
+            desired_env["OTEL_EXPORTER_OTLP_HEADERS"] = f"x-tokenage-token={token}"
+
+        changed = False
+        for k, v in desired_env.items():
+            if env.get(k) != v:
+                env[k] = v
+                changed = True
+        if not token and "OTEL_EXPORTER_OTLP_HEADERS" in env:
+            del env["OTEL_EXPORTER_OTLP_HEADERS"]
+            changed = True
+
+        if changed:
+            write_private(settings_path, json.dumps(settings, indent=2) + "\n")
+            _info(f"Claude Code telemetry configured in {settings_path}")
+        else:
+            _info(f"Claude Code telemetry already up-to-date in {settings_path}")
     except (OSError, UnicodeError, ValueError):
         print("cannot update Claude configuration; left unchanged", file=sys.stderr)
-        return 1
+        return FAILED
+    return DONE
 
 
-if __name__ == "__main__":
-    raise SystemExit(main())
+def disable(target: str | Path, expected_endpoint: str | None) -> int:
+    try:
+        return _disable(Path(target).expanduser(), expected_endpoint)
+    except (OSError, UnicodeError, ValueError):
+        print("cannot update Claude configuration; left unchanged", file=sys.stderr)
+        return FAILED

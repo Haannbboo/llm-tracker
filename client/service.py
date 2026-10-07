@@ -6,9 +6,12 @@ the server is on this machine or in the cloud. It records this machine's
 client/agent status on an interval and reports it to whichever server applies:
 the one this machine signed in to, or the local server component.
 
-Managed by ``tokenage client start|stop|restart|status|run``. ``login`` and the
-installer start it, and it runs on every device, with or without a server
-component on the same machine.
+The OS supervises it: a systemd user unit on Linux, a launchd agent on macOS.
+``tokenage client start|stop|restart|status`` drive that manager, and the unit
+restarts the service after a crash and at user login. ``run`` is the foreground
+loop the manager executes; run it under your own supervisor where neither
+exists. ``login`` and the installer start it, and it runs on every device, with
+or without a server component on the same machine.
 """
 
 from __future__ import annotations
@@ -16,6 +19,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import plistlib
 import shutil
 import signal
 import socket
@@ -29,24 +33,25 @@ import httpx
 
 from client.auth import save_private_object
 from client.paths import client_commit, client_version, tracker_home
-from client.setup import AGENT_SCRIPTS, intended_endpoint, read_agent_states
+from client.setup import AGENT_MODULES, agent_path, intended_endpoint, read_agent_states
+from protocol.device_status import DeviceStatusReport
 
 CHECK_INTERVAL_SECONDS = 60.0
-START_TIMEOUT_SECONDS = 10.0
-STOP_TIMEOUT_SECONDS = 10.0
 REPORT_TIMEOUT_SECONDS = 10.0
+
+UNIT_NAME = "tokenage-client.service"
+LAUNCHD_LABEL = "ai.tokenage.client"
 
 logger = logging.getLogger("tokenage.client.service")
 
 
 def state_path() -> Path:
-    """The daemon's pid and liveness record, read directly by the CLI.
+    """The daemon's last-check record, shown by ``status``.
 
-    Structure: ``{"pid": int, "started_at": int, "last_check_at": int | null,
-    "last_report_at": int | null, "last_report_status": str | null}``
-    (`started_at`/`last_check_at`/`last_report_at` are unix seconds). The daemon
-    writes it atomically at start and on every check, and removes it on clean
-    exit; a missing file or a dead pid means the service is stopped.
+    Structure: ``{"last_check_at": int | null, "last_report_at": int | null,
+    "last_report_status": str | null}`` (unix seconds). The daemon rewrites it
+    atomically on every check. Liveness comes from the OS service manager, never
+    from this file.
     """
     return tracker_home() / "run" / "client.json"
 
@@ -55,127 +60,250 @@ def log_path() -> Path:
     return tracker_home() / "logs" / "client.log"
 
 
-def _read_state() -> dict[str, Any] | None:
+def _read_state() -> dict[str, Any]:
     try:
         data = json.loads(state_path().read_text(encoding="utf-8"))
     except (OSError, UnicodeError, json.JSONDecodeError):
-        return None
-    return data if isinstance(data, dict) else None
-
-
-def _pid_alive(pid: Any) -> bool:
-    if not isinstance(pid, int) or isinstance(pid, bool) or pid <= 0:
-        return False
-    try:
-        os.kill(pid, 0)
-    except ProcessLookupError:
-        return False
-    except PermissionError:
-        return True
-    return True
+        return {}
+    return data if isinstance(data, dict) else {}
 
 
 def _write_state(state: dict[str, Any]) -> None:
     save_private_object(state_path(), state)
 
 
-def _clear_state() -> None:
-    state_path().unlink(missing_ok=True)
+# ------------------------------------------------------------ OS service manager
 
 
-def running_state() -> dict[str, Any] | None:
-    """The daemon state while its process is alive; None otherwise."""
-    state = _read_state()
-    if state is None or not _pid_alive(state.get("pid")):
-        return None
-    return state
+def _run(cmd: list[str]) -> subprocess.CompletedProcess:
+    return subprocess.run(cmd, capture_output=True, text=True, check=False)
+
+
+def _manager() -> str | None:
+    """ "systemd", "launchd", or None when this machine has no user service manager.
+
+    systemd counts only when ``systemctl --user`` really works: WSL1, containers
+    and SSH sessions without a user bus have the binary but not a manager.
+    """
+    if sys.platform == "darwin":
+        return "launchd"
+    if sys.platform.startswith("linux") and shutil.which("systemctl"):
+        try:
+            if _run(["systemctl", "--user", "show-environment"]).returncode == 0:
+                return "systemd"
+        except OSError:
+            pass
+    return None
+
+
+def _launcher() -> Path | None:
+    found = shutil.which("tokenage")
+    if found:
+        return Path(found)
+    bin_dir = os.environ.get("TOKENAGE_BIN_DIR", "~/.local/bin")
+    candidate = Path(bin_dir).expanduser() / "tokenage"
+    return candidate if candidate.is_file() else None
+
+
+def _service_env() -> dict[str, str]:
+    env = {"TOKENAGE_HOME": str(tracker_home()), "TOKENAGE_SKIP_BANNER": "1"}
+    if os.environ.get("TOKENAGE_ROOT"):
+        env["TOKENAGE_ROOT"] = os.environ["TOKENAGE_ROOT"]
+    return env
+
+
+def unit_path() -> Path:
+    return Path.home() / ".config" / "systemd" / "user" / UNIT_NAME
+
+
+def plist_path() -> Path:
+    return Path.home() / "Library" / "LaunchAgents" / f"{LAUNCHD_LABEL}.plist"
+
+
+def _unit_quote(value: str) -> str:
+    escaped = value.replace("\\", "\\\\").replace('"', '\\"').replace("%", "%%")
+    return '"' + escaped.replace("$", "$$") + '"'
+
+
+def render_unit(launcher: Path) -> str:
+    env = "".join(
+        f"Environment={_unit_quote(f'{k}={v}')}\n" for k, v in _service_env().items()
+    )
+    return (
+        "[Unit]\nDescription=tokenage client service\n\n"
+        f"[Service]\nType=simple\nExecStart={_unit_quote(str(launcher))} client run\n"
+        f"{env}Restart=on-failure\nRestartSec=10\n\n"
+        "[Install]\nWantedBy=default.target\n"
+    )
+
+
+def render_plist(launcher: Path) -> bytes:
+    return plistlib.dumps(
+        {
+            "Label": LAUNCHD_LABEL,
+            "ProgramArguments": [str(launcher), "client", "run"],
+            "EnvironmentVariables": _service_env(),
+            "RunAtLoad": True,
+            "KeepAlive": {"SuccessfulExit": False},
+            "ThrottleInterval": 10,
+            "StandardOutPath": str(log_path()),
+            "StandardErrorPath": str(log_path()),
+        }
+    )
+
+
+def _write_if_changed(path: Path, content: bytes) -> bool:
+    try:
+        if path.read_bytes() == content:
+            return False
+    except OSError:
+        pass
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(content)
+    return True
+
+
+def _fail(message: str) -> int:
+    print(f"tokenage: {message}", file=sys.stderr)
+    return 1
+
+
+def _unsupported() -> int:
+    return _fail(
+        "no user service manager here (needs systemd --user or launchd). "
+        "Run `tokenage client run` under your own supervisor "
+        "(tmux, nohup, a container entrypoint...)."
+    )
+
+
+def _gui_domain() -> str:
+    return f"gui/{os.getuid()}"
+
+
+def _launchd_loaded() -> bool:
+    return (
+        _run(["launchctl", "print", f"{_gui_domain()}/{LAUNCHD_LABEL}"]).returncode == 0
+    )
+
+
+def _launchd_bootout() -> None:
+    _run(["launchctl", "bootout", f"{_gui_domain()}/{LAUNCHD_LABEL}"])
+
+
+def start(*, restart: bool = False) -> int:
+    """Install the unit/agent (rewritten when its contents change), enable it at
+    login and start it. ``restart`` also bounces an already running service."""
+    manager = _manager()
+    if manager is None:
+        return _unsupported()
+    launcher = _launcher()
+    if launcher is None:
+        return _fail(
+            "could not find the tokenage launcher on PATH or in "
+            "$TOKENAGE_BIN_DIR (~/.local/bin); install it first"
+        )
+    log_path().parent.mkdir(parents=True, exist_ok=True)
+    if manager == "systemd":
+        changed = _write_if_changed(unit_path(), render_unit(launcher).encode())
+        steps = [["systemctl", "--user", "daemon-reload"]] if changed else []
+        steps.append(["systemctl", "--user", "enable", "--now", UNIT_NAME])
+        if changed or restart:
+            steps.append(["systemctl", "--user", "restart", UNIT_NAME])
+    else:
+        changed = _write_if_changed(plist_path(), render_plist(launcher))
+        if changed or restart:
+            _launchd_bootout()
+        steps = [["launchctl", "enable", f"{_gui_domain()}/{LAUNCHD_LABEL}"]]
+        if not _launchd_loaded():
+            steps.append(["launchctl", "bootstrap", _gui_domain(), str(plist_path())])
+    for cmd in steps:
+        result = _run(cmd)
+        if result.returncode != 0:
+            return _fail(
+                f"could not start the client service ({' '.join(cmd)}): "
+                f"{(result.stderr or result.stdout).strip()}"
+            )
+    print(f"  started   client service ({manager})")
+    print(f"  log       {log_path()}")
+    return 0
+
+
+def stop() -> int:
+    """Stop the service and disable its start at login; ``start`` re-enables."""
+    manager = _manager()
+    if manager is None:
+        return _unsupported()
+    if manager == "systemd":
+        result = _run(["systemctl", "--user", "disable", "--now", UNIT_NAME])
+        # A unit that was never installed is already stopped.
+        if result.returncode != 0 and unit_path().exists():
+            return _fail(f"could not stop the client service: {result.stderr.strip()}")
+    else:
+        _launchd_bootout()
+        _run(["launchctl", "disable", f"{_gui_domain()}/{LAUNCHD_LABEL}"])
+    print("  stopped   client service")
+    return 0
+
+
+def restart() -> int:
+    return start(restart=True)
+
+
+def _manager_active(manager: str | None) -> bool:
+    if manager == "systemd":
+        return (
+            _run(["systemctl", "--user", "is-active", "--quiet", UNIT_NAME]).returncode
+            == 0
+        )
+    if manager == "launchd":
+        return _launchd_loaded()
+    return False
 
 
 def service_status() -> dict[str, Any]:
-    state = running_state()
-    status: dict[str, Any] = {
-        "running": state is not None,
+    manager = _manager()
+    state = _read_state()
+    return {
+        "running": _manager_active(manager),
+        "manager": manager,
         "log": str(log_path()),
         "client_version": client_version(),
         "client_commit": client_commit(),
+        "last_check_at": state.get("last_check_at"),
+        "last_report_at": state.get("last_report_at"),
+        "last_report_status": state.get("last_report_status"),
     }
-    if state is not None:
-        status["pid"] = state.get("pid")
-        status["started_at"] = state.get("started_at")
-        status["last_check_at"] = state.get("last_check_at")
-        status["last_report_at"] = state.get("last_report_at")
-        status["last_report_status"] = state.get("last_report_status")
-    return status
-
-
-def _detected_agents() -> dict[str, dict[str, Any]]:
-    home = Path.home()
-    detected: dict[str, dict[str, Any]] = {}
-    for name in AGENT_SCRIPTS:
-        path = shutil.which(name)
-        if path is None and name == "kilo":
-            fallback = home / ".kilo" / "bin" / "kilo"
-            path = str(fallback) if fallback.exists() else None
-        detected[name] = {"found": path is not None, "path": path}
-    return detected
 
 
 def health_payload() -> dict[str, Any]:
     """The device's status: build, detected agents and collector wiring.
 
-    Local file paths are included because these consumers are on this machine;
-    a report that leaves it is assembled from the same payload minus the paths.
+    The same payload is printed locally and sent to the server, wherever that
+    runs. It carries no local file paths, so nothing about this machine's
+    layout leaves it.
     """
-    endpoint = intended_endpoint()
-    states = read_agent_states(endpoint)
-    agents = {name: states[name] for name in AGENT_SCRIPTS}
-    return {
-        "device_name": socket.gethostname() or "device",
-        "client_version": client_version(),
-        "client_commit": client_commit(),
-        "collected_at": int(time.time()),
-        "expected": {
-            "otlp_endpoint": endpoint[: -len("/v1/logs")] if endpoint else None,
-            "otlp_logs_endpoint": endpoint,
-        },
-        "summary": {
-            "total_agents": len(agents),
-            "configured_agents": sum(
-                1 for agent in agents.values() if agent["configured"]
-            ),
-            "matching_agents": sum(
-                1 for agent in agents.values() if agent["endpoint_matches"] is True
-            ),
-        },
-        "agents": agents,
-        "detected": _detected_agents(),
-    }
-
-
-def report_payload(payload: dict[str, Any], *, include_paths: bool) -> dict[str, Any]:
-    """The payload as a report body, without local file paths when hosted.
-
-    A remote server has no use for this machine's file layout, and storing it
-    would leak local paths; a local server gets the full payload.
-    """
-    if include_paths:
-        return payload
-    report = dict(payload)
-    detected = payload.get("detected")
-    if isinstance(detected, dict):
-        report["detected"] = {
-            name: {key: value for key, value in info.items() if key != "path"}
-            for name, info in detected.items()
+    states = read_agent_states(intended_endpoint())
+    report = DeviceStatusReport.model_validate(
+        {
+            "device_name": (socket.gethostname() or "device")[:64],
+            "client_version": client_version(),
+            "client_commit": client_commit(),
+            "collected_at": int(time.time()),
+            "agents": {name: states[name] for name in AGENT_MODULES},
+            "detected": {
+                name: {"found": agent_path(name) is not None} for name in AGENT_MODULES
+            },
         }
-    return report
+    )
+    return report.model_dump(mode="json")
 
 
-def _report_once(state: dict[str, Any]) -> None:
-    """Send this device's status to whichever server applies. Never raises.
+def _report_target() -> tuple[str, dict[str, str], dict[str, str]] | None:
+    """(server URL, headers, extra body fields) for the report, or None.
 
-    Signed in: report to that server with the CLI token, without local paths.
-    Not signed in but a local server is installed: report to it with the
-    installation key, paths included. Neither: stay idle until the next tick.
+    Signed in: the server this machine signed in to, with the CLI token. Not
+    signed in but a local server is installed: that server, which runs without
+    auth, identified by the installation key.
     """
     from client.auth import installation_key, load_credentials
     from client.paths import local_server_info, server_root
@@ -186,29 +314,32 @@ def _report_once(state: dict[str, Any]) -> None:
         credentials = {}
     server_url = credentials.get("server_url")
     cli_token = credentials.get("cli_token")
+    if server_url and cli_token:
+        return server_url, {"Authorization": f"Bearer {cli_token}"}, {}
+    if server_root() is not None:
+        # ponytail: second identity path exists only because an auth-off server
+        # cannot sign a client in; it goes away once local servers issue tokens.
+        return (
+            local_server_info()["api_url"],
+            {},
+            {"installation_key": installation_key()},
+        )
+    return None
+
+
+def _report_once(state: dict[str, Any], payload: dict[str, Any]) -> None:
+    """Send this device's status to its server, if it has one. Never raises."""
     try:
-        if (
-            isinstance(server_url, str)
-            and server_url
-            and isinstance(cli_token, str)
-            and cli_token
-        ):
-            response = httpx.post(
-                f"{server_url}/devices/status",
-                json=report_payload(health_payload(), include_paths=False),
-                headers={"Authorization": f"Bearer {cli_token}"},
-                timeout=REPORT_TIMEOUT_SECONDS,
-            )
-        elif server_root() is not None:
-            body = report_payload(health_payload(), include_paths=True)
-            body["installation_key"] = installation_key()
-            response = httpx.post(
-                f"{local_server_info()['api_url']}/devices/status",
-                json=body,
-                timeout=REPORT_TIMEOUT_SECONDS,
-            )
-        else:
+        target = _report_target()
+        if target is None:
             return
+        server_url, headers, extra = target
+        response = httpx.post(
+            f"{server_url}/devices/status",
+            json={**payload, **extra},
+            headers=headers,
+            timeout=REPORT_TIMEOUT_SECONDS,
+        )
         response.raise_for_status()
     except Exception:
         state["last_report_status"] = "failed"
@@ -221,25 +352,18 @@ def _report_once(state: dict[str, Any]) -> None:
 def _check_once(state: dict[str, Any]) -> None:
     payload = health_payload()
     state["last_check_at"] = payload["collected_at"]
-    _report_once(state)
+    _report_once(state, payload)
     _write_state(state)
+    agents = payload["agents"].values()
     logger.info(
         "device check: %s/%s agents configured, %s matching",
-        payload["summary"]["configured_agents"],
-        payload["summary"]["total_agents"],
-        payload["summary"]["matching_agents"],
+        sum(1 for agent in agents if agent["configured"]),
+        len(agents),
+        sum(1 for agent in agents if agent["endpoint_matches"] is True),
     )
 
 
 def run_foreground() -> int:
-    existing = running_state()
-    if existing is not None:
-        print(
-            f"tokenage client service is already running (pid {existing['pid']})",
-            file=sys.stderr,
-        )
-        return 1
-
     log_path().parent.mkdir(parents=True, exist_ok=True)
     logging.basicConfig(
         filename=str(log_path()),
@@ -247,8 +371,7 @@ def run_foreground() -> int:
         format="%(asctime)s %(levelname)s %(message)s",
     )
 
-    # Signals only flip the flag; the loop below owns the actual shutdown, so
-    # cleanup always runs on the way out.
+    # Signals only flip the flag; the loop below owns the shutdown.
     stop = False
 
     def _request_stop(signum, frame):  # noqa: ARG001
@@ -259,13 +382,10 @@ def run_foreground() -> int:
     signal.signal(signal.SIGINT, _request_stop)
 
     state: dict[str, Any] = {
-        "pid": os.getpid(),
-        "started_at": int(time.time()),
         "last_check_at": None,
         "last_report_at": None,
         "last_report_status": None,
     }
-    _write_state(state)
     print(f"tokenage client service running (pid {os.getpid()})")
     logger.info("client service started (pid %s)", os.getpid())
     try:
@@ -280,98 +400,8 @@ def run_foreground() -> int:
             while not stop and time.monotonic() < deadline:
                 time.sleep(min(0.5, max(0.0, deadline - time.monotonic())))
     finally:
-        # A concurrent start may have replaced the state file; only clear ours.
-        current = _read_state()
-        if current is not None and current.get("pid") == os.getpid():
-            _clear_state()
         logger.info("client service stopped (pid %s)", os.getpid())
     return 0
-
-
-def start() -> int:
-    existing = running_state()
-    if existing is not None:
-        print(f"tokenage client service is already running (pid {existing['pid']})")
-        return 0
-
-    log_path().parent.mkdir(parents=True, exist_ok=True)
-    env = os.environ.copy()
-    env["TOKENAGE_SKIP_BANNER"] = "1"
-    # The child appends its stdout/stderr here; this handle closes when the
-    # parent exits, the child keeps its duplicates.
-    with open(log_path(), "ab") as log:
-        try:
-            process = subprocess.Popen(
-                [sys.executable, "-P", "-m", "client", "client", "run"],
-                stdin=subprocess.DEVNULL,
-                stdout=log,
-                stderr=log,
-                start_new_session=True,
-                env=env,
-                close_fds=True,
-            )
-        except OSError as exc:
-            print(
-                f"tokenage: could not start the client service: {exc}", file=sys.stderr
-            )
-            return 1
-
-    # The child writes its state file once running; an early exit means failure.
-    deadline = time.monotonic() + START_TIMEOUT_SECONDS
-    while time.monotonic() < deadline:
-        state = running_state()
-        if state is not None:
-            print(f"  started   client service (pid {state['pid']})")
-            print(f"  log       {log_path()}")
-            return 0
-        if process.poll() is not None:
-            print(
-                f"tokenage: client service exited during startup; see {log_path()}",
-                file=sys.stderr,
-            )
-            return 1
-        time.sleep(0.1)
-    print(
-        f"tokenage: client service did not report ready; see {log_path()}",
-        file=sys.stderr,
-    )
-    return 1
-
-
-def stop() -> int:
-    state = _read_state()
-    pid = state.get("pid") if state is not None else None
-    if not _pid_alive(pid):
-        if state is not None:
-            _clear_state()
-        print("tokenage client service is not running")
-        return 0
-    try:
-        os.kill(pid, signal.SIGTERM)
-    except OSError as exc:
-        print(f"tokenage: could not stop the client service: {exc}", file=sys.stderr)
-        return 1
-    # Graceful first: the daemon removes its own state on the way out.
-    deadline = time.monotonic() + STOP_TIMEOUT_SECONDS
-    while time.monotonic() < deadline:
-        if not _pid_alive(pid):
-            _clear_state()
-            print(f"  stopped   client service (pid {pid})")
-            return 0
-        time.sleep(0.1)
-    # SIGKILL cannot clean up after itself, so the stale state file goes here.
-    try:
-        os.kill(pid, signal.SIGKILL)
-    except OSError:
-        pass
-    _clear_state()
-    print(f"  stopped   client service (pid {pid})")
-    return 0
-
-
-def restart() -> int:
-    stop()
-    return start()
 
 
 def run_status(*, as_json: bool) -> int:
@@ -379,7 +409,7 @@ def run_status(*, as_json: bool) -> int:
     if as_json:
         print(json.dumps(data, separators=(",", ":"), sort_keys=True))
     elif data["running"]:
-        print(f"tokenage client service running (pid {data['pid']})")
+        print(f"tokenage client service running ({data['manager']})")
         if data.get("last_check_at"):
             stamp = time.strftime(
                 "%Y-%m-%d %H:%M:%S", time.localtime(data["last_check_at"])
@@ -393,6 +423,8 @@ def run_status(*, as_json: bool) -> int:
         elif data.get("last_report_status"):
             print(f"  last report {data['last_report_status']}")
         print(f"  log         {data['log']}")
+    elif data["manager"] is None:
+        print("tokenage client service is not managed here; run `tokenage client run`")
     else:
         print("tokenage client service is not running")
     return 0 if data["running"] else 1
@@ -407,7 +439,7 @@ def _render_health(payload: dict[str, Any]) -> str:
             else ""
         )
     ]
-    for name in AGENT_SCRIPTS:
+    for name in AGENT_MODULES:
         agent = payload["agents"][name]
         detected = payload["detected"][name]["found"]
         state = "not detected" if not detected else agent["status"]
