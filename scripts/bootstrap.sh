@@ -53,26 +53,6 @@ except Exception:
   fi
 }
 
-_fetch_setup_health() {
-  local url="$1"
-  if command -v curl >/dev/null 2>&1; then
-    curl --connect-timeout 3 -sS "${url}"
-    return
-  fi
-  local python
-  python="$(_python_cmd)" || return 1
-  "${python}" -c '
-import sys
-import urllib.request
-url = sys.argv[1]
-try:
-    with urllib.request.urlopen(url, timeout=3) as response:
-        sys.stdout.write(response.read().decode("utf-8"))
-except Exception:
-    sys.exit(1)
-' "${url}"
-}
-
 # `server start` compares requirements.txt against this stamp and refuses to run
 # when they differ, so installing deps and recording them happen together.
 # shellcheck source=scripts/lib/requirements.sh
@@ -176,7 +156,6 @@ _install_deps() {
 }
 
 _verify_agent_setup_health() {
-  local url="http://${HOST}:${API_PORT}/local/setup-health"
   local health_json
   local python
   local claude_detected=0
@@ -192,8 +171,9 @@ _verify_agent_setup_health() {
     return
   }
 
-  if ! health_json="$(_fetch_setup_health "${url}" 2>/dev/null)"; then
-    fail "Agent tracking: could not read ${url}"
+  if ! health_json="$(TOKENAGE_ROOT="${ROOT_DIR}" TOKENAGE_SKIP_BANNER=1 \
+      "${CLI_SYMLINK}" client health --json 2>/dev/null)"; then
+    fail "Agent tracking: could not read the client service health"
     CHECKS_FAIL=$((CHECKS_FAIL + 1))
     return
   fi
@@ -276,6 +256,23 @@ sys.exit(1 if failed else 0)
   then
     CHECKS_PASS=$((CHECKS_PASS + 1))
   else
+    CHECKS_FAIL=$((CHECKS_FAIL + 1))
+  fi
+}
+
+_start_client_service() {
+  step_header "Starting client service"
+  if [[ ! -x "${CLI_SYMLINK}" ]]; then
+    fail "Client service: ${CLI_SYMLINK} not found"
+    CHECKS_FAIL=$((CHECKS_FAIL + 1))
+    return
+  fi
+  if TOKENAGE_ROOT="${ROOT_DIR}" TOKENAGE_SKIP_BANNER=1 \
+      "${CLI_SYMLINK}" client start >/dev/null; then
+    pass "Client service running"
+    CHECKS_PASS=$((CHECKS_PASS + 1))
+  else
+    fail "Client service: could not start"
     CHECKS_FAIL=$((CHECKS_FAIL + 1))
   fi
 }
@@ -427,6 +424,7 @@ else
   CHECKS_PASS=$((CHECKS_PASS + 1))
 fi
 
+_start_client_service
 _verify_agent_setup_health
 
 # ── Final report ────────────────────────────────────────────────────

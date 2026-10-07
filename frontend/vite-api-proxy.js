@@ -15,6 +15,7 @@ export function shouldProxyApiRequest(requestUrl) {
     pathname === '/model-effectiveness' ||
     pathname === '/sessions' ||
     pathname.startsWith('/sessions/') ||
+    pathname === '/devices/status' ||
     pathname === '/version'
   )
 }

@@ -3,6 +3,7 @@ from typing import Any
 
 _MODEL_NAME_ALIASES = {
     "space-bunny-free": "stealth/space-bunny-alpha",
+    "ling-3.1-flash-free": "inclusionai/ling-3.1-flash",
 }
 
 

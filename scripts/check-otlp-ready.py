@@ -1,4 +1,7 @@
+import json
 import os
+import shutil
+import subprocess
 import sys
 
 import httpx
@@ -16,17 +19,6 @@ def load_config():
             return yaml.safe_load(f) or {}
     except Exception:
         return None
-
-
-def get_api_url(config):
-    server = config.get("server", {})
-    host = server.get("host", "127.0.0.1")
-    api_port = server.get("api_port")
-    if api_port is None and isinstance(server.get("port"), int):
-        api_port = server["port"] + 1
-    if not isinstance(api_port, int):
-        return None
-    return f"http://{host}:{api_port}"
 
 
 def get_otlp_url(config):
@@ -57,53 +49,60 @@ def check_otlp_health(otlp_url):
     return False
 
 
+def client_health_payload():
+    """Ask the installed client service for this machine's agent wiring."""
+    launcher = shutil.which("tokenage")
+    if launcher is None:
+        return None
+    try:
+        result = subprocess.run(
+            [launcher, "client", "health", "--json"],
+            capture_output=True,
+            text=True,
+            timeout=15,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if result.returncode != 0:
+        return None
+    try:
+        payload = json.loads(result.stdout)
+    except json.JSONDecodeError:
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
 def main():
     config = load_config()
     if config is None:
         return 0
 
-    # First, make an actual request to the OTLP server
-    otlp_url = get_otlp_url(config)
-    if check_otlp_health(otlp_url):
+    # A live collector means agents are reporting; nothing to warn about.
+    if check_otlp_health(get_otlp_url(config)):
         return 0
 
-    # OTLP server is not responding — fall back to API agent health check
-    base_url = get_api_url(config)
-    if base_url is None:
+    # Otherwise let the local client name the detected agents that are unwired.
+    payload = client_health_payload()
+    if payload is None:
         return 0
-    try:
-        httpx.get(f"{base_url}/config", timeout=2.0)
-    except Exception:
-        # API server is down or unreachable, skip check
+    detected = payload.get("detected")
+    health = payload.get("agents")
+    if not isinstance(detected, dict) or not isinstance(health, dict):
         return 0
 
-    try:
-        agents_resp = httpx.get(f"{base_url}/local/agents", timeout=2.0)
-        health_resp = httpx.get(f"{base_url}/local/setup-health", timeout=2.0)
+    errors = []
+    for name, info in detected.items():
+        if not isinstance(info, dict) or not info.get("found"):
+            continue
+        agent_health = health.get(name)
+        status = agent_health.get("status") if isinstance(agent_health, dict) else None
+        if status != "ready":
+            errors.append(f"❌ OTLP tracking not ready for {name} (Status: {status})")
 
-        if agents_resp.status_code != 200 or health_resp.status_code != 200:
-            return 0
-
-        detected = agents_resp.json()
-        health = health_resp.json().get("agents", {})
-
-        errors = []
-        for name, info in detected.items():
-            if info.get("found"):
-                agent_health = health.get(name, {})
-                if agent_health.get("status") != "ready":
-                    errors.append(
-                        f"❌ OTLP tracking not ready for {name} (Status: {agent_health.get('status')})"
-                    )
-
-        if errors:
-            print("\n".join(errors))
-            print("Check Settings -> OTLP Tracking Setup in the dashboard to fix.")
-            return 1
-
-    except Exception as e:
-        print(f"Warning: OTLP readiness check failed: {e}")
-        return 0
+    if errors:
+        print("\n".join(errors))
+        print("Run tokenage setup to repair agent tracking.")
+        return 1
 
     return 0
 

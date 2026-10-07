@@ -76,6 +76,10 @@ def client_home(tmp_path, monkeypatch):
     monkeypatch.delenv("TOKENAGE_SERVER", raising=False)
     # Nothing is detected on PATH, so a login wires no real agent config.
     monkeypatch.setattr(setup.shutil, "which", lambda _name: None)
+    # A successful login starts the daemon; tests must never spawn processes.
+    from client import service
+
+    monkeypatch.setattr(service, "start", lambda: 0)
 
 
 # -------------------------------------------------------------- cli.py surface

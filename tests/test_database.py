@@ -5049,6 +5049,26 @@ def test_migrate_database_creates_evaluation_jobs_table(
     )
 
 
+def test_migrate_database_creates_device_status_table(
+    database_module, schema_migrations_module, isolated_home
+):
+    db_path = str(isolated_home / "usage.db")
+    engine = database_module.get_engine(db_path)
+    database_module.metadata.drop_all(engine)
+
+    applied = schema_migrations_module.migrate_database(db_path)
+
+    assert "device_status.create" in applied
+    assert schema_migrations_module._table_exists(engine, "device_status")
+    assert {
+        "installation_hash",
+        "status_json",
+        "client_version",
+        "client_commit",
+        "reported_at",
+    }.issubset(schema_migrations_module._table_column_names(engine, "device_status"))
+
+
 def test_migrate_database_adds_session_selector_indexes(
     database_module, schema_migrations_module, isolated_home
 ):

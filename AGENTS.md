@@ -133,6 +133,9 @@ Command surface:
 ```bash
 tokenage status            # installed components, agents, whether things run
 tokenage setup             # agent configuration, in both installation modes
+tokenage client start      # start this device's background client service
+tokenage client health     # device status and agent wiring, from the client
+tokenage client status     # whether the client service runs
 tokenage server start      # turn the services on
 tokenage server restart    # reload running code
 tokenage server bootstrap  # install, build the dashboard, start, verify

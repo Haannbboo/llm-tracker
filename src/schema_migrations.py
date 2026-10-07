@@ -628,6 +628,21 @@ def _create_price_snapshots_table(engine: Engine) -> None:
         connection.execute(text(create_sql))
 
 
+def _create_device_status_table(engine: Engine) -> None:
+    # postgresql and sqlite accept the same DDL here.
+    create_sql = """
+        CREATE TABLE device_status (
+            installation_hash TEXT PRIMARY KEY,
+            status_json TEXT NOT NULL,
+            client_version TEXT,
+            client_commit TEXT,
+            reported_at BIGINT NOT NULL
+        )
+    """
+    with engine.begin() as connection:
+        connection.execute(text(create_sql))
+
+
 def _migrate_price_snapshots(engine: Engine) -> list[str]:
     applied: list[str] = []
     table = "price_snapshots"
@@ -686,6 +701,12 @@ def migrate_database(db_path: str | None = None) -> list[str]:
         with engine.begin() as connection:
             connection.execute(text(create_sql))
         applied.append("evaluation_jobs.create")
+
+    # Device status reports: one row per installation; local servers have no
+    # user/device row, so it is keyed by the installation hash value alone.
+    if not _table_exists(engine, "device_status"):
+        _create_device_status_table(engine)
+        applied.append("device_status.create")
 
     init_db(db_path)
 

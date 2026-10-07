@@ -1,13 +1,14 @@
-import { useState } from 'react'
+import { Fragment, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { PricingPage } from './PricingPage'
 import { useApp } from '../contexts/AppContext'
 import { useSettingsData } from '../hooks/useSettingsData'
 import { useDevices } from '../hooks/useDevices'
+import { useDeviceStatuses } from '../hooks/useDeviceStatuses'
 import { t } from '../i18n/index.ts'
-import { getAgentDisplayName, formatTime } from '../utils'
+import { formatTime } from '../utils'
 import { TimezoneSelector } from '../components/TimezoneSelector'
-import { useDashboardAgents } from '../hooks/useDashboardAgents'
+import { DeviceStatusDetail } from '../components/DeviceStatusDetail'
 import { useVersion } from '../hooks/useVersion'
 
 const DEVICE_KIND_LABELS: Record<string, string> = {
@@ -23,11 +24,15 @@ export function SettingsPage() {
   const {
     auth, showToast, signOut,
   } = useApp()
-  const { localAgents, setupDiagnostics } = useDashboardAgents()
   const versionData = useVersion()
   const authDevicesActive = activeSection === 'devices'
   const { devices, refresh: refreshDevices } = useDevices(authDevicesActive && auth.enabled)
+  const { statuses } = useDeviceStatuses(authDevicesActive && auth.enabled)
+  const [expandedDeviceId, setExpandedDeviceId] = useState<string | null>(null)
   const [revokingDeviceId, setRevokingDeviceId] = useState<string | null>(null)
+
+  const deviceReport = (deviceId: string) =>
+    statuses?.find((entry) => entry.device_id === deviceId)?.status ?? null
 
   const handleRevokeDevice = async (deviceId: string) => {
     if (revokingDeviceId !== null) return
@@ -51,33 +56,6 @@ export function SettingsPage() {
     handleEvaluationEvaluatorChange,
     evaluationEvaluator, evaluationEvaluators,
   } = useSettingsData()
-
-  // Setup summary computations (from App.tsx lines 821-838)
-  const getSetupAgentKey = (name: string) => {
-    const normalized = name.toLowerCase()
-    if (normalized.includes('vectorengine') || normalized.includes('claude')) return 'claude'
-    if (normalized.includes('codesonline') || normalized.includes('codex')) return 'codex'
-    return normalized
-  }
-
-  const foundLocalAgents = localAgents
-    ? Object.entries(localAgents).filter(([, info]) => info.found)
-    : []
-  const foundLocalAgentCount = foundLocalAgents.length
-  const setupLocalAgentTotal = setupDiagnostics
-    ? foundLocalAgents.filter(([name]) => setupDiagnostics.agents[getSetupAgentKey(name)]).length
-    : foundLocalAgentCount
-  const setupMatchingAgents = setupDiagnostics
-    ? foundLocalAgents.filter(([name]) => setupDiagnostics.agents[getSetupAgentKey(name)]?.endpoint_matches).length
-    : 0
-  const setupConfiguredAgents = setupDiagnostics
-    ? foundLocalAgents.filter(([name]) => setupDiagnostics.agents[getSetupAgentKey(name)]?.configured).length
-    : 0
-  const setupSummaryText = setupDiagnostics
-    ? setupLocalAgentTotal > 0
-      ? `${setupMatchingAgents}/${setupLocalAgentTotal}`
-      : t('No local Agent')
-      : t('Unknown')
 
   return (
     <div className="settings-page" style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
@@ -166,91 +144,6 @@ export function SettingsPage() {
               </div>
             </div>
           </div>
-
-          {/* Detected Agents */}
-          <div className="panel">
-            <div className="panel-tabs">
-              <div className="tab active"><span>🧭</span> {t('Detected Agents')}</div>
-            </div>
-            <div className="panel-body" style={{ padding: '0' }}>
-              <div style={{ padding: '16px', borderBottom: '1px solid var(--border-color)', fontSize: '13px', color: 'var(--text-secondary)' }}>
-                {t('Detected from your local config and available commands.')}
-              </div>
-              <table className="table">
-                <thead>
-                  <tr>
-                    <th>{t('Agent')}</th>
-                    <th>{t('Status')}</th>
-                    <th>{t('Detected:')}</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {localAgents && Object.keys(localAgents).length > 0 ? Object.entries(localAgents).map(([name, info]) => (
-                    <tr key={name}>
-                      <td style={{ fontWeight: 700 }}>{getAgentDisplayName(name)}</td>
-                      <td>
-                        <span className={`badge ${info.found ? 'badge-success' : 'badge-error'}`}>
-                          {info.found ? t('Ready') : t('Not found')}
-                        </span>
-                      </td>
-                      <td style={{ fontSize: '12px', fontFamily: 'var(--font-mono)', color: info.path ? 'var(--text-secondary)' : 'var(--text-muted)' }}>
-                        {info.path || t('Unknown')}
-                      </td>
-                    </tr>
-                  )) : (
-                    <tr>
-                      <td colSpan={3} style={{ textAlign: 'center', padding: '24px', color: 'var(--text-muted)' }}>
-                        {localAgents ? t('No local Agent') : t('Unknown')}
-                      </td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </div>
-
-          <div className="panel">
-            <div className="panel-tabs">
-              <div className="tab active"><span>📡</span> {t('OTLP Tracking Setup')}</div>
-            </div>
-            <div className="panel-body" style={{ padding: '0' }}>
-              <table className="table">
-                <thead>
-                  <tr>
-                    <th>{t('Agent')}</th>
-                    <th>{t('Status')}</th>
-                    <th>{t('Expected endpoint')}</th>
-                    <th>{t('Configured endpoint')}</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {setupDiagnostics ? Object.entries(setupDiagnostics.agents).map(([name, agent]) => (
-                    <tr key={name}>
-                      <td style={{ fontWeight: 700 }}>{getAgentDisplayName(name)}</td>
-                      <td>
-                        <span className={`badge ${agent.endpoint_matches ? 'badge-success' : 'badge-error'}`}>
-                          {agent.status === 'ready' ? t('Ready') : agent.status === 'wrong_endpoint' ? t('Wrong endpoint') : t('Missing config')}
-                        </span>
-                      </td>
-                      <td style={{ fontSize: '12px', fontFamily: 'var(--font-mono)', color: 'var(--text-secondary)' }}>{agent.expected_endpoint}</td>
-                      <td style={{ fontSize: '12px', fontFamily: 'var(--font-mono)', color: agent.endpoint_matches ? 'var(--color-green)' : 'var(--color-red)' }}>
-                        {agent.configured_endpoint ?? '—'}
-                      </td>
-                    </tr>
-                  )) : (
-                    <tr>
-                      <td colSpan={4} style={{ textAlign: 'center', padding: '24px', color: 'var(--text-muted)' }}>
-                        {t('Unknown')}
-                      </td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
-              <div style={{ padding: '16px', borderTop: '1px solid var(--border-color)', fontSize: '13px', color: 'var(--text-secondary)' }}>
-                {t('OTLP configured')}: <strong>{setupSummaryText}</strong> · {t('Configured')}: <strong>{setupConfiguredAgents}/{setupLocalAgentTotal}</strong>
-              </div>
-            </div>
-          </div>
         </>
       )}
 
@@ -290,42 +183,59 @@ export function SettingsPage() {
                 </thead>
                 <tbody>
                   {devices && devices.length > 0 ? devices.map((device) => (
-                    <tr key={device.id}>
-                      <td style={{ fontWeight: 700 }}>
-                        {device.device_name ?? '—'}
-                        {device.current && (
-                          <span className="badge badge-success" style={{ marginLeft: '8px' }}>
-                            {t('Current device')}
+                    <Fragment key={device.id}>
+                      <tr
+                        className={device.kind === 'client' ? `expandable-row${expandedDeviceId === device.id ? ' expanded' : ''}` : undefined}
+                        onClick={device.kind === 'client' ? () => setExpandedDeviceId(expandedDeviceId === device.id ? null : device.id) : undefined}
+                      >
+                        <td style={{ fontWeight: 700 }}>
+                          {device.device_name ?? '—'}
+                          {device.current && (
+                            <span className="badge badge-success" style={{ marginLeft: '8px' }}>
+                              {t('Current device')}
+                            </span>
+                          )}
+                        </td>
+                        <td style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
+                          {t(DEVICE_KIND_LABELS[device.kind] ?? device.kind)}
+                        </td>
+                        <td style={{ fontSize: '12px', color: 'var(--text-secondary)' }} title={device.client_commit ?? undefined}>
+                          {device.client_version ?? '—'}
+                          {device.client_commit && ` (${device.client_commit.slice(0, 7)})`}
+                        </td>
+                        <td style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>{formatTime(device.created_at)}</td>
+                        <td style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
+                          {device.last_used_at != null ? formatTime(device.last_used_at) : '—'}
+                        </td>
+                        <td>
+                          <span className={`badge ${device.kind === 'client' || device.current ? 'badge-success' : 'badge-neutral'}`}>
+                            {device.kind === 'client' ? t('Authorized') : device.current ? t('Active') : t('Idle')}
                           </span>
-                        )}
-                      </td>
-                      <td style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
-                        {t(DEVICE_KIND_LABELS[device.kind] ?? device.kind)}
-                      </td>
-                      <td style={{ fontSize: '12px', color: 'var(--text-secondary)' }} title={device.client_commit ?? undefined}>
-                        {device.client_version ?? '—'}
-                        {device.client_commit && ` (${device.client_commit.slice(0, 7)})`}
-                      </td>
-                      <td style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>{formatTime(device.created_at)}</td>
-                      <td style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
-                        {device.last_used_at != null ? formatTime(device.last_used_at) : '—'}
-                      </td>
-                      <td>
-                        <span className={`badge ${device.kind === 'client' || device.current ? 'badge-success' : 'badge-neutral'}`}>
-                          {device.kind === 'client' ? t('Authorized') : device.current ? t('Active') : t('Idle')}
-                        </span>
-                      </td>
-                      <td style={{ textAlign: 'right' }}>
-                        <button
-                          type="button"
-                          className="btn-danger"
-                          disabled={revokingDeviceId !== null}
-                          onClick={() => void handleRevokeDevice(device.id)}
-                        >
-                          {revokingDeviceId === device.id ? `${t('Revoke')}…` : t('Revoke')}
-                        </button>
-                      </td>
-                    </tr>
+                        </td>
+                        <td style={{ textAlign: 'right' }}>
+                          <button
+                            type="button"
+                            className="btn-danger"
+                            disabled={revokingDeviceId !== null}
+                            onClick={(event) => {
+                              event.stopPropagation()
+                              void handleRevokeDevice(device.id)
+                            }}
+                          >
+                            {revokingDeviceId === device.id ? `${t('Revoke')}…` : t('Revoke')}
+                          </button>
+                        </td>
+                      </tr>
+                      {expandedDeviceId === device.id && (
+                        <tr className="expanded-row">
+                          <td colSpan={7}>
+                            <div className="expanded-detail" style={{ gridTemplateColumns: '1fr' }}>
+                              <DeviceStatusDetail status={deviceReport(device.id)} />
+                            </div>
+                          </td>
+                        </tr>
+                      )}
+                    </Fragment>
                   )) : (
                     <tr>
                       <td colSpan={7} style={{ textAlign: 'center', padding: '24px', color: 'var(--text-muted)' }}>

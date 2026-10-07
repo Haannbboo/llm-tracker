@@ -300,7 +300,12 @@ curl http://127.0.0.1:4001/usage/summary
 curl http://127.0.0.1:4001/usage/daily
 curl http://127.0.0.1:4001/usage/high-watermark
 curl http://127.0.0.1:4001/config
-curl http://127.0.0.1:4001/local/setup-health
+```
+
+设备状态和 agent 配置检查属于 client：
+
+```bash
+tokenage client health --json
 ```
 
 `/usage` query params：`limit`、`offset`、`provider`、`model`、`since`、`until`。

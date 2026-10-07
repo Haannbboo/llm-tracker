@@ -60,6 +60,14 @@ def client_home(tmp_path, monkeypatch):
     monkeypatch.setenv("TOKENAGE_HOME", str(tmp_path / "tracker"))
 
 
+@pytest.fixture(autouse=True)
+def no_client_daemon(monkeypatch):
+    """A successful login starts the daemon; tests must never spawn processes."""
+    from client import service
+
+    monkeypatch.setattr(service, "start", lambda: 0)
+
+
 class FakeHttpx:
     """The two httpx calls login makes, faked. auth.httpx keeps the real module."""
 
@@ -274,6 +282,25 @@ def test_login_regenerates_a_corrupt_installation_key(monkeypatch):
         body = [c for c in fake.calls if c[0] == "POST"][0][2]
         assert body["installation_key"] not in ("not-a-valid-key", content)
         assert key_path.read_text(encoding="utf-8").strip() == body["installation_key"]
+
+
+def test_login_starts_the_client_daemon(monkeypatch):
+    from client import service
+
+    started = []
+    monkeypatch.setattr(service, "start", lambda: started.append(True) or 0)
+    code, _, _ = _run_login(monkeypatch, inputs=["the-code"])
+    assert code == 0
+    assert started == [True]
+
+
+def test_login_daemon_failure_is_only_a_warning(monkeypatch, capsys):
+    from client import service
+
+    monkeypatch.setattr(service, "start", lambda: 1)
+    code, _, _ = _run_login(monkeypatch, inputs=["the-code"])
+    assert code == 0
+    assert "client service did not start" in capsys.readouterr().err
 
 
 def test_login_three_failures_exit_1_no_credentials(monkeypatch):

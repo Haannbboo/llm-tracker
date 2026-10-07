@@ -10,6 +10,7 @@ from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
 from .base_url import get_or_create_base_url, resolve_base_url_id
+from .device_status import list_device_statuses, upsert_device_status
 from .engine import DB_URL_ENV_VAR, get_db_url, get_engine, init_db
 from .evaluation_jobs import (
     VALID_EVALUATION_JOB_TRIGGERS,
@@ -36,6 +37,7 @@ from .models import (
     Base,
     BaseUrl,
     Device,
+    DeviceStatus,
     EvaluationJob,
     PriceSnapshot,
     SessionRecord,
@@ -95,6 +97,7 @@ __all__ = [
     "CostRecalcResult",
     "DB_URL_ENV_VAR",
     "Device",
+    "DeviceStatus",
     "EvaluationJob",
     "PriceSnapshot",
     "Session",
@@ -135,6 +138,7 @@ __all__ = [
     "init_db",
     "list_active_evaluation_jobs",
     "list_active_evaluation_jobs_with_progress",
+    "list_device_statuses",
     "list_session_evaluation_jobs_with_progress",
     "log_usage",
     "mark_evaluation_job_failed",
@@ -158,6 +162,7 @@ __all__ = [
     "summarize_usage_window",
     "text",
     "upsert_daily_aggregate",
+    "upsert_device_status",
     "upsert_session_evaluation",
     "upsert_session_from_usage",
 ]

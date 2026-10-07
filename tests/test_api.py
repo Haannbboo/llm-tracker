@@ -1644,8 +1644,6 @@ def test_usage_count_passes_tool_name(api_module, monkeypatch):
 # ---------------------------------------------------------------------------
 
 LOCAL_ONLY_ROUTES = [
-    ("GET", "/local/agents"),
-    ("GET", "/local/setup-health"),
     ("PUT", "/local/sessions/sess-1/evaluation"),
     ("GET", "/local/sessions/sess-1/evaluation"),
     ("DELETE", "/local/sessions/sess-1/evaluation"),
@@ -1767,6 +1765,28 @@ def test_old_pre_rename_paths_are_gone_when_auth_disabled(api_module, method, pa
 
 @pytest.mark.parametrize("method,path", OLD_PRE_RENAME_PATHS)
 def test_old_pre_rename_paths_are_gone_when_auth_enabled(
+    api_module, fresh_db, monkeypatch, method, path
+):
+    client = _authenticated_client(api_module, fresh_db, monkeypatch)
+    response = client.request(method, path)
+    _assert_route_removed(response)
+
+
+REMOVED_LOCAL_INSPECTION_PATHS = [
+    ("GET", "/local/agents"),
+    ("GET", "/local/setup-health"),
+]
+
+
+@pytest.mark.parametrize("method,path", REMOVED_LOCAL_INSPECTION_PATHS)
+def test_local_inspection_routes_are_gone_when_auth_disabled(api_module, method, path):
+    """Machine inspection belongs to the client service now, not the server."""
+    response = TestClient(api_module.app).request(method, path)
+    _assert_route_removed(response)
+
+
+@pytest.mark.parametrize("method,path", REMOVED_LOCAL_INSPECTION_PATHS)
+def test_local_inspection_routes_are_gone_when_auth_enabled(
     api_module, fresh_db, monkeypatch, method, path
 ):
     client = _authenticated_client(api_module, fresh_db, monkeypatch)

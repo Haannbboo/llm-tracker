@@ -60,6 +60,22 @@ class Device(Base):
     revoked_at: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
 
 
+class DeviceStatus(Base):
+    """The latest status report from a device, keyed by installation hash.
+
+    No foreign key: a local (auth-off) device has no user or device row, and a
+    hosted report links to ``devices`` by ``installation_hash`` value.
+    """
+
+    __tablename__ = "device_status"
+
+    installation_hash: Mapped[str] = mapped_column(String, primary_key=True)
+    status_json: Mapped[str] = mapped_column(Text, nullable=False)
+    client_version: Mapped[str | None] = mapped_column(String, nullable=True)
+    client_commit: Mapped[str | None] = mapped_column(String, nullable=True)
+    reported_at: Mapped[int] = mapped_column(BigInteger, nullable=False)
+
+
 class AuthToken(Base):
     __tablename__ = "auth_tokens"
 

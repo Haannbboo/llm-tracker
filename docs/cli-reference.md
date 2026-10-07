@@ -44,6 +44,10 @@ as a wrapper option.
 | `tokenage logout [--keep-agents]` | client | Delete this machine's credentials, then un-wire the agents. |
 | `tokenage setup [--disable]` | client | Point detected agents at a collector, or take tokenage's telemetry keys back off. |
 | `tokenage status [--json]` | either | Report installed components, whether they run, and where agents point. |
+| `tokenage client start\|stop\|restart` | client | Manage this device's background client service. |
+| `tokenage client status [--json]` | client | Report whether the client service runs. |
+| `tokenage client run` | client | Run the client service in the foreground. |
+| `tokenage client health [--json]` | client | Report this device's detected agents and collector wiring. |
 | `tokenage update [--check\|--dry-run] [--scope all\|client\|server]` | either | Update installed components; `--check` checks server availability, while client availability is not published. |
 | `tokenage check-server --server URL` | client | Internal: verify reachability and wire protocol. Writes nothing. |
 | `tokenage <command> [args...]` | client | Run any command with usage tracking. |
@@ -264,8 +268,13 @@ curl http://127.0.0.1:4001/usage/daily
 curl http://127.0.0.1:4001/usage/high-watermark
 curl http://127.0.0.1:4001/usage/run-summary?after_ts=0
 curl http://127.0.0.1:4001/config
-curl http://127.0.0.1:4001/local/setup-health
 curl http://127.0.0.1:4001/version
+```
+
+Device status and agent wiring come from the client service, not the API:
+
+```bash
+tokenage client health --json
 ```
 
 `/version` is public when auth is enabled, and carries the wire protocol range,

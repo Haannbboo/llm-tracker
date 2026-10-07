@@ -29,7 +29,14 @@ def _make_fake_bootstrap_repo(
 
     # Create CLI wrapper directly (install logic is now inline in bootstrap.sh)
     (scripts_dir / "tokenage").write_text(
-        "#!/usr/bin/env bash\necho tokenage fake cli\n",
+        "#!/usr/bin/env bash\n"
+        'if [ "${1:-}" = "client" ]; then\n'
+        '  case "${2:-}" in\n'
+        "    start) exit 0 ;;\n"
+        '    health) exec cat "${HOME}/health.json" ;;\n'
+        "  esac\n"
+        "fi\n"
+        "echo tokenage fake cli\n",
         encoding="utf-8",
     )
     (scripts_dir / "tokenage").chmod(0o755)
@@ -58,9 +65,7 @@ def _make_fake_bootstrap_repo(
     return fake_repo
 
 
-def _make_fake_curl(
-    tmp_path: Path, *, open_ports: set[int], setup_health: dict | None = None
-) -> Path:
+def _make_fake_curl(tmp_path: Path, *, open_ports: set[int]) -> Path:
     bin_dir = tmp_path / "fake-bin"
     bin_dir.mkdir(exist_ok=True)
     curl_path = bin_dir / "curl"
@@ -72,7 +77,6 @@ def _make_fake_curl(
             from urllib.parse import urlparse
 
             OPEN_PORTS = {sorted(open_ports)!r}
-            SETUP_HEALTH = {json.dumps(setup_health)!r}
 
             args = sys.argv[1:]
             url = next((arg for arg in reversed(args) if arg.startswith("http://")), "")
@@ -81,12 +85,6 @@ def _make_fake_curl(
 
             if port not in OPEN_PORTS:
                 sys.exit(7)
-
-            if parsed.path == "/local/setup-health":
-                if SETUP_HEALTH == "null":
-                    sys.exit(22)
-                sys.stdout.write(SETUP_HEALTH)
-                sys.exit(0)
 
             if "%{{content_type}}" in args:
                 sys.stdout.write("text/html")
@@ -104,6 +102,11 @@ def _make_fake_curl(
     return bin_dir
 
 
+def _health_file(home: Path, setup_health: dict) -> None:
+    home.mkdir(parents=True, exist_ok=True)
+    (home / "health.json").write_text(json.dumps(setup_health), encoding="utf-8")
+
+
 def _add_fake_agent(bin_dir: Path, name: str) -> None:
     agent_path = bin_dir / name
     agent_path.write_text("#!/usr/bin/env sh\nexit 0\n", encoding="utf-8")
@@ -115,7 +118,10 @@ def _run_bootstrap(
     home: Path,
     bin_dir: Path,
     extra_env: dict[str, str] | None = None,
+    setup_health: dict | None = None,
 ) -> subprocess.CompletedProcess:
+    if setup_health is not None:
+        _health_file(home, setup_health)
     env = {
         **os.environ,
         "HOME": str(home),
@@ -209,10 +215,8 @@ def test_bootstrap_succeeds_when_install_start_and_post_checks_pass(tmp_path):
         ),
     )
     fake_repo = _make_fake_bootstrap_repo(tmp_path, home, ports=ports)
-    bin_dir = _make_fake_curl(
-        tmp_path, open_ports=set(ports), setup_health=setup_health
-    )
-    result = _run_bootstrap(fake_repo, home, bin_dir)
+    bin_dir = _make_fake_curl(tmp_path, open_ports=set(ports))
+    result = _run_bootstrap(fake_repo, home, bin_dir, setup_health=setup_health)
 
     output = result.stdout + result.stderr
     assert result.returncode == 0, output
@@ -244,13 +248,11 @@ def test_bootstrap_reports_local_setup_health_ready_and_skipped_agents(tmp_path)
         ),
     )
     fake_repo = _make_fake_bootstrap_repo(tmp_path, home, ports=ports)
-    bin_dir = _make_fake_curl(
-        tmp_path, open_ports=set(ports), setup_health=setup_health
-    )
+    bin_dir = _make_fake_curl(tmp_path, open_ports=set(ports))
 
     _add_fake_agent(bin_dir, "kilo")
 
-    result = _run_bootstrap(fake_repo, home, bin_dir)
+    result = _run_bootstrap(fake_repo, home, bin_dir, setup_health=setup_health)
 
     output = result.stdout + result.stderr
     assert result.returncode == 0, output
@@ -298,13 +300,11 @@ def test_bootstrap_fails_when_detected_agent_setup_health_is_not_ready(tmp_path)
         ),
     )
     fake_repo = _make_fake_bootstrap_repo(tmp_path, home, ports=ports)
-    bin_dir = _make_fake_curl(
-        tmp_path, open_ports=set(ports), setup_health=setup_health
-    )
+    bin_dir = _make_fake_curl(tmp_path, open_ports=set(ports))
     _add_fake_agent(bin_dir, "claude")
     _add_fake_agent(bin_dir, "codex")
 
-    result = _run_bootstrap(fake_repo, home, bin_dir)
+    result = _run_bootstrap(fake_repo, home, bin_dir, setup_health=setup_health)
 
     output = result.stdout + result.stderr
     assert result.returncode != 0, output
@@ -378,11 +378,9 @@ def test_bootstrap_skips_undetected_agent_even_when_setup_health_is_ready(tmp_pa
         ),
     )
     fake_repo = _make_fake_bootstrap_repo(tmp_path, home, ports=ports)
-    bin_dir = _make_fake_curl(
-        tmp_path, open_ports=set(ports), setup_health=setup_health
-    )
+    bin_dir = _make_fake_curl(tmp_path, open_ports=set(ports))
 
-    result = _run_bootstrap(fake_repo, home, bin_dir)
+    result = _run_bootstrap(fake_repo, home, bin_dir, setup_health=setup_health)
 
     output = result.stdout + result.stderr
     assert result.returncode == 0, output

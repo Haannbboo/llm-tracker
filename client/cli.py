@@ -20,7 +20,7 @@ from client.paths import client_version
 
 PROG = "tokenage"
 
-SUBCOMMANDS = ("login", "logout", "setup", "status", "update", "check-server")
+SUBCOMMANDS = ("login", "logout", "setup", "status", "update", "check-server", "client")
 
 EPILOG = """\
 commands:
@@ -29,6 +29,8 @@ commands:
   setup [--disable]         point detected agents at a collector
   status [--json]           report installed components and whether they run
   update [--check]          update whichever components are installed
+  client <command>          manage this device's background client service
+                            (start, stop, restart, status, run, health)
   server <command>          start, stop, restart, bootstrap, status, token
                             (requires the server component)
 
@@ -174,6 +176,30 @@ def _build_subcommand(name: str) -> argparse.ArgumentParser:
         )
         _add_banner_flag(parser)
         return parser
+    if name == "client":
+        parser = argparse.ArgumentParser(
+            prog=f"{PROG} client",
+            description="Manage this device's background client service.",
+        )
+        subparsers = parser.add_subparsers(dest="action", required=True)
+        subparsers.add_parser("start", help="start the service in the background")
+        subparsers.add_parser("stop", help="stop the background service")
+        subparsers.add_parser("restart", help="stop then start the service")
+        client_status = subparsers.add_parser(
+            "status", help="report whether the service runs"
+        )
+        client_status.add_argument(
+            "--json", action="store_true", help="print one compact JSON line"
+        )
+        subparsers.add_parser("run", help="run the service in the foreground")
+        client_health = subparsers.add_parser(
+            "health", help="report this device's status and agent wiring"
+        )
+        client_health.add_argument(
+            "--json", action="store_true", help="print one compact JSON line"
+        )
+        _add_banner_flag(parser)
+        return parser
     # check-server is internal: the installer uses it to refuse an incompatible box.
     parser = argparse.ArgumentParser(prog=f"{PROG} check-server")
     parser.add_argument("--server", required=True)
@@ -228,6 +254,20 @@ def _run_subcommand(name: str, argv: list[str]) -> int:
             dry_run=args.dry_run,
             scope=args.scope,
         )
+    if name == "client":
+        from client import service
+
+        if args.action == "start":
+            return service.start()
+        if args.action == "stop":
+            return service.stop()
+        if args.action == "restart":
+            return service.restart()
+        if args.action == "status":
+            return service.run_status(as_json=args.json)
+        if args.action == "health":
+            return service.run_health(as_json=args.json)
+        return service.run_foreground()
     try:
         server = auth.normalize_server_url(args.server)
     except ValueError as exc:

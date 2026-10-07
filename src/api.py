@@ -10,12 +10,11 @@ from typing import Literal
 from urllib.parse import urlparse, urlsplit
 
 import httpx
-import tomllib
 from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response
 from fastapi.responses import JSONResponse
 from fastapi.routing import APIRoute
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, model_validator
+from pydantic import BaseModel, Field, model_validator
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from protocol import MAX_SUPPORTED_GENERATION, MIN_SUPPORTED_GENERATION
@@ -42,9 +41,12 @@ from .auth import (
     get_current_user,
 )
 from .auth import router as auth_router
+from .auth.tokens import hash_token, list_user_devices
 from .database import (
     VALID_OUTCOMES,
     VALID_SOURCES,
+    Device,
+    User,
     aggregate_daily_by_dimension,
     aggregate_model_effectiveness,
     aggregate_usage_by_period,
@@ -63,6 +65,7 @@ from .database import (
     get_usage_high_watermark_ts,
     init_db,
     list_active_evaluation_jobs_with_progress,
+    list_device_statuses,
     list_session_evaluation_jobs_with_progress,
     recalculate_usage_cost,
     reprice_estimated_rows,
@@ -74,6 +77,7 @@ from .database import (
     summarize_usage_daily,
     summarize_usage_window,
     update_queued_evaluation_job_evaluator,
+    upsert_device_status,
     upsert_session_evaluation,
 )
 from .evaluation import (
@@ -100,6 +104,7 @@ _SPA_API_PREFIXES = (
     "/auth/",
     "/usage",
     "/sessions",
+    "/devices",
     "/model-effectiveness",
     "/config",
     "/pricing",
@@ -184,6 +189,55 @@ class EvaluationJobUpdate(BaseModel):
 
 class EvaluationConfigUpdate(BaseModel):
     evaluator: str
+
+
+DEVICE_AGENT_KEY = Literal["claude", "codex", "opencode", "kilo"]
+
+
+class DeviceExpectedEndpoints(BaseModel):
+    otlp_endpoint: str | None = Field(default=None, max_length=512)
+    otlp_logs_endpoint: str | None = Field(default=None, max_length=512)
+
+
+class DeviceAgentHealth(BaseModel):
+    configured: bool
+    endpoint_matches: bool | None = None
+    configured_endpoint: str | None = Field(default=None, max_length=512)
+    expected_endpoint: str | None = Field(default=None, max_length=512)
+    status: Literal["ready", "missing_config", "wrong_endpoint", "configured"]
+
+
+class DeviceAgentDetected(BaseModel):
+    found: bool
+    path: str | None = Field(default=None, max_length=512)
+
+
+class DeviceStatusSummary(BaseModel):
+    total_agents: int
+    configured_agents: int
+    matching_agents: int
+
+
+class DeviceStatusReport(BaseModel):
+    # Unbounded on purpose: a malformed secret must never be echoed back in a
+    # validation-error body, so the handler checks it and returns a static 422.
+    installation_key: str | None = None
+    device_name: str = Field(max_length=64)
+    client_version: str | None = Field(default=None, max_length=32)
+    client_commit: str | None = Field(default=None, max_length=64)
+    collected_at: int
+    expected: DeviceExpectedEndpoints
+    summary: DeviceStatusSummary | None = None
+    agents: dict[DEVICE_AGENT_KEY, DeviceAgentHealth]
+    detected: dict[DEVICE_AGENT_KEY, DeviceAgentDetected]
+
+
+def _parse_device_status_json(raw: str) -> dict | None:
+    try:
+        status = json.loads(raw)
+    except (TypeError, ValueError):
+        return None
+    return status if isinstance(status, dict) else None
 
 
 async def _stop_evaluation_worker(
@@ -661,6 +715,84 @@ async def sessions_daily_effectiveness(request: Request, date: str):
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+
+def _device_status_entry(row, device: Device | None = None) -> dict:
+    """One device_status row as the GET response entry, tolerating bad JSON."""
+    status = _parse_device_status_json(row.status_json)
+    return {
+        "device_id": device.id if device is not None else None,
+        "device_name": device.device_name
+        if device is not None
+        else (status or {}).get("device_name"),
+        "client_version": row.client_version,
+        "client_commit": row.client_commit,
+        "reported_at": row.reported_at,
+        "status": status,
+    }
+
+
+@app.post("/devices/status", status_code=204)
+def post_device_status(
+    request: Request,
+    report: DeviceStatusReport,
+    user: User | None = Depends(get_current_user),
+):
+    """Store the latest status report from a device.
+
+    Auth disabled (local): the body's installation key is the identity, checked
+    by hash. Auth enabled (hosted): the caller's device token is the identity
+    and any client-supplied installation key is ignored.
+    """
+    if user is None:
+        if report.installation_key is None or not re.fullmatch(
+            r"[A-Za-z0-9_-]{43,128}", report.installation_key
+        ):
+            raise HTTPException(status_code=422, detail="invalid installation_key")
+        installation_hash = hash_token(report.installation_key)
+    else:
+        auth_token = getattr(request.state, "auth_token", None)
+        device_id = auth_token.device_id if auth_token is not None else None
+        device = next(
+            (row for row in list_user_devices(user.id) if row.id == device_id), None
+        )
+        if device is None:
+            raise HTTPException(status_code=400, detail="device token required")
+        installation_hash = device.installation_hash
+    upsert_device_status(
+        installation_hash,
+        json.dumps(
+            report.model_dump(exclude={"installation_key"}, mode="json"),
+            sort_keys=True,
+        ),
+        report.client_version,
+        report.client_commit,
+    )
+    return Response(status_code=204)
+
+
+@app.get("/devices/status")
+def get_devices_status(user: User | None = Depends(get_current_user)):
+    """Latest report per device: every device when local, the caller's when hosted."""
+    if user is None:
+        return {
+            "devices": [_device_status_entry(row) for row in list_device_statuses()]
+        }
+
+    devices = list_user_devices(user.id)
+    reports = {
+        row.installation_hash: row
+        for row in list_device_statuses(
+            [device.installation_hash for device in devices]
+        )
+    }
+    entries = [
+        _device_status_entry(report, device)
+        for device in devices
+        if (report := reports.get(device.installation_hash)) is not None
+    ]
+    entries.sort(key=lambda entry: entry["reported_at"], reverse=True)
+    return {"devices": entries}
 
 
 @app.put(
@@ -1225,226 +1357,6 @@ async def reprice_estimated_usage(
         model_cost_sources=model_cost_sources,
         provider_model_cost_sources=provider_model_cost_sources,
     )
-
-
-@app.get("/local/agents", dependencies=[Depends(_require_local_profile)])
-async def detect_local_agents():
-    """Detect locally installed CLI agents. Only works when API has host access."""
-    import shutil
-    from pathlib import Path
-
-    # Kilo's install script adds ~/.kilo/bin to PATH via ~/.zshrc, but
-    # the supervisor service runs without sourcing .zshrc so it lacks this
-    # directory. Other agents (claude, codex, opencode) are found via
-    # ~/superset/bin which IS on the supervisor PATH, so only Kilo needs
-    # a fallback path check.
-    kilo_fallback = str(Path.home() / ".kilo" / "bin" / "kilo")
-
-    agents = {}
-    for name in ("claude", "codex", "opencode", "kilo"):
-        path = shutil.which(name)
-        if path is None and name == "kilo":
-            path = kilo_fallback if Path(kilo_fallback).exists() else None
-        agents[name] = {"found": path is not None, "path": path}
-    return agents
-
-
-def _local_setup_expected_endpoints() -> dict[str, str]:
-    from src.config.server_config import resolve_server_urls
-
-    urls = resolve_server_urls(CONFIG)
-    base = urls["otlp_url"]
-    return {"otlp_endpoint": base, "otlp_logs_endpoint": f"{base}/v1/logs"}
-
-
-def _read_json_file(path: Path) -> dict:
-    if not path.exists():
-        return {}
-    try:
-        return json.loads(path.read_text(encoding="utf-8"))
-    except Exception:
-        return {}
-
-
-def _read_toml_file(path: Path) -> dict:
-    if not path.exists():
-        return {}
-    try:
-        return tomllib.loads(path.read_text(encoding="utf-8"))
-    except Exception:
-        return {}
-
-
-def _agent_health(
-    configured: bool, configured_endpoint: str | None, expected_endpoint: str
-) -> dict:
-    endpoint_matches = configured and configured_endpoint == expected_endpoint
-    if not configured:
-        status = "missing_config"
-    elif endpoint_matches:
-        status = "ready"
-    else:
-        status = "wrong_endpoint"
-    return {
-        "configured": configured,
-        "endpoint_matches": endpoint_matches,
-        "configured_endpoint": configured_endpoint,
-        "expected_endpoint": expected_endpoint,
-        "status": status,
-    }
-
-
-@app.get("/local/setup-health", dependencies=[Depends(_require_local_profile)])
-async def get_local_setup_health():
-    """Report local AI-agent OTLP config without returning secrets."""
-    home = Path.home()
-    expected = _local_setup_expected_endpoints()
-
-    claude_settings = _read_json_file(home / ".claude" / "settings.json")
-    claude_env = (
-        claude_settings.get("env")
-        if isinstance(claude_settings.get("env"), dict)
-        else {}
-    )
-    claude_endpoint = claude_env.get("OTEL_EXPORTER_OTLP_LOGS_ENDPOINT")
-    claude_configured = (
-        claude_env.get("CLAUDE_CODE_ENABLE_TELEMETRY") in ("1", "true", "True", True)
-        and claude_env.get("OTEL_LOGS_EXPORTER") == "otlp"
-        and isinstance(claude_endpoint, str)
-    )
-
-    codex_config = _read_toml_file(home / ".codex" / "config.toml")
-    codex_otel = (
-        codex_config.get("otel") if isinstance(codex_config.get("otel"), dict) else {}
-    )
-    codex_exporter = (
-        codex_otel.get("exporter", {})
-        if isinstance(codex_otel.get("exporter"), dict)
-        else {}
-    )
-    codex_otlp_http = (
-        codex_exporter.get("otlp-http", {})
-        if isinstance(codex_exporter.get("otlp-http"), dict)
-        else {}
-    )
-    codex_endpoint = codex_otlp_http.get("endpoint")
-    codex_disabled = (
-        codex_otel.get("enabled") is False or codex_otlp_http.get("enabled") is False
-    )
-    codex_configured = not codex_disabled and isinstance(codex_endpoint, str)
-
-    opencode_config_path = home / ".config" / "opencode" / "opencode.json"
-    opencode_config = _read_json_file(opencode_config_path)
-    opencode_plugins = opencode_config.get("plugin", [])
-    opencode_endpoint = None
-    opencode_plugin_registered = False
-    opencode_plugin_suffixes = ("plugins/opencode/dist/index.js",)
-    _otlp_host = (
-        CONFIG["server"]
-        .get("base_url", "")
-        .rstrip("/")
-        .replace("http://", "")
-        .replace("https://", "")
-        if CONFIG["server"].get("base_url")
-        else "localhost"
-    )
-    opencode_default_endpoint = f"http://{_otlp_host}:4005/v1/logs"
-    if isinstance(opencode_plugins, list):
-        for entry in opencode_plugins:
-            entry_path = (
-                str(entry)
-                if isinstance(entry, str)
-                else str(entry[0])
-                if isinstance(entry, list) and len(entry) >= 1
-                else ""
-            )
-            matched_suffix = next(
-                (s for s in opencode_plugin_suffixes if entry_path.endswith(s)),
-                None,
-            )
-            if matched_suffix is None:
-                continue
-            opencode_plugin_registered = True
-            if isinstance(entry, str):
-                opencode_endpoint = opencode_default_endpoint
-            elif (
-                isinstance(entry, list)
-                and len(entry) >= 2
-                and isinstance(entry[1], dict)
-            ):
-                opencode_endpoint = (
-                    entry[1].get("endpoint") or opencode_default_endpoint
-                )
-            else:
-                opencode_endpoint = opencode_default_endpoint
-            break
-
-    kilo_config_path = home / ".config" / "kilo" / "opencode.json"
-    kilo_config = _read_json_file(kilo_config_path)
-    kilo_plugins = kilo_config.get("plugin", [])
-    kilo_endpoint = None
-    kilo_plugin_registered = False
-    kilo_plugin_suffix = "plugins/kilo/dist/index.js"
-    kilo_default_endpoint = f"http://{_otlp_host}:4005/v1/logs"
-    if isinstance(kilo_plugins, list):
-        for entry in kilo_plugins:
-            entry_path = (
-                str(entry)
-                if isinstance(entry, str)
-                else str(entry[0])
-                if isinstance(entry, list) and len(entry) >= 1
-                else ""
-            )
-            if not entry_path.endswith(kilo_plugin_suffix):
-                continue
-            kilo_plugin_registered = True
-            if isinstance(entry, str):
-                kilo_endpoint = kilo_default_endpoint
-            elif (
-                isinstance(entry, list)
-                and len(entry) >= 2
-                and isinstance(entry[1], dict)
-            ):
-                kilo_endpoint = entry[1].get("endpoint") or kilo_default_endpoint
-            else:
-                kilo_endpoint = kilo_default_endpoint
-            break
-
-    agents = {
-        "claude": _agent_health(
-            claude_configured,
-            claude_endpoint if isinstance(claude_endpoint, str) else None,
-            expected["otlp_logs_endpoint"],
-        ),
-        "codex": _agent_health(
-            codex_configured,
-            codex_endpoint if isinstance(codex_endpoint, str) else None,
-            expected["otlp_logs_endpoint"],
-        ),
-        "opencode": _agent_health(
-            opencode_plugin_registered,
-            opencode_endpoint,
-            expected["otlp_logs_endpoint"],
-        ),
-        "kilo": _agent_health(
-            kilo_plugin_registered,
-            kilo_endpoint,
-            expected["otlp_logs_endpoint"],
-        ),
-    }
-    return {
-        "expected": expected,
-        "summary": {
-            "total_agents": len(agents),
-            "configured_agents": sum(
-                1 for agent in agents.values() if agent["configured"]
-            ),
-            "matching_agents": sum(
-                1 for agent in agents.values() if agent["endpoint_matches"]
-            ),
-        },
-        "agents": agents,
-    }
 
 
 def _collector_hint() -> dict[str, str]:

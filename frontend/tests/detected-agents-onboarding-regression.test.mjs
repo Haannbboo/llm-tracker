@@ -5,81 +5,65 @@ import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
 
 const here = join(dirname(fileURLToPath(import.meta.url)), '..')
-const appSource = readFileSync(join(here, 'src', 'App.tsx'), 'utf-8')
-const dashboardSource = readFileSync(join(here, 'src', 'pages', 'DashboardPage.tsx'), 'utf-8')
+const overviewSource = readFileSync(join(here, 'src', 'pages', 'OverviewTab.tsx'), 'utf-8')
 const settingsSource = readFileSync(join(here, 'src', 'pages', 'SettingsPage.tsx'), 'utf-8')
+const detailSource = readFileSync(join(here, 'src', 'components', 'DeviceStatusDetail.tsx'), 'utf-8')
 const utilsSource = readFileSync(join(here, 'src', 'utils.tsx'), 'utf-8')
 const zhSource = readFileSync(join(here, 'src', 'i18n', 'zh.ts'), 'utf-8')
 
-const detectedAgentsStart = dashboardSource.indexOf('{/* Detected agents */}')
-assert.notEqual(detectedAgentsStart, -1)
-const detectedAgentsEnd = dashboardSource.indexOf('</div>\n                  </div>', detectedAgentsStart)
-assert.notEqual(detectedAgentsEnd, -1)
-const detectedAgentsBlock = dashboardSource.slice(detectedAgentsStart, detectedAgentsEnd)
+const detectedStart = overviewSource.indexOf('{/* Detected agents */}')
+assert.notEqual(detectedStart, -1)
+const detectedEnd = overviewSource.indexOf('dashboard-refresh-surface', detectedStart)
+assert.notEqual(detectedEnd, -1)
+const detectedBlock = overviewSource.slice(detectedStart, detectedEnd)
 
-const settingsDetectedAgentsStart = settingsSource.indexOf('{/* Detected Agents */}')
-assert.notEqual(settingsDetectedAgentsStart, -1)
-const settingsOtlpStart = settingsSource.indexOf('OTLP Tracking Setup')
-const settingsConfigStart = settingsSource.indexOf('Configuration (YAML)')
-const settingsBlock = settingsSource
+const detailDetectedStart = detailSource.indexOf("{t('Detected Agents')}")
+assert.notEqual(detailDetectedStart, -1)
+const detailOtlpStart = detailSource.indexOf('OTLP Tracking Setup')
+assert.notEqual(detailOtlpStart, -1)
+const detailDetectedBlock = detailSource.slice(detailDetectedStart, detailOtlpStart)
+const detailOtlpBlock = detailSource.slice(detailOtlpStart)
 
 test('detected agents card explains where detection comes from', () => {
-  assert.match(detectedAgentsBlock, /Detected from your local config and available commands\./)
+  assert.match(detectedBlock, /Detected from your local config and available commands\./)
+  assert.match(detailDetectedBlock, /Detected from your local config and available commands\./)
 })
 
 test('detected agents use readable display labels instead of raw internal names only', () => {
   assert.match(utilsSource, /export function getAgentDisplayName/)
   assert.match(utilsSource, /claude.*Claude Code/s)
   assert.match(utilsSource, /codex.*Codex/s)
-  assert.match(detectedAgentsBlock, /getAgentDisplayName\(name\)/)
+  assert.match(detailDetectedBlock, /getAgentDisplayName\(name\)/)
 })
 
-test('detected agent rows show status without duplicating test commands', () => {
-  assert.match(detectedAgentsBlock, /\{info\.found \? t\('Ready'\) : t\('Not found'\)\}/)
-  assert.doesNotMatch(detectedAgentsBlock, /\{t\('Test:'\)\}/)
-})
-
-test('detected agent rows include detected path or unknown fallback', () => {
-  assert.match(detectedAgentsBlock, /\{t\('Detected:'\)\}/)
-  assert.match(detectedAgentsBlock, /info\.path \|\| t\('Unknown'\)/)
+test('detected agent rows show status and path without duplicating test commands', () => {
+  assert.match(detailDetectedBlock, /\{info\?\.found \? t\('Ready'\) : t\('Not found'\)\}/)
+  assert.match(detailDetectedBlock, /\{t\('Detected:'\)\}/)
+  assert.match(detailDetectedBlock, /info\?\.path \|\| t\('Unknown'\)/)
+  assert.doesNotMatch(detailDetectedBlock, /\{t\('Test:'\)\}/)
 })
 
 test('no-agent fallback remains actionable with test commands', () => {
-  assert.match(detectedAgentsBlock, /No local Agent/)
-  assert.match(dashboardSource, /tokenage codex exec/)
-  assert.match(dashboardSource, /tokenage claude/)
-  assert.doesNotMatch(dashboardSource, /tokenage --/)
+  assert.match(detectedBlock, /No local Agent/)
+  assert.match(overviewSource, /tokenage codex exec/)
+  assert.match(overviewSource, /tokenage claude/)
+  assert.doesNotMatch(overviewSource, /tokenage --/)
 })
 
-test('settings page has separate detected local agents status section', () => {
-  assert.notEqual(settingsDetectedAgentsStart, -1, 'settings should show a local detected agents panel')
-  assert.notEqual(settingsOtlpStart, -1, 'settings should keep OTLP Tracking Setup panel')
-  assert.notEqual(settingsConfigStart, -1, 'settings should keep Configuration (YAML) panel')
-
-  const settingsDetectedAgentsBlock = settingsBlock.slice(settingsDetectedAgentsStart, settingsOtlpStart)
-  assert.match(settingsDetectedAgentsBlock, /Detected Agents/)
-  assert.match(settingsDetectedAgentsBlock, /Detected from your local config and available commands\./)
-  assert.match(settingsDetectedAgentsBlock, /getAgentDisplayName\(name\)/)
-  assert.match(settingsDetectedAgentsBlock, /\{info\.found \? t\('Ready'\) : t\('Not found'\)\}/)
-  assert.match(settingsDetectedAgentsBlock, /\{t\('Detected:'\)\}/)
-  assert.match(settingsDetectedAgentsBlock, /info\.path \|\| t\('Unknown'\)/)
-  assert.match(settingsDetectedAgentsBlock, /t\('No local Agent'\)/)
-  assert.doesNotMatch(settingsDetectedAgentsBlock, /OTLP configured/)
-  assert.doesNotMatch(settingsDetectedAgentsBlock, /Expected endpoint/)
-  assert.doesNotMatch(settingsDetectedAgentsBlock, /Configured endpoint/)
-  assert.doesNotMatch(settingsDetectedAgentsBlock, /Fix setup/)
-  assert.doesNotMatch(settingsDetectedAgentsBlock, /setupCommand/)
-  assert.doesNotMatch(settingsDetectedAgentsBlock, /Copy bootstrap command/)
+test('per-device agent status renders in the settings devices detail, not the services tab', () => {
+  assert.match(settingsSource, /<DeviceStatusDetail status=\{deviceReport\(device\.id\)\} \/>/)
+  assert.match(settingsSource, /useDeviceStatuses/)
+  assert.match(settingsSource, /expandedDeviceId/)
+  assert.doesNotMatch(settingsSource, /OTLP Tracking Setup/)
+  assert.doesNotMatch(settingsSource, /\{t\('Detected Agents'\)\}/)
 })
 
-test('settings local agent detection does not imply OTLP setup readiness', () => {
-  const settingsDetectedAgentsBlock = settingsBlock.slice(settingsDetectedAgentsStart, settingsOtlpStart)
-  const settingsOtlpBlock = settingsBlock.slice(settingsOtlpStart, settingsConfigStart)
-
-  assert.match(settingsDetectedAgentsBlock, /localAgents/)
-  assert.doesNotMatch(settingsDetectedAgentsBlock, /setupDiagnostics/)
-  assert.match(settingsOtlpBlock, /setupDiagnostics/)
-  assert.match(settingsOtlpBlock, /endpoint_matches/)
+test('device detail separates detection from OTLP readiness', () => {
+  assert.match(detailDetectedBlock, /detected/)
+  assert.doesNotMatch(detailDetectedBlock, /endpoint_matches/)
+  assert.match(detailOtlpBlock, /endpoint_matches/)
+  assert.match(detailOtlpBlock, /Expected endpoint/)
+  assert.match(detailOtlpBlock, /Configured endpoint/)
 })
 
 test('chinese translations include detected-agent onboarding strings', () => {
@@ -90,6 +74,7 @@ test('chinese translations include detected-agent onboarding strings', () => {
     'Unknown',
     'Detected:',
     'No local Agent',
+    'No report yet. Start the tokenage client service on this device.',
   ]) {
     assert.match(zhSource, new RegExp(key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')))
   }
