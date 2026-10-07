@@ -41,7 +41,6 @@ def test_corrupt_credentials_are_reported_without_a_traceback(
     monkeypatch.delenv("TOKENAGE_SERVER", raising=False)
     monkeypatch.setattr(setup, "installed_agents", lambda: ["codex"])
     monkeypatch.setattr(client_cli.update, "client_root", lambda: paths.tracker_home())
-    monkeypatch.setattr(client_cli.update, "server_root", lambda: None)
     path = paths.credentials_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(content)
@@ -505,10 +504,12 @@ def test_usage_client_sends_bearer_from_credentials():
     assert client.token == "tok-1"
 
 
-def test_usage_client_without_credentials_uses_the_local_api():
+def test_usage_client_without_credentials_has_no_server():
     client = track.UsageApiClient()
     assert client.token is None
-    assert client.base_url == paths.local_server_info()["api_url"]
+    assert client.base_url is None
+    with pytest.raises(track.ApiError, match="login --server"):
+        client.get_high_watermark()
 
 
 def test_usage_client_401_surfaces_relogin_message(monkeypatch):

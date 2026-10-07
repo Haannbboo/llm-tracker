@@ -131,13 +131,14 @@ There is one installed command: `scripts/tokenage`. Both installers write it, an
 Command surface:
 
 ```bash
-tokenage status            # installed components, agents, whether things run
+tokenage status            # this client: sign-in, agents, wiring
 tokenage setup             # agent configuration, in both installation modes
 tokenage client start      # install + start the OS-supervised client service (systemd --user / launchd)
 tokenage client health     # device status and agent wiring, from the client
 tokenage client status     # whether the OS manager runs it, last report
 tokenage server start      # turn the services on
 tokenage server restart    # reload running code
+tokenage server update     # update the server clone
 tokenage server bootstrap  # install, build the dashboard, start, verify
 tokenage server status     # the service view
 ```

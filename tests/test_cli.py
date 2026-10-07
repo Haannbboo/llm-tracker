@@ -32,7 +32,6 @@ def _scrubbed_env(tmp_path):
         "TOKENAGE_ROOT",
         "TOKENAGE_SKIP_BANNER",
         "TOKENAGE_CLIENT_COMMIT",
-        "TOKENAGE_SERVER_ROOT",
         "NO_COLOR",
     ):
         env.pop(key, None)
@@ -120,7 +119,10 @@ def test_tokenage_server_routes_bootstrap_to_the_script(tmp_path):
     content = LAUNCHER.read_text(encoding="utf-8")
 
     assert 'exec bash "${root}/scripts/${name}.sh" "$@"' in content
-    assert "bootstrap|start|stop|restart|status) shift; run_server_script" in content
+    assert (
+        "bootstrap|start|stop|restart|status|update) shift; run_server_script"
+        in content
+    )
     # The bare spellings still route, with a note on stderr — except `status`,
     # which is the component report now. Its old meaning is `server status`.
     assert "bootstrap|start|stop|restart|token)" in content
@@ -357,7 +359,6 @@ def test_tokenage_identity_defaults_and_env_overrides_agree_with_launcher(
     default_home = home / ".tokenage"
     assert paths.tracker_home() == default_home
     assert paths.credentials_path() == default_home / "credentials.json"
-    assert paths.config_path() == default_home / "config.yaml"
 
     snapshot = default_home / "versions" / "test"
     _client_install(snapshot, "snapshot", "1.2.3", "a" * 40)
@@ -384,7 +385,6 @@ def test_tokenage_identity_defaults_and_env_overrides_agree_with_launcher(
     monkeypatch.setenv("TOKENAGE_CONFIG", str(tmp_path / "custom.yaml"))
     assert paths.tracker_home() == override_home
     assert paths.credentials_path() == override_home / "credentials.json"
-    assert paths.config_path() == tmp_path / "custom.yaml"
     env["TOKENAGE_HOME"] = str(override_home)
     result = subprocess.run(
         [str(launcher), "--version"],

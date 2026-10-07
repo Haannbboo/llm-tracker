@@ -1,10 +1,8 @@
-"""``tokenage update`` — update whichever components are installed.
+"""``tokenage update`` — update the client.
 
-The server component is a git clone, so it updates with a fast-forward pull and a
-bootstrap. The client component is a source snapshot under
-``$TOKENAGE_HOME/versions``, so it updates by asking its server for the
-installer and letting that install a new snapshot. Both paths reuse the code
-that is already tested rather than reimplementing it here.
+The client is a source snapshot under ``$TOKENAGE_HOME/versions``, so it updates
+by asking its server for the installer and letting that install a new snapshot.
+Updating the server clone is ``tokenage server update``.
 """
 
 from __future__ import annotations
@@ -16,16 +14,9 @@ import sys
 import tempfile
 from pathlib import Path
 
-from client.paths import client_commit, client_root, client_version, server_root
+from client.paths import client_commit, client_root, client_version
 
 INSTALLER_PATH = "/install.sh"
-
-
-def _server_version(root: Path) -> str | None:
-    try:
-        return (root / "VERSION").read_text(encoding="utf-8").strip() or None
-    except OSError:
-        return None
 
 
 def _bin_dir() -> Path:
@@ -34,23 +25,6 @@ def _bin_dir() -> Path:
 
 def _run(command: list[str], env: dict[str, str] | None = None) -> int:
     return subprocess.run(command, env=env).returncode
-
-
-def update_server(*, check: bool, dry_run: bool) -> int:
-    root = server_root()
-    if root is None:
-        print("tokenage: the server component is not installed on this machine.")
-        return 0
-    script = root / "scripts" / "update.sh"
-    if not script.is_file():
-        print(f"tokenage: update script not found: {script}", file=sys.stderr)
-        return 1
-    command = ["bash", str(script)]
-    if check:
-        command.append("--check")
-    elif dry_run:
-        command.append("--dry-run")
-    return _run(command)
 
 
 def update_client() -> int:
@@ -92,60 +66,32 @@ def update_client() -> int:
     return 0
 
 
-def run_update(*, check: bool, dry_run: bool, scope: str) -> int:
-    if scope not in ("all", "client", "server"):
-        print("tokenage: --scope must be all, client or server.", file=sys.stderr)
-        return 2
-
-    root = server_root()
-    snapshot = client_root()
-    has_server = root is not None and scope in ("all", "server")
-    has_client = snapshot is not None and scope in ("all", "client")
-
-    print("  ▶ Installed components")
-    if has_server and root is not None:
-        print(f"  Installed server  {_server_version(root) or 'unknown'}  ({root})")
-    if has_client:
+def run_update(*, check: bool, dry_run: bool) -> int:
+    if client_root() is None:
         print(
-            f"  Installed client  {client_version()}  "
-            f"(commit {client_commit() or 'unknown'})"
+            "tokenage: no client snapshot to update on this machine "
+            "(the server updates with tokenage server update)."
         )
-    if not has_server and not has_client:
-        print("tokenage: nothing to update on this machine.")
         return 0
 
+    print("  ▶ Installed client")
+    print(
+        f"  Installed client  {client_version()}  "
+        f"(commit {client_commit() or 'unknown'})"
+    )
     if check:
-        print("")
-        result = 0
-        if has_server:
-            result = update_server(check=True, dry_run=False)
-        if has_client:
-            print(
-                "  Client update availability cannot be checked: the hosted "
-                "installer does not publish a client version."
-            )
-        return result
-
+        print(
+            "  Client update availability cannot be checked: the hosted "
+            "installer does not publish a client version."
+        )
+        return 0
     if dry_run:
-        print("\n  Planned commands:")
-        if has_server and root is not None:
-            print(f"  bash {root / 'scripts' / 'update.sh'}")
-        if has_client:
-            print(f"  sh <{INSTALLER_PATH} from the signed-in server>")
+        print(f"  sh <{INSTALLER_PATH} from the signed-in server>")
         return 0
 
-    print("")
-    if has_client:
-        print("  ▶ Updating client")
-        if update_client():
-            return 1
-        print("  ✓ client updated")
-        print("  ✓ credentials preserved")
-    if has_server and root is not None:
-        print("  ▶ Updating server")
-        if update_server(check=False, dry_run=False):
-            return 1
-
-    print("")
-    print("  ✓ tokenage is up to date")
+    print("  ▶ Updating client")
+    if update_client():
+        return 1
+    print("  ✓ client updated")
+    print("  ✓ credentials preserved")
     return 0

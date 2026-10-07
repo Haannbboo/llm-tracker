@@ -15,7 +15,7 @@ import pytest
 
 CLIENT_DIR = Path(__file__).resolve().parents[2] / "client"
 # `src` is the server package; the rest are the server's framework stack, which a
-# client-only install does not install. pyyaml is deliberately allowed.
+# client-only install does not install.
 FORBIDDEN_ROOTS = {"src", "gunicorn", "fastapi", "sqlalchemy", "uvicorn"}
 
 
@@ -46,7 +46,7 @@ def test_client_requirements_stay_small() -> None:
         for line in requirements.splitlines()
         if line.strip() and not line.startswith("#")
     }
-    assert names == {"httpx", "pydantic", "pyyaml"}
+    assert names == {"httpx", "pydantic"}
 
 
 def test_server_cli_does_not_import_the_client() -> None:

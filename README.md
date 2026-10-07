@@ -101,10 +101,11 @@ is the client's job:
 tokenage setup
 ```
 
-It points the agents installed on this machine at the local OTLP collector, and
+It points the agents installed on this machine at the collector of the server
+the client signed in to (`tokenage login --server URL`), and
 leaves every setting it does not own alone. `tokenage setup --disable` takes
-them back off again. `tokenage status` shows what is installed, whether it
-runs, and where the agents point.
+them back off again. `tokenage status` shows this client's sign-in and where the
+agents point.
 
 ### 4. Generate your first tracked event
 
@@ -147,7 +148,7 @@ tokenage codex exec "say hello in one sentence"
 The same command also covers everything that is not a tracked run:
 
 ```bash
-# Components, services, agents
+# Client sign-in and agents
 tokenage status
 tokenage setup
 tokenage update --check
@@ -167,7 +168,6 @@ tokenage --json -- codex
 tokenage --usage-only -- codex exec "say hello in one sentence"
 tokenage --wait-ms 5000 -- codex exec "say hello in one sentence"
 tokenage --summary-dest file --summary-file /tmp/llm-summary.json -- claude
-tokenage --proxy-env -- some-openai-compatible-cli
 tokenage --no-summary -- codex exec "say hello"
 ```
 
@@ -211,8 +211,8 @@ tokenage server stop
 
 `tokenage server start` turns the services on, and `tokenage server
 bootstrap` reinstalls, rebuilds the dashboard and restarts the API so the new
-bundle is served. `tokenage status` is a different command: it reports the
-installed components and whether they run.
+bundle is served. `tokenage server update` updates the server clone. `tokenage status` is a
+different command: it reports this client, not the services.
 
 Runtime files live under `~/.tokenage/run/`. Logs are written to `logs/`.
 
@@ -283,12 +283,6 @@ providers:
     auth_scheme: x-api-key
     models:
       claude-sonnet-4-6: {}
-```
-
-Or let the wrapper set both for one child process:
-
-```bash
-tokenage --proxy-env -- some-openai-compatible-cli
 ```
 
 Supported proxy paths include:

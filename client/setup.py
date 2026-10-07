@@ -17,12 +17,7 @@ from typing import Any
 import tomllib
 
 from client.agents import DONE, SKIPPED, claude, codex, kilo, opencode
-from client.paths import (
-    PACKAGE_ROOT,
-    display_endpoint,
-    local_server_info,
-    server_root,
-)
+from client.paths import PACKAGE_ROOT, display_endpoint
 
 AGENT_MODULES = {"codex": codex, "claude": claude, "opencode": opencode, "kilo": kilo}
 
@@ -71,23 +66,12 @@ def installed_agents() -> list[str]:
 
 
 def intended_endpoint() -> str | None:
-    """The collector this install wants agents to report at, or None.
-
-    Offline and cheap, because `status` asks on every run: it reads what login
-    recorded. A machine signed in to a remote server never falls back to the
-    local collector — that would quietly point agents at a collector which is
-    not their server's. `setup` uses `discover_collector`, which can go and ask.
+    """The collector recorded at login, or None. Offline and cheap, because
+    `status` asks on every run. `setup` uses `discover_collector`, which can ask.
     """
-    from client.auth import load_credentials, stored_collector
+    from client.auth import stored_collector
 
-    stored = stored_collector()
-    if stored:
-        return stored
-    if load_credentials():
-        return None
-    if server_root() is not None:
-        return local_server_info()["otlp_logs_endpoint"]
-    return None
+    return stored_collector()
 
 
 def discover_collector() -> str | None:
@@ -279,8 +263,7 @@ def run_setup(*, disable: bool) -> int:
     endpoint = discover_collector() or expected
     if not endpoint:
         print(
-            "No collector to wire agents to. Sign in with tokenage login, "
-            "or install the server component.",
+            "No server configured. Run tokenage login --server URL.",
             file=sys.stderr,
         )
         return 1

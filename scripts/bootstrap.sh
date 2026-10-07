@@ -234,6 +234,9 @@ for key, label in (
     if not detected:
         skipped += 1
         print(f"  {GREEN}✓{RESET} {label}: skipped")
+    elif agent.get("expected_endpoint") is None:
+        skipped += 1
+        print(f"  {GREEN}✓{RESET} {label}: skipped (no server configured; run tokenage login --server URL)")
     elif status == "ready" and endpoint_matches:
         ready += 1
         print(f"  {GREEN}✓{RESET} {label}: ready")

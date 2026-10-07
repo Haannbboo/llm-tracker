@@ -90,26 +90,7 @@ def test_setup_is_idempotent(machine: Path) -> None:
 
 def test_setup_needs_a_collector(machine: Path, capsys) -> None:
     assert setup.run_setup(disable=False) == 1
-    assert "No collector to wire agents to" in capsys.readouterr().err
-
-
-def test_setup_uses_the_local_collector_when_the_server_is_installed(
-    machine: Path, capsys, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    server_root = machine / ".tokenage" / "src"
-    (server_root / ".venv" / "bin").mkdir(parents=True)
-    (server_root / ".venv" / "bin" / "python").write_text("#!/bin/sh\n")
-    (server_root / ".venv" / "bin" / "python").chmod(0o755)
-    monkeypatch.setenv("TOKENAGE_ROOT", str(server_root))
-    (machine / ".tokenage" / "config.yaml").write_text(
-        "server:\n  host: 127.0.0.1\n  otlp_port: 4102\n", encoding="utf-8"
-    )
-    assert setup.run_setup(disable=False) == 0
-    assert "http://localhost:4102/v1/logs" in capsys.readouterr().out
-    claude = json.loads((machine / ".claude" / "settings.json").read_text())
-    assert claude["env"]["OTEL_EXPORTER_OTLP_LOGS_ENDPOINT"] == (
-        "http://localhost:4102/v1/logs"
-    )
+    assert "login --server URL" in capsys.readouterr().err
 
 
 def test_setup_disable_removes_only_our_keys(machine: Path, capsys) -> None:

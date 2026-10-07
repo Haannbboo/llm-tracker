@@ -264,6 +264,26 @@ def test_bootstrap_reports_local_setup_health_ready_and_skipped_agents(tmp_path)
     assert "Agents: 1 ready, 3 skipped, 0 failed" in output
 
 
+def test_bootstrap_skips_agent_check_when_client_has_no_server(tmp_path):
+    home = tmp_path / "home"
+    home.mkdir()
+    ports = (4200, 4201, 4202)
+    unsigned = {
+        **_agent_health(status="missing_config", expected_endpoint="x"),
+        "expected_endpoint": None,
+    }
+    setup_health = _setup_health(otlp_port=ports[2], claude=unsigned, codex=unsigned)
+    fake_repo = _make_fake_bootstrap_repo(tmp_path, home, ports=ports)
+    bin_dir = _make_fake_curl(tmp_path, open_ports=set(ports))
+    _add_fake_agent(bin_dir, "claude")
+
+    result = _run_bootstrap(fake_repo, home, bin_dir, setup_health=setup_health)
+
+    output = result.stdout + result.stderr
+    assert result.returncode == 0, output
+    assert "no server configured" in output
+
+
 def test_bootstrap_fails_when_detected_agent_setup_health_is_not_ready(tmp_path):
     home = tmp_path / "home"
     home.mkdir()

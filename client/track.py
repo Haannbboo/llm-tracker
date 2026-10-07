@@ -5,26 +5,21 @@ that is already running, then ask for the summary of everything recorded after
 that watermark. Nothing is started and nothing is stopped, so a run never
 leaves a process behind and never has to merge a scratch database.
 
-The API is the local one unless this machine is signed in, in which case it is
-the signed-in server and the summary comes back over the network.
+The API is the server this machine signed in to; the summary comes back over
+the network.
 """
 
 from __future__ import annotations
 
 import json
-import os
-import socket
 import subprocess
 import sys
 import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlparse
 
 import httpx
-
-from client.paths import local_server_info
 
 
 class ApiError(RuntimeError):
@@ -38,7 +33,6 @@ class RunOptions:
     summary_file: str | None = None
     wait_ms: int = 3000
     poll_ms: int = 250
-    proxy_env: bool = False
     no_summary: bool = False
     quiet_child_output: bool = False
 
@@ -51,8 +45,8 @@ class UsageApiClient:
 
         credentials = load_credentials() or {}
         if base_url is None:
-            base_url = credentials.get("server_url") or local_server_info()["api_url"]
-        self.base_url = str(base_url)
+            base_url = credentials.get("server_url")
+        self.base_url = str(base_url) if base_url else None
         if token is None:
             candidate = credentials.get("cli_token")
             token = candidate if isinstance(candidate, str) else None
@@ -91,6 +85,8 @@ class UsageApiClient:
     def _get_json(
         self, path: str, *, params: dict[str, Any] | None = None
     ) -> dict[str, Any]:
+        if not self.base_url:
+            raise ApiError("no server configured — run tokenage login --server URL")
         headers = {}
         if self.token:
             headers["Authorization"] = f"Bearer {self.token}"
@@ -119,7 +115,6 @@ def options_from_args(args) -> RunOptions:
         summary_file=args.summary_file,
         wait_ms=args.wait_ms,
         poll_ms=args.poll_ms,
-        proxy_env=args.proxy_env,
         no_summary=args.no_summary,
         quiet_child_output=usage_only,
     )
@@ -129,35 +124,6 @@ def child_output_kwargs(options: RunOptions) -> dict[str, Any]:
     if not options.quiet_child_output:
         return {}
     return {"stdout": subprocess.DEVNULL, "stderr": subprocess.DEVNULL}
-
-
-def build_child_env(options: RunOptions) -> dict[str, str] | None:
-    """Point the child at the running collector, and at the proxy with --proxy-env.
-
-    Both use the long-running services. There is no per-run proxy.
-    """
-    if not options.proxy_env:
-        return None
-    info = local_server_info()
-    parsed = urlparse(info["proxy_url"])
-    try:
-        with socket.create_connection(
-            (
-                parsed.hostname or "localhost",
-                parsed.port or (443 if parsed.scheme == "https" else 80),
-            ),
-            timeout=1,
-        ):
-            pass
-    except OSError as exc:
-        raise ValueError(
-            "--proxy-env requires a running proxy at the configured address"
-        ) from exc
-    env = os.environ.copy()
-    env.pop("TOKENAGE_DB_URL", None)
-    env["OPENAI_BASE_URL"] = f"{info['proxy_url']}/v1"
-    env["ANTHROPIC_BASE_URL"] = info["proxy_url"]
-    return env
 
 
 def _normalize_return_code(returncode: int) -> int:
@@ -206,7 +172,6 @@ def poll_summary(
 
 
 def run_with_tracking(*, command: list[str], options: RunOptions) -> int:
-    env = build_child_env(options)
     client = UsageApiClient()
     before_ts: int | None
     try:
@@ -220,7 +185,6 @@ def run_with_tracking(*, command: list[str], options: RunOptions) -> int:
 
     completed = subprocess.run(
         command,
-        env=env,
         **child_output_kwargs(options),
     )
     child_code = _normalize_return_code(int(completed.returncode))

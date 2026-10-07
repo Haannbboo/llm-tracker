@@ -27,11 +27,11 @@ commands:
   login [--server URL]      sign in to a server and wire detected agents
   logout [--keep-agents]    remove this machine's credentials
   setup [--disable]         point detected agents at a collector
-  status [--json]           report installed components and whether they run
-  update [--check]          update whichever components are installed
+  status [--json]           report this client: sign-in, agents, wiring
+  update [--check]          update the client
   client <command>          manage this device's background client service
                             (start, stop, restart, status, run, health)
-  server <command>          start, stop, restart, bootstrap, status, token
+  server <command>          start, stop, restart, bootstrap, status, update, token
                             (requires the server component)
 
 anything else is run with usage tracking, e.g. `tokenage codex exec "hi"`
@@ -97,11 +97,6 @@ def _build_wrapper_parser() -> argparse.ArgumentParser:
         help="poll interval in milliseconds while waiting for the summary",
     )
     parser.add_argument(
-        "--proxy-env",
-        action="store_true",
-        help="set OPENAI_BASE_URL and ANTHROPIC_BASE_URL for the child command",
-    )
-    parser.add_argument(
         "--no-summary",
         action="store_true",
         help="run tracking but skip printing the usage summary",
@@ -153,7 +148,7 @@ def _build_subcommand(name: str) -> argparse.ArgumentParser:
     if name == "status":
         parser = argparse.ArgumentParser(
             prog=f"{PROG} status",
-            description="Report installed components and whether they run.",
+            description="Report this client: sign-in, agents and wiring.",
         )
         parser.add_argument(
             "--json", action="store_true", help="print one compact JSON line"
@@ -163,16 +158,13 @@ def _build_subcommand(name: str) -> argparse.ArgumentParser:
     if name == "update":
         parser = argparse.ArgumentParser(
             prog=f"{PROG} update",
-            description="Update whichever components are installed.",
+            description="Update the client.",
         )
         parser.add_argument(
             "--check", action="store_true", help="report without changing anything"
         )
         parser.add_argument(
             "--dry-run", action="store_true", help="print the planned commands"
-        )
-        parser.add_argument(
-            "--scope", choices=("all", "client", "server"), default="all"
         )
         _add_banner_flag(parser)
         return parser
@@ -252,7 +244,6 @@ def _run_subcommand(name: str, argv: list[str]) -> int:
         return update.run_update(
             check=args.check,
             dry_run=args.dry_run,
-            scope=args.scope,
         )
     if name == "client":
         from client import service
