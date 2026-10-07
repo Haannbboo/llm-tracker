@@ -50,6 +50,9 @@ jobs:
       - name: Ruff format and lint
         run: python -m ruff format --check . && python -m ruff check src/ client/ protocol/ scripts/ tests/
 
+      - name: Import contracts
+        run: lint-imports
+
       - name: Mypy type check
         run: python -m mypy src/ client/ protocol/ scripts/ --ignore-missing-imports
 

@@ -18,3 +18,4 @@ supervisor>=4.2
 sqlalchemy>=2.1.1,<2.2
 psycopg[binary]>=3.2
 pymysql>=1.1
+import-linter>=2.0

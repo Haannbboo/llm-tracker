@@ -1,0 +1,31 @@
+[importlinter]
+root_packages =
+    client
+    src
+    protocol
+include_external_packages = True
+
+[importlinter:contract:client-is-standalone]
+name = client imports neither the server nor its framework stack
+type = forbidden
+source_modules = client
+forbidden_modules =
+    src
+    fastapi
+    gunicorn
+    sqlalchemy
+    uvicorn
+
+[importlinter:contract:server-not-client]
+name = server never imports the client
+type = forbidden
+source_modules = src
+forbidden_modules = client
+
+[importlinter:contract:protocol-is-leaf]
+name = protocol imports neither client nor server
+type = forbidden
+source_modules = protocol
+forbidden_modules =
+    client
+    src

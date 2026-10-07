@@ -210,7 +210,8 @@ Key behaviors:
 
 ## Durable repo notes
 
-- `client/` must never import `src`. A client-only install has no server clone, so the dependency would break the whole client; `tests/client/test_no_server_imports.py` enforces it.
+- Three Python packages, each with a metadata-only `pyproject.toml` (installers still use `requirements.txt`): `client/`, `src/` (server), `protocol/` (shared pydantic wire schemas). Import rules: client ↛ src, src ↛ client, protocol ↛ client/src. `plugins/` and `scripts/tokenage` belong to the client component (shipped in the hosted snapshot) but stay where they are.
+- `client/` must never import `src`. A client-only install has no server clone, so the dependency would break the whole client; `.importlinter` (run by pre-commit and CI via `lint-imports`) enforces it.
 - One auth model: every request resolves to a user. `auth.provider` is `local` (default; direct loopback requests are the built-in owner, others need a token or `tokenage server login-link`) or `google`. There is no auth-off mode; don't add `user is None` branches.
 - Runtime API port is config-driven. Do not assume `4001`; read `~/.tokenage/config.yaml`. This repo has recently run the API on `4004`.
 - Service control uses `~/.tokenage/supervisord.conf`.

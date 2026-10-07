@@ -1,0 +1,10 @@
+# Metadata only: installers still use requirements.txt and copy the tree (phase 9 wires packaging).
+[project]
+name = "tokenage-client"
+description = "tokenage client: tracking wrapper, agent setup, device service"
+requires-python = ">=3.12"
+dynamic = ["version", "dependencies"]
+
+[tool.setuptools.dynamic]
+version = { file = ["VERSION"] }
+dependencies = { file = ["requirements.txt"] }
