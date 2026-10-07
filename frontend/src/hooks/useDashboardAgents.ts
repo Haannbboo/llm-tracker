@@ -3,7 +3,6 @@ import type { DeviceStatus, SetupDiagnostics } from '../types'
 
 export type LocalAgentInfo = {
   found: boolean
-  path: string | null
 }
 
 export type AgentsData = {
@@ -35,17 +34,11 @@ export function useDashboardAgents(): AgentsData {
         if (detected) {
           const agents: Record<string, LocalAgentInfo> = {}
           for (const [name, info] of Object.entries(detected)) {
-            agents[name] = { found: Boolean(info?.found), path: info?.path ?? null }
+            agents[name] = { found: Boolean(info?.found) }
           }
           setLocalAgents(agents)
         }
-        if (status.expected || status.summary || status.agents) {
-          setSetupDiagnostics({
-            expected: status.expected,
-            summary: status.summary,
-            agents: status.agents,
-          })
-        }
+        if (status.agents) setSetupDiagnostics({ agents: status.agents })
       } catch {}
     }
 

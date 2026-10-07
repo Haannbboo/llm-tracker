@@ -15,17 +15,8 @@ export function DeviceStatusDetail({ status }: Props) {
     )
   }
 
-  const detected = (status.detected ?? {}) as Record<
-    string,
-    { found?: boolean; path?: string | null }
-  >
-  const diagnostics = status.agents
-    ? ({
-        expected: status.expected,
-        summary: status.summary,
-        agents: status.agents,
-      } as SetupDiagnostics)
-    : null
+  const detected = (status.detected ?? {}) as Record<string, { found?: boolean }>
+  const diagnostics: SetupDiagnostics | null = status.agents ? { agents: status.agents } : null
 
   const foundLocalAgents = Object.entries(detected).filter(([, info]) => info?.found)
   const foundLocalAgentCount = foundLocalAgents.length
@@ -59,7 +50,6 @@ export function DeviceStatusDetail({ status }: Props) {
               <tr>
                 <th>{t('Agent')}</th>
                 <th>{t('Status')}</th>
-                <th>{t('Detected:')}</th>
               </tr>
             </thead>
             <tbody>
@@ -71,13 +61,10 @@ export function DeviceStatusDetail({ status }: Props) {
                       {info?.found ? t('Ready') : t('Not found')}
                     </span>
                   </td>
-                  <td style={{ fontSize: '12px', fontFamily: 'var(--font-mono)', color: info?.path ? 'var(--text-secondary)' : 'var(--text-muted)' }}>
-                    {info?.path || t('Unknown')}
-                  </td>
                 </tr>
               )) : (
                 <tr>
-                  <td colSpan={3} style={{ textAlign: 'center', padding: '24px', color: 'var(--text-muted)' }}>
+                  <td colSpan={2} style={{ textAlign: 'center', padding: '24px', color: 'var(--text-muted)' }}>
                     {t('No local Agent')}
                   </td>
                 </tr>

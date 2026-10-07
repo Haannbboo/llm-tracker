@@ -32,7 +32,7 @@ type OverviewTabProps = {
   setupSummaryColor: string
   verifyTimeoutGuidance: string
   setupDiagnostics: any
-  localAgents: Record<string, { found: boolean; path: string | null }> | null
+  localAgents: Record<string, { found: boolean }> | null
   sources: string[]
   error: string | null
   onNavigateToLogs: (filters?: any) => void
@@ -297,9 +297,6 @@ export function OverviewTab({
                               <span style={{ fontSize: '11px', color: info.found ? 'var(--color-green)' : 'var(--text-muted)', fontWeight: 700 }}>
                                 {info.found ? t('Ready') : t('Not found')}
                               </span>
-                            </div>
-                            <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '3px', wordBreak: 'break-all' }}>
-                              {t('Detected:')} {info.path || t('Unknown')}
                             </div>
                           </div>
                         </div>

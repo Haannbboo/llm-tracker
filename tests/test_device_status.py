@@ -31,17 +31,8 @@ def _report(**overrides) -> dict:
         "client_version": "0.1.200",
         "client_commit": "a" * 40,
         "collected_at": 1770000000,
-        "expected": {
-            "otlp_endpoint": "http://localhost:4005",
-            "otlp_logs_endpoint": ENDPOINT,
-        },
-        "summary": {
-            "total_agents": 4,
-            "configured_agents": 1,
-            "matching_agents": 1,
-        },
-        "agents": {"claude": CLAUDE, "codex": CODEX},
-        "detected": {"claude": {"found": True, "path": "/usr/bin/claude"}},
+        "agents": {"claude": dict(CLAUDE), "codex": dict(CODEX)},
+        "detected": {"claude": {"found": True}},
     }
     report.update(overrides)
     return report
@@ -87,7 +78,7 @@ def test_post_persists_and_get_returns_the_report(api_module, fresh_db):
     assert device["client_version"] == "0.1.200"
     assert device["client_commit"] == "a" * 40
     assert isinstance(device["reported_at"], int) and device["reported_at"] > 0
-    assert device["status"]["expected"]["otlp_logs_endpoint"] == ENDPOINT
+    assert device["status"]["agents"]["claude"]["expected_endpoint"] == ENDPOINT
     assert device["status"]["agents"]["claude"]["status"] == "ready"
     assert "installation_key" not in json.dumps(device)
 
@@ -194,20 +185,29 @@ def test_get_returns_401_without_a_token_when_auth_enabled(
     )
 
 
-def test_post_rejects_unknown_agent_keys_and_overlong_strings(api_module, fresh_db):
+def test_post_accepts_agents_the_server_does_not_know(api_module, fresh_db):
+    # Clients release independently; a new agent must not be rejected.
     client = TestClient(api_module.app)
+    report = _report(installation_key=INSTALLATION_KEY)
+    report["agents"]["gemini"] = dict(CLAUDE, status="some_new_status")
+    report["detected"]["gemini"] = {"found": True}
+    assert client.post("/devices/status", json=report).status_code == 204
 
-    unknown_agent = _report(installation_key=INSTALLATION_KEY)
-    unknown_agent["agents"]["gemini"] = CLAUDE
-    assert client.post("/devices/status", json=unknown_agent).status_code == 422
+
+def test_post_rejects_overlong_strings_and_oversized_maps(api_module, fresh_db):
+    client = TestClient(api_module.app)
 
     overlong = _report(installation_key=INSTALLATION_KEY)
     overlong["agents"]["claude"]["configured_endpoint"] = "x" * 513
     assert client.post("/devices/status", json=overlong).status_code == 422
 
-    overlong_path = _report(installation_key=INSTALLATION_KEY)
-    overlong_path["detected"]["claude"]["path"] = "x" * 513
-    assert client.post("/devices/status", json=overlong_path).status_code == 422
+    long_name = _report(installation_key=INSTALLATION_KEY)
+    long_name["agents"]["x" * 33] = dict(CLAUDE)
+    assert client.post("/devices/status", json=long_name).status_code == 422
+
+    too_many = _report(installation_key=INSTALLATION_KEY)
+    too_many["detected"] = {f"agent{i}": {"found": True} for i in range(33)}
+    assert client.post("/devices/status", json=too_many).status_code == 422
 
 
 def test_get_returns_null_status_for_corrupt_stored_json(api_module, fresh_db):
@@ -217,8 +217,6 @@ def test_get_returns_null_status_for_corrupt_stored_json(api_module, fresh_db):
     upsert_device_status(
         hash_token(INSTALLATION_KEY),
         "not-json",
-        None,
-        None,
         db_path=fresh_db.db_path,
     )
 

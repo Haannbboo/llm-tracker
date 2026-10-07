@@ -634,8 +634,6 @@ def _create_device_status_table(engine: Engine) -> None:
         CREATE TABLE device_status (
             installation_hash TEXT PRIMARY KEY,
             status_json TEXT NOT NULL,
-            client_version TEXT,
-            client_commit TEXT,
             reported_at BIGINT NOT NULL
         )
     """

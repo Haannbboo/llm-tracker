@@ -19,8 +19,6 @@ def _now_micros() -> int:
 def upsert_device_status(
     installation_hash: str,
     status_json: str,
-    client_version: str | None,
-    client_commit: str | None,
     *,
     db_path: str | None = None,
 ) -> None:
@@ -34,15 +32,11 @@ def upsert_device_status(
                 DeviceStatus(
                     installation_hash=installation_hash,
                     status_json=status_json,
-                    client_version=client_version,
-                    client_commit=client_commit,
                     reported_at=reported_at,
                 )
             )
         else:
             row.status_json = status_json
-            row.client_version = client_version
-            row.client_commit = client_commit
             row.reported_at = reported_at
         session.commit()
 

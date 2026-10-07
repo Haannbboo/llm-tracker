@@ -229,7 +229,6 @@ export const zh: Record<string, string> = {
   'Not found': '未找到',
   'Ready': '就绪',
   'Unknown': '未知',
-  'Detected:': '检测到：',
   'Detected from your local config and available commands.': '根据你的本地配置和可用命令检测。',
 
   // Empty state / onboarding (Commit 1 reframe)

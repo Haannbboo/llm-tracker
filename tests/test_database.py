@@ -5063,8 +5063,6 @@ def test_migrate_database_creates_device_status_table(
     assert {
         "installation_hash",
         "status_json",
-        "client_version",
-        "client_commit",
         "reported_at",
     }.issubset(schema_migrations_module._table_column_names(engine, "device_status"))
 

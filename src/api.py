@@ -14,10 +14,11 @@ from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response
 from fastapi.responses import JSONResponse
 from fastapi.routing import APIRoute
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, model_validator
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from protocol import MAX_SUPPORTED_GENERATION, MIN_SUPPORTED_GENERATION
+from protocol.device_status import DeviceStatusReport as ProtocolDeviceStatusReport
 from src.config.app import (
     CONFIG,
     CONFIG_PATH,
@@ -191,45 +192,10 @@ class EvaluationConfigUpdate(BaseModel):
     evaluator: str
 
 
-DEVICE_AGENT_KEY = Literal["claude", "codex", "opencode", "kilo"]
-
-
-class DeviceExpectedEndpoints(BaseModel):
-    otlp_endpoint: str | None = Field(default=None, max_length=512)
-    otlp_logs_endpoint: str | None = Field(default=None, max_length=512)
-
-
-class DeviceAgentHealth(BaseModel):
-    configured: bool
-    endpoint_matches: bool | None = None
-    configured_endpoint: str | None = Field(default=None, max_length=512)
-    expected_endpoint: str | None = Field(default=None, max_length=512)
-    status: Literal["ready", "missing_config", "wrong_endpoint", "configured"]
-
-
-class DeviceAgentDetected(BaseModel):
-    found: bool
-    path: str | None = Field(default=None, max_length=512)
-
-
-class DeviceStatusSummary(BaseModel):
-    total_agents: int
-    configured_agents: int
-    matching_agents: int
-
-
-class DeviceStatusReport(BaseModel):
+class DeviceStatusReport(ProtocolDeviceStatusReport):
     # Unbounded on purpose: a malformed secret must never be echoed back in a
     # validation-error body, so the handler checks it and returns a static 422.
     installation_key: str | None = None
-    device_name: str = Field(max_length=64)
-    client_version: str | None = Field(default=None, max_length=32)
-    client_commit: str | None = Field(default=None, max_length=64)
-    collected_at: int
-    expected: DeviceExpectedEndpoints
-    summary: DeviceStatusSummary | None = None
-    agents: dict[DEVICE_AGENT_KEY, DeviceAgentHealth]
-    detected: dict[DEVICE_AGENT_KEY, DeviceAgentDetected]
 
 
 def _parse_device_status_json(raw: str) -> dict | None:
@@ -725,8 +691,8 @@ def _device_status_entry(row, device: Device | None = None) -> dict:
         "device_name": device.device_name
         if device is not None
         else (status or {}).get("device_name"),
-        "client_version": row.client_version,
-        "client_commit": row.client_commit,
+        "client_version": (status or {}).get("client_version"),
+        "client_commit": (status or {}).get("client_commit"),
         "reported_at": row.reported_at,
         "status": status,
     }
@@ -765,8 +731,6 @@ def post_device_status(
             report.model_dump(exclude={"installation_key"}, mode="json"),
             sort_keys=True,
         ),
-        report.client_version,
-        report.client_commit,
     )
     return Response(status_code=204)
 

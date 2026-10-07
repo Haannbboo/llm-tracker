@@ -36,10 +36,10 @@ test('detected agents use readable display labels instead of raw internal names 
   assert.match(detailDetectedBlock, /getAgentDisplayName\(name\)/)
 })
 
-test('detected agent rows show status and path without duplicating test commands', () => {
+test('detected agent rows show status without local paths or test commands', () => {
   assert.match(detailDetectedBlock, /\{info\?\.found \? t\('Ready'\) : t\('Not found'\)\}/)
-  assert.match(detailDetectedBlock, /\{t\('Detected:'\)\}/)
-  assert.match(detailDetectedBlock, /info\?\.path \|\| t\('Unknown'\)/)
+  assert.doesNotMatch(detailDetectedBlock, /info\?\.path/)
+  assert.doesNotMatch(detectedBlock, /info\.path/)
   assert.doesNotMatch(detailDetectedBlock, /\{t\('Test:'\)\}/)
 })
 
@@ -72,7 +72,6 @@ test('chinese translations include detected-agent onboarding strings', () => {
     'Detected from your local config and available commands.',
     'Ready',
     'Unknown',
-    'Detected:',
     'No local Agent',
     'No report yet. Start the tokenage client service on this device.',
   ]) {

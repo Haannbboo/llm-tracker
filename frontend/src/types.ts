@@ -246,15 +246,6 @@ export type SetupAgentHealth = {
 }
 
 export type SetupDiagnostics = {
-  expected: {
-    otlp_endpoint: string
-    otlp_logs_endpoint: string
-  }
-  summary: {
-    total_agents: number
-    configured_agents: number
-    matching_agents: number
-  }
   agents: Record<string, SetupAgentHealth>
 }
 

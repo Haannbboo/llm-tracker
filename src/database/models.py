@@ -71,8 +71,6 @@ class DeviceStatus(Base):
 
     installation_hash: Mapped[str] = mapped_column(String, primary_key=True)
     status_json: Mapped[str] = mapped_column(Text, nullable=False)
-    client_version: Mapped[str | None] = mapped_column(String, nullable=True)
-    client_commit: Mapped[str | None] = mapped_column(String, nullable=True)
     reported_at: Mapped[int] = mapped_column(BigInteger, nullable=False)
 
 
