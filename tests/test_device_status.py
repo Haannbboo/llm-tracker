@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import json
-
 from fastapi.testclient import TestClient
 
 INSTALLATION_KEY = "k" * 43
@@ -42,95 +40,89 @@ def _enable_auth(monkeypatch) -> None:
     import src.config.app
 
     monkeypatch.setitem(
-        src.config.app.CONFIG, "auth", {"enabled": True, "allowlist": []}
+        src.config.app.CONFIG, "auth", {"provider": "google", "allowlist": []}
     )
 
 
-def test_post_requires_a_valid_installation_key_when_auth_disabled(
-    api_module, fresh_db
-):
+def _device_client(api_module, fresh_db, email="a@example.com", key="d" * 43):
+    """A client carrying a device bearer token; returns (client, user, device)."""
+    from src.auth.tokens import mint_device_tokens, mint_token
+
+    _, user = mint_token(email, kind="web", db_path=fresh_db.db_path)
+    cli_token, _, device = mint_device_tokens(
+        user.id, key, "laptop", db_path=fresh_db.db_path
+    )
     client = TestClient(api_module.app)
-
-    assert client.post("/devices/status", json=_report()).status_code == 422
-    assert (
-        client.post(
-            "/devices/status", json=_report(installation_key="too-short")
-        ).status_code
-        == 422
-    )
+    client.headers["Authorization"] = f"Bearer {cli_token}"
+    return client, user, device
 
 
 def test_post_persists_and_get_returns_the_report(api_module, fresh_db):
-    from src.auth.tokens import hash_token
     from src.database import list_device_statuses
 
-    client = TestClient(api_module.app)
-    response = client.post(
-        "/devices/status", json=_report(installation_key=INSTALLATION_KEY)
-    )
-    assert response.status_code == 204
+    client, _, device = _device_client(api_module, fresh_db)
+    assert client.post("/devices/status", json=_report()).status_code == 204
 
     devices = client.get("/devices/status").json()["devices"]
     assert len(devices) == 1
-    device = devices[0]
-    assert device["device_id"] is None
-    assert device["device_name"] == "laptop"
-    assert device["client_version"] == "0.1.200"
-    assert device["client_commit"] == "a" * 40
-    assert isinstance(device["reported_at"], int) and device["reported_at"] > 0
-    assert device["status"]["agents"]["claude"]["expected_endpoint"] == ENDPOINT
-    assert device["status"]["agents"]["claude"]["status"] == "ready"
-    assert "installation_key" not in json.dumps(device)
-
-    rows = list_device_statuses(db_path=fresh_db.db_path)
-    assert len(rows) == 1
-    assert rows[0].installation_hash == hash_token(INSTALLATION_KEY)
-
-
-def test_post_ignores_a_client_supplied_installation_key_when_auth_enabled(
-    api_module, fresh_db, monkeypatch
-):
-    from src.auth.tokens import hash_token, mint_device_tokens, mint_token
-    from src.database import list_device_statuses
-
-    _enable_auth(monkeypatch)
-    _, user = mint_token("a@example.com", kind="web", db_path=fresh_db.db_path)
-    cli_token, _, device = mint_device_tokens(
-        user.id, "d" * 43, "laptop", db_path=fresh_db.db_path
-    )
-
-    client = TestClient(api_module.app)
-    client.headers["Authorization"] = f"Bearer {cli_token}"
-    response = client.post(
-        "/devices/status",
-        json=_report(installation_key=INSTALLATION_KEY, device_name="ignored"),
-    )
-    assert response.status_code == 204
+    entry = devices[0]
+    assert entry["device_id"] == device.id
+    assert entry["device_name"] == "laptop"
+    assert entry["client_version"] == "0.1.200"
+    assert entry["client_commit"] == "a" * 40
+    assert isinstance(entry["reported_at"], int) and entry["reported_at"] > 0
+    assert entry["status"]["agents"]["claude"]["expected_endpoint"] == ENDPOINT
+    assert entry["status"]["agents"]["claude"]["status"] == "ready"
 
     rows = list_device_statuses(db_path=fresh_db.db_path)
     assert [row.installation_hash for row in rows] == [device.installation_hash]
-    assert hash_token(INSTALLATION_KEY) != device.installation_hash
 
 
-def test_post_rejects_tokens_without_a_device_when_auth_enabled(
-    api_module, fresh_db, monkeypatch
-):
-    from src.auth.tokens import mint_token
+def test_post_has_no_installation_key_path(api_module, fresh_db):
+    """Tokenless callers are rejected and a body installation_key is ignored."""
+    from src.database import list_device_statuses
 
-    _enable_auth(monkeypatch)
-    token, _ = mint_token("a@example.com", kind="cli", db_path=fresh_db.db_path)
+    anonymous = TestClient(
+        api_module.app, client=("203.0.113.9", 5), base_url="http://tracker.example"
+    )
+    assert (
+        anonymous.post(
+            "/devices/status", json=_report(installation_key=INSTALLATION_KEY)
+        ).status_code
+        == 401
+    )
 
-    client = TestClient(api_module.app)
-    client.headers["Authorization"] = f"Bearer {token}"
+    client, _, device = _device_client(api_module, fresh_db)
     assert (
         client.post(
             "/devices/status", json=_report(installation_key=INSTALLATION_KEY)
         ).status_code
+        == 204
+    )
+    rows = list_device_statuses(db_path=fresh_db.db_path)
+    assert [row.installation_hash for row in rows] == [device.installation_hash]
+    assert "installation_key" not in rows[0].status_json
+
+
+def test_post_rejects_tokens_without_a_device(api_module, fresh_db, monkeypatch):
+    from src.auth.tokens import mint_token
+
+    token, _ = mint_token("a@example.com", kind="cli", db_path=fresh_db.db_path)
+
+    client = TestClient(api_module.app)
+    client.headers["Authorization"] = f"Bearer {token}"
+    assert client.post("/devices/status", json=_report()).status_code == 400
+
+
+def test_loopback_owner_without_a_device_token_cannot_post(api_module, fresh_db):
+    # The local owner resolves with no token, so there is no device to report as.
+    assert (
+        TestClient(api_module.app).post("/devices/status", json=_report()).status_code
         == 400
     )
 
 
-def test_get_is_user_scoped_when_auth_enabled(api_module, fresh_db, monkeypatch):
+def test_get_is_user_scoped(api_module, fresh_db, monkeypatch):
     from src.auth.tokens import mint_device_tokens, mint_token
 
     _enable_auth(monkeypatch)
@@ -171,56 +163,45 @@ def test_get_is_user_scoped_when_auth_enabled(api_module, fresh_db, monkeypatch)
     ]
 
 
-def test_get_returns_401_without_a_token_when_auth_enabled(
-    api_module, fresh_db, monkeypatch
-):
+def test_get_returns_401_without_a_token_when_google(api_module, fresh_db, monkeypatch):
     _enable_auth(monkeypatch)
     client = TestClient(api_module.app)
     assert client.get("/devices/status").status_code == 401
-    assert (
-        client.post(
-            "/devices/status", json=_report(installation_key=INSTALLATION_KEY)
-        ).status_code
-        == 401
-    )
+    assert client.post("/devices/status", json=_report()).status_code == 401
 
 
 def test_post_accepts_agents_the_server_does_not_know(api_module, fresh_db):
     # Clients release independently; a new agent must not be rejected.
-    client = TestClient(api_module.app)
-    report = _report(installation_key=INSTALLATION_KEY)
+    client, _, _ = _device_client(api_module, fresh_db)
+    report = _report()
     report["agents"]["gemini"] = dict(CLAUDE, status="some_new_status")
     report["detected"]["gemini"] = {"found": True}
     assert client.post("/devices/status", json=report).status_code == 204
 
 
 def test_post_rejects_overlong_strings_and_oversized_maps(api_module, fresh_db):
-    client = TestClient(api_module.app)
+    client, _, _ = _device_client(api_module, fresh_db)
 
-    overlong = _report(installation_key=INSTALLATION_KEY)
+    overlong = _report()
     overlong["agents"]["claude"]["configured_endpoint"] = "x" * 513
     assert client.post("/devices/status", json=overlong).status_code == 422
 
-    long_name = _report(installation_key=INSTALLATION_KEY)
+    long_name = _report()
     long_name["agents"]["x" * 33] = dict(CLAUDE)
     assert client.post("/devices/status", json=long_name).status_code == 422
 
-    too_many = _report(installation_key=INSTALLATION_KEY)
+    too_many = _report()
     too_many["detected"] = {f"agent{i}": {"found": True} for i in range(33)}
     assert client.post("/devices/status", json=too_many).status_code == 422
 
 
 def test_get_returns_null_status_for_corrupt_stored_json(api_module, fresh_db):
-    from src.auth.tokens import hash_token
     from src.database import upsert_device_status
 
-    upsert_device_status(
-        hash_token(INSTALLATION_KEY),
-        "not-json",
-        db_path=fresh_db.db_path,
-    )
+    client, _, device = _device_client(api_module, fresh_db)
+    upsert_device_status(device.installation_hash, "not-json", db_path=fresh_db.db_path)
 
-    devices = TestClient(api_module.app).get("/devices/status").json()["devices"]
+    devices = client.get("/devices/status").json()["devices"]
     assert len(devices) == 1
     assert devices[0]["status"] is None
 

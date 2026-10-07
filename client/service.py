@@ -298,15 +298,12 @@ def health_payload() -> dict[str, Any]:
     return report.model_dump(mode="json")
 
 
-def _report_target() -> tuple[str, dict[str, str], dict[str, str]] | None:
-    """(server URL, headers, extra body fields) for the report, or None.
+def _report_target() -> tuple[str, dict[str, str]] | None:
+    """(server URL, headers) for the report, or None when not signed in.
 
-    Signed in: the server this machine signed in to, with the CLI token. Not
-    signed in but a local server is installed: that server, which runs without
-    auth, identified by the installation key.
+    A client that has not signed in has no identity to report under.
     """
-    from client.auth import installation_key, load_credentials
-    from client.paths import local_server_info, server_root
+    from client.auth import load_credentials
 
     try:
         credentials = load_credentials() or {}
@@ -315,15 +312,7 @@ def _report_target() -> tuple[str, dict[str, str], dict[str, str]] | None:
     server_url = credentials.get("server_url")
     cli_token = credentials.get("cli_token")
     if server_url and cli_token:
-        return server_url, {"Authorization": f"Bearer {cli_token}"}, {}
-    if server_root() is not None:
-        # ponytail: second identity path exists only because an auth-off server
-        # cannot sign a client in; it goes away once local servers issue tokens.
-        return (
-            local_server_info()["api_url"],
-            {},
-            {"installation_key": installation_key()},
-        )
+        return server_url, {"Authorization": f"Bearer {cli_token}"}
     return None
 
 
@@ -333,10 +322,10 @@ def _report_once(state: dict[str, Any], payload: dict[str, Any]) -> None:
         target = _report_target()
         if target is None:
             return
-        server_url, headers, extra = target
+        server_url, headers = target
         response = httpx.post(
             f"{server_url}/devices/status",
-            json={**payload, **extra},
+            json=payload,
             headers=headers,
             timeout=REPORT_TIMEOUT_SECONDS,
         )

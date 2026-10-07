@@ -613,36 +613,20 @@ def test_report_signed_in_posts_with_bearer(device_home: Path, monkeypatch) -> N
     assert isinstance(state["last_report_at"], int)
 
 
-def test_report_local_posts_the_same_payload_with_installation_key(
+def test_report_unsigned_client_with_local_server_makes_no_request(
     device_home: Path, monkeypatch, tmp_path
 ) -> None:
     server_root = tmp_path / "server"
     (server_root / ".venv" / "bin").mkdir(parents=True)
     (server_root / ".venv" / "bin" / "python").write_text("", encoding="utf-8")
-    config = tmp_path / "config.yaml"
-    config.write_text(
-        "server:\n  host: 127.0.0.1\n  api_port: 4444\n", encoding="utf-8"
-    )
     monkeypatch.setenv("TOKENAGE_ROOT", str(server_root))
-    monkeypatch.setenv("TOKENAGE_CONFIG", str(config))
     fake = FakePost()
     monkeypatch.setattr(service.httpx, "post", fake)
     state = {"last_report_at": None, "last_report_status": None}
 
     service._report_once(state, service.health_payload())
 
-    assert len(fake.calls) == 1
-    call = fake.calls[0]
-    assert call["url"] == "http://localhost:4444/devices/status"
-    body = call["json"]
-    key = (
-        (device_home / ".tokenage" / "installation_key")
-        .read_text(encoding="utf-8")
-        .strip()
-    )
-    assert body.pop("installation_key") == key
-    assert body.keys() == service.health_payload().keys()
-    assert state["last_report_status"] == "ok"
+    assert fake.calls == []
 
 
 def test_report_without_server_makes_no_request(device_home: Path, monkeypatch) -> None:

@@ -190,36 +190,47 @@ def test_migrate_existing_auth_tokens_adds_device_link(
     )
 
 
-def test_auth_me_disabled(api_module):
-    response = TestClient(api_module.app).get("/auth/me")
-    assert response.status_code == 200
-    assert response.json() == {"auth_enabled": False, "user": None}
+def test_auth_me_local_loopback_is_the_owner(api_module):
+    body = TestClient(api_module.app).get("/auth/me").json()
+    assert body["provider"] == "local"
+    assert body["user"]["email"] == "owner@localhost"
+    assert body["token"] is None
 
 
-def test_auth_me_enabled(api_module, fresh_db, monkeypatch):
+def test_auth_me_local_remote_has_no_user(api_module):
+    remote = TestClient(
+        api_module.app, client=("203.0.113.9", 5), base_url="http://tracker.example"
+    )
+    assert remote.get("/auth/me").json() == {"provider": "local", "user": None}
+
+
+def test_auth_me_google(api_module, fresh_db, monkeypatch):
     import src.config.app
 
     monkeypatch.setitem(
-        src.config.app.CONFIG, "auth", {"enabled": True, "allowlist": []}
+        src.config.app.CONFIG, "auth", {"provider": "google", "allowlist": []}
     )
     token, _ = _mint(fresh_db, device_name="unraid-vm")
     client = TestClient(api_module.app)
 
-    assert client.get("/auth/me").status_code == 401
+    # Unresolved is a 200 with no user, never the loopback owner under google.
+    signed_out = {"provider": "google", "user": None}
+    assert client.get("/auth/me").json() == signed_out
     assert (
-        client.get("/auth/me", headers={"Authorization": "garbage"}).status_code == 401
+        client.get("/auth/me", headers={"Authorization": "garbage"}).json()
+        == signed_out
     )
     assert (
         client.get(
             "/auth/me", headers={"Authorization": "Bearer tokenage_cli_wrong"}
-        ).status_code
-        == 401
+        ).json()
+        == signed_out
     )
 
     response = client.get("/auth/me", headers={"Authorization": f"Bearer {token}"})
     assert response.status_code == 200
     body = response.json()
-    assert body["auth_enabled"] is True
+    assert body["provider"] == "google"
     assert body["user"]["email"] == "a@example.com"
     assert body["token"] == {"kind": "cli", "device_name": "unraid-vm"}
 
@@ -227,20 +238,20 @@ def test_auth_me_enabled(api_module, fresh_db, monkeypatch):
     with engine.begin() as conn:
         conn.execute(text("UPDATE auth_tokens SET revoked_at = 1"))
     revoked = client.get("/auth/me", headers={"Authorization": f"Bearer {token}"})
-    assert revoked.status_code == 401
-    assert revoked.json() == {"detail": "invalid token"}
+    assert revoked.json() == signed_out
+    assert client.get("/usage/count").status_code == 401
 
 
 def test_ingest_token_cannot_authenticate_api(api_module, fresh_db, monkeypatch):
     import src.config.app
 
     monkeypatch.setitem(
-        src.config.app.CONFIG, "auth", {"enabled": True, "allowlist": []}
+        src.config.app.CONFIG, "auth", {"provider": "google", "allowlist": []}
     )
     token, _ = _mint(fresh_db, kind="ingest")
 
     response = TestClient(api_module.app).get(
-        "/auth/me", headers={"Authorization": f"Bearer {token}"}
+        "/usage/count", headers={"Authorization": f"Bearer {token}"}
     )
 
     assert response.status_code == 401
@@ -251,7 +262,7 @@ def test_auth_me_db_error_is_500_not_none(api_module, monkeypatch):
     import src.config.app
 
     monkeypatch.setitem(
-        src.config.app.CONFIG, "auth", {"enabled": True, "allowlist": []}
+        src.config.app.CONFIG, "auth", {"provider": "google", "allowlist": []}
     )
 
     def boom(token):
@@ -265,14 +276,14 @@ def test_auth_me_db_error_is_500_not_none(api_module, monkeypatch):
     assert response.status_code == 500
 
 
-def test_auth_me_enabled_no_users_is_401_not_500(api_module, fresh_db, monkeypatch):
+def test_unknown_token_with_no_users_is_401_not_500(api_module, fresh_db, monkeypatch):
     import src.config.app
 
     monkeypatch.setitem(
-        src.config.app.CONFIG, "auth", {"enabled": True, "allowlist": []}
+        src.config.app.CONFIG, "auth", {"provider": "google", "allowlist": []}
     )
     response = TestClient(api_module.app).get(
-        "/auth/me", headers={"Authorization": "Bearer tokenage_cli_x"}
+        "/usage/count", headers={"Authorization": "Bearer tokenage_cli_x"}
     )
     assert response.status_code == 401
 

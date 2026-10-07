@@ -10,7 +10,7 @@ import logging
 import time
 from datetime import datetime, timezone
 
-from sqlalchemy import select, update
+from sqlalchemy import or_, select, update
 from sqlalchemy.exc import IntegrityError
 
 from .database.base_url import resolve_base_url_id
@@ -241,7 +241,7 @@ def record_tool_call(
                 legacy = session.scalar(
                     select(ToolCall).where(
                         ToolCall.tool_use_id == legacy_tool_use_id,
-                        ToolCall.user_id.is_(None),
+                        or_(ToolCall.user_id.is_(None), ToolCall.user_id == user_id),
                         ToolCall.session_id == legacy_session_id,
                         ToolCall.tool_name == normalized_tool_name,
                         ToolCall.client_source == client_source,

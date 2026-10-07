@@ -44,7 +44,7 @@ def _enable_auth(
         src.config.app.CONFIG,
         "auth",
         {
-            "enabled": True,
+            "provider": "google",
             "allowlist": list(allowlist),
             "google_client_id": client_id,
             "google_client_secret": client_secret,
@@ -159,17 +159,14 @@ def test_state_store_caps_pending_entries(api_module, isolated_home, monkeypatch
 # ------------------------------------------------------------- auth.google.*
 
 
-def test_google_login_404_when_auth_disabled(api_module):
+def test_google_login_404_under_local_provider(api_module):
     client = TestClient(api_module.app)
     assert client.get("/auth/google/login").status_code == 404
 
 
-def test_auth_routes_404_when_auth_disabled(api_module):
+def test_google_routes_404_under_local_provider(api_module):
     client = TestClient(api_module.app)
     assert client.get("/auth/google/callback?code=x&state=y").status_code == 404
-    assert client.post("/auth/logout").status_code == 404
-    assert client.get("/auth/devices").status_code == 404
-    assert client.post("/auth/devices/whatever/revoke").status_code == 404
 
 
 def test_google_login_503_without_credentials(api_module, monkeypatch):
@@ -203,7 +200,7 @@ def test_google_callback_happy_path(api_module, monkeypatch, fresh_db):
     me = client.get("/auth/me")
     assert me.status_code == 200
     body = me.json()
-    assert body["auth_enabled"] is True
+    assert body["provider"] == "google"
     assert body["user"]["email"] == "a@example.com"
     assert body["user"]["name"] == "Alice"
     assert body["token"] == {"kind": "web", "device_name": "browser"}
@@ -225,7 +222,7 @@ def test_second_login_retires_the_previous_web_session(
     second.get(f"/auth/google/callback?code=the-code&state={state}")
     assert second.get("/auth/me").status_code == 200
 
-    assert first.get("/auth/me").status_code == 401
+    assert first.get("/auth/me").json()["user"] is None
 
     # The surviving session is a cookie, not a listed device.
     assert second.get("/auth/devices").json()["devices"] == []
@@ -482,9 +479,8 @@ def test_logout_revokes_token_and_clears_cookie(api_module, monkeypatch, fresh_d
     assert logout.status_code == 204
     assert logout.cookies.get(SESSION_COOKIE) is None
 
-    me = client.get("/auth/me")
-    assert me.status_code == 401
-    assert me.json() == {"detail": "invalid token"}
+    assert client.get("/auth/me").json() == {"provider": "google", "user": None}
+    assert client.get("/usage").status_code == 401
 
 
 def test_google_callback_redirects_to_login_origin(api_module, monkeypatch, fresh_db):
@@ -591,7 +587,7 @@ def test_gate_allows_valid_cookie(api_module, monkeypatch, fresh_db):
 def test_gate_public_paths(api_module, monkeypatch, fresh_db):
     _enable_auth(monkeypatch)
     client = TestClient(api_module.app)
-    assert client.get("/auth/me").status_code == 401
+    assert client.get("/auth/me").json() == {"provider": "google", "user": None}
     assert client.get("/version").status_code == 200
     login = client.get("/auth/google/login", follow_redirects=False)
     assert login.status_code == 302
@@ -636,7 +632,7 @@ def test_gate_bearer_token_also_works(api_module, monkeypatch, fresh_db):
     assert response.status_code == 200
 
 
-def test_gate_inactive_when_auth_disabled(api_module, fresh_db):
+def test_gate_lets_loopback_owner_in_under_local_provider(api_module, fresh_db):
     client = TestClient(api_module.app)
     assert client.get("/usage").status_code == 200
 

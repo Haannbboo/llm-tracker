@@ -408,6 +408,7 @@ export const zh: Record<string, string> = {
   'Sign in required': '需要登录',
   'Sign in with your Google account to continue using tokenage.': '请使用 Google 账户登录以继续使用 tokenage。',
   'Sign in with Google': '使用 Google 登录',
+  'This server uses local sign-in. On the server machine, run `tokenage server login-link` and open the link it prints in this browser.': '此服务器使用本地登录。请在服务器上运行 `tokenage server login-link`，并在此浏览器中打开其输出的链接。',
   'This sign-in link was invalid or expired. Please try again.': '登录链接无效或已过期，请重试。',
   'Your Google account email is not verified.': '您的 Google 账户邮箱尚未验证。',
   'Your Google account is not on this server\'s allowlist.': '您的 Google 账户不在该服务器的允许列表中。',

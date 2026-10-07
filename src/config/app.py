@@ -45,7 +45,11 @@ def load_config(path: str | None = None) -> dict[str, Any]:
     server.setdefault("otlp_port", server["api_port"] + 1)
 
     auth = config.setdefault("auth", {})
-    auth.setdefault("enabled", False)
+    # `enabled` is only read to map pre-provider configs: true meant Google.
+    if "provider" not in auth:
+        auth["provider"] = "google" if auth.get("enabled") else "local"
+    if auth["provider"] not in ("local", "google"):
+        raise ValueError("auth.provider must be 'local' or 'google'")
     auth.setdefault("allowlist", [])
     # Google OAuth credentials: config.yaml by default (0600, alongside the
     # provider api_keys), with TOKENAGE_AUTH__GOOGLE_CLIENT_* overriding when

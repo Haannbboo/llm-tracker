@@ -211,6 +211,7 @@ Key behaviors:
 ## Durable repo notes
 
 - `client/` must never import `src`. A client-only install has no server clone, so the dependency would break the whole client; `tests/client/test_no_server_imports.py` enforces it.
+- One auth model: every request resolves to a user. `auth.provider` is `local` (default; direct loopback requests are the built-in owner, others need a token or `tokenage server login-link`) or `google`. There is no auth-off mode; don't add `user is None` branches.
 - Runtime API port is config-driven. Do not assume `4001`; read `~/.tokenage/config.yaml`. This repo has recently run the API on `4004`.
 - Service control uses `~/.tokenage/supervisord.conf`.
 - The configured DB may be remote Postgres/Supabase, not local SQLite. Worker and session-selector changes must tolerate slow or hung DB calls.

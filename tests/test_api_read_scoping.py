@@ -97,7 +97,7 @@ def tenant_reads(api_module, fresh_db):
     return tokens, user_ids
 
 
-@pytest.mark.parametrize("auth_mode", ("cookie", "bearer", "empty", "disabled"))
+@pytest.mark.parametrize("auth_mode", ("cookie", "bearer", "empty", "loopback"))
 @pytest.mark.parametrize("range_mode", ("daily", "raw"))
 def test_all_read_routes_isolate_data(
     api_module, tenant_reads, monkeypatch, auth_mode, range_mode
@@ -105,18 +105,19 @@ def test_all_read_routes_isolate_data(
     from src.config.app import CONFIG
 
     tokens, _ = tenant_reads
-    monkeypatch.setitem(CONFIG, "auth", {"enabled": auth_mode != "disabled"})
+    # "loopback": the local provider's owner (no token) owns none of the seeded
+    # rows, including the user-less "local" ones, so it reads nothing.
+    monkeypatch.setitem(
+        CONFIG, "auth", {"provider": "local" if auth_mode == "loopback" else "google"}
+    )
     client = TestClient(api_module.app)
     if auth_mode == "cookie":
         client.cookies.set("tokenage_session", tokens["cookie"])
-    else:
-        # A valid token has no effect when auth is disabled.
+    elif auth_mode != "loopback":
         client.headers["Authorization"] = f"Bearer {tokens.get(auth_mode, tokens['a'])}"
-    owners = ("a", "b", "local") if auth_mode == "disabled" else ("a",)
-    if auth_mode == "empty":
-        owners = ()
+    owners = () if auth_mode in ("empty", "loopback") else ("a",)
     count = 2 * len(owners)
-    weight = 111 if auth_mode == "disabled" else int(bool(owners))
+    weight = int(bool(owners))
     params = {
         "since": "2026-04-16T00:00:00+00:00"
         if range_mode == "daily"
@@ -136,7 +137,7 @@ def test_all_read_routes_isolate_data(
     assert {row["id"] for row in rows} == expected_ids
     assert sum(row["total_cost_usd"] for row in rows) == 2 * weight
     assert read("/usage/count") == {"total": count}
-    latest = START_TS + (210 if auth_mode == "disabled" else 10) * 1_000_000
+    latest = START_TS + 10 * 1_000_000
     assert read("/usage/high-watermark") == {"ts": latest if owners else 0}
     assert set(read("/usage/sources")) == (
         {"opencode", *(f"{owner}-source" for owner in owners)} if owners else set()
@@ -222,7 +223,7 @@ def test_foreign_ids_and_filters_cannot_expand_scope(
     from src.config.app import CONFIG
 
     tokens, user_ids = tenant_reads
-    monkeypatch.setitem(CONFIG, "auth", {"enabled": True})
+    monkeypatch.setitem(CONFIG, "auth", {"provider": "google"})
     client = TestClient(
         api_module.app, headers={"Authorization": f"Bearer {tokens['a']}"}
     )
@@ -265,7 +266,7 @@ def test_tool_queries_require_matching_owner(
     from src.database.models import ToolCall
 
     tokens, user_ids = tenant_reads
-    monkeypatch.setitem(CONFIG, "auth", {"enabled": True})
+    monkeypatch.setitem(CONFIG, "auth", {"provider": "google"})
     with Session(fresh_db.database_module.get_engine()) as session:
         session.add(
             ToolCall(
@@ -303,7 +304,7 @@ def test_reads_reject_missing_invalid_and_ingest_tokens(
     from src.auth.tokens import mint_token
     from src.config.app import CONFIG
 
-    monkeypatch.setitem(CONFIG, "auth", {"enabled": True})
+    monkeypatch.setitem(CONFIG, "auth", {"provider": "google"})
     ingest, _ = mint_token("a@example.com", kind="ingest")
     client = TestClient(api_module.app)
     for token in (None, "invalid", ingest):
@@ -318,14 +319,14 @@ def test_reads_reject_missing_invalid_and_ingest_tokens(
 def test_request_user_id_fails_closed_without_middleware(api_module, monkeypatch):
     from src.config.app import CONFIG
 
-    monkeypatch.setitem(CONFIG, "auth", {"enabled": True})
+    monkeypatch.setitem(CONFIG, "auth", {"provider": "google"})
     request = Request({"type": "http", "headers": []})
     with pytest.raises(HTTPException) as exc:
         api_module._request_user_id(request)
     assert exc.value.status_code == 401
 
 
-@pytest.mark.parametrize("auth_mode", ("cookie", "bearer", "b", "disabled"))
+@pytest.mark.parametrize("auth_mode", ("cookie", "bearer", "b"))
 def test_cost_recalculation_requires_row_ownership(
     api_module, tenant_reads, monkeypatch, fresh_db, auth_mode
 ):
@@ -335,13 +336,13 @@ def test_cost_recalculation_requires_row_ownership(
     from src.database.models import PriceSnapshot, SessionRecord, Usage, UsageDaily
 
     tokens, _ = tenant_reads
-    monkeypatch.setitem(CONFIG, "auth", {"enabled": auth_mode != "disabled"})
+    monkeypatch.setitem(CONFIG, "auth", {"provider": "google"})
     client = TestClient(api_module.app)
     if auth_mode == "cookie":
         client.cookies.set("tokenage_session", tokens["cookie"])
     else:
         client.headers["Authorization"] = f"Bearer {tokens.get(auth_mode, tokens['a'])}"
-    owner = "local" if auth_mode == "disabled" else "b" if auth_mode == "b" else "a"
+    owner = "b" if auth_mode == "b" else "a"
 
     def stored_costs():
         with Session(fresh_db.database_module.get_engine()) as session:
@@ -371,8 +372,7 @@ def test_cost_recalculation_requires_row_ownership(
 
     before = stored_costs()
     rejected = ["missing"]
-    if auth_mode != "disabled":
-        rejected.extend(f"{other}-0" for other in ("a", "b", "local") if other != owner)
+    rejected.extend(f"{other}-0" for other in ("a", "b", "local") if other != owner)
     for usage_id in rejected:
         response = client.post(f"/usage/{usage_id}/recalculate-cost")
         assert response.status_code == 404
@@ -398,6 +398,17 @@ def test_cost_recalculation_requires_row_ownership(
     assert len(after[3]) == len(before[3]) + 1
 
 
+def test_loopback_owner_cannot_recalculate_other_users_or_user_less_rows(
+    api_module, tenant_reads, monkeypatch
+):
+    from src.config.app import CONFIG
+
+    monkeypatch.setitem(CONFIG, "auth", {"provider": "local"})
+    client = TestClient(api_module.app)
+    for usage_id in ("a-0", "b-0", "local-0"):
+        assert client.post(f"/usage/{usage_id}/recalculate-cost").status_code == 404
+
+
 def test_cost_recalculation_rejects_invalid_and_revoked_tokens(
     api_module, tenant_reads, monkeypatch
 ):
@@ -408,7 +419,7 @@ def test_cost_recalculation_rejects_invalid_and_revoked_tokens(
     ingest, _ = mint_token("a@example.com", kind="ingest")
     _, token_row = resolve_token(tokens["a"])
     assert revoke_token(token_row.id, user_id=user_ids["a"])
-    monkeypatch.setitem(CONFIG, "auth", {"enabled": True})
+    monkeypatch.setitem(CONFIG, "auth", {"provider": "google"})
     client = TestClient(api_module.app)
     for token in (None, "invalid", ingest, tokens["a"]):
         headers = {"Authorization": f"Bearer {token}"} if token else {}

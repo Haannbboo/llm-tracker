@@ -27,7 +27,7 @@ from src.config.app import (
 )
 from src.config.models import ProviderConfig
 
-from .auth import _require_local_profile
+from .auth import _require_local_owner, auth_provider, get_local_owner
 from .database import init_db
 from .recorder import record_tool_call, record_usage
 from .utils import extract_usage, find_stream_usage, normalize_provider_name
@@ -270,7 +270,7 @@ class StreamToolCallAccumulator:
 
 
 def _record_tool_calls_for_usage(
-    usage, tool_calls: list[dict[str, str]], client_source: str | None
+    usage, tool_calls: list[dict[str, str]], client_source: str | None, user_id: str
 ) -> None:
     """Record tool calls linked to a usage row. ToolCall.ts uses milliseconds."""
     if not usage or not tool_calls:
@@ -281,6 +281,7 @@ def _record_tool_calls_for_usage(
             tool_use_id=tc["tool_use_id"],
             usage_id=usage.id,
             tool_name=tc["tool_name"],
+            user_id=user_id,
             client_source=client_source,
             ts=ts_ms,
         )
@@ -403,9 +404,11 @@ async def _forward_stream_or_error(
             await client.aclose()
             usage_fields = extract_usage(raw_usage)
             latency_ms = int((time.monotonic() - started_at) * 1000)
+            user_id = get_local_owner().id
             usage = record_usage(
                 provider=provider.name,
                 model=model,
+                user_id=user_id,
                 client_source=client_source,
                 session_id=None,
                 endpoint=path,
@@ -426,7 +429,7 @@ async def _forward_stream_or_error(
             )
 
             _record_tool_calls_for_usage(
-                usage, tool_accumulator.get_tool_calls(), client_source
+                usage, tool_accumulator.get_tool_calls(), client_source, user_id
             )
 
     return StreamingResponse(_relay(), media_type="text/event-stream")
@@ -434,6 +437,10 @@ async def _forward_stream_or_error(
 
 async def forward(request: Request, path: str):
     """Core proxy logic: resolve provider, forward request, and record usage."""
+    if auth_provider() != "local":
+        # The proxy is unauthenticated and spends the operator's provider keys:
+        # it exists only for the single-owner local provider.
+        raise HTTPException(status_code=404)
     body = await request.body()
     body_json = parse_json_body(body)
     user_agent = request.headers.get("user-agent", "")
@@ -494,9 +501,11 @@ async def forward(request: Request, path: str):
         extract_usage(response_json.get("usage", {})) if response_json else {}
     )
     tool_calls = extract_tool_calls(response_json) if response_json else []
+    user_id = get_local_owner().id
     usage = record_usage(
         provider=provider.name,
         model=upstream_model,
+        user_id=user_id,
         client_source=client_source,
         session_id=None,
         endpoint=path,
@@ -516,7 +525,7 @@ async def forward(request: Request, path: str):
         base_url_source="proxy_config",
     )
 
-    _record_tool_calls_for_usage(usage, tool_calls, client_source)
+    _record_tool_calls_for_usage(usage, tool_calls, client_source, user_id)
 
     if error_content is not None:
         return JSONResponse(content=error_content, status_code=response.status_code)
@@ -588,7 +597,7 @@ async def list_models():
     }
 
 
-@app.post("/config/refresh", dependencies=[Depends(_require_local_profile)])
+@app.post("/config/refresh", dependencies=[Depends(_require_local_owner)])
 async def refresh_config():
     """Reload config from disk so the proxy picks up provider/model changes."""
     await asyncio.to_thread(refresh_runtime_config)

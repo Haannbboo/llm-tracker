@@ -33,6 +33,13 @@ def _litellm(costs: dict[str, ModelCost]) -> list[FetchedSource]:
     ]
 
 
+def _reset_config(api_module) -> None:
+    """Clear CONFIG but keep the DB target: every request resolves to a user."""
+    db = api_module.CONFIG.get("db")
+    api_module.CONFIG.clear()
+    api_module.CONFIG["db"] = db
+
+
 # --- Key normalization ---
 
 
@@ -904,7 +911,7 @@ def test_resolve_all_costs_remote_and_yaml_scopes_coexist(
 def test_pricing_endpoint_provider_display_overwrites_global_same_key(
     api_module, monkeypatch
 ):
-    api_module.CONFIG.clear()
+    _reset_config(api_module)
     api_module.CONFIG.update(
         {
             "models": {
@@ -940,7 +947,7 @@ def test_pricing_endpoint_provider_display_overwrites_global_same_key(
 
 
 def test_pricing_with_multiplier(api_module, monkeypatch):
-    api_module.CONFIG.clear()
+    _reset_config(api_module)
     api_module.CONFIG.update(
         {
             "models": {
@@ -987,7 +994,7 @@ def test_pricing_with_multiplier(api_module, monkeypatch):
 
 
 def test_pricing_without_provider_shows_all(api_module, monkeypatch):
-    api_module.CONFIG.clear()
+    _reset_config(api_module)
     api_module.CONFIG.update(
         {
             "models": {
@@ -1034,7 +1041,7 @@ def test_pricing_without_provider_shows_all(api_module, monkeypatch):
 
 
 def test_pricing_unknown_provider_defaults_multiplier_1(api_module, monkeypatch):
-    api_module.CONFIG.clear()
+    _reset_config(api_module)
     api_module.CONFIG.update(
         {
             "models": {
@@ -1061,7 +1068,7 @@ def test_pricing_unknown_provider_defaults_multiplier_1(api_module, monkeypatch)
 
 
 def test_pricing_two_providers_same_model_route_correctly(api_module, monkeypatch):
-    api_module.CONFIG.clear()
+    _reset_config(api_module)
     api_module.CONFIG.update(
         {
             "models": {},
@@ -1105,7 +1112,7 @@ def test_pricing_two_providers_same_model_route_correctly(api_module, monkeypatc
 def test_pricing_provider_override_beats_global_and_fallback_gets_multiplier(
     api_module, monkeypatch
 ):
-    api_module.CONFIG.clear()
+    _reset_config(api_module)
     api_module.CONFIG.update(
         {
             "models": {
@@ -1147,7 +1154,7 @@ def test_pricing_provider_override_beats_global_and_fallback_gets_multiplier(
 
 
 def test_single_model_pricing_contains_litellm_match(api_module, monkeypatch):
-    api_module.CONFIG.clear()
+    _reset_config(api_module)
     api_module.CONFIG.update({"models": {}, "providers": {}})
     monkeypatch.setattr(
         "src.pricing.sources.litellm.fetch_remote_pricing",
@@ -1174,7 +1181,7 @@ def test_single_model_pricing_contains_litellm_match(api_module, monkeypatch):
 
 
 def test_single_model_pricing_includes_tiers(api_module, monkeypatch):
-    api_module.CONFIG.clear()
+    _reset_config(api_module)
     api_module.CONFIG.update({"models": {}, "providers": {}})
     monkeypatch.setattr(
         "src.pricing.sources.litellm.fetch_remote_pricing",
@@ -1229,7 +1236,7 @@ def test_single_model_pricing_includes_tiers(api_module, monkeypatch):
 
 
 def test_single_model_pricing_unresolved_includes_empty_tiers(api_module, monkeypatch):
-    api_module.CONFIG.clear()
+    _reset_config(api_module)
     api_module.CONFIG.update({"models": {}, "providers": {}})
     monkeypatch.setattr(
         "src.pricing.sources.litellm.fetch_remote_pricing", lambda *args, **kwargs: {}
@@ -1244,7 +1251,7 @@ def test_single_model_pricing_unresolved_includes_empty_tiers(api_module, monkey
 
 
 def test_single_model_pricing_yaml_override_beats_litellm(api_module, monkeypatch):
-    api_module.CONFIG.clear()
+    _reset_config(api_module)
     api_module.CONFIG.update(
         {
             "models": {
@@ -1275,7 +1282,7 @@ def test_single_model_pricing_yaml_override_beats_litellm(api_module, monkeypatc
 def test_single_model_pricing_provider_scope_and_multiplier(
     api_module, monkeypatch, provider
 ):
-    api_module.CONFIG.clear()
+    _reset_config(api_module)
     api_module.CONFIG.update(
         {
             "models": {
@@ -1319,7 +1326,7 @@ def test_single_model_pricing_provider_scope_and_multiplier(
 
 
 def test_single_model_pricing_cheapest_contains_match(api_module, monkeypatch):
-    api_module.CONFIG.clear()
+    _reset_config(api_module)
     api_module.CONFIG.update({"models": {}, "providers": {}})
     monkeypatch.setattr(
         "src.pricing.sources.litellm.fetch_remote_pricing",
@@ -1343,7 +1350,7 @@ def test_single_model_pricing_cheapest_contains_match(api_module, monkeypatch):
 
 
 def test_single_model_pricing_slashed_model_exact_yaml(api_module, monkeypatch):
-    api_module.CONFIG.clear()
+    _reset_config(api_module)
     api_module.CONFIG.update(
         {
             "models": {
@@ -1377,7 +1384,7 @@ def test_single_model_pricing_slashed_model_exact_yaml(api_module, monkeypatch):
     ],
 )
 def test_single_model_pricing_unresolved(api_module, monkeypatch, model, expected):
-    api_module.CONFIG.clear()
+    _reset_config(api_module)
     api_module.CONFIG.update({"models": {}, "providers": {}})
     monkeypatch.setattr(
         "src.pricing.sources.litellm.fetch_remote_pricing", lambda *args, **kwargs: {}
@@ -1394,7 +1401,7 @@ def test_single_model_pricing_unresolved(api_module, monkeypatch, model, expecte
 
 
 def test_single_model_pricing_provider_contains_match(api_module, monkeypatch):
-    api_module.CONFIG.clear()
+    _reset_config(api_module)
     api_module.CONFIG.update(
         {
             "models": {},
@@ -1426,7 +1433,7 @@ def test_single_model_pricing_provider_contains_match(api_module, monkeypatch):
 
 
 def test_single_model_pricing_case_insensitive(api_module, monkeypatch):
-    api_module.CONFIG.clear()
+    _reset_config(api_module)
     api_module.CONFIG.update({"models": {}, "providers": {}})
     monkeypatch.setattr(
         "src.pricing.sources.litellm.fetch_remote_pricing",
@@ -1447,7 +1454,7 @@ def test_single_model_pricing_case_insensitive(api_module, monkeypatch):
 
 
 def test_single_model_pricing_rejects_empty_model(api_module, monkeypatch):
-    api_module.CONFIG.clear()
+    _reset_config(api_module)
     api_module.CONFIG.update({"models": {}, "providers": {}})
     monkeypatch.setattr(
         "src.pricing.sources.litellm.fetch_remote_pricing", lambda *args, **kwargs: {}

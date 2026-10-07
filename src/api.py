@@ -18,7 +18,7 @@ from pydantic import BaseModel, model_validator
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from protocol import MAX_SUPPORTED_GENERATION, MIN_SUPPORTED_GENERATION
-from protocol.device_status import DeviceStatusReport as ProtocolDeviceStatusReport
+from protocol.device_status import DeviceStatusReport
 from src.config.app import (
     CONFIG,
     CONFIG_PATH,
@@ -36,13 +36,12 @@ from src.pricing.models import ResolvedCost
 
 from ._version import get_version
 from .auth import (
-    _auth_enabled,
-    _require_local_profile,
+    _require_local_owner,
     _resolve_request_user,
     get_current_user,
 )
 from .auth import router as auth_router
-from .auth.tokens import hash_token, list_user_devices
+from .auth.tokens import list_user_devices
 from .database import (
     VALID_OUTCOMES,
     VALID_SOURCES,
@@ -114,13 +113,12 @@ _SPA_API_PREFIXES = (
     "/install.sh",
 )
 
-# Public when auth is enabled: Google OAuth endpoints, /auth/me (the frontend
-# probes it before login), and /version. Everything else API-shaped requires
-# a valid session once auth is enabled.
+# Public: sign-in endpoints, /auth/me (the frontend probes it before login),
+# and /version. Everything else API-shaped requires a resolved user.
 AUTH_GATE_PUBLIC_PATHS = ("/auth/me", "/version", "/install.sh")
 
 # FastAPI's interactive docs and schema are not in the public allowlist, so
-# they are gated like any other API surface when auth is enabled.
+# they are gated like any other API surface.
 AUTH_GATE_EXTRA_GATED_PATHS = ("/docs", "/redoc", "/openapi.json")
 
 
@@ -144,9 +142,8 @@ class ConfigPatch(BaseModel):
         return data
 
 
-def _request_user_id(request: Request) -> str | None:
-    user = get_current_user(request)
-    return user.id if user is not None else None
+def _request_user_id(request: Request) -> str:
+    return get_current_user(request).id
 
 
 class ConfigPatchUpdate(BaseModel):
@@ -190,12 +187,6 @@ class EvaluationJobUpdate(BaseModel):
 
 class EvaluationConfigUpdate(BaseModel):
     evaluator: str
-
-
-class DeviceStatusReport(ProtocolDeviceStatusReport):
-    # Unbounded on purpose: a malformed secret must never be echoed back in a
-    # validation-error body, so the handler checks it and returns a static 422.
-    installation_key: str | None = None
 
 
 def _parse_device_status_json(raw: str) -> dict | None:
@@ -253,10 +244,10 @@ app.include_router(auth_router)
 
 
 def _is_public_path(path: str) -> bool:
-    """Public when auth is enabled: Google OAuth, CLI login, /auth/me, /version, SPA."""
+    """Public: sign-in endpoints, /auth/me, /version, SPA."""
     if not any(path.startswith(prefix) for prefix in _SPA_API_PREFIXES):
         return path not in AUTH_GATE_EXTRA_GATED_PATHS
-    if path.startswith(("/auth/google/", "/auth/cli/")):
+    if path.startswith(("/auth/google/", "/auth/cli/", "/auth/local/")):
         # CLI login endpoints are the credential-issuing surface: the
         # one-time code + PKCE verifier (or the Google flow itself) are the
         # credentials.
@@ -265,13 +256,11 @@ def _is_public_path(path: str) -> bool:
 
 
 class AuthGateMiddleware(BaseHTTPMiddleware):
-    """Require a valid session (cookie or bearer) for all API routes when auth
-    is enabled, except the public allowlist. Data routes pass the authenticated
-    user ID to database queries for per-user scoping."""
+    """Require a resolved user (token, or the local owner on direct loopback)
+    for all API routes except the public allowlist. Data routes pass the user
+    ID to database queries for per-user scoping."""
 
     async def dispatch(self, request: Request, call_next):
-        if not _auth_enabled():
-            return await call_next(request)
         if request.method == "OPTIONS":
             # CORS preflights carry no credentials (browsers never attach
             # them), so they can never authenticate. Let them through so the
@@ -702,47 +691,30 @@ def _device_status_entry(row, device: Device | None = None) -> dict:
 def post_device_status(
     request: Request,
     report: DeviceStatusReport,
-    user: User | None = Depends(get_current_user),
+    user: User = Depends(get_current_user),
 ):
     """Store the latest status report from a device.
 
-    Auth disabled (local): the body's installation key is the identity, checked
-    by hash. Auth enabled (hosted): the caller's device token is the identity
-    and any client-supplied installation key is ignored.
+    The caller's device token is the identity; a token that isn't linked to a
+    device is rejected.
     """
-    if user is None:
-        if report.installation_key is None or not re.fullmatch(
-            r"[A-Za-z0-9_-]{43,128}", report.installation_key
-        ):
-            raise HTTPException(status_code=422, detail="invalid installation_key")
-        installation_hash = hash_token(report.installation_key)
-    else:
-        auth_token = getattr(request.state, "auth_token", None)
-        device_id = auth_token.device_id if auth_token is not None else None
-        device = next(
-            (row for row in list_user_devices(user.id) if row.id == device_id), None
-        )
-        if device is None:
-            raise HTTPException(status_code=400, detail="device token required")
-        installation_hash = device.installation_hash
+    auth_token = getattr(request.state, "auth_token", None)
+    device_id = auth_token.device_id if auth_token is not None else None
+    device = next(
+        (row for row in list_user_devices(user.id) if row.id == device_id), None
+    )
+    if device is None:
+        raise HTTPException(status_code=400, detail="device token required")
     upsert_device_status(
-        installation_hash,
-        json.dumps(
-            report.model_dump(exclude={"installation_key"}, mode="json"),
-            sort_keys=True,
-        ),
+        device.installation_hash,
+        json.dumps(report.model_dump(mode="json"), sort_keys=True),
     )
     return Response(status_code=204)
 
 
 @app.get("/devices/status")
-def get_devices_status(user: User | None = Depends(get_current_user)):
-    """Latest report per device: every device when local, the caller's when hosted."""
-    if user is None:
-        return {
-            "devices": [_device_status_entry(row) for row in list_device_statuses()]
-        }
-
+def get_devices_status(user: User = Depends(get_current_user)):
+    """Latest report per device, for the caller's devices only."""
     devices = list_user_devices(user.id)
     reports = {
         row.installation_hash: row
@@ -761,7 +733,7 @@ def get_devices_status(user: User | None = Depends(get_current_user)):
 
 @app.put(
     "/local/sessions/{session_id}/evaluation",
-    dependencies=[Depends(_require_local_profile)],
+    dependencies=[Depends(_require_local_owner)],
 )
 async def put_session_evaluation(
     request: Request, session_id: str, update: SessionEvaluationUpdate
@@ -804,7 +776,7 @@ async def put_session_evaluation(
 
 @app.get(
     "/local/sessions/{session_id}/evaluation",
-    dependencies=[Depends(_require_local_profile)],
+    dependencies=[Depends(_require_local_owner)],
 )
 async def get_evaluation(request: Request, session_id: str):
     evaluation = get_session_evaluation(session_id, user_id=_request_user_id(request))
@@ -813,7 +785,7 @@ async def get_evaluation(request: Request, session_id: str):
 
 @app.delete(
     "/local/sessions/{session_id}/evaluation",
-    dependencies=[Depends(_require_local_profile)],
+    dependencies=[Depends(_require_local_owner)],
 )
 async def delete_evaluation(request: Request, session_id: str):
     deleted = delete_session_evaluation(session_id, user_id=_request_user_id(request))
@@ -825,7 +797,7 @@ async def delete_evaluation(request: Request, session_id: str):
 @app.post(
     "/local/sessions/{session_id}/evaluate-with-llm",
     status_code=202,
-    dependencies=[Depends(_require_local_profile)],
+    dependencies=[Depends(_require_local_owner)],
 )
 async def evaluate_session_with_llm(
     http_request: Request,
@@ -862,15 +834,10 @@ async def evaluate_session_with_llm(
 
 @app.get(
     "/local/poll/{job_id}",
-    dependencies=[Depends(_require_local_profile)],
+    dependencies=[Depends(_require_local_owner)],
 )
 async def poll_job(request: Request, job_id: str):
-    user_id = _request_user_id(request)
-    job = (
-        get_evaluation_job_progress(job_id)
-        if user_id is None
-        else get_evaluation_job_progress(job_id, user_id=user_id)
-    )
+    job = get_evaluation_job_progress(job_id, user_id=_request_user_id(request))
     if job is None:
         raise HTTPException(status_code=404, detail="Job not found")
     return job
@@ -878,19 +845,15 @@ async def poll_job(request: Request, job_id: str):
 
 @app.get(
     "/local/evaluation-jobs/active",
-    dependencies=[Depends(_require_local_profile)],
+    dependencies=[Depends(_require_local_owner)],
 )
 async def active_evaluation_jobs(request: Request, session_ids: str | None = None):
     parsed_session_ids = [
         item for item in (session_ids or "").split(",") if item
     ] or None
     user_id = _request_user_id(request)
-    jobs = (
-        list_active_evaluation_jobs_with_progress(session_ids=parsed_session_ids)
-        if user_id is None
-        else list_active_evaluation_jobs_with_progress(
-            session_ids=parsed_session_ids, user_id=user_id
-        )
+    jobs = list_active_evaluation_jobs_with_progress(
+        session_ids=parsed_session_ids, user_id=user_id
     )
     return {
         "jobs": {job["session_id"]: job for job in jobs},
@@ -900,15 +863,11 @@ async def active_evaluation_jobs(request: Request, session_ids: str | None = Non
 
 @app.get(
     "/local/sessions/{session_id}/evaluation-jobs",
-    dependencies=[Depends(_require_local_profile)],
+    dependencies=[Depends(_require_local_owner)],
 )
 async def session_evaluation_jobs(request: Request, session_id: str):
     user_id = _request_user_id(request)
-    jobs = (
-        list_session_evaluation_jobs_with_progress(session_id)
-        if user_id is None
-        else list_session_evaluation_jobs_with_progress(session_id, user_id=user_id)
-    )
+    jobs = list_session_evaluation_jobs_with_progress(session_id, user_id=user_id)
     return {
         "jobs": jobs,
         **_evaluation_metadata_payload(),
@@ -917,17 +876,13 @@ async def session_evaluation_jobs(request: Request, session_id: str):
 
 @app.patch(
     "/local/evaluation-jobs/{job_id}",
-    dependencies=[Depends(_require_local_profile)],
+    dependencies=[Depends(_require_local_owner)],
 )
 async def update_evaluation_job(
     request: Request, job_id: str, update: EvaluationJobUpdate
 ):
     user_id = _request_user_id(request)
-    current = (
-        get_evaluation_job_progress(job_id)
-        if user_id is None
-        else get_evaluation_job_progress(job_id, user_id=user_id)
-    )
+    current = get_evaluation_job_progress(job_id, user_id=user_id)
     if current is None:
         raise HTTPException(status_code=404, detail="Job not found")
     if current["status"] != "queued":
@@ -941,24 +896,15 @@ async def update_evaluation_job(
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
-    if user_id is None:
-        updated = update_queued_evaluation_job_evaluator(
-            job_id, evaluator_type=evaluator_type
-        )
-    else:
-        updated = update_queued_evaluation_job_evaluator(
-            job_id, evaluator_type=evaluator_type, user_id=user_id
-        )
+    updated = update_queued_evaluation_job_evaluator(
+        job_id, evaluator_type=evaluator_type, user_id=user_id
+    )
     if updated is None:
         raise HTTPException(
             status_code=409,
             detail="Only queued evaluation jobs can change evaluator",
         )
-    refreshed = (
-        get_evaluation_job_progress(job_id)
-        if user_id is None
-        else get_evaluation_job_progress(job_id, user_id=user_id)
-    )
+    refreshed = get_evaluation_job_progress(job_id, user_id=user_id)
     return refreshed or updated
 
 
@@ -998,7 +944,7 @@ async def _notify_proxy_refresh() -> None:
         )
 
 
-@app.patch("/config", dependencies=[Depends(_require_local_profile)])
+@app.patch("/config", dependencies=[Depends(_require_local_owner)])
 async def patch_config(update: ConfigPatchUpdate):
     from ruamel.yaml import YAML
     from ruamel.yaml.error import YAMLError as RuamelYAMLError
@@ -1040,7 +986,7 @@ async def patch_config(update: ConfigPatchUpdate):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.patch("/config/evaluation", dependencies=[Depends(_require_local_profile)])
+@app.patch("/config/evaluation", dependencies=[Depends(_require_local_owner)])
 async def update_evaluation_config(update: EvaluationConfigUpdate):
     """Update the global evaluator type in config.yaml."""
     if update.evaluator not in VALID_EVALUATOR_AGENTS:
@@ -1280,7 +1226,7 @@ async def recalculate_usage_cost_route(request: Request, usage_id: str):
     }
 
 
-@app.post("/usage/reprice", dependencies=[Depends(_require_local_profile)])
+@app.post("/usage/reprice", dependencies=[Depends(_require_local_owner)])
 async def reprice_estimated_usage(
     provider: str | None = None,
     model: str | None = None,

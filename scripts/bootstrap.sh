@@ -278,6 +278,24 @@ _start_client_service() {
   fi
 }
 
+# The local provider signs a loopback request in as the owner, so no Google or
+# token is needed. The client only has to be told which server to talk to.
+_sign_in_client() {
+  step_header "Signing in the client"
+  local login_url="http://127.0.0.1:${API_PORT}"
+  if [[ -t 0 && -t 1 ]]; then
+    if TOKENAGE_ROOT="${ROOT_DIR}" TOKENAGE_SKIP_BANNER=1 \
+        "${CLI_SYMLINK}" login --server "${login_url}"; then
+      pass "Client signed in to ${login_url}"
+      CHECKS_PASS=$((CHECKS_PASS + 1))
+    else
+      info "Client sign-in did not finish; run: tokenage login --server ${login_url}"
+    fi
+  else
+    info "Not interactive; sign the client in with: tokenage login --server ${login_url}"
+  fi
+}
+
 # ── Banner ──────────────────────────────────────────────────────────
 if [[ -z "${TOKENAGE_SKIP_BANNER:-}" ]]; then
   banner
@@ -426,6 +444,7 @@ else
 fi
 
 _start_client_service
+_sign_in_client
 _verify_agent_setup_health
 
 # ── Final report ────────────────────────────────────────────────────

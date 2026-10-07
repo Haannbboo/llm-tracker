@@ -39,7 +39,9 @@ async function readRequestBody(req) {
   return chunks.length > 0 ? Buffer.concat(chunks) : undefined
 }
 
-function buildForwardHeaders(headers) {
+const LOOPBACK_ADDRESSES = new Set(['127.0.0.1', '::1', '::ffff:127.0.0.1'])
+
+function buildForwardHeaders(headers, remoteAddress) {
   const forwarded = new Headers()
   for (const [key, value] of Object.entries(headers)) {
     if (value === undefined) continue
@@ -53,6 +55,12 @@ function buildForwardHeaders(headers) {
     }
 
     forwarded.set(key, value)
+  }
+  // The API treats a direct loopback request as the local owner. This proxy
+  // is itself loopback, so mark requests from other machines (vite --host) as
+  // forwarded or they would be signed in as the owner.
+  if (remoteAddress && !LOOPBACK_ADDRESSES.has(remoteAddress)) {
+    forwarded.set('x-forwarded-for', remoteAddress)
   }
   return forwarded
 }
@@ -69,7 +77,7 @@ export function createApiProxyMiddleware({ env, trackerConfigPath } = {}) {
         resolveProxyRequestUrl(req.url, { env, trackerConfigPath }),
         {
           method: req.method,
-          headers: buildForwardHeaders(req.headers),
+          headers: buildForwardHeaders(req.headers, req.socket?.remoteAddress),
           body:
             req.method === 'GET' || req.method === 'HEAD'
               ? undefined

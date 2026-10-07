@@ -9,6 +9,7 @@ scripts; the launcher routes ``tokenage server token`` here.
 from __future__ import annotations
 
 import argparse
+import secrets
 import sys
 
 from src.auth import mint_token
@@ -50,11 +51,30 @@ def run_token_command(argv: list[str]) -> int:
     return 0
 
 
+def run_login_link_command() -> int:
+    from src.auth.google import store_login_code
+    from src.auth.routes import auth_provider
+    from src.config.app import CONFIG
+    from src.config.server_config import resolve_server_urls
+
+    if auth_provider() != "local":
+        print("login-link only applies to auth.provider: local", file=sys.stderr)
+        return 2
+    code = secrets.token_urlsafe(24)
+    store_login_code(code)
+    api_url = resolve_server_urls(CONFIG)["api_url"]
+    print(f"{api_url}/auth/local/login?code={code}")
+    print("Single use; expires in 5 minutes.", file=sys.stderr)
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     args = list(sys.argv[1:] if argv is None else argv)
     if args and args[0] == "token":
         return run_token_command(args[1:])
-    print(f"usage: {PROG} token create --email <email>", file=sys.stderr)
+    if args and args[0] == "login-link":
+        return run_login_link_command()
+    print(f"usage: {PROG} token create --email <email> | login-link", file=sys.stderr)
     return 2
 
 

@@ -26,8 +26,8 @@ export function SettingsPage() {
   } = useApp()
   const versionData = useVersion()
   const authDevicesActive = activeSection === 'devices'
-  const { devices, refresh: refreshDevices } = useDevices(authDevicesActive && auth.enabled)
-  const { statuses } = useDeviceStatuses(authDevicesActive && auth.enabled)
+  const { devices, refresh: refreshDevices } = useDevices(authDevicesActive)
+  const { statuses } = useDeviceStatuses(authDevicesActive)
   const [expandedDeviceId, setExpandedDeviceId] = useState<string | null>(null)
   const [revokingDeviceId, setRevokingDeviceId] = useState<string | null>(null)
 
@@ -73,7 +73,7 @@ export function SettingsPage() {
           {[
             { id: 'pricing', label: t('Pricing') },
             { id: 'services', label: t('Services') },
-            ...(auth.enabled && auth.user ? [{ id: 'devices', label: t('Devices') }] : []),
+            { id: 'devices', label: t('Devices') },
           ].map((section) => (
             <button
               key={section.id}
@@ -151,7 +151,7 @@ export function SettingsPage() {
         <div className="panel">
             <div className="panel-tabs" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <div className="tab active"><span>💻</span> {t('Devices')}</div>
-              {auth.user && (
+              {auth.provider === 'google' && auth.user && (
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                   <span className="user-avatar">
                     {(auth.user.name || auth.user.email).charAt(0).toUpperCase()}

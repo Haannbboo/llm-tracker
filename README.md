@@ -152,6 +152,9 @@ tokenage status
 tokenage setup
 tokenage update --check
 
+# The local server needs no Google account: its dashboard and `tokenage login`
+# work from the server machine; for a browser on another machine, run
+# `tokenage server login-link` on the server and open the URL it prints.
 # A remote server instead of a local one
 tokenage login --server https://app.example.com
 tokenage logout

@@ -215,11 +215,12 @@ usage: tokenage server <command>
   restart [program...]   reload running services
   status [program...]    supervisord table, ports, port check
   token create ...       mint an operator token
+  login-link             one-time browser sign-in link (local provider)
 EOF
     return 2
   fi
   case "$sub" in
-    token) shift; run_server_python token "$@" ;;
+    token|login-link) shift; run_server_python "$sub" "$@" ;;
     bootstrap|start|stop|restart|status) shift; run_server_script "$sub" "$@" ;;
     *)
       printf 'tokenage: unknown server command: %s\n' "$sub" >&2

@@ -63,7 +63,7 @@ function Root() {
       </div>
     )
   }
-  if (auth.enabled && !auth.user) {
+  if (!auth.user) {
     return <LoginGate />
   }
   return <AppLayout />

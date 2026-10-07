@@ -5,6 +5,7 @@ import sys
 import threading
 from pathlib import Path
 
+import pytest
 import yaml
 
 
@@ -756,10 +757,36 @@ def test_load_config_auth_defaults(config_module, tmp_path, monkeypatch):
 
     config = config_module.load_config(str(config_path))
 
-    assert config["auth"]["enabled"] is False
+    assert config["auth"]["provider"] == "local"
     assert config["auth"]["allowlist"] == []
     assert config["auth"]["google_client_id"] == ""
     assert config["auth"]["google_client_secret"] == ""
+
+
+@pytest.mark.parametrize(
+    "auth_yaml,provider",
+    [
+        ("auth:\n  enabled: false\n", "local"),
+        ("auth:\n  enabled: true\n", "google"),
+        ("auth:\n  provider: local\n  enabled: true\n", "local"),
+        ("auth:\n  provider: google\n", "google"),
+    ],
+)
+def test_load_config_auth_provider_mapping(
+    config_module, tmp_path, auth_yaml, provider
+):
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(auth_yaml, encoding="utf-8")
+
+    assert config_module.load_config(str(config_path))["auth"]["provider"] == provider
+
+
+def test_load_config_rejects_unknown_auth_provider(config_module, tmp_path):
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text("auth:\n  provider: github\n", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="auth.provider"):
+        config_module.load_config(str(config_path))
 
 
 def test_load_config_google_creds_prefer_env(config_module, tmp_path, monkeypatch):
@@ -773,7 +800,7 @@ def test_load_config_google_creds_prefer_env(config_module, tmp_path, monkeypatc
 
     config = config_module.load_config(str(config_path))
 
-    assert config["auth"]["enabled"] is True
+    assert config["auth"]["provider"] == "google"  # legacy enabled: true
     assert config["auth"]["google_client_id"] == "from-env"
     assert config["auth"]["google_client_secret"] == "from-env-secret"
 

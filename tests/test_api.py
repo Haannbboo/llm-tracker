@@ -1,5 +1,6 @@
 import asyncio
 import json
+from unittest.mock import ANY
 
 import pytest
 from fastapi.testclient import TestClient
@@ -133,7 +134,7 @@ def test_usage_run_summary_endpoint_passes_filters(api_module, monkeypatch):
     )
 
     assert captured == {
-        "user_id": None,
+        "user_id": ANY,
         "after_ts": 1718000000000000,
         "until_ts": 1718100000000000,
         "since": "2026-04-17T00:00:00+00:00",
@@ -195,7 +196,7 @@ def test_usage_run_summary_route_parses_query_filters(api_module, monkeypatch):
 
     assert response.status_code == 200
     assert captured == {
-        "user_id": None,
+        "user_id": ANY,
         "after_ts": 1718000000000000,
         "until_ts": 1718100000000000,
         "since": "2026-04-17T00:00:00+00:00",
@@ -579,7 +580,7 @@ def test_usage_by_provider_endpoint_includes_avg_effective_price_per_million(
     assert response.status_code == 200
     assert response.json()[0]["avg_effective_price_per_million_usd"] == 10.0
     assert captured == {
-        "user_id": None,
+        "user_id": ANY,
         "since": None,
         "until": None,
         "provider": "openai",
@@ -588,9 +589,9 @@ def test_usage_by_provider_endpoint_includes_avg_effective_price_per_million(
     }
 
 
-@pytest.mark.parametrize("auth_enabled", (False, True))
-def test_connectivity_endpoint_removed(api_module, monkeypatch, auth_enabled):
-    monkeypatch.setitem(api_module.CONFIG, "auth", {"enabled": auth_enabled})
+@pytest.mark.parametrize("provider", ("local", "google"))
+def test_connectivity_endpoint_removed(api_module, monkeypatch, provider):
+    monkeypatch.setitem(api_module.CONFIG, "auth", {"provider": provider})
     assert "/test-connectivity" not in api_module.app.openapi()["paths"]
     response = TestClient(api_module.app).post(
         "/test-connectivity",
@@ -668,7 +669,7 @@ def test_daily_by_dimension_endpoint_passes_all_filters(api_module, monkeypatch)
     )
     assert response.status_code == 200
     assert captured == {
-        "user_id": None,
+        "user_id": ANY,
         "dimension": "provider",
         "since": "2026-05-01T00:00:00Z",
         "until": "2026-05-08T00:00:00Z",
@@ -1033,7 +1034,7 @@ def test_model_effectiveness_endpoint_passes_filters(api_module, monkeypatch):
     data = response.json()
     assert data["groups"][0]["key"] == "gpt-5.5"
     assert captured == {
-        "user_id": None,
+        "user_id": ANY,
         "group_by": "model",
         "since": "2026-05-01T00:00:00Z",
         "until": "2026-05-11T23:59:59Z",
@@ -1092,7 +1093,7 @@ def test_daily_effectiveness_endpoint_passes_date(api_module, monkeypatch):
     )
 
     assert response.status_code == 200
-    assert captured == {"date": "2026-05-10", "user_id": None}
+    assert captured == {"date": "2026-05-10", "user_id": ANY}
     assert response.json()["date"] == "2026-05-10"
 
 
@@ -1238,7 +1239,7 @@ def test_poll_job_returns_progress_fields(api_module, monkeypatch):
     monkeypatch.setattr(
         api_module,
         "get_evaluation_job_progress",
-        lambda job_id: {
+        lambda job_id, **kw: {
             "job_id": job_id,
             "kind": "session_evaluation",
             "session_id": "sess-1",
@@ -1266,7 +1267,9 @@ def test_poll_job_returns_progress_fields(api_module, monkeypatch):
 
 
 def test_poll_job_returns_404_for_unknown_job(api_module, monkeypatch):
-    monkeypatch.setattr(api_module, "get_evaluation_job_progress", lambda job_id: None)
+    monkeypatch.setattr(
+        api_module, "get_evaluation_job_progress", lambda job_id, **kw: None
+    )
 
     response = TestClient(api_module.app).get("/local/poll/missing")
 
@@ -1285,7 +1288,7 @@ def test_active_evaluation_jobs_returns_visible_session_jobs(api_module, monkeyp
     monkeypatch.setattr(
         api_module,
         "list_active_evaluation_jobs_with_progress",
-        lambda session_ids=None: [
+        lambda session_ids=None, **kw: [
             {
                 "job_id": "job-1",
                 "session_id": "sess-1",
@@ -1314,7 +1317,7 @@ def test_session_evaluation_jobs_returns_history_and_evaluator_catalog(
     monkeypatch.setattr(
         api_module,
         "list_session_evaluation_jobs_with_progress",
-        lambda session_id: [
+        lambda session_id, **kw: [
             {
                 "job_id": "job-failed",
                 "kind": "session_evaluation",
@@ -1357,7 +1360,7 @@ def test_patch_evaluation_job_updates_queued_evaluator(api_module, monkeypatch):
     monkeypatch.setattr(
         api_module,
         "get_evaluation_job_progress",
-        lambda job_id: {
+        lambda job_id, **kw: {
             "job_id": job_id,
             "session_id": "sess-1",
             "status": "queued",
@@ -1368,7 +1371,7 @@ def test_patch_evaluation_job_updates_queued_evaluator(api_module, monkeypatch):
         },
     )
 
-    def fake_update(job_id, *, evaluator_type):
+    def fake_update(job_id, *, evaluator_type, user_id=None):
         stored["evaluator_type"] = evaluator_type
         return {
             "job_id": job_id,
@@ -1404,7 +1407,7 @@ def test_patch_evaluation_job_rejects_running_evaluator_change(api_module, monke
     monkeypatch.setattr(
         api_module,
         "get_evaluation_job_progress",
-        lambda job_id: {
+        lambda job_id, **kw: {
             "job_id": job_id,
             "session_id": "sess-1",
             "status": "running",
@@ -1429,7 +1432,7 @@ def test_patch_evaluation_job_returns_409_for_running_before_evaluator_validatio
     monkeypatch.setattr(
         api_module,
         "get_evaluation_job_progress",
-        lambda job_id: {
+        lambda job_id, **kw: {
             "job_id": job_id,
             "session_id": "sess-1",
             "status": "running",
@@ -1456,7 +1459,9 @@ def test_patch_evaluation_job_returns_409_for_running_before_evaluator_validatio
 def test_patch_evaluation_job_returns_404_for_missing_before_evaluator_validation(
     api_module, monkeypatch
 ):
-    monkeypatch.setattr(api_module, "get_evaluation_job_progress", lambda job_id: None)
+    monkeypatch.setattr(
+        api_module, "get_evaluation_job_progress", lambda job_id, **kw: None
+    )
 
     def reject(evaluator_type):
         raise ValueError(f"Unsupported evaluator agent: {evaluator_type}")
@@ -1676,7 +1681,7 @@ def _authenticated_client(api_module, fresh_db, monkeypatch):
     from src.auth.tokens import mint_token
 
     monkeypatch.setitem(
-        src.config.app.CONFIG, "auth", {"enabled": True, "allowlist": []}
+        src.config.app.CONFIG, "auth", {"provider": "google", "allowlist": []}
     )
     token, _ = mint_token("a@example.com", kind="cli", db_path=fresh_db.db_path)
     client = TestClient(api_module.app)
@@ -1685,7 +1690,7 @@ def _authenticated_client(api_module, fresh_db, monkeypatch):
 
 
 @pytest.mark.parametrize("method,path", LOCAL_ONLY_ROUTES + ADMIN_ONLY_ROUTES)
-def test_local_and_admin_routes_404_for_authenticated_user_when_auth_enabled(
+def test_local_and_admin_routes_404_for_authenticated_user_under_google_provider(
     api_module, fresh_db, monkeypatch, method, path
 ):
     client = _authenticated_client(api_module, fresh_db, monkeypatch)
@@ -1694,7 +1699,7 @@ def test_local_and_admin_routes_404_for_authenticated_user_when_auth_enabled(
 
 
 @pytest.mark.parametrize("method,path", LOCAL_ONLY_ROUTES + ADMIN_ONLY_ROUTES)
-def test_local_and_admin_routes_unaffected_when_auth_disabled(
+def test_local_and_admin_routes_unaffected_under_local_provider(
     api_module, monkeypatch, method, path
 ):
     monkeypatch.setattr(api_module, "upsert_session_evaluation", lambda **kw: None)
@@ -1758,13 +1763,13 @@ def _assert_route_removed(response):
 
 
 @pytest.mark.parametrize("method,path", OLD_PRE_RENAME_PATHS)
-def test_old_pre_rename_paths_are_gone_when_auth_disabled(api_module, method, path):
+def test_old_pre_rename_paths_are_gone_under_local_provider(api_module, method, path):
     response = TestClient(api_module.app).request(method, path)
     _assert_route_removed(response)
 
 
 @pytest.mark.parametrize("method,path", OLD_PRE_RENAME_PATHS)
-def test_old_pre_rename_paths_are_gone_when_auth_enabled(
+def test_old_pre_rename_paths_are_gone_under_google_provider(
     api_module, fresh_db, monkeypatch, method, path
 ):
     client = _authenticated_client(api_module, fresh_db, monkeypatch)
@@ -1779,14 +1784,16 @@ REMOVED_LOCAL_INSPECTION_PATHS = [
 
 
 @pytest.mark.parametrize("method,path", REMOVED_LOCAL_INSPECTION_PATHS)
-def test_local_inspection_routes_are_gone_when_auth_disabled(api_module, method, path):
+def test_local_inspection_routes_are_gone_under_local_provider(
+    api_module, method, path
+):
     """Machine inspection belongs to the client service now, not the server."""
     response = TestClient(api_module.app).request(method, path)
     _assert_route_removed(response)
 
 
 @pytest.mark.parametrize("method,path", REMOVED_LOCAL_INSPECTION_PATHS)
-def test_local_inspection_routes_are_gone_when_auth_enabled(
+def test_local_inspection_routes_are_gone_under_google_provider(
     api_module, fresh_db, monkeypatch, method, path
 ):
     client = _authenticated_client(api_module, fresh_db, monkeypatch)
@@ -1927,7 +1934,7 @@ def test_client_accepts_real_api_version_contract(api_module, monkeypatch, capsy
     from client import auth
 
     api_client = TestClient(api_module.app)
-    monkeypatch.setattr(api_module, "_auth_enabled", lambda: True)
+    monkeypatch.setitem(api_module.CONFIG, "auth", {"provider": "google"})
     monkeypatch.setattr(auth.httpx, "get", api_client.get)
 
     assert auth.check_server("http://testserver") == 0
@@ -1947,7 +1954,7 @@ def test_hosted_installer_uses_configured_origin_and_is_public(
     monkeypatch.setattr(
         api_module, "resolve_server_urls", lambda _config: {"api_url": server_url}
     )
-    monkeypatch.setattr(api_module, "_auth_enabled", lambda: True)
+    monkeypatch.setitem(api_module.CONFIG, "auth", {"provider": "google"})
     response = TestClient(api_module.app).get(
         "/install.sh", headers={"host": "attacker.example"}
     )

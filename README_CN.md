@@ -144,6 +144,8 @@ tokenage status
 tokenage setup
 tokenage update --check
 
+# 本地 server 不需要 Google 账户：在 server 本机即可使用 dashboard 和 `tokenage login`；
+# 其他机器的浏览器请在 server 上运行 `tokenage server login-link` 并打开输出的 URL。
 # 用远端 server 代替本地 server
 tokenage login --server https://app.example.com
 tokenage logout

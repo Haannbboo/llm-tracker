@@ -57,6 +57,7 @@ as a wrapper option.
 | `tokenage server restart [--otlp-port N]` | server | Migrate, then reload the running services. |
 | `tokenage server status [program...]` | server | Supervisord table, ports, port check. |
 | `tokenage server token create --email EMAIL [--kind cli\|ingest\|web] [--name NAME]` | server | Mint an operator token on the server box. |
+| `tokenage server login-link` | server | Print a one-time, 5-minute browser sign-in link for the local owner (local provider). Needed only for browsers that are not on the server machine; a browser on the server machine is signed in automatically. |
 | `tokenage --version` | either | Client version, plus the server release when it is installed. |
 | `tokenage --help`, `tokenage server --help` | either | Usage for the client and the service commands. |
 
@@ -64,6 +65,17 @@ as a wrapper option.
 forward to the matching `tokenage server` command, printing a one-line note
 on stderr. `status` is not one of them: it is the component report, and the
 service view is `tokenage server status`.
+
+## Sign-in providers
+
+`auth.provider` in the server's `config.yaml` is `local` (default) or `google`;
+an older `auth.enabled: true` still means `google`. Under `local` the server has
+one built-in owner (`owner@localhost`): a request that comes straight from the
+server machine (loopback peer, no forwarding headers, `localhost`/`127.0.0.1`/`::1`
+Host) is that owner with no token, so the dashboard and already-wired agents work
+untouched. Anything else needs a token. `tokenage login` works on loopback with no
+Google account; for a browser on another machine run `tokenage server login-link`
+on the server and open the URL it prints (single use, 5 minutes).
 
 ## Examples
 
@@ -167,6 +179,7 @@ tokenage server restart                             # migrate, then SIGHUP the r
 tokenage server restart --otlp-port 5002            # persist a new OTLP port, then restart the collector
 tokenage server bootstrap                           # install, build, start, verify, restart the API
 tokenage server token create --email ops@example.com
+tokenage server login-link                          # open the printed URL in a remote browser
 ```
 
 Valid program names: `tokenage-proxy`, `tokenage-api`, `tokenage-otlp`.
@@ -276,7 +289,7 @@ Device status and agent wiring come from the client service, not the API:
 tokenage client health --json
 ```
 
-`/version` is public when auth is enabled, and carries the wire protocol range,
+`/version` is public, and carries the wire protocol range,
 the server release, and `otlp_logs_endpoint` — the collector clients point agents
 at. Its `collector_bind` host/port fields describe server-local listener
 addresses for status diagnostics; they are not hosted client wiring targets.
