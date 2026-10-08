@@ -426,7 +426,9 @@ async def test_forward_persists_parsed_client_source(
         receive,
     )
 
-    response = await proxy_module.forward(request, "/v1/responses")
+    response = await proxy_module.forward(
+        request, "/v1/responses", proxy_module.get_local_owner().id
+    )
 
     assert response.status_code == 200
     assert captured["client_source"] == "opencode"
@@ -571,7 +573,9 @@ async def test_forward_logs_base_url_id_from_provider_config(proxy_module, monke
         receive,
     )
 
-    response = await proxy_module.forward(request, "/v1/responses")
+    response = await proxy_module.forward(
+        request, "/v1/responses", proxy_module.get_local_owner().id
+    )
 
     assert response.status_code == 200
     assert captured["url"] == "https://api.example.com/v1/responses"
@@ -638,7 +642,9 @@ async def test_forward_computes_prompt_length_non_streaming(proxy_module, monkey
         receive,
     )
 
-    await proxy_module.forward(request, "/v1/chat/completions")
+    await proxy_module.forward(
+        request, "/v1/chat/completions", proxy_module.get_local_owner().id
+    )
 
     # Only "Bye" after last assistant; "Hello world" is before it
     assert captured["prompt_length"] == 3
@@ -718,7 +724,9 @@ async def test_streaming_forward_logs_first_chunk_latency(proxy_module, monkeypa
         receive,
     )
 
-    response = await proxy_module.forward(request, "/v1/responses")
+    response = await proxy_module.forward(
+        request, "/v1/responses", proxy_module.get_local_owner().id
+    )
     chunks = [chunk async for chunk in response.body_iterator]
 
     assert response.status_code == 200
@@ -806,7 +814,9 @@ async def test_streaming_forward_merges_anthropic_message_start_and_delta_usage(
         receive,
     )
 
-    response = await proxy_module.forward(request, "/v1/messages")
+    response = await proxy_module.forward(
+        request, "/v1/messages", proxy_module.get_local_owner().id
+    )
     _ = [chunk async for chunk in response.body_iterator]
 
     # Anthropic's input_tokens (25) excludes cache_read_input_tokens (3) --
@@ -895,7 +905,9 @@ async def test_forward_computes_prompt_length_streaming(proxy_module, monkeypatc
         receive,
     )
 
-    response = await proxy_module.forward(request, "/v1/chat/completions")
+    response = await proxy_module.forward(
+        request, "/v1/chat/completions", proxy_module.get_local_owner().id
+    )
     _ = [chunk async for chunk in response.body_iterator]
 
     assert response.status_code == 200
@@ -959,7 +971,9 @@ async def test_streaming_forward_returns_upstream_error(proxy_module, monkeypatc
         receive,
     )
 
-    response = await proxy_module.forward(request, "/v1/chat/completions")
+    response = await proxy_module.forward(
+        request, "/v1/chat/completions", proxy_module.get_local_owner().id
+    )
 
     assert response.status_code == 401
     assert (
@@ -1020,7 +1034,9 @@ async def test_streaming_forward_relays_non_utf8_upstream_error(
         receive,
     )
 
-    response = await proxy_module.forward(request, "/v1/chat/completions")
+    response = await proxy_module.forward(
+        request, "/v1/chat/completions", proxy_module.get_local_owner().id
+    )
 
     assert response.status_code == 502
     assert "\ufffd".encode() in response.body
@@ -1074,7 +1090,9 @@ async def test_non_streaming_forward_relays_non_utf8_upstream_error(
         receive,
     )
 
-    response = await proxy_module.forward(request, "/v1/chat/completions")
+    response = await proxy_module.forward(
+        request, "/v1/chat/completions", proxy_module.get_local_owner().id
+    )
 
     assert response.status_code == 502
     assert "\ufffd".encode() in response.body
@@ -1130,7 +1148,9 @@ async def test_streaming_forward_closes_client_on_send_error(proxy_module, monke
     )
 
     with pytest.raises(RuntimeError, match="connection refused"):
-        await proxy_module.forward(request, "/v1/chat/completions")
+        await proxy_module.forward(
+            request, "/v1/chat/completions", proxy_module.get_local_owner().id
+        )
 
     assert closed, "client.aclose() was not called on send error"
 
@@ -1193,7 +1213,9 @@ async def test_streaming_forward_closes_client_on_aread_error(
     )
 
     with pytest.raises(RuntimeError, match="upstream read failed"):
-        await proxy_module.forward(request, "/v1/chat/completions")
+        await proxy_module.forward(
+            request, "/v1/chat/completions", proxy_module.get_local_owner().id
+        )
 
     assert closed, "client.aclose() was not called on aread error"
 
@@ -1375,3 +1397,105 @@ class TestStreamToolCallAccumulator:
         acc.accumulate({"choices": [{"delta": {"content": "hello"}}]})
         acc.accumulate({"usage": {"prompt_tokens": 10}})
         assert acc.get_tool_calls() == []
+
+
+# ---------------------------------------------------------------- proxy auth
+
+
+def _auth_client(proxy_module, monkeypatch, provider="local", remote=False):
+    """A client whose forward() just echoes the authenticated user id."""
+    import src.config.app
+
+    monkeypatch.setitem(src.config.app.CONFIG["auth"], "provider", provider)
+
+    async def echo_user(request, path, user_id):
+        return {"user_id": user_id}
+
+    monkeypatch.setattr(proxy_module, "forward", echo_user)
+    if remote:
+        return TestClient(
+            proxy_module.app,
+            client=("203.0.113.9", 5),
+            base_url="http://tracker.example",
+        )
+    return TestClient(proxy_module.app)
+
+
+def test_proxy_tokenless_loopback_is_the_local_owner(
+    proxy_module, monkeypatch, fresh_db
+):
+    client = _auth_client(proxy_module, monkeypatch)
+
+    response = client.post("/v1/chat/completions", json={})
+
+    assert response.status_code == 200
+    assert response.json()["user_id"] == proxy_module.get_local_owner().id
+
+
+@pytest.mark.parametrize("provider,remote", [("local", True), ("google", False)])
+def test_proxy_rejects_tokenless_calls_off_loopback_or_under_google(
+    proxy_module, monkeypatch, fresh_db, provider, remote
+):
+    client = _auth_client(proxy_module, monkeypatch, provider, remote)
+
+    assert client.post("/v1/messages", json={}).status_code == 401
+
+
+@pytest.mark.parametrize(
+    "header", ["authorization", "x-api-key"], ids=["bearer", "x-api-key"]
+)
+def test_proxy_records_under_the_ingest_tokens_user(
+    proxy_module, monkeypatch, fresh_db, header
+):
+    from src.auth.tokens import mint_token
+
+    token, user = mint_token("dev@example.com", kind="ingest", db_path=fresh_db.db_path)
+    client = _auth_client(proxy_module, monkeypatch, "google", remote=True)
+    value = f"Bearer {token}" if header == "authorization" else token
+
+    response = client.post("/v1/responses", json={}, headers={header: value})
+
+    assert response.status_code == 200
+    assert response.json()["user_id"] == user.id
+
+
+def test_proxy_rejects_non_ingest_and_unknown_tokens_without_owner_fallback(
+    proxy_module, monkeypatch, fresh_db
+):
+    from src.auth.tokens import mint_token
+
+    cli_token, _ = mint_token("dev@example.com", kind="cli", db_path=fresh_db.db_path)
+    client = _auth_client(proxy_module, monkeypatch)  # loopback, local provider
+
+    for token in (cli_token, "llmt_ingest_not-a-real-token"):
+        response = client.post(
+            "/v1/chat/completions",
+            json={},
+            headers={"authorization": f"Bearer {token}"},
+        )
+        assert response.status_code == 401
+
+
+def test_forward_headers_never_pass_the_clients_token_upstream(proxy_module):
+    from starlette.requests import Request
+
+    request = Request(
+        {
+            "type": "http",
+            "headers": [
+                (b"authorization", b"Bearer llmt_ingest_secret"),
+                (b"x-api-key", b"llmt_ingest_secret"),
+                (b"anthropic-version", b"2023-06-01"),
+            ],
+        }
+    )
+    provider = ProviderConfig(
+        name="p", base_url="https://up.example", api_key="sk-up", auth_scheme="bearer"
+    )
+
+    headers = proxy_module.build_forward_headers(request, provider)
+
+    assert headers == {
+        "anthropic-version": "2023-06-01",
+        "authorization": "Bearer sk-up",
+    }

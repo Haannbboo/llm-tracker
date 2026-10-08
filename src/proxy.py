@@ -27,7 +27,12 @@ from src.config.app import (
 )
 from src.config.models import ProviderConfig
 
-from .auth import _require_local_owner, auth_provider, get_local_owner
+from .auth import (
+    _require_local_owner,
+    get_local_owner,
+    local_owner_allowed,
+    resolve_token,
+)
 from .database import init_db
 from .recorder import record_tool_call, record_usage
 from .utils import extract_usage, find_stream_usage, normalize_provider_name
@@ -151,7 +156,8 @@ def build_forward_headers(
     headers = {
         k: v
         for k, v in request.headers.items()
-        if k.lower() not in {"host", "content-length", "authorization"}
+        # The client's own credential is a tokenage token: never forward it.
+        if k.lower() not in {"host", "content-length", "authorization", "x-api-key"}
     }
     if provider and provider.api_key:
         if provider.auth_scheme == "x-api-key":
@@ -159,6 +165,31 @@ def build_forward_headers(
         else:
             headers["authorization"] = f"Bearer {provider.api_key}"
     return headers
+
+
+def proxy_user_id(request: Request) -> str:
+    """Authenticate a proxied model call; the user its usage is recorded under.
+
+    The client puts its device's ingest token where a provider key would go
+    (`Authorization: Bearer` or `x-api-key`); upstream gets the operator's key.
+    Tokenless calls pass only as the local provider's loopback owner, and a
+    present-but-bad token never falls back to the owner. Sync, so FastAPI runs
+    the DB lookup in its threadpool.
+    """
+    scheme, _, bearer = request.headers.get("authorization", "").partition(" ")
+    token = (
+        bearer.strip() if scheme.lower() == "bearer" else ""
+    ) or request.headers.get("x-api-key", "").strip()
+    if not token:
+        if local_owner_allowed(request):
+            return get_local_owner().id
+    else:
+        # ponytail: no invalid-token cache as in the collector; tokens are
+        # 256-bit random, so a miss costs one indexed lookup.
+        resolved = resolve_token(token)
+        if resolved is not None and resolved[1].kind == "ingest":
+            return resolved[0].id
+    raise HTTPException(status_code=401, detail="invalid token")
 
 
 def parse_json_body(body: bytes) -> dict[str, Any]:
@@ -333,6 +364,7 @@ async def _forward_stream_or_error(
     client_ip: str | None,
     path: str,
     started_at: float,
+    user_id: str,
     prompt_length: int = 0,
 ) -> StreamingResponse | JSONResponse:
     """Open an upstream streaming connection, check status, and relay or error."""
@@ -404,7 +436,6 @@ async def _forward_stream_or_error(
             await client.aclose()
             usage_fields = extract_usage(raw_usage)
             latency_ms = int((time.monotonic() - started_at) * 1000)
-            user_id = get_local_owner().id
             usage = record_usage(
                 provider=provider.name,
                 model=model,
@@ -435,12 +466,8 @@ async def _forward_stream_or_error(
     return StreamingResponse(_relay(), media_type="text/event-stream")
 
 
-async def forward(request: Request, path: str):
+async def forward(request: Request, path: str, user_id: str):
     """Core proxy logic: resolve provider, forward request, and record usage."""
-    if auth_provider() != "local":
-        # The proxy is unauthenticated and spends the operator's provider keys:
-        # it exists only for the single-owner local provider.
-        raise HTTPException(status_code=404)
     body = await request.body()
     body_json = parse_json_body(body)
     user_agent = request.headers.get("user-agent", "")
@@ -475,6 +502,7 @@ async def forward(request: Request, path: str):
             client_ip=client_ip,
             path=path,
             started_at=started_at,
+            user_id=user_id,
             prompt_length=prompt_length,
         )
 
@@ -501,7 +529,6 @@ async def forward(request: Request, path: str):
         extract_usage(response_json.get("usage", {})) if response_json else {}
     )
     tool_calls = extract_tool_calls(response_json) if response_json else []
-    user_id = get_local_owner().id
     usage = record_usage(
         provider=provider.name,
         model=upstream_model,
@@ -564,23 +591,23 @@ def proxy_metadata() -> dict[str, Any]:
 
 @app.post("/chat/completions")
 @app.post("/v1/chat/completions")
-async def chat_completions(request: Request):
+async def chat_completions(request: Request, user_id: str = Depends(proxy_user_id)):
     """OpenAI-compatible chat completions endpoint."""
-    return await forward(request, "/v1/chat/completions")
+    return await forward(request, "/v1/chat/completions", user_id)
 
 
 @app.post("/responses")
 @app.post("/v1/responses")
-async def responses(request: Request):
+async def responses(request: Request, user_id: str = Depends(proxy_user_id)):
     """Proxy for /responses endpoint."""
-    return await forward(request, "/v1/responses")
+    return await forward(request, "/v1/responses", user_id)
 
 
 @app.post("/messages")
 @app.post("/v1/messages")
-async def messages(request: Request):
+async def messages(request: Request, user_id: str = Depends(proxy_user_id)):
     """Proxy for /messages endpoint."""
-    return await forward(request, "/v1/messages")
+    return await forward(request, "/v1/messages", user_id)
 
 
 @app.get("/api/v1/models")
