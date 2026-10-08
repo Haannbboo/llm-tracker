@@ -107,8 +107,12 @@ def _launcher() -> Path | None:
 
 def _service_env() -> dict[str, str]:
     env = {"TOKENAGE_HOME": str(tracker_home()), "TOKENAGE_SKIP_BANNER": "1"}
-    if os.environ.get("TOKENAGE_ROOT"):
-        env["TOKENAGE_ROOT"] = os.environ["TOKENAGE_ROOT"]
+    # systemd/launchd start services with a bare PATH, so agents installed in
+    # ~/.local/bin and the like would read as missing; keep the user's PATH
+    # from when the service was installed (`client start` rewrites it).
+    for key in ("TOKENAGE_ROOT", "PATH"):
+        if os.environ.get(key):
+            env[key] = os.environ[key]
     return env
 
 

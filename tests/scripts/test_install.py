@@ -11,6 +11,8 @@ import tarfile
 import time
 from pathlib import Path
 
+import pytest
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 INSTALLER = REPO_ROOT / "install.sh"
 SHARED_LAUNCHER = REPO_ROOT / "client" / "bin" / "tokenage"
@@ -540,11 +542,10 @@ def _run_raw(tmp_path: Path, env: dict, *args: str):
 def test_default_install_is_server_then_client_pointed_at_it(tmp_path: Path) -> None:
     home, env = _both_fixture(tmp_path)
 
-    result = _run_raw(tmp_path, env, "--otlp-port", "9")
+    result = _run_raw(tmp_path, env)
 
     assert result.returncode == 0, result.stdout + result.stderr
-    # Extra arguments reach the server bootstrap.
-    assert (tmp_path / "python.log.server").read_text() == "bootstrap --otlp-port 9\n"
+    assert (tmp_path / "python.log.server").read_text() == "bootstrap \n"
     tracker_home = home / ".tokenage"
     # The client has its own snapshot, and the launcher no longer points into the
     # server clone.
@@ -570,10 +571,13 @@ def test_server_only_installs_no_client(tmp_path: Path) -> None:
     assert (home / ".local" / "bin" / "tokenage").is_symlink()
 
 
-def test_unknown_option_is_refused_for_a_client_install(tmp_path: Path) -> None:
+@pytest.mark.parametrize("flags", [["--client"], ["--server"], []])
+def test_unknown_option_is_refused_before_any_install(
+    tmp_path: Path, flags: list[str]
+) -> None:
     _, env = _both_fixture(tmp_path)
 
-    result = _run_raw(tmp_path, env, "--client", "--bogus")
+    result = _run_raw(tmp_path, env, *flags, "--bogus")
 
     assert result.returncode != 0
     assert "unknown option: --bogus" in result.stderr

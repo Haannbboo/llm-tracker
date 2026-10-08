@@ -13,6 +13,7 @@ RUN pip install --no-cache-dir uv && uv pip install --system --no-cache -r src/p
 
 # Copy application code
 COPY src/ src/
+COPY protocol/ protocol/
 
 COPY frontend/dist/ frontend/dist/
 COPY config.example.yaml VERSION install.sh ./

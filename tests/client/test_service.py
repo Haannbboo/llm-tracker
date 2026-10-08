@@ -395,6 +395,7 @@ def managed(device_home: Path, monkeypatch: pytest.MonkeyPatch):
     _write(launcher, "#!/bin/sh\n")
     monkeypatch.setattr(service, "_launcher", lambda: launcher)
     monkeypatch.setenv("TOKENAGE_ROOT", "/dev/checkout")
+    monkeypatch.setenv("PATH", "/home/u/.local/bin:/usr/bin")
     install.launcher = launcher
     return install
 
@@ -406,6 +407,8 @@ def test_systemd_start_writes_unit_and_enables(managed, device_home, capsys) -> 
     assert f'ExecStart="{managed.launcher}" client run' in unit
     assert f'Environment="TOKENAGE_HOME={device_home / ".tokenage"}"' in unit
     assert 'Environment="TOKENAGE_ROOT=/dev/checkout"' in unit
+    # The manager's bare PATH would hide agents in ~/.local/bin.
+    assert 'Environment="PATH=/home/u/.local/bin:/usr/bin"' in unit
     assert "Restart=on-failure" in unit
     assert "WantedBy=default.target" in unit
     assert fake.calls == [

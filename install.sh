@@ -43,7 +43,7 @@ case "$TOKENAGE_INSTALL_COMMIT" in
 esac
 
 # ── Which components ───────────────────────────────────────────────
-# Arguments that are not component flags go to the server bootstrap.
+# Only component flags are accepted.
 WANT_CLIENT=0
 WANT_SERVER=0
 count=$#
@@ -60,7 +60,7 @@ done
 if [ "$WANT_CLIENT$WANT_SERVER" = 00 ]; then
   if [ -n "$SERVER_URL" ]; then WANT_CLIENT=1; else WANT_CLIENT=1; WANT_SERVER=1; fi
 fi
-[ "$WANT_SERVER" = 1 ] || [ "$#" -eq 0 ] || fail "unknown option: $1"
+[ "$#" -eq 0 ] || fail "unknown option: $1"
 if [ "$WANT_CLIENT" = 1 ]; then say 'Installing: client'; fi
 if [ "$WANT_SERVER" = 1 ]; then say 'Installing: server'; fi
 
@@ -104,7 +104,7 @@ if [ "$WANT_SERVER" = 1 ]; then
     mkdir -p "$TRACKER_HOME"
     git clone --branch "$BRANCH" "https://github.com/$REPOSITORY.git" "$INSTALL_DIR"
   fi
-  bash "$INSTALL_DIR/src/scripts/bootstrap.sh" "$@"
+  bash "$INSTALL_DIR/src/scripts/bootstrap.sh"
   # Same version on both sides of a both-install.
   [ -n "$TOKENAGE_INSTALL_COMMIT" ] || TOKENAGE_INSTALL_COMMIT=$(git -C "$INSTALL_DIR" rev-parse HEAD)
 fi

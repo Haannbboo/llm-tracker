@@ -156,7 +156,7 @@ TOKENAGE_ROOT="$PWD" tokenage server bootstrap  # build THIS checkout's dashboar
 
 It also makes the client import this checkout instead of a snapshot. Repair agent settings with `TOKENAGE_ROOT="$PWD" tokenage setup`.
 
-There is one installer, `install.sh` at the repo root (POSIX sh, also served by `GET /install.sh` with the server URL and commit placeholders filled). Components are chosen by flag: `--server`, `--client`, or neither/both. With no flag it installs both, unless it was served by a server (preset URL), in which case it installs the client. Unrecognised arguments go to the server bootstrap.
+There is one installer, `install.sh` at the repo root (POSIX sh, also served by `GET /install.sh` with the server URL and commit placeholders filled). Components are chosen by flag: `--server`, `--client`, or neither/both. With no flag it installs both, unless it was served by a server (preset URL), in which case it installs the client. Any other argument is rejected.
 
 ```txt
 server: install.sh → clone to ~/.tokenage/src → src/scripts/bootstrap.sh → python -m src.cli bootstrap (src/ops.py)

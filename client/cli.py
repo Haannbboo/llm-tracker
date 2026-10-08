@@ -30,7 +30,7 @@ commands:
   status [--json]           report this client: sign-in, agents, wiring
   update [--check]          update the client
   client <command>          manage this device's background client service
-                            (start, stop, restart, status, run, health)
+                            (start, stop, restart, status, run)
   server <command>          start, stop, restart, bootstrap, status, update, token
                             (requires the server component)
 
