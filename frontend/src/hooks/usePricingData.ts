@@ -116,7 +116,8 @@ export function usePricingData() {
    *  from the pricing data, with unsaved edits applied on top. */
   const activeCost = useCallback((model: { name: string } & PricingEntry) => {
     const active: Record<string, number> = {}
-    if (model.source === 'yaml') {
+    // A provider view also lists global entries; only this scope's overrides are editable here.
+    if (model.source === 'yaml' && model.scope === selectedPricingProvider) {
       active.input = model.input
       active.output = model.output
       active.cacheRead = model.cache_read

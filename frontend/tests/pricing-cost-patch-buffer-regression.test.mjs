@@ -59,3 +59,7 @@ test('pricing save clears the buffer after a successful save and refetches prici
 
   assert.match(savePricingSource, /setPricingData\(await pricingResp\.json\(\)\)/)
 })
+
+test('a provider view seeds only that provider\'s overrides, not global ones', () => {
+  assert.match(pricingHook, /model\.source === 'yaml' && model\.scope === selectedPricingProvider/)
+})
