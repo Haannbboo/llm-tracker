@@ -58,6 +58,8 @@ class Device(Base):
     created_at: Mapped[int] = mapped_column(BigInteger, nullable=False)
     last_seen_at: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     revoked_at: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    status_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    status_reported_at: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
 
 
 class AuthToken(Base):

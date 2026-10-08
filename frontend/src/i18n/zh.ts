@@ -3,7 +3,6 @@ export const zh: Record<string, string> = {
   'Dashboard': '仪表盘',
   'Request Logs': '请求日志',
   'Settings': '设置',
-  'Connectivity Test': '连通性测试',
 
   // Theme
   'Switch to light mode': '切换到亮色模式',
@@ -166,15 +165,9 @@ export const zh: Record<string, string> = {
   'Jump:': '跳转：',
   '/ page': '/ 页',
 
-  // Settings - Active Providers
-  'Active Providers': '活跃供应商',
-  'Base URL': '基础 URL',
-  'Models': '模型',
-  'No providers configured in config.yaml.': 'config.yaml 中未配置供应商。',
-  'Cost Override': '费用覆盖',
-
   // Settings - Model Pricing
   'Model Pricing': '模型定价',
+  'Models': '模型',
   'Scope:': '范围：',
   'Global Default': '全局默认',
   'Provider:': '供应商：',
@@ -182,50 +175,17 @@ export const zh: Record<string, string> = {
   'Output (per 1M)': '输出（每百万）',
   'Cache Read (per 1M)': '缓存读取（每百万）',
   'Cache Write (per 1M)': '缓存写入（每百万）',
-  'No global models configured in config.yaml.': 'config.yaml 中未配置全局模型。',
-  'Provider Override': '供应商覆盖',
 
-  // Settings - Configuration
-  'Configuration (YAML)': '配置（YAML）',
-  'Directly edit your <code>config.yaml</code>. Providers and routing are defined here.': '直接编辑 <code>config.yaml</code>。供应商和路由在此定义。',
   'Configuration saved successfully': '配置保存成功',
-  'Save Configuration': '保存配置',
-  'Saving...': '保存中...',
 
-  // Connectivity Test
-  'Upstream Connectivity Test': '上游连通性测试',
-  'The upstream API root URL, e.g. https://api.openai.com/v1': '上游 API 根 URL，例如 https://api.openai.com/v1',
-  'API Key': 'API 密钥',
-  'Format': '格式',
-  'OpenAI': 'OpenAI',
-  'Chat Completion': '聊天补全',
-  'Anthropic': 'Anthropic',
-  'Claude': 'Claude',
-  'Codex': 'Codex',
-  'Responses': 'Responses',
-  'Custom:': '自定义：',
-  'Message': '消息',
-  'Testing...': '测试中...',
-  'Run Connectivity Test': '运行连通性测试',
-  'Manual curl equivalent': '等效 curl 命令',
   'Copy': '复制',
-  'Copied': '已复制',
-  'Test Result': '测试结果',
-  'Results will appear here after testing': '测试后结果将显示在此处',
-  'Status Code': '状态码',
-  'Error': '错误',
   'Latency': '延迟',
-  'Response': '响应',
-  'Upstream returned HTML -- check that base_url points to an API endpoint': '上游返回了 HTML — 请检查 base_url 是否指向 API 端点',
-  'Response Body': '响应体',
 
   // Error messages
   'Failed to fetch dashboard data': '获取仪表盘数据失败',
   'Failed to fetch log data': '获取日志数据失败',
   'Unknown error': '未知错误',
   'Failed to save config': '保存配置失败',
-  'Failed to refresh config after save': '保存后刷新配置失败',
-  'Config root must be a YAML mapping': '配置根节点必须是 YAML 映射',
   'Connection error while saving config': '保存配置时连接错误',
   'Test failed': '测试失败',
 
@@ -239,7 +199,6 @@ export const zh: Record<string, string> = {
 
   // Empty state / onboarding (P0-6)
   'Welcome to tokenage': '欢迎使用 tokenage',
-  'tokenage Settings': 'tokenage 设置',
   'Your local dashboard for AI coding agents': '你的本地 AI 编程代理仪表盘',
   'Track Claude Code, Codex, and OpenAI-compatible traffic in one place — usage, cost, latency.': '在一个地方追踪 Claude Code、Codex 和 OpenAI 兼容流量 — 用量、费用、延迟。',
   'Get Started': '开始使用',
@@ -270,7 +229,6 @@ export const zh: Record<string, string> = {
   'Not found': '未找到',
   'Ready': '就绪',
   'Unknown': '未知',
-  'Detected:': '检测到：',
   'Detected from your local config and available commands.': '根据你的本地配置和可用命令检测。',
 
   // Empty state / onboarding (Commit 1 reframe)
@@ -450,6 +408,7 @@ export const zh: Record<string, string> = {
   'Sign in required': '需要登录',
   'Sign in with your Google account to continue using tokenage.': '请使用 Google 账户登录以继续使用 tokenage。',
   'Sign in with Google': '使用 Google 登录',
+  'This server uses local sign-in. On the server machine, run `tokenage server login-link` and open the link it prints in this browser.': '此服务器使用本地登录。请在服务器上运行 `tokenage server login-link`，并在此浏览器中打开其输出的链接。',
   'This sign-in link was invalid or expired. Please try again.': '登录链接无效或已过期，请重试。',
   'Your Google account email is not verified.': '您的 Google 账户邮箱尚未验证。',
   'Your Google account is not on this server\'s allowlist.': '您的 Google 账户不在该服务器的允许列表中。',
@@ -480,6 +439,7 @@ export const zh: Record<string, string> = {
   // Pricing page
   'Pricing': '定价',
   'Details': '详情',
+  'No report yet. Start the tokenage client service on this device.': '该设备尚未上报状态。请在此设备上运行 tokenage client start。',
   'All': '全部',
   'Multiplier:': '倍率：',
   'Search models...': '搜索模型...',

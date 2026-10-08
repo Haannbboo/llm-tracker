@@ -8,14 +8,15 @@ RUN apt-get update && \
     rm -rf /var/lib/apt/lists/*
 
 # Install Python dependencies
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+COPY src/pyproject.toml src/pyproject.toml
+RUN pip install --no-cache-dir uv && uv pip install --system --no-cache -r src/pyproject.toml
 
 # Copy application code
 COPY src/ src/
-COPY scripts/ scripts/
+COPY protocol/ protocol/
+
 COPY frontend/dist/ frontend/dist/
-COPY config.example.yaml VERSION ./
+COPY config.example.yaml VERSION install.sh ./
 
 # Create directories for runtime
 RUN mkdir -p /root/.tokenage/logs

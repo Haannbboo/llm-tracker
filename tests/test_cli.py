@@ -3,7 +3,7 @@
 Everything a per-user client does — tracking, sign-in, agent wiring — is tested
 in tests/client/ against the client package. What is left here is what only the
 server can answer (`tokenage server token ...`) and the contract of
-scripts/tokenage, the one installed command.
+client/bin/tokenage, the one installed command.
 """
 
 from __future__ import annotations
@@ -16,7 +16,7 @@ import sys
 import time
 from pathlib import Path
 
-LAUNCHER = Path(__file__).resolve().parents[1] / "scripts" / "tokenage"
+LAUNCHER = Path(__file__).resolve().parents[1] / "client" / "bin" / "tokenage"
 CLIENT = Path(__file__).resolve().parents[1] / "client"
 
 
@@ -32,7 +32,6 @@ def _scrubbed_env(tmp_path):
         "TOKENAGE_ROOT",
         "TOKENAGE_SKIP_BANNER",
         "TOKENAGE_CLIENT_COMMIT",
-        "TOKENAGE_SERVER_ROOT",
         "NO_COLOR",
     ):
         env.pop(key, None)
@@ -95,7 +94,7 @@ def test_main_without_a_command_prints_usage(cli_module, isolated_home, capsys):
 
 
 def test_dev_scripts_live_under_scripts_dev():
-    scripts_dir = Path(__file__).resolve().parents[1] / "scripts"
+    scripts_dir = Path(__file__).resolve().parents[1] / "src" / "scripts"
 
     assert not (scripts_dir / "dev-start.sh").exists()
     assert not (scripts_dir / "dev-stop.sh").exists()
@@ -110,8 +109,7 @@ def test_tokenage_script_routes_to_client_and_server():
     # it a `python -m` run from inside some other checkout would import that
     # checkout's client instead of the installed one.
     assert 'exec "$python" -P -m client "$@"' in content
-    # `tokenage server ...` is the server half: shell scripts, plus the
-    # operator CLI for `server token`.
+    # `tokenage server ...` is the server half: src.cli, except bootstrap.
     assert "run_server() {" in content
     assert '-m src.cli "$@"' in content
 
@@ -119,12 +117,12 @@ def test_tokenage_script_routes_to_client_and_server():
 def test_tokenage_server_routes_bootstrap_to_the_script(tmp_path):
     content = LAUNCHER.read_text(encoding="utf-8")
 
-    assert 'exec bash "${root}/scripts/${name}.sh" "$@"' in content
-    assert "bootstrap|start|stop|restart|status) shift; run_server_script" in content
-    # The bare spellings still route, with a note on stderr — except `status`,
-    # which is the component report now. Its old meaning is `server status`.
-    assert "bootstrap|start|stop|restart|token)" in content
-    assert 'alias_notice "$1"' in content
+    assert 'exec bash "${root}/src/scripts/${name}.sh" "$@"' in content
+    assert 'bootstrap) shift; run_server_script bootstrap "$@"' in content
+    assert (
+        "start|stop|restart|status|update|token|login-link) shift; run_server_python"
+        in content
+    )
 
     result = _run_launcher(tmp_path, "server")
     assert result.returncode == 2
@@ -169,10 +167,7 @@ def _client_snapshot(home: Path) -> Path:
 
     The launcher accepts the dev checkout as a client only when its bootstrap-
     made `.venv/bin/python` exists — true on a developer machine, not in CI —
-    so shipping the snapshot keeps these tests off that ambient state. Both
-    banner sources exercised: locally print_banner still prefers the checkout
-    server clone, while CI exercises the snapshot fallback.
-    """
+    so shipping the snapshot keeps these tests off that ambient state."""
     snapshot = home / "versions" / "test"
     if (home / "current").is_symlink():
         return home
@@ -181,11 +176,6 @@ def _client_snapshot(home: Path) -> Path:
     # The real installer always records a commit for the installed snapshot.
     (snapshot / "client" / "COMMIT").write_text("t" * 40)
     shutil.copytree(CLIENT.parent / "protocol", snapshot / "protocol")
-    # The launcher sources scripts/lib/terminal.sh from its snapshot when no
-    # server component exists, so the banner lives there too.
-    lib = snapshot / "scripts" / "lib"
-    lib.mkdir(parents=True)
-    shutil.copytree(CLIENT.parent / "scripts" / "lib", lib, dirs_exist_ok=True)
     stub_bin = snapshot / ".venv" / "bin"
     stub_bin.mkdir(parents=True)
     python = stub_bin / "python"
@@ -357,7 +347,6 @@ def test_tokenage_identity_defaults_and_env_overrides_agree_with_launcher(
     default_home = home / ".tokenage"
     assert paths.tracker_home() == default_home
     assert paths.credentials_path() == default_home / "credentials.json"
-    assert paths.config_path() == default_home / "config.yaml"
 
     snapshot = default_home / "versions" / "test"
     _client_install(snapshot, "snapshot", "1.2.3", "a" * 40)
@@ -384,7 +373,6 @@ def test_tokenage_identity_defaults_and_env_overrides_agree_with_launcher(
     monkeypatch.setenv("TOKENAGE_CONFIG", str(tmp_path / "custom.yaml"))
     assert paths.tracker_home() == override_home
     assert paths.credentials_path() == override_home / "credentials.json"
-    assert paths.config_path() == tmp_path / "custom.yaml"
     env["TOKENAGE_HOME"] = str(override_home)
     result = subprocess.run(
         [str(launcher), "--version"],
@@ -397,19 +385,19 @@ def test_tokenage_identity_defaults_and_env_overrides_agree_with_launcher(
     assert result.stdout == "tokenage 4.5.6 (client bbbbbbb)\n"
 
 
-def test_relative_launcher_symlink_uses_its_checkout(tmp_path):
+def test_client_never_runs_from_the_server_clone(tmp_path):
     checkout = tmp_path / "checkout"
     _client_install(checkout, "checkout", "1.2.3", "a" * 40)
-    scripts = checkout / "scripts"
-    scripts.mkdir()
+    (checkout / "client" / "bin").mkdir(parents=True, exist_ok=True)
     (checkout / "src").mkdir()
-    launcher = scripts / "tokenage"
+    (checkout / "install.sh").write_text("")
+    launcher = checkout / "client" / "bin" / "tokenage"
     launcher.write_text(LAUNCHER.read_text())
     launcher.chmod(0o755)
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     linked = bin_dir / "tokenage"
-    linked.symlink_to("../checkout/scripts/tokenage")
+    linked.symlink_to("../checkout/client/bin/tokenage")
     unrelated_cwd = tmp_path / "other"
     unrelated_cwd.mkdir()
     env = {**os.environ, "TOKENAGE_HOME": str(tmp_path / "empty-home")}
@@ -422,8 +410,10 @@ def test_relative_launcher_symlink_uses_its_checkout(tmp_path):
         capture_output=True,
         text=True,
     )
-    assert result.returncode == 0, result.stderr
-    assert json.loads(result.stdout)["root"] == str(checkout)
+    # The clone has a client and an environment, but without a snapshot the
+    # client is simply not installed.
+    assert result.returncode == 1
+    assert "client component is not installed" in result.stderr
 
 
 def test_hosted_launcher_does_not_use_unrelated_home_virtualenv_as_server(tmp_path):
@@ -457,11 +447,8 @@ def test_hosted_launcher_does_not_use_unrelated_home_virtualenv_as_server(tmp_pa
 def test_server_dispatch_consumes_no_banner_without_changing_other_arguments(tmp_path):
     root = tmp_path / "checkout"
     _client_install(root, "checkout", "1.2.3", "a" * 40)
-    scripts = root / "scripts"
-    scripts.mkdir()
-    (scripts / "restart.sh").write_text('#!/bin/bash\nprintf "%s\\n" "$@"\n')
     src = root / "src"
-    src.mkdir()
+    src.mkdir(parents=True)
     (src / "__init__.py").write_text("")
     (src / "cli.py").write_text("import json, sys\nprint(json.dumps(sys.argv[1:]))\n")
     env = {
@@ -472,9 +459,8 @@ def test_server_dispatch_consumes_no_banner_without_changing_other_arguments(tmp
     for args, expected in [
         (
             ["server", "restart", "--no-banner", "--otlp-port", "4202"],
-            "--otlp-port\n4202\n",
+            json.dumps(["restart", "--otlp-port", "4202"]) + "\n",
         ),
-        (["restart", "--no-banner"], "\n"),
         (
             ["server", "--no-banner", "token", "create", "--email", "ops@example.com"],
             json.dumps(["token", "create", "--email", "ops@example.com"]) + "\n",

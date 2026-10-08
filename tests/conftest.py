@@ -118,7 +118,12 @@ def isolated_home(
 @pytest.fixture
 def load_module(isolated_home: Path) -> Callable[[str], ModuleType]:
     def load(module_name: str) -> ModuleType:
-        return importlib.import_module(module_name)
+        module = importlib.import_module(module_name)
+        if module_name in ("src.api", "src.otlp", "src.proxy"):
+            # Every request resolves to a user (the local owner is created on
+            # demand), so these apps always need the schema.
+            importlib.import_module("src.database").init_db()
+        return module
 
     return load
 
@@ -323,3 +328,28 @@ def pg_db(pg_clean: Any) -> Generator[str, None, None]:
     url = os.environ[PG_URL_ENV_VAR]
     sm.migrate_database(url)
     yield url
+
+
+@pytest.fixture(autouse=True)
+def _loopback_test_client(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Default TestClient to a direct loopback request (the local owner).
+
+    Starlette's default peer is "testclient" with Host "testserver", which the
+    local provider correctly treats as remote. Tests of the remote path pass
+    their own ``client=``/``base_url=``/headers. A client-only environment
+    (CI's hosted-install job) has no fastapi and no TestClient to patch.
+    """
+    try:
+        from fastapi.testclient import TestClient
+    except ImportError:
+        return
+
+    original = TestClient.__init__
+
+    def init(self, app, *args, **kwargs):
+        if not args:
+            kwargs.setdefault("client", ("127.0.0.1", 50000))
+            kwargs.setdefault("base_url", "http://localhost")
+        original(self, app, *args, **kwargs)
+
+    monkeypatch.setattr(TestClient, "__init__", init)

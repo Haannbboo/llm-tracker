@@ -1,5 +1,6 @@
 import asyncio
 import json
+from unittest.mock import ANY
 
 import pytest
 from fastapi.testclient import TestClient
@@ -36,16 +37,6 @@ def test_lifespan_shutdown_cancels_stuck_evaluation_worker(api_module, monkeypat
 
 def test_api_defines_bounded_evaluation_worker_shutdown(api_module):
     assert hasattr(api_module, "_stop_evaluation_worker")
-
-
-def test_usage_high_watermark_endpoint(api_module, monkeypatch):
-    monkeypatch.setattr(
-        api_module, "get_usage_high_watermark_ts", lambda: 1718000000000000
-    )
-
-    result = asyncio.run(api_module.usage_high_watermark())
-
-    assert result == {"ts": 1718000000000000}
 
 
 def test_reprice_estimated_usage_endpoint_passes_filters(api_module, monkeypatch):
@@ -127,21 +118,23 @@ def test_usage_run_summary_endpoint_passes_filters(api_module, monkeypatch):
 
     monkeypatch.setattr(api_module, "summarize_usage_window", fake_summary)
 
-    result = asyncio.run(
-        api_module.usage_run_summary(
-            after_ts=1718000000000000,
-            until_ts=1718100000000000,
-            since="2026-04-17T00:00:00+00:00",
-            until="2026-04-18T00:00:00+00:00",
-            client_source="codex",
-            session_id="conv-1",
-            provider="openai",
-            model="gpt-test",
-            include_rows=True,
-        )
+    response = TestClient(api_module.app).get(
+        "/usage/run-summary",
+        params={
+            "after_ts": 1718000000000000,
+            "until_ts": 1718100000000000,
+            "since": "2026-04-17T00:00:00+00:00",
+            "until": "2026-04-18T00:00:00+00:00",
+            "client_source": "codex",
+            "session_id": "conv-1",
+            "provider": "openai",
+            "model": "gpt-test",
+            "include_rows": True,
+        },
     )
 
     assert captured == {
+        "user_id": ANY,
         "after_ts": 1718000000000000,
         "until_ts": 1718100000000000,
         "since": "2026-04-17T00:00:00+00:00",
@@ -152,12 +145,13 @@ def test_usage_run_summary_endpoint_passes_filters(api_module, monkeypatch):
         "model": "gpt-test",
         "include_rows": True,
     }
-    assert result["summary"]["requests"] == 1
+    assert response.status_code == 200
+    assert response.json()["summary"]["requests"] == 1
 
 
 def test_usage_high_watermark_route(api_module, monkeypatch):
     monkeypatch.setattr(
-        api_module, "get_usage_high_watermark_ts", lambda: 1718000000000000
+        api_module, "get_usage_high_watermark_ts", lambda **kwargs: 1718000000000000
     )
 
     response = TestClient(api_module.app).get("/usage/high-watermark")
@@ -202,6 +196,7 @@ def test_usage_run_summary_route_parses_query_filters(api_module, monkeypatch):
 
     assert response.status_code == 200
     assert captured == {
+        "user_id": ANY,
         "after_ts": 1718000000000000,
         "until_ts": 1718100000000000,
         "since": "2026-04-17T00:00:00+00:00",
@@ -238,79 +233,6 @@ def test_usage_ingest_route_is_not_available(api_module):
     )
 
     assert response.status_code == 405
-
-
-def test_get_config_returns_raw_content_for_malformed_yaml(
-    api_module, isolated_home, monkeypatch
-):
-    config_path = isolated_home / ".tokenage" / "broken.yaml"
-    config_path.write_text("providers:\n  broken: [\n", encoding="utf-8")
-    monkeypatch.setattr(api_module, "CONFIG_PATH", str(config_path))
-
-    result = asyncio.run(api_module.get_config())
-
-    assert result["content"] == "providers:\n  broken: [\n"
-    assert result["parsed"] == {}
-    assert result["runtime"]["evaluation"]["evaluator"] == "codex"
-
-
-def test_get_config_surfaces_runtime_evaluator(api_module, isolated_home, monkeypatch):
-    config_path = isolated_home / ".tokenage" / "config.yaml"
-    config_path.parent.mkdir(parents=True, exist_ok=True)
-    config_path.write_text(
-        """
-evaluation:
-  evaluator: claude
-""".lstrip(),
-        encoding="utf-8",
-    )
-    monkeypatch.setattr(api_module, "CONFIG_PATH", str(config_path))
-
-    result = asyncio.run(api_module.get_config())
-
-    assert result["parsed"]["evaluation"]["evaluator"] == "claude"
-    assert result["runtime"]["evaluation"]["evaluator"] == "claude"
-
-
-def test_update_config_refreshes_runtime_config(
-    api_module, config_module, isolated_home
-):
-    config_path = isolated_home / ".tokenage" / "config.yaml"
-    api_module.CONFIG_PATH = str(config_path)
-
-    result = asyncio.run(
-        api_module.update_config(
-            api_module.ConfigUpdate(
-                content="""
-pricing:
-  auto_fetch: false
-server:
-  host: 0.0.0.0
-  port: 4000
-db:
-  path: ~/.tokenage/usage.db
-models:
-  new-model: {}
-providers:
-  new-provider:
-    base_url: https://new.example/v1
-    models:
-      new-model: {}
-"""
-            )
-        )
-    )
-
-    assert result == {"status": "success"}
-    assert config_module.CONFIG["server"]["host"] == "0.0.0.0"
-    assert config_module.PROVIDER_MAP["new-provider"] == config_module.ProviderConfig(
-        name="new-provider",
-        base_url="https://new.example/v1",
-    )
-    assert config_module.MODEL_MAP["new-model"] == config_module.ProviderConfig(
-        name="new-provider",
-        base_url="https://new.example/v1",
-    )
 
 
 def test_usage_endpoint_passes_client_source(api_module, monkeypatch):
@@ -463,29 +385,6 @@ def test_usage_endpoint_does_not_include_cors_for_untrusted_origin(
     )
 
     assert response.status_code == 200
-    assert "access-control-allow-origin" not in response.headers
-
-
-def test_config_endpoint_does_not_include_cors_for_localhost_origin(api_module):
-    response = TestClient(api_module.app).get(
-        "/config",
-        headers={"Origin": "http://localhost:3000"},
-    )
-
-    assert response.status_code == 200
-    assert "access-control-allow-origin" not in response.headers
-
-
-def test_config_endpoint_preflight_does_not_allow_localhost_origin(api_module):
-    response = TestClient(api_module.app).options(
-        "/config",
-        headers={
-            "Origin": "http://localhost:3000",
-            "Access-Control-Request-Method": "GET",
-        },
-    )
-
-    assert response.status_code == 405
     assert "access-control-allow-origin" not in response.headers
 
 
@@ -681,6 +580,7 @@ def test_usage_by_provider_endpoint_includes_avg_effective_price_per_million(
     assert response.status_code == 200
     assert response.json()[0]["avg_effective_price_per_million_usd"] == 10.0
     assert captured == {
+        "user_id": ANY,
         "since": None,
         "until": None,
         "provider": "openai",
@@ -689,116 +589,19 @@ def test_usage_by_provider_endpoint_includes_avg_effective_price_per_million(
     }
 
 
-def test_connectivity_endpoint(api_module, monkeypatch):
-    class FakeResponse:
-        def __init__(self):
-            self.status_code = 200
-            self.text = '{"ok": true}'
-
-        def json(self):
-            return {"ok": True}
-
-    async def fake_post(*args, **kwargs):
-        return FakeResponse()
-
-    # Mock httpx.AsyncClient.post
-    from unittest.mock import AsyncMock, MagicMock
-
-    mock_client = MagicMock()
-    mock_client.post = AsyncMock(side_effect=fake_post)
-    mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-    mock_client.__aexit__ = AsyncMock(return_value=None)
-
-    monkeypatch.setattr("httpx.AsyncClient", lambda **kwargs: mock_client)
-
+@pytest.mark.parametrize("provider", ("local", "google"))
+def test_connectivity_endpoint_removed(api_module, monkeypatch, provider):
+    monkeypatch.setitem(api_module.CONFIG, "auth", {"provider": provider})
+    assert "/test-connectivity" not in api_module.app.openapi()["paths"]
     response = TestClient(api_module.app).post(
         "/test-connectivity",
         json={
-            "base_url": "https://api.openai.com/v1",
-            "api_key": "sk-test",
-            "format": "openai",
-            "model": "gpt-test",
-        },
-    )
-
-    assert response.status_code == 200
-    data = response.json()
-    assert data["status_code"] == 200
-    assert data["body"] == {"ok": True}
-    assert "latency_ms" in data
-    assert data["url"] == "https://api.openai.com/v1/chat/completions"
-
-
-def test_connectivity_endpoint_adds_v1(api_module, monkeypatch):
-    captured = {}
-
-    async def fake_post(url, **kwargs):
-        captured["url"] = url
-
-        class FakeResponse:
-            status_code = 200
-            text = '{"ok": true}'
-
-            def json(self):
-                return {"ok": True}
-
-        return FakeResponse()
-
-    from unittest.mock import AsyncMock, MagicMock
-
-    mock_client = MagicMock()
-    mock_client.post = AsyncMock(side_effect=fake_post)
-    mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-    mock_client.__aexit__ = AsyncMock(return_value=None)
-
-    monkeypatch.setattr("httpx.AsyncClient", lambda **kwargs: mock_client)
-
-    TestClient(api_module.app).post(
-        "/test-connectivity",
-        json={
-            "base_url": "https://free.codesonline.dev",
-            "api_key": "sk-test",
+            "base_url": "http://127.0.0.1",
+            "api_key": "test-key",
             "format": "openai",
         },
     )
-
-    assert captured["url"] == "https://free.codesonline.dev/v1/chat/completions"
-
-
-def test_connectivity_endpoint_deduplicates_url(api_module, monkeypatch):
-    captured = {}
-
-    async def fake_post(url, **kwargs):
-        captured["url"] = url
-
-        class FakeResponse:
-            status_code = 200
-            text = '{"ok": true}'
-
-            def json(self):
-                return {"ok": True}
-
-        return FakeResponse()
-
-    from unittest.mock import AsyncMock, MagicMock
-
-    mock_client = MagicMock()
-    mock_client.post = AsyncMock(side_effect=fake_post)
-    mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-    mock_client.__aexit__ = AsyncMock(return_value=None)
-
-    monkeypatch.setattr("httpx.AsyncClient", lambda **kwargs: mock_client)
-
-    TestClient(api_module.app).post(
-        "/test-connectivity",
-        json={
-            "base_url": "https://api.openai.com/v1/chat/completions",
-            "api_key": "sk-test",
-            "format": "openai",
-        },
-    )
-
-    assert captured["url"] == "https://api.openai.com/v1/chat/completions"
+    assert response.status_code in (404, 405)
 
 
 def test_daily_by_dimension_returns_per_model_data(api_module, monkeypatch):
@@ -866,6 +669,7 @@ def test_daily_by_dimension_endpoint_passes_all_filters(api_module, monkeypatch)
     )
     assert response.status_code == 200
     assert captured == {
+        "user_id": ANY,
         "dimension": "provider",
         "since": "2026-05-01T00:00:00Z",
         "until": "2026-05-08T00:00:00Z",
@@ -1230,6 +1034,7 @@ def test_model_effectiveness_endpoint_passes_filters(api_module, monkeypatch):
     data = response.json()
     assert data["groups"][0]["key"] == "gpt-5.5"
     assert captured == {
+        "user_id": ANY,
         "group_by": "model",
         "since": "2026-05-01T00:00:00Z",
         "until": "2026-05-11T23:59:59Z",
@@ -1288,7 +1093,7 @@ def test_daily_effectiveness_endpoint_passes_date(api_module, monkeypatch):
     )
 
     assert response.status_code == 200
-    assert captured == {"date": "2026-05-10"}
+    assert captured == {"date": "2026-05-10", "user_id": ANY}
     assert response.json()["date"] == "2026-05-10"
 
 
@@ -1434,7 +1239,7 @@ def test_poll_job_returns_progress_fields(api_module, monkeypatch):
     monkeypatch.setattr(
         api_module,
         "get_evaluation_job_progress",
-        lambda job_id: {
+        lambda job_id, **kw: {
             "job_id": job_id,
             "kind": "session_evaluation",
             "session_id": "sess-1",
@@ -1462,7 +1267,9 @@ def test_poll_job_returns_progress_fields(api_module, monkeypatch):
 
 
 def test_poll_job_returns_404_for_unknown_job(api_module, monkeypatch):
-    monkeypatch.setattr(api_module, "get_evaluation_job_progress", lambda job_id: None)
+    monkeypatch.setattr(
+        api_module, "get_evaluation_job_progress", lambda job_id, **kw: None
+    )
 
     response = TestClient(api_module.app).get("/local/poll/missing")
 
@@ -1481,7 +1288,7 @@ def test_active_evaluation_jobs_returns_visible_session_jobs(api_module, monkeyp
     monkeypatch.setattr(
         api_module,
         "list_active_evaluation_jobs_with_progress",
-        lambda session_ids=None: [
+        lambda session_ids=None, **kw: [
             {
                 "job_id": "job-1",
                 "session_id": "sess-1",
@@ -1510,7 +1317,7 @@ def test_session_evaluation_jobs_returns_history_and_evaluator_catalog(
     monkeypatch.setattr(
         api_module,
         "list_session_evaluation_jobs_with_progress",
-        lambda session_id: [
+        lambda session_id, **kw: [
             {
                 "job_id": "job-failed",
                 "kind": "session_evaluation",
@@ -1553,7 +1360,7 @@ def test_patch_evaluation_job_updates_queued_evaluator(api_module, monkeypatch):
     monkeypatch.setattr(
         api_module,
         "get_evaluation_job_progress",
-        lambda job_id: {
+        lambda job_id, **kw: {
             "job_id": job_id,
             "session_id": "sess-1",
             "status": "queued",
@@ -1564,7 +1371,7 @@ def test_patch_evaluation_job_updates_queued_evaluator(api_module, monkeypatch):
         },
     )
 
-    def fake_update(job_id, *, evaluator_type):
+    def fake_update(job_id, *, evaluator_type, user_id=None):
         stored["evaluator_type"] = evaluator_type
         return {
             "job_id": job_id,
@@ -1600,7 +1407,7 @@ def test_patch_evaluation_job_rejects_running_evaluator_change(api_module, monke
     monkeypatch.setattr(
         api_module,
         "get_evaluation_job_progress",
-        lambda job_id: {
+        lambda job_id, **kw: {
             "job_id": job_id,
             "session_id": "sess-1",
             "status": "running",
@@ -1625,7 +1432,7 @@ def test_patch_evaluation_job_returns_409_for_running_before_evaluator_validatio
     monkeypatch.setattr(
         api_module,
         "get_evaluation_job_progress",
-        lambda job_id: {
+        lambda job_id, **kw: {
             "job_id": job_id,
             "session_id": "sess-1",
             "status": "running",
@@ -1652,7 +1459,9 @@ def test_patch_evaluation_job_returns_409_for_running_before_evaluator_validatio
 def test_patch_evaluation_job_returns_404_for_missing_before_evaluator_validation(
     api_module, monkeypatch
 ):
-    monkeypatch.setattr(api_module, "get_evaluation_job_progress", lambda job_id: None)
+    monkeypatch.setattr(
+        api_module, "get_evaluation_job_progress", lambda job_id, **kw: None
+    )
 
     def reject(evaluator_type):
         raise ValueError(f"Unsupported evaluator agent: {evaluator_type}")
@@ -1840,8 +1649,6 @@ def test_usage_count_passes_tool_name(api_module, monkeypatch):
 # ---------------------------------------------------------------------------
 
 LOCAL_ONLY_ROUTES = [
-    ("GET", "/local/agents"),
-    ("GET", "/local/setup-health"),
     ("PUT", "/local/sessions/sess-1/evaluation"),
     ("GET", "/local/sessions/sess-1/evaluation"),
     ("DELETE", "/local/sessions/sess-1/evaluation"),
@@ -1853,8 +1660,6 @@ LOCAL_ONLY_ROUTES = [
 ]
 
 ADMIN_ONLY_ROUTES = [
-    ("GET", "/config"),
-    ("PUT", "/config"),
     ("PATCH", "/config"),
     ("PATCH", "/config/evaluation"),
 ]
@@ -1876,7 +1681,7 @@ def _authenticated_client(api_module, fresh_db, monkeypatch):
     from src.auth.tokens import mint_token
 
     monkeypatch.setitem(
-        src.config.app.CONFIG, "auth", {"enabled": True, "allowlist": []}
+        src.config.app.CONFIG, "auth", {"provider": "google", "allowlist": []}
     )
     token, _ = mint_token("a@example.com", kind="cli", db_path=fresh_db.db_path)
     client = TestClient(api_module.app)
@@ -1885,7 +1690,7 @@ def _authenticated_client(api_module, fresh_db, monkeypatch):
 
 
 @pytest.mark.parametrize("method,path", LOCAL_ONLY_ROUTES + ADMIN_ONLY_ROUTES)
-def test_local_and_admin_routes_404_for_authenticated_user_when_auth_enabled(
+def test_local_and_admin_routes_404_for_authenticated_user_under_google_provider(
     api_module, fresh_db, monkeypatch, method, path
 ):
     client = _authenticated_client(api_module, fresh_db, monkeypatch)
@@ -1894,7 +1699,7 @@ def test_local_and_admin_routes_404_for_authenticated_user_when_auth_enabled(
 
 
 @pytest.mark.parametrize("method,path", LOCAL_ONLY_ROUTES + ADMIN_ONLY_ROUTES)
-def test_local_and_admin_routes_unaffected_when_auth_disabled(
+def test_local_and_admin_routes_unaffected_under_local_provider(
     api_module, monkeypatch, method, path
 ):
     monkeypatch.setattr(api_module, "upsert_session_evaluation", lambda **kw: None)
@@ -1958,13 +1763,37 @@ def _assert_route_removed(response):
 
 
 @pytest.mark.parametrize("method,path", OLD_PRE_RENAME_PATHS)
-def test_old_pre_rename_paths_are_gone_when_auth_disabled(api_module, method, path):
+def test_old_pre_rename_paths_are_gone_under_local_provider(api_module, method, path):
     response = TestClient(api_module.app).request(method, path)
     _assert_route_removed(response)
 
 
 @pytest.mark.parametrize("method,path", OLD_PRE_RENAME_PATHS)
-def test_old_pre_rename_paths_are_gone_when_auth_enabled(
+def test_old_pre_rename_paths_are_gone_under_google_provider(
+    api_module, fresh_db, monkeypatch, method, path
+):
+    client = _authenticated_client(api_module, fresh_db, monkeypatch)
+    response = client.request(method, path)
+    _assert_route_removed(response)
+
+
+REMOVED_LOCAL_INSPECTION_PATHS = [
+    ("GET", "/local/agents"),
+    ("GET", "/local/setup-health"),
+]
+
+
+@pytest.mark.parametrize("method,path", REMOVED_LOCAL_INSPECTION_PATHS)
+def test_local_inspection_routes_are_gone_under_local_provider(
+    api_module, method, path
+):
+    """Machine inspection belongs to the client service now, not the server."""
+    response = TestClient(api_module.app).request(method, path)
+    _assert_route_removed(response)
+
+
+@pytest.mark.parametrize("method,path", REMOVED_LOCAL_INSPECTION_PATHS)
+def test_local_inspection_routes_are_gone_under_google_provider(
     api_module, fresh_db, monkeypatch, method, path
 ):
     client = _authenticated_client(api_module, fresh_db, monkeypatch)
@@ -2105,7 +1934,7 @@ def test_client_accepts_real_api_version_contract(api_module, monkeypatch, capsy
     from client import auth
 
     api_client = TestClient(api_module.app)
-    monkeypatch.setattr(api_module, "_auth_enabled", lambda: True)
+    monkeypatch.setitem(api_module.CONFIG, "auth", {"provider": "google"})
     monkeypatch.setattr(auth.httpx, "get", api_client.get)
 
     assert auth.check_server("http://testserver") == 0
@@ -2125,7 +1954,7 @@ def test_hosted_installer_uses_configured_origin_and_is_public(
     monkeypatch.setattr(
         api_module, "resolve_server_urls", lambda _config: {"api_url": server_url}
     )
-    monkeypatch.setattr(api_module, "_auth_enabled", lambda: True)
+    monkeypatch.setitem(api_module.CONFIG, "auth", {"provider": "google"})
     response = TestClient(api_module.app).get(
         "/install.sh", headers={"host": "attacker.example"}
     )

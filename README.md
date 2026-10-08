@@ -58,20 +58,31 @@ Agent telemetry is best for agent-specific fields such as sessions and tool/reas
 - Node.js 18+ if you want the dashboard built and served
 - Optional: `claude`, `codex`, `opencode`, or `kilo` installed locally
 
-### 1. Bootstrap everything
+### 1. Install
+
+Pick the components this machine needs. With no flag the installer does both:
 
 ```bash
-bash scripts/bootstrap.sh
+curl -fsSL https://raw.githubusercontent.com/Haannbboo/tokenage/main/install.sh | bash                # server + client
+curl -fsSL https://raw.githubusercontent.com/Haannbboo/tokenage/main/install.sh | bash -s -- --server # server only
+curl -fsSL https://YOUR_SERVER/install.sh | sh                                                         # client only, for that server
 ```
 
-Bootstrap does the boring crap for you:
+The server is a git clone in `~/.tokenage/src`. The client is a separate snapshot
+and virtualenv under `~/.tokenage/versions`, even on the machine that runs the
+server; the two talk only over HTTP. Installing both is the server install
+followed by the client install pointed at `http://127.0.0.1:<api_port>`. The
+`tokenage` launcher in `~/.local/bin` is shared. `tokenage update` updates the
+client and `tokenage server update` the server.
+
+From a checkout, `bash src/scripts/bootstrap.sh` is the server install alone. It:
 
 1. installs Python dependencies into `.venv`
 2. builds the dashboard when Node/npm are available
-3. creates a CLI symlink at `~/.local/bin/tokenage`
+3. creates a launcher symlink at `~/.local/bin/tokenage` if there is none (steps 1 and 3 are shell, the rest `src/ops.py`)
 4. creates `~/.tokenage/config.yaml` if needed
 5. starts proxy, API, and OTLP services with Supervisor
-6. verifies service ports, the dashboard, and agent setup health
+6. verifies service ports and the dashboard
 7. restarts the API so the freshly built dashboard is served
 
 If `~/.local/bin` is not on your `PATH`, the installer prints the shell command to add it.
@@ -94,17 +105,18 @@ Then open [http://localhost:5173](http://localhost:5173).
 
 ### 3. Point your agents at the collector
 
-Bootstrap reports agent setup health but does not configure agents any more. That
-is the client's job:
+The server install never configures agents. That is the client's job (the
+both-install runs the sign-in for you):
 
 ```bash
 tokenage setup
 ```
 
-It points the agents installed on this machine at the local OTLP collector, and
+It points the agents installed on this machine at the collector of the server
+the client signed in to (`tokenage login --server URL`), and
 leaves every setting it does not own alone. `tokenage setup --disable` takes
-them back off again. `tokenage status` shows what is installed, whether it
-runs, and where the agents point.
+them back off again. `tokenage status` shows this client's sign-in and where the
+agents point.
 
 ### 4. Generate your first tracked event
 
@@ -118,8 +130,8 @@ tokenage claude
 Repo-local fallback, useful before the symlink is on your `PATH`:
 
 ```bash
-./scripts/tokenage codex exec "hello"
-./scripts/tokenage claude
+TOKENAGE_ROOT="$PWD" ./client/bin/tokenage codex exec "hello"
+TOKENAGE_ROOT="$PWD" ./client/bin/tokenage claude
 ```
 
 The empty dashboard automatically checks for your first event. No fake demo data, no manual seeding.
@@ -147,11 +159,14 @@ tokenage codex exec "say hello in one sentence"
 The same command also covers everything that is not a tracked run:
 
 ```bash
-# Components, services, agents
+# Client sign-in and agents
 tokenage status
 tokenage setup
 tokenage update --check
 
+# The local server needs no Google account: its dashboard and `tokenage login`
+# work from the server machine; for a browser on another machine, run
+# `tokenage server login-link` on the server and open the URL it prints.
 # A remote server instead of a local one
 tokenage login --server https://app.example.com
 tokenage logout
@@ -164,7 +179,6 @@ tokenage --json -- codex
 tokenage --usage-only -- codex exec "say hello in one sentence"
 tokenage --wait-ms 5000 -- codex exec "say hello in one sentence"
 tokenage --summary-dest file --summary-file /tmp/llm-summary.json -- claude
-tokenage --proxy-env -- some-openai-compatible-cli
 tokenage --no-summary -- codex exec "say hello"
 ```
 
@@ -180,7 +194,6 @@ The dashboard gives you:
 - latency and TTFT trends
 - request logs
 - detected agents and setup health
-- connectivity testing
 
 By default, the backend API serves the built dashboard at `http://localhost:4001`. The frontend dev server resolves the API URL in this order:
 
@@ -209,8 +222,8 @@ tokenage server stop
 
 `tokenage server start` turns the services on, and `tokenage server
 bootstrap` reinstalls, rebuilds the dashboard and restarts the API so the new
-bundle is served. `tokenage status` is a different command: it reports the
-installed components and whether they run.
+bundle is served. `tokenage server update` updates the server clone. `tokenage status` is a
+different command: it reports this client, not the services.
 
 Runtime files live under `~/.tokenage/run/`. Logs are written to `logs/`.
 
@@ -271,7 +284,13 @@ For Anthropic-compatible clients:
 export ANTHROPIC_BASE_URL=http://127.0.0.1:4000
 ```
 
-By default, if a provider sets `api_key`, the proxy injects it upstream as `Authorization: Bearer <key>`. For providers using Anthropic's native auth scheme (e.g. `api.anthropic.com`), set `auth_scheme: x-api-key` on that provider so the proxy sends `x-api-key: <key>` instead. The client must still send its own `anthropic-version` header (real Anthropic clients like Claude Code always do; the proxy passes it through unchanged and does not set a default):
+The proxy spends your provider keys, so every model call is signed in. Put this device's ingest token (`ingest_token` in `~/.tokenage/credentials.json`, written by `tokenage login`) where the client expects its API key — it arrives as `Authorization: Bearer …` or `x-api-key` — and usage is recorded under your account. The token is never forwarded upstream. Under the `local` provider, calls straight from this machine need no token.
+
+```bash
+export OPENAI_API_KEY="$(python3 -c 'import json,os;print(json.load(open(os.path.expanduser("~/.tokenage/credentials.json")))["ingest_token"])')"
+```
+
+If a provider sets `api_key`, the proxy injects it upstream as `Authorization: Bearer <key>`. For providers using Anthropic's native auth scheme (e.g. `api.anthropic.com`), set `auth_scheme: x-api-key` on that provider so the proxy sends `x-api-key: <key>` instead. The client must still send its own `anthropic-version` header (real Anthropic clients like Claude Code always do; the proxy passes it through unchanged and does not set a default):
 
 ```yaml
 providers:
@@ -281,12 +300,6 @@ providers:
     auth_scheme: x-api-key
     models:
       claude-sonnet-4-6: {}
-```
-
-Or let the wrapper set both for one child process:
-
-```bash
-tokenage --proxy-env -- some-openai-compatible-cli
 ```
 
 Supported proxy paths include:
@@ -314,7 +327,7 @@ For streamed responses, the proxy records TTFT as time until the first upstream 
 
 TTFT is an operational signal, not a billing-grade metric. Each agent exposes different timing data.
 
-OpenCode and Kilo Code tracking is provided by local plugins (`plugins/opencode` and `plugins/kilo`) that emit one OTLP log record for each completed assistant message. `tokenage setup` runs `scripts/configure-opencode-plugin.py` when `opencode` is installed and `scripts/configure-kilo-plugin.py` when `kilo` is installed, registering each built plugin with the local OTLP logs endpoint.
+OpenCode and Kilo Code tracking is provided by local plugins (`plugins/opencode` and `plugins/kilo`) that emit one OTLP log record for each completed assistant message. `tokenage setup` registers each built plugin (when `opencode` or `kilo` is installed) with the local OTLP logs endpoint, using `client/agents/`.
 
 ## API
 
@@ -326,7 +339,12 @@ curl http://127.0.0.1:4001/usage/summary
 curl http://127.0.0.1:4001/usage/daily
 curl http://127.0.0.1:4001/usage/high-watermark
 curl http://127.0.0.1:4001/config
-curl http://127.0.0.1:4001/local/setup-health
+```
+
+Device status and agent wiring live on the client, not the API:
+
+```bash
+tokenage status --json
 ```
 
 Query params for `/usage`: `limit`, `offset`, `provider`, `model`, `since`, `until`.
@@ -338,7 +356,7 @@ Query params for `/usage/daily`: `since`, `until`, `provider`, `model`, `granula
 Install/start backend services:
 
 ```bash
-bash scripts/start.sh
+TOKENAGE_ROOT="$PWD" tokenage server start
 ```
 
 Run backend tests:
@@ -360,18 +378,17 @@ npm run build
 Maintainer-only bootstrap smoke test:
 
 ```bash
-bash scripts/dev/smoke-bootstrap-container.sh
+bash src/scripts/dev/smoke-bootstrap-container.sh
 ```
 
-That check runs `scripts/bootstrap.sh` in a fresh Docker or Apple `container` environment. It is not part of normal user setup.
+That check runs `src/scripts/bootstrap.sh` in a fresh Docker or Apple `container` environment. It is not part of normal user setup.
 
 ## Privacy and security notes
 
 - `tokenage` is intended to run locally.
 - Usage is stored in `~/.tokenage/usage.db` by default.
 - If you configure `db.url`, usage data is written to that database instead.
-- The proxy forwards auth headers unchanged.
-- API keys are not managed by `tokenage`.
+- The proxy requires a tokenage ingest token (or a loopback call under the `local` provider) and replaces it with the provider key from `config.yaml`; the client's own credential headers are never forwarded upstream.
 - OTLP payloads are emitted by the agents themselves; review agent telemetry settings if you need strict metadata control.
 
 ## Contributing

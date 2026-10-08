@@ -58,20 +58,30 @@ Agent telemetry 更适合拿到 session、tool/reasoning metadata 等 agent-spec
 - Node.js 18+，用于构建和提供 Dashboard
 - 可选：本地已安装 `claude`、`codex`、`opencode` 或 `kilo`
 
-### 1. 一键 Bootstrap
+### 1. 安装
+
+按这台机器的需要选择组件，不带参数时两个都装：
 
 ```bash
-bash scripts/bootstrap.sh
+curl -fsSL https://raw.githubusercontent.com/Haannbboo/tokenage/main/install.sh | bash                # server + client
+curl -fsSL https://raw.githubusercontent.com/Haannbboo/tokenage/main/install.sh | bash -s -- --server # 只装 server
+curl -fsSL https://YOUR_SERVER/install.sh | sh                                                         # 只装 client，连接该 server
 ```
 
-Bootstrap 会帮你处理这些烦人的东西：
+Server 是 `~/.tokenage/src` 里的 git clone。Client 是 `~/.tokenage/versions` 下独立的
+snapshot 和 virtualenv，即使与 server 在同一台机器上也一样，两者只通过 HTTP 通信。
+两个都装就是先装 server，再装指向 `http://127.0.0.1:<api_port>` 的 client。
+`~/.local/bin` 里的 `tokenage` launcher 是共享的。`tokenage update` 更新 client，
+`tokenage server update` 更新 server。
+
+在 checkout 里，`bash src/scripts/bootstrap.sh` 只是 server 安装：
 
 1. 把 Python 依赖安装到 `.venv`
 2. Node/npm 可用时构建 Dashboard
-3. 在 `~/.local/bin/tokenage` 创建 CLI symlink
+3. 没有 launcher 时在 `~/.local/bin/tokenage` 创建 symlink
 4. 按需创建 `~/.tokenage/config.yaml`
 5. 用 Supervisor 启动 proxy、API 和 OTLP 服务
-6. 检查服务端口、Dashboard 和 Agent setup health
+6. 检查服务端口和 Dashboard
 7. 重启 API，让刚构建出来的 Dashboard 生效
 
 如果 `~/.local/bin` 不在 `PATH` 里，安装脚本会打印该加到 shell profile 的命令。
@@ -94,7 +104,7 @@ npm run dev
 
 ### 3. 把 Agent 指向 collector
 
-Bootstrap 只检查 Agent setup health，不再配置 Agent。改 Agent 是 client 的职责：
+Server 安装不会配置 Agent。改 Agent 是 client 的职责（同时安装两者时安装脚本会带你登录）：
 
 ```bash
 tokenage setup
@@ -114,8 +124,8 @@ tokenage claude
 如果 symlink 还没进 `PATH`，可以用 repo-local fallback：
 
 ```bash
-./scripts/tokenage codex exec "hello"
-./scripts/tokenage claude
+TOKENAGE_ROOT="$PWD" ./client/bin/tokenage codex exec "hello"
+TOKENAGE_ROOT="$PWD" ./client/bin/tokenage claude
 ```
 
 空 Dashboard 会自动检查第一条 event。没有假 demo 数据，也不用手动 seed。
@@ -144,6 +154,8 @@ tokenage status
 tokenage setup
 tokenage update --check
 
+# 本地 server 不需要 Google 账户：在 server 本机即可使用 dashboard 和 `tokenage login`；
+# 其他机器的浏览器请在 server 上运行 `tokenage server login-link` 并打开输出的 URL。
 # 用远端 server 代替本地 server
 tokenage login --server https://app.example.com
 tokenage logout
@@ -172,7 +184,6 @@ Dashboard 提供：
 - latency 和 TTFT 趋势
 - 请求日志
 - 已检测到的 Agent 和 setup health
-- connectivity test
 
 默认情况下，后端 API 会在 `http://localhost:4001` 提供构建后的 Dashboard。前端 dev server 按下面顺序解析 API URL：
 
@@ -301,7 +312,12 @@ curl http://127.0.0.1:4001/usage/summary
 curl http://127.0.0.1:4001/usage/daily
 curl http://127.0.0.1:4001/usage/high-watermark
 curl http://127.0.0.1:4001/config
-curl http://127.0.0.1:4001/local/setup-health
+```
+
+设备状态和 agent 配置检查属于 client：
+
+```bash
+tokenage status --json
 ```
 
 `/usage` query params：`limit`、`offset`、`provider`、`model`、`since`、`until`。
@@ -313,7 +329,7 @@ curl http://127.0.0.1:4001/local/setup-health
 安装/启动后端服务：
 
 ```bash
-bash scripts/start.sh
+TOKENAGE_ROOT="$PWD" tokenage server start
 ```
 
 运行后端测试：
@@ -333,18 +349,17 @@ npm run build
 维护者专用 bootstrap smoke test：
 
 ```bash
-bash scripts/dev/smoke-bootstrap-container.sh
+bash src/scripts/dev/smoke-bootstrap-container.sh
 ```
 
-这个检查会在全新的 Docker 或 Apple `container` 环境里运行 `scripts/bootstrap.sh`。它不是普通用户 setup 的一部分。
+这个检查会在全新的 Docker 或 Apple `container` 环境里运行 `src/scripts/bootstrap.sh`。它不是普通用户 setup 的一部分。
 
 ## 隐私和安全说明
 
 - `tokenage` 设计为本地运行。
 - 使用量默认存储在 `~/.tokenage/usage.db`。
 - 如果配置了 `db.url`，使用量数据会写入该数据库。
-- Proxy 会原样转发 auth headers。
-- `tokenage` 不管理 API keys。
+- Proxy 要求 tokenage ingest token（`local` provider 下本机直连除外），并把它替换成 `config.yaml` 里的 provider key；客户端自己的凭证 header 不会转发到上游。把 `~/.tokenage/credentials.json` 里的 `ingest_token` 填到客户端的 API key 位置即可。
 - OTLP payload 由 Agent 自己发出；如果你需要严格控制 metadata，请检查 Agent telemetry settings。
 
 ## 贡献

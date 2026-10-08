@@ -6107,10 +6107,14 @@ def _old_shape_db(db_file) -> None:
 
 
 def test_migrate_database_adds_tenancy_schema_preserves_data(
-    database_module, schema_migrations_module, isolated_home
+    database_module, schema_migrations_module, isolated_home, monkeypatch
 ):
     """AC 1: old-shape DB migrates with data preserved, keys swapped, and a
     second run is a no-op for the tenancy steps."""
+    # These cover the tenancy step; the owner-assignment step has its own tests.
+    import src.config.app
+
+    monkeypatch.setitem(src.config.app.CONFIG, "auth", {"provider": "google"})
     import sqlite3
 
     db_file = isolated_home / "usage.db"
@@ -6400,11 +6404,15 @@ def test_rebuild_sessions_from_usage_stamps_user_id(fresh_db):
 
 
 def test_migrate_database_merges_duplicate_usage_daily_rows(
-    database_module, schema_migrations_module, isolated_home
+    database_module, schema_migrations_module, isolated_home, monkeypatch
 ):
     """Duplicate (date, provider, model, client_source) rows (possible on
     create_all-era DBs that never had the old UNIQUE) are merged by summing
     before the partial indexes are created."""
+    # These cover the tenancy step; the owner-assignment step has its own tests.
+    import src.config.app
+
+    monkeypatch.setitem(src.config.app.CONFIG, "auth", {"provider": "google"})
     db_file = isolated_home / "usage.db"
     _create_all_era_db(db_file)
 
@@ -6496,10 +6504,14 @@ def test_migrate_database_converges_after_crashed_usage_daily_recreate(
 
 
 def test_upsert_daily_aggregate_accumulates_after_migration_recreate(
-    database_module, schema_migrations_module, isolated_home
+    database_module, schema_migrations_module, isolated_home, monkeypatch
 ):
     """The write path works against the recreated table: the ON CONFLICT
     upsert accumulates onto migrated rows and new rows still get ids."""
+    # These cover the tenancy step; the owner-assignment step has its own tests.
+    import src.config.app
+
+    monkeypatch.setitem(src.config.app.CONFIG, "auth", {"provider": "google"})
     db_file = isolated_home / "usage.db"
     _old_shape_db(db_file)
     schema_migrations_module.migrate_database(str(db_file))

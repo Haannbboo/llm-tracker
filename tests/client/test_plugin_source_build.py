@@ -1,19 +1,20 @@
 from __future__ import annotations
 
 import json
-import os
 import shutil
-import subprocess
 import sys
 from pathlib import Path
 
 import pytest
 
+from client.agents import claude, kilo, opencode
+
 ROOT = Path(__file__).resolve().parents[2]
+AGENTS = {"opencode": opencode, "kilo": kilo}
 
 
 @pytest.mark.parametrize("agent", ["opencode", "kilo"])
-def test_hosted_plugin_builds_from_source_with_npm(agent, tmp_path):
+def test_hosted_plugin_builds_from_source_with_npm(agent, tmp_path, monkeypatch):
     plugin_dir = tmp_path / "snapshot" / "plugins" / agent
     plugin_dir.mkdir(parents=True)
     shutil.copy2(ROOT / "plugins" / agent / "package.json", plugin_dir / "package.json")
@@ -45,29 +46,13 @@ def test_hosted_plugin_builds_from_source_with_npm(agent, tmp_path):
 
     home = tmp_path / "home"
     home.mkdir()
-    env = {
-        **os.environ,
-        "HOME": str(home),
-        "PATH": str(fake_bin),
-        "TOKENAGE_HOSTED_CLIENT": "1",
-        "TOKENAGE_NPM_LOG": str(npm_log),
-    }
-    script = ROOT / "scripts" / f"configure-{agent}-plugin.py"
-    result = subprocess.run(
-        [
-            sys.executable,
-            str(script),
-            str(tmp_path / "snapshot"),
-            "0",
-            "localhost",
-            "https://example.test/v1/logs",
-        ],
-        env=env,
-        text=True,
-        capture_output=True,
-        timeout=20,
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("PATH", str(fake_bin))
+    monkeypatch.setenv("TOKENAGE_NPM_LOG", str(npm_log))
+    assert (
+        AGENTS[agent].configure(tmp_path / "snapshot", "https://example.test/v1/logs")
+        == 0
     )
-    assert result.returncode == 0, result.stderr
     assert npm_log.read_text().splitlines() == ["ci", "run build"]
     assert (plugin_dir / "dist" / "index.js").is_file()
     config_path = home / ".config" / agent / "opencode.json"
@@ -81,7 +66,7 @@ def test_hosted_plugin_builds_from_source_with_npm(agent, tmp_path):
 
 
 @pytest.mark.parametrize("agent", ["opencode", "kilo"])
-def test_hosted_login_removes_old_server_plugin_and_token(agent, tmp_path):
+def test_hosted_login_removes_old_server_plugin_and_token(agent, tmp_path, monkeypatch):
     snapshot = tmp_path / "snapshot"
     plugin_dir = snapshot / "plugins" / agent
     plugin_dir.mkdir(parents=True)
@@ -105,26 +90,10 @@ def test_hosted_login_removes_old_server_plugin_and_token(agent, tmp_path):
             }
         )
     )
-    result = subprocess.run(
-        [
-            sys.executable,
-            str(ROOT / "scripts" / f"configure-{agent}-plugin.py"),
-            str(snapshot),
-            "0",
-            "localhost",
-            "https://new.test/v1/logs",
-        ],
-        env={
-            **os.environ,
-            "HOME": str(home),
-            "TOKENAGE_HOSTED_CLIENT": "1",
-            "TOKENAGE_INGEST_TOKEN": "new-secret",
-        },
-        text=True,
-        capture_output=True,
-        timeout=20,
+    monkeypatch.setenv("HOME", str(home))
+    assert (
+        AGENTS[agent].configure(snapshot, "https://new.test/v1/logs", "new-secret") == 0
     )
-    assert result.returncode == 0, result.stderr
     config = json.loads(config_path.read_text())
     assert config["plugin"] == [
         "other-plugin",
@@ -137,28 +106,9 @@ def test_hosted_login_removes_old_server_plugin_and_token(agent, tmp_path):
 
 
 def test_hosted_claude_setup_does_not_register_versioned_hook(tmp_path):
-    home = tmp_path / "home"
-    home.mkdir()
-    settings = home / ".claude" / "settings.json"
-    env = {
-        **os.environ,
-        "HOME": str(home),
-        "TOKENAGE_HOSTED_CLIENT": "1",
-        "TOKENAGE_INGEST_TOKEN": "new-secret",
-    }
-    command = [
-        sys.executable,
-        str(ROOT / "scripts" / "configure-claude-settings.py"),
-        str(settings),
-        "0",
-        "localhost",
-        "https://new.test/v1/logs",
-    ]
+    settings = tmp_path / "home" / ".claude" / "settings.json"
     for _ in range(2):
-        result = subprocess.run(
-            command, env=env, text=True, capture_output=True, timeout=20
-        )
-        assert result.returncode == 0, result.stderr
+        assert claude.configure(settings, "https://new.test/v1/logs", "new-secret") == 0
     data = json.loads(settings.read_text())
     assert data["env"]["OTEL_EXPORTER_OTLP_LOGS_ENDPOINT"] == (
         "https://new.test/v1/logs"

@@ -16,6 +16,8 @@ from src.config.server_config import resolve_server_urls
 from ..database import AuthToken, User
 from . import google as auth_google
 from .tokens import (
+    LOCAL_OWNER_EMAIL,
+    get_local_owner,
     get_or_create_user,
     get_user_by_id,
     list_user_devices,
@@ -37,14 +39,60 @@ _NO_STORE = {"Cache-Control": "no-store"}
 router = APIRouter()
 
 
-def _auth_enabled() -> bool:
-    return bool(CONFIG.get("auth", {}).get("enabled"))
+def auth_provider() -> str:
+    """The configured sign-in provider: "local" (default) or "google"."""
+    return CONFIG.get("auth", {}).get("provider", "local")
 
 
-def _require_local_profile() -> None:
-    """Deny local-only and admin-only routes outright when auth is enabled."""
-    if _auth_enabled():
+def _require_local_owner() -> None:
+    """Admin-only routes: the local provider's owner is the only user, so any
+    authenticated caller is the admin; denied outright under google."""
+    if auth_provider() != "local":
         raise HTTPException(status_code=404)
+
+
+def _require_google() -> None:
+    if auth_provider() != "google":
+        raise HTTPException(status_code=404, detail="not found")
+
+
+_LOOPBACK_PEERS = frozenset({"127.0.0.1", "::1", "::ffff:127.0.0.1"})
+_LOOPBACK_HOSTNAMES = frozenset({"localhost", "127.0.0.1", "::1"})
+_FORWARDING_HEADERS = ("x-forwarded-for", "forwarded", "x-real-ip")
+
+
+def _hostname(netloc: str) -> str | None:
+    try:
+        return urlparse(f"//{netloc}").hostname
+    except ValueError:
+        return None
+
+
+def is_direct_loopback(request: Request) -> bool:
+    """True only for a request that provably never left this machine.
+
+    Peer is loopback, no forwarding headers (a local reverse proxy adds them),
+    and the Host header names loopback (DNS-rebinding guard: a rebound public
+    name resolves to 127.0.0.1 but keeps its own Host). A state-changing
+    request that carries a non-loopback Origin is a cross-site browser request
+    and is refused too, so a website can't drive the local owner's API.
+    """
+    if request.client is None or request.client.host not in _LOOPBACK_PEERS:
+        return False
+    if any(header in request.headers for header in _FORWARDING_HEADERS):
+        return False
+    if _hostname(request.headers.get("host", "")) not in _LOOPBACK_HOSTNAMES:
+        return False
+    origin = request.headers.get("origin")
+    if origin is not None and request.method not in ("GET", "HEAD", "OPTIONS"):
+        if _hostname(origin.partition("://")[2]) not in _LOOPBACK_HOSTNAMES:
+            return False
+    return True
+
+
+def local_owner_allowed(request: Request) -> bool:
+    """Tokenless access: local provider and a direct loopback request."""
+    return auth_provider() == "local" and is_direct_loopback(request)
 
 
 def _request_token(request: Request) -> str | None:
@@ -59,31 +107,34 @@ def _request_token(request: Request) -> str | None:
 
 def _resolve_request_user(
     request: Request,
-) -> tuple[User, AuthToken] | None:
-    """Resolve the request's bearer/cookie token to (user, auth_token), or None."""
-    token = _request_token(request)
-    if not token:
-        return None
-    resolved = resolve_token(token)
-    if resolved is None:
-        return None
-    user, auth_token = resolved
-    if auth_token.kind == "ingest":
-        return None
-    request.state.user = user
-    request.state.auth_token = auth_token
-    return user, auth_token
+) -> tuple[User, AuthToken | None] | None:
+    """Resolve the request to (user, auth_token), or None.
 
-
-def get_current_user(request: Request) -> User | None:
-    """Resolve the request's session (bearer token or cookie) to a user.
-
-    Returns None when auth is disabled. When enabled, raises 401 for
-    missing/malformed/unknown/revoked tokens (one message for all cases —
-    callers must not learn which). DB errors propagate as 500: fail closed.
+    A valid bearer/cookie token wins. Otherwise a direct loopback request under
+    the local provider is the owner (auth_token None). Anything else is None.
     """
-    if not _auth_enabled():
-        return None
+    token = _request_token(request)
+    if token:
+        resolved = resolve_token(token)
+        if resolved is not None and resolved[1].kind != "ingest":
+            user, auth_token = resolved
+            request.state.user = user
+            request.state.auth_token = auth_token
+            return user, auth_token
+    if local_owner_allowed(request):
+        user = get_local_owner()
+        request.state.user = user
+        request.state.auth_token = None
+        return user, None
+    return None
+
+
+def get_current_user(request: Request) -> User:
+    """Resolve the request to a user; never None.
+
+    Raises 401 for anything unresolved (one message for all cases — callers
+    must not learn which). DB errors propagate as 500: fail closed.
+    """
     user = getattr(request.state, "user", None)
     if user is not None:
         return user
@@ -154,12 +205,15 @@ def _request_frontend_origin(request: Request) -> str | None:
 
 
 @router.get("/auth/me")
-def auth_me(request: Request, user: User | None = Depends(get_current_user)):
-    if user is None:
-        return {"auth_enabled": False, "user": None}
-    auth_token = request.state.auth_token
+def auth_me(request: Request):
+    """Provider plus the caller's user; user is null (200) when unresolved so
+    the frontend can tell "sign in" from "ask the operator for a login link"."""
+    resolved = _resolve_request_user(request)
+    if resolved is None:
+        return {"provider": auth_provider(), "user": None}
+    user, auth_token = resolved
     return {
-        "auth_enabled": True,
+        "provider": auth_provider(),
         "user": {
             "id": user.id,
             "email": user.email,
@@ -174,11 +228,33 @@ def auth_me(request: Request, user: User | None = Depends(get_current_user)):
     }
 
 
+@router.get("/auth/local/login")
+def auth_local_login(request: Request, code: str = ""):
+    """Redeem a one-time link from `tokenage server login-link` for a session."""
+    if auth_provider() != "local":
+        raise HTTPException(status_code=404, detail="not found")
+    if auth_google.pop_login_code(code) is None:
+        raise HTTPException(status_code=400, detail="invalid or expired link")
+    # One live browser session: the new login retires the old cookie.
+    _retire_web_sessions(get_local_owner().id)
+    plaintext_token, _ = mint_token(
+        LOCAL_OWNER_EMAIL, kind="web", device_name="browser"
+    )
+    response = _frontend_redirect(_request_frontend_origin(request))
+    response.set_cookie(
+        SESSION_COOKIE_NAME,
+        plaintext_token,
+        httponly=True,
+        samesite="lax",
+        secure=_cookie_is_secure(),
+    )
+    return response
+
+
 @router.get("/auth/google/login")
 async def auth_google_login(request: Request):
     """Start the Google authorization-code flow (public when auth enabled)."""
-    if not _auth_enabled():
-        raise HTTPException(status_code=404, detail="not found")
+    _require_google()
     if auth_google.google_credentials() is None:
         raise HTTPException(status_code=503, detail="google oauth not configured")
     state = secrets.token_urlsafe(24)
@@ -210,8 +286,7 @@ async def auth_google_login(request: Request):
 @router.get("/auth/google/callback")
 async def auth_google_callback(request: Request):
     """Complete the Google flow: verify state, exchange the code, set the cookie."""
-    if not _auth_enabled():
-        raise HTTPException(status_code=404, detail="not found")
+    _require_google()
     state = request.query_params.get("state", "")
     cookie_state = request.cookies.get(OAUTH_STATE_COOKIE_NAME)
     data = auth_google.pop_oauth_state(state)
@@ -279,10 +354,8 @@ async def auth_google_callback(request: Request):
 
 
 @router.post("/auth/logout")
-def auth_logout(request: Request, user: User | None = Depends(get_current_user)):
+def auth_logout(request: Request, user: User = Depends(get_current_user)):
     """Revoke the authenticating token and clear the session cookie."""
-    if user is None:
-        raise HTTPException(status_code=404, detail="not found")
     auth_token = getattr(request.state, "auth_token", None)
     if auth_token is not None:
         revoke_token(auth_token.id, user.id)
@@ -292,14 +365,12 @@ def auth_logout(request: Request, user: User | None = Depends(get_current_user))
 
 
 @router.get("/auth/devices")
-def auth_devices(request: Request, user: User | None = Depends(get_current_user)):
+def auth_devices(request: Request, user: User = Depends(get_current_user)):
     """List installed machines and the caller's unlinked tokens.
 
     Browser sessions are deliberately absent: signing in again retires the
     previous one, so a stale browser entry is never left to manage here.
     """
-    if user is None:
-        raise HTTPException(status_code=404, detail="not found")
     auth_token = getattr(request.state, "auth_token", None)
     current_id = auth_token.id if auth_token is not None else None
     current_device_id = auth_token.device_id if auth_token is not None else None
@@ -338,11 +409,9 @@ def auth_devices(request: Request, user: User | None = Depends(get_current_user)
 def auth_devices_revoke(
     device_id: str,
     request: Request,
-    user: User | None = Depends(get_current_user),
+    user: User = Depends(get_current_user),
 ):
     """Revoke a machine or legacy token owned by the caller."""
-    if user is None:
-        raise HTTPException(status_code=404, detail="not found")
     if not revoke_device(device_id, user.id) and not revoke_token(device_id, user.id):
         raise HTTPException(status_code=404, detail="not found")
     return Response(status_code=204)
@@ -471,14 +540,18 @@ async def auth_cli_start(
     code_challenge: str | None = None,
     device_name: str | None = None,
 ):
-    """Start the CLI login: confirm page with a session, Google without."""
-    if not _auth_enabled():
-        raise HTTPException(status_code=404, detail="not found")
+    """Start the CLI login: confirm page for a resolved user (session token or
+    local loopback owner); Google for anyone else under the google provider."""
     challenge, device = _validate_cli_start_params(code_challenge, device_name)
     resolved = _resolve_request_user(request)
     if resolved is not None:
         return HTMLResponse(
             _confirm_page(resolved[0], device, challenge), headers=_NO_STORE
+        )
+    if auth_provider() != "google":
+        raise HTTPException(
+            status_code=401,
+            detail="login required: run `tokenage server login-link` on the server",
         )
     if auth_google.google_credentials() is None:
         raise HTTPException(status_code=503, detail="google oauth not configured")
@@ -520,14 +593,13 @@ def auth_cli_start_approve(
     code_challenge: str | None = Form(default=None),
     device_name: str | None = Form(default=None),
 ):
-    """Approve the CLI login from the confirm page (requires a web session).
+    """Approve the CLI login from the confirm page (requires a resolved user).
 
-    The SameSite=Lax cookie is withheld on cross-site POSTs, so this is
-    unreachable from another site without the session cookie — no separate
-    CSRF token (same argument as POST /auth/logout).
+    The SameSite=Lax cookie is withheld on cross-site POSTs, and the loopback
+    owner rule refuses a cross-site Origin (see is_direct_loopback), so this is
+    unreachable from another site — no separate CSRF token (same argument as
+    POST /auth/logout).
     """
-    if not _auth_enabled():
-        raise HTTPException(status_code=404, detail="not found")
     challenge, device = _validate_cli_start_params(code_challenge, device_name)
     resolved = _resolve_request_user(request)
     if resolved is None:
@@ -539,8 +611,6 @@ def auth_cli_start_approve(
 @router.post("/auth/cli/exchange")
 def auth_cli_exchange(body: CliExchangeRequest):
     """Redeem a one-time code with its PKCE verifier for device tokens."""
-    if not _auth_enabled():
-        raise HTTPException(status_code=404, detail="not found")
     if not body.code or not body.code_verifier:
         # One message for all failures — no oracle for which half was wrong.
         raise HTTPException(status_code=400, detail="invalid code")

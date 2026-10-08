@@ -39,7 +39,7 @@ def load_credentials() -> dict[str, Any] | None:
     return read_object(credentials_path())
 
 
-def _save_private_object(path: Path, data: dict[str, Any]) -> None:
+def save_private_object(path: Path, data: dict[str, Any]) -> None:
     path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
     temporary = path.with_name(f".{path.name}.{secrets.token_hex(8)}.tmp")
     fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
@@ -53,7 +53,7 @@ def _save_private_object(path: Path, data: dict[str, Any]) -> None:
 
 
 def save_credentials(data: dict[str, Any]) -> None:
-    _save_private_object(credentials_path(), data)
+    save_private_object(credentials_path(), data)
 
 
 def clear_credentials() -> bool:
@@ -85,7 +85,7 @@ def _write_private_text(path: Path, text: str) -> None:
         temporary.unlink(missing_ok=True)
 
 
-def _load_or_create_installation_key() -> str:
+def installation_key() -> str:
     """This machine's stable secret. Re-login rotates tokens; the key stays.
 
     A missing, malformed, or non-UTF-8 file is regenerated, so a broken file can
@@ -253,7 +253,7 @@ def login(
         return 1
 
     try:
-        installation_key = _load_or_create_installation_key()
+        key = installation_key()
     except OSError as exc:
         print(f"tokenage: cannot store the installation key: {exc}", file=sys.stderr)
         return 1
@@ -271,7 +271,7 @@ def login(
 
     body: dict[str, str] = {
         "code_verifier": verifier,
-        "installation_key": installation_key,
+        "installation_key": key,
     }
     # The server validates both fields strictly; a malformed one would fail the
     # exchange permanently, so an unrecognized value is simply not sent.
@@ -362,6 +362,16 @@ def login(
             file=sys.stderr,
         )
         return 1
+    try:
+        from client import service
+
+        if service.start() != 0:
+            print(
+                "warning: the client service did not start; run tokenage client start",
+                file=sys.stderr,
+            )
+    except Exception as exc:
+        print(f"warning: could not start the client service: {exc}", file=sys.stderr)
     return 0
 
 

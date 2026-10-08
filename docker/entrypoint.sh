@@ -27,9 +27,9 @@ if changed:
 " "$CONFIG"
 
 # Run schema migrations
-python scripts/migrate_schema.py || echo "Migration skipped or failed (non-fatal)"
+python -m src.cli migrate || echo "Migration skipped or failed (non-fatal)"
 
 # Sync config defaults
-python scripts/sync-config.py "$CONFIG" config.example.yaml || true
+python -m src.cli sync-config || true
 
 exec supervisord -n -c /etc/supervisor/supervisord.conf

@@ -4,15 +4,12 @@ import logging
 import os
 import re
 import shlex
-import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Literal
 from urllib.parse import urlparse, urlsplit
 
 import httpx
-import tomllib
-import yaml
 from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response
 from fastapi.responses import JSONResponse
 from fastapi.routing import APIRoute
@@ -21,6 +18,7 @@ from pydantic import BaseModel, model_validator
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from protocol import MAX_SUPPORTED_GENERATION, MIN_SUPPORTED_GENERATION
+from protocol.device_status import DeviceStatusReport
 from src.config.app import (
     CONFIG,
     CONFIG_PATH,
@@ -37,11 +35,18 @@ from src.config.server_config import (
 from src.pricing.models import ResolvedCost
 
 from ._version import get_version
-from .auth import _auth_enabled, _require_local_profile, _resolve_request_user
+from .auth import (
+    _require_local_owner,
+    _resolve_request_user,
+    get_current_user,
+)
 from .auth import router as auth_router
+from .auth.tokens import list_user_devices, set_device_status
 from .database import (
     VALID_OUTCOMES,
     VALID_SOURCES,
+    Device,
+    User,
     aggregate_daily_by_dimension,
     aggregate_model_effectiveness,
     aggregate_usage_by_period,
@@ -97,27 +102,22 @@ _SPA_API_PREFIXES = (
     "/auth/",
     "/usage",
     "/sessions",
+    "/devices",
     "/model-effectiveness",
     "/config",
     "/pricing",
     "/local/",
-    "/test-connectivity",
     "/version",
     "/install.sh",
 )
 
-# Public when auth is enabled: Google OAuth endpoints, /auth/me (the frontend
-# probes it before login), and /version. Everything else API-shaped requires
-# a valid session once auth is enabled.
+# Public: sign-in endpoints, /auth/me (the frontend probes it before login),
+# and /version. Everything else API-shaped requires a resolved user.
 AUTH_GATE_PUBLIC_PATHS = ("/auth/me", "/version", "/install.sh")
 
 # FastAPI's interactive docs and schema are not in the public allowlist, so
-# they are gated like any other API surface when auth is enabled.
+# they are gated like any other API surface.
 AUTH_GATE_EXTRA_GATED_PATHS = ("/docs", "/redoc", "/openapi.json")
-
-
-class ConfigUpdate(BaseModel):
-    content: str
 
 
 class ConfigPatch(BaseModel):
@@ -140,23 +140,12 @@ class ConfigPatch(BaseModel):
         return data
 
 
-def _request_user_id(request: Request) -> str | None:
-    user = getattr(request.state, "user", None)
-    return getattr(user, "id", None)
+def _request_user_id(request: Request) -> str:
+    return get_current_user(request).id
 
 
 class ConfigPatchUpdate(BaseModel):
     patches: list[ConfigPatch]
-
-
-def _runtime_config_payload(parsed_config: dict | None) -> dict:
-    worker_config = load_evaluation_worker_config(parsed_config or {})
-    return {
-        "evaluation": {
-            "evaluator": worker_config.evaluator,
-            "evaluators": list_evaluator_agents(),
-        },
-    }
 
 
 def _evaluation_metadata_payload() -> dict:
@@ -172,14 +161,6 @@ def _evaluation_metadata_payload() -> dict:
         "global_evaluator_type": default_evaluator,
         "global_evaluator_available": default_available,
     }
-
-
-class ConnectivityTest(BaseModel):
-    base_url: str
-    api_key: str
-    format: str  # "openai", "anthropic", "responses"
-    model: str | None = None
-    message: str | None = None
 
 
 class SessionEvaluationUpdate(BaseModel):
@@ -204,6 +185,16 @@ class EvaluationJobUpdate(BaseModel):
 
 class EvaluationConfigUpdate(BaseModel):
     evaluator: str
+
+
+def _parse_device_status_json(raw: str | None) -> dict | None:
+    if raw is None:
+        return None
+    try:
+        status = json.loads(raw)
+    except (TypeError, ValueError):
+        return None
+    return status if isinstance(status, dict) else None
 
 
 async def _stop_evaluation_worker(
@@ -253,10 +244,10 @@ app.include_router(auth_router)
 
 
 def _is_public_path(path: str) -> bool:
-    """Public when auth is enabled: Google OAuth, CLI login, /auth/me, /version, SPA."""
+    """Public: sign-in endpoints, /auth/me, /version, SPA."""
     if not any(path.startswith(prefix) for prefix in _SPA_API_PREFIXES):
         return path not in AUTH_GATE_EXTRA_GATED_PATHS
-    if path.startswith(("/auth/google/", "/auth/cli/")):
+    if path.startswith(("/auth/google/", "/auth/cli/", "/auth/local/")):
         # CLI login endpoints are the credential-issuing surface: the
         # one-time code + PKCE verifier (or the Google flow itself) are the
         # credentials.
@@ -265,13 +256,11 @@ def _is_public_path(path: str) -> bool:
 
 
 class AuthGateMiddleware(BaseHTTPMiddleware):
-    """Require a valid session (cookie or bearer) for all API routes when auth
-    is enabled, except the public allowlist. This gates "is anyone logged in";
-    it is not per-user data scoping."""
+    """Require a resolved user (token, or the local owner on direct loopback)
+    for all API routes except the public allowlist. Data routes pass the user
+    ID to database queries for per-user scoping."""
 
     async def dispatch(self, request: Request, call_next):
-        if not _auth_enabled():
-            return await call_next(request)
         if request.method == "OPTIONS":
             # CORS preflights carry no credentials (browsers never attach
             # them), so they can never authenticate. Let them through so the
@@ -330,6 +319,7 @@ async def usage_read_cors(request: Request, call_next):
 
 @app.get("/usage")
 async def get_usage(
+    request: Request,
     limit: int = Query(100, ge=0, le=USAGE_QUERY_LIMIT_MAX),
     offset: int = Query(0, ge=0),
     provider: str | None = None,
@@ -344,9 +334,11 @@ async def get_usage(
     status_4xx: bool = False,
     status_5xx: bool = False,
 ):
+    user_id = _request_user_id(request)
     return await asyncio.to_thread(
         lambda: enrich_rows(
             fetch_recent_usage(
+                user_id=user_id,
                 limit=limit,
                 offset=offset,
                 provider=provider,
@@ -367,6 +359,7 @@ async def get_usage(
 
 @app.get("/usage/count")
 async def get_usage_count(
+    request: Request,
     provider: str | None = None,
     model: str | None = None,
     client_source: str | None = None,
@@ -377,6 +370,7 @@ async def get_usage_count(
 ):
     return {
         "total": count_usage(
+            user_id=_request_user_id(request),
             provider=provider,
             model=model,
             client_source=client_source,
@@ -389,28 +383,35 @@ async def get_usage_count(
 
 
 @app.get("/usage/high-watermark")
-async def usage_high_watermark():
-    return {"ts": get_usage_high_watermark_ts()}
+async def usage_high_watermark(request: Request):
+    return {"ts": get_usage_high_watermark_ts(user_id=_request_user_id(request))}
 
 
 @app.get("/usage/sources")
 async def usage_sources(
+    request: Request,
     since: str | None = None,
     until: str | None = None,
 ):
-    return distinct_client_sources(since=since, until=until)
+    return distinct_client_sources(
+        user_id=_request_user_id(request), since=since, until=until
+    )
 
 
 @app.get("/usage/tools")
 async def usage_tools(
+    request: Request,
     since: str | None = None,
     until: str | None = None,
 ):
-    return distinct_tool_names(since=since, until=until)
+    return distinct_tool_names(
+        user_id=_request_user_id(request), since=since, until=until
+    )
 
 
 @app.get("/usage/run-summary")
 async def usage_run_summary(
+    request: Request,
     after_ts: int = 0,
     until_ts: int | None = None,
     since: str | None = None,
@@ -422,6 +423,7 @@ async def usage_run_summary(
     include_rows: bool = False,
 ):
     return summarize_usage_window(
+        user_id=_request_user_id(request),
         after_ts=after_ts,
         until_ts=until_ts,
         since=since,
@@ -436,6 +438,7 @@ async def usage_run_summary(
 
 @app.get("/usage/summary")
 async def usage_summary(
+    request: Request,
     since: str | None = None,
     until: str | None = None,
     provider: str | None = None,
@@ -443,6 +446,7 @@ async def usage_summary(
     client_source: str | None = None,
 ):
     return summarize_usage_daily(
+        user_id=_request_user_id(request),
         since=since,
         until=until,
         provider=provider,
@@ -453,6 +457,7 @@ async def usage_summary(
 
 @app.get("/usage/by-source")
 async def usage_by_source(
+    request: Request,
     since: str | None = None,
     until: str | None = None,
     provider: str | None = None,
@@ -460,6 +465,7 @@ async def usage_by_source(
     client_source: str | None = None,
 ):
     return summarize_usage_by_source(
+        user_id=_request_user_id(request),
         since=since,
         until=until,
         provider=provider,
@@ -470,6 +476,7 @@ async def usage_by_source(
 
 @app.get("/usage/by-tool")
 async def usage_by_tool(
+    request: Request,
     since: str | None = None,
     until: str | None = None,
     provider: str | None = None,
@@ -481,6 +488,7 @@ async def usage_by_tool(
     status_5xx: bool = False,
 ):
     return summarize_tool_calls(
+        user_id=_request_user_id(request),
         since=since,
         until=until,
         provider=provider,
@@ -495,6 +503,7 @@ async def usage_by_tool(
 
 @app.get("/usage/by-provider")
 async def usage_by_provider(
+    request: Request,
     since: str | None = None,
     until: str | None = None,
     provider: str | None = None,
@@ -502,6 +511,7 @@ async def usage_by_provider(
     client_source: str | None = None,
 ):
     return summarize_usage_by_provider(
+        user_id=_request_user_id(request),
         since=since,
         until=until,
         provider=provider,
@@ -512,6 +522,7 @@ async def usage_by_provider(
 
 @app.get("/usage/daily")
 async def usage_daily(
+    request: Request,
     since: str | None = None,
     until: str | None = None,
     provider: str | None = None,
@@ -521,6 +532,7 @@ async def usage_daily(
     tz_offset: str = "+00:00",
 ):
     return aggregate_usage_by_period(
+        user_id=_request_user_id(request),
         since=since,
         until=until,
         provider=provider,
@@ -533,6 +545,7 @@ async def usage_daily(
 
 @app.get("/usage/daily-by-dimension")
 async def usage_daily_by_dimension(
+    request: Request,
     dimension: str = "model",
     since: str | None = None,
     until: str | None = None,
@@ -541,6 +554,7 @@ async def usage_daily_by_dimension(
     client_source: str | None = None,
 ):
     return aggregate_daily_by_dimension(
+        user_id=_request_user_id(request),
         dimension=dimension,
         since=since,
         until=until,
@@ -552,6 +566,7 @@ async def usage_daily_by_dimension(
 
 @app.get("/sessions")
 async def get_sessions(
+    request: Request,
     client_source: str | None = None,
     since: str | None = None,
     until: str | None = None,
@@ -562,6 +577,7 @@ async def get_sessions(
     offset: int = 0,
     hide_noop: bool = False,
 ):
+    user_id = _request_user_id(request)
     if view not in {"summary", "selector"}:
         raise HTTPException(
             status_code=400,
@@ -571,6 +587,7 @@ async def get_sessions(
     if view == "selector":
         return {
             "sessions": fetch_session_selector_rows(
+                user_id=user_id,
                 client_source=client_source,
                 since=since,
                 until=until,
@@ -584,6 +601,7 @@ async def get_sessions(
         }
 
     sessions = fetch_sessions(
+        user_id=user_id,
         client_source=client_source,
         since=since,
         until=until,
@@ -594,6 +612,7 @@ async def get_sessions(
         hide_noop=hide_noop,
     )
     total = count_sessions(
+        user_id=user_id,
         client_source=client_source,
         since=since,
         until=until,
@@ -604,12 +623,14 @@ async def get_sessions(
 
 @app.get("/sessions/summary")
 async def get_sessions_summary(
+    request: Request,
     client_source: str | None = None,
     since: str | None = None,
     until: str | None = None,
     hide_noop: bool = False,
 ):
     return summarize_sessions(
+        user_id=_request_user_id(request),
         client_source=client_source,
         since=since,
         until=until,
@@ -619,6 +640,7 @@ async def get_sessions_summary(
 
 @app.get("/model-effectiveness")
 async def model_effectiveness(
+    request: Request,
     since: str | None = None,
     until: str | None = None,
     client_source: str | None = None,
@@ -631,6 +653,7 @@ async def model_effectiveness(
             detail="Invalid group_by. Must be one of ['model', 'provider', 'source']",
         )
     return aggregate_model_effectiveness(
+        user_id=_request_user_id(request),
         group_by=group_by,
         since=since,
         until=until,
@@ -640,16 +663,68 @@ async def model_effectiveness(
 
 
 @app.get("/sessions/daily-effectiveness")
-async def sessions_daily_effectiveness(date: str):
+async def sessions_daily_effectiveness(request: Request, date: str):
     try:
-        return daily_session_effectiveness_report(date=date)
+        return daily_session_effectiveness_report(
+            date=date, user_id=_request_user_id(request)
+        )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
 
+def _device_status_entry(device: Device) -> dict:
+    """One device as the GET response entry, tolerating bad JSON."""
+    status = _parse_device_status_json(device.status_json)
+    return {
+        "device_id": device.id,
+        "device_name": device.device_name,
+        "client_version": (status or {}).get("client_version"),
+        "client_commit": (status or {}).get("client_commit"),
+        "reported_at": device.status_reported_at,
+        "status": status,
+    }
+
+
+@app.post("/devices/status", status_code=204)
+def post_device_status(
+    request: Request,
+    report: DeviceStatusReport,
+    user: User = Depends(get_current_user),
+):
+    """Store the latest status report from a device.
+
+    The caller's device token is the identity; a token that isn't linked to a
+    device is rejected.
+    """
+    auth_token = getattr(request.state, "auth_token", None)
+    device_id = auth_token.device_id if auth_token is not None else None
+    device = next(
+        (row for row in list_user_devices(user.id) if row.id == device_id), None
+    )
+    if device is None:
+        raise HTTPException(status_code=400, detail="device token required")
+    set_device_status(
+        device.id,
+        json.dumps(report.model_dump(mode="json"), sort_keys=True),
+    )
+    return Response(status_code=204)
+
+
+@app.get("/devices/status")
+def get_devices_status(user: User = Depends(get_current_user)):
+    """Latest report per device, for the caller's devices only."""
+    entries = [
+        _device_status_entry(device)
+        for device in list_user_devices(user.id)
+        if device.status_json is not None
+    ]
+    entries.sort(key=lambda entry: entry["reported_at"], reverse=True)
+    return {"devices": entries}
+
+
 @app.put(
     "/local/sessions/{session_id}/evaluation",
-    dependencies=[Depends(_require_local_profile)],
+    dependencies=[Depends(_require_local_owner)],
 )
 async def put_session_evaluation(
     request: Request, session_id: str, update: SessionEvaluationUpdate
@@ -692,7 +767,7 @@ async def put_session_evaluation(
 
 @app.get(
     "/local/sessions/{session_id}/evaluation",
-    dependencies=[Depends(_require_local_profile)],
+    dependencies=[Depends(_require_local_owner)],
 )
 async def get_evaluation(request: Request, session_id: str):
     evaluation = get_session_evaluation(session_id, user_id=_request_user_id(request))
@@ -701,7 +776,7 @@ async def get_evaluation(request: Request, session_id: str):
 
 @app.delete(
     "/local/sessions/{session_id}/evaluation",
-    dependencies=[Depends(_require_local_profile)],
+    dependencies=[Depends(_require_local_owner)],
 )
 async def delete_evaluation(request: Request, session_id: str):
     deleted = delete_session_evaluation(session_id, user_id=_request_user_id(request))
@@ -713,7 +788,7 @@ async def delete_evaluation(request: Request, session_id: str):
 @app.post(
     "/local/sessions/{session_id}/evaluate-with-llm",
     status_code=202,
-    dependencies=[Depends(_require_local_profile)],
+    dependencies=[Depends(_require_local_owner)],
 )
 async def evaluate_session_with_llm(
     http_request: Request,
@@ -750,15 +825,10 @@ async def evaluate_session_with_llm(
 
 @app.get(
     "/local/poll/{job_id}",
-    dependencies=[Depends(_require_local_profile)],
+    dependencies=[Depends(_require_local_owner)],
 )
 async def poll_job(request: Request, job_id: str):
-    user_id = _request_user_id(request)
-    job = (
-        get_evaluation_job_progress(job_id)
-        if user_id is None
-        else get_evaluation_job_progress(job_id, user_id=user_id)
-    )
+    job = get_evaluation_job_progress(job_id, user_id=_request_user_id(request))
     if job is None:
         raise HTTPException(status_code=404, detail="Job not found")
     return job
@@ -766,19 +836,15 @@ async def poll_job(request: Request, job_id: str):
 
 @app.get(
     "/local/evaluation-jobs/active",
-    dependencies=[Depends(_require_local_profile)],
+    dependencies=[Depends(_require_local_owner)],
 )
 async def active_evaluation_jobs(request: Request, session_ids: str | None = None):
     parsed_session_ids = [
         item for item in (session_ids or "").split(",") if item
     ] or None
     user_id = _request_user_id(request)
-    jobs = (
-        list_active_evaluation_jobs_with_progress(session_ids=parsed_session_ids)
-        if user_id is None
-        else list_active_evaluation_jobs_with_progress(
-            session_ids=parsed_session_ids, user_id=user_id
-        )
+    jobs = list_active_evaluation_jobs_with_progress(
+        session_ids=parsed_session_ids, user_id=user_id
     )
     return {
         "jobs": {job["session_id"]: job for job in jobs},
@@ -788,15 +854,11 @@ async def active_evaluation_jobs(request: Request, session_ids: str | None = Non
 
 @app.get(
     "/local/sessions/{session_id}/evaluation-jobs",
-    dependencies=[Depends(_require_local_profile)],
+    dependencies=[Depends(_require_local_owner)],
 )
 async def session_evaluation_jobs(request: Request, session_id: str):
     user_id = _request_user_id(request)
-    jobs = (
-        list_session_evaluation_jobs_with_progress(session_id)
-        if user_id is None
-        else list_session_evaluation_jobs_with_progress(session_id, user_id=user_id)
-    )
+    jobs = list_session_evaluation_jobs_with_progress(session_id, user_id=user_id)
     return {
         "jobs": jobs,
         **_evaluation_metadata_payload(),
@@ -805,17 +867,13 @@ async def session_evaluation_jobs(request: Request, session_id: str):
 
 @app.patch(
     "/local/evaluation-jobs/{job_id}",
-    dependencies=[Depends(_require_local_profile)],
+    dependencies=[Depends(_require_local_owner)],
 )
 async def update_evaluation_job(
     request: Request, job_id: str, update: EvaluationJobUpdate
 ):
     user_id = _request_user_id(request)
-    current = (
-        get_evaluation_job_progress(job_id)
-        if user_id is None
-        else get_evaluation_job_progress(job_id, user_id=user_id)
-    )
+    current = get_evaluation_job_progress(job_id, user_id=user_id)
     if current is None:
         raise HTTPException(status_code=404, detail="Job not found")
     if current["status"] != "queued":
@@ -829,24 +887,15 @@ async def update_evaluation_job(
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
-    if user_id is None:
-        updated = update_queued_evaluation_job_evaluator(
-            job_id, evaluator_type=evaluator_type
-        )
-    else:
-        updated = update_queued_evaluation_job_evaluator(
-            job_id, evaluator_type=evaluator_type, user_id=user_id
-        )
+    updated = update_queued_evaluation_job_evaluator(
+        job_id, evaluator_type=evaluator_type, user_id=user_id
+    )
     if updated is None:
         raise HTTPException(
             status_code=409,
             detail="Only queued evaluation jobs can change evaluator",
         )
-    refreshed = (
-        get_evaluation_job_progress(job_id)
-        if user_id is None
-        else get_evaluation_job_progress(job_id, user_id=user_id)
-    )
+    refreshed = get_evaluation_job_progress(job_id, user_id=user_id)
     return refreshed or updated
 
 
@@ -870,34 +919,6 @@ async def get_session_tool_calls_summary(request: Request, session_id: str):
     return summary
 
 
-@app.get("/config", dependencies=[Depends(_require_local_profile)])
-async def get_config():
-    path = os.path.expanduser(CONFIG_PATH)
-    if not os.path.exists(path):
-        parsed: dict = {}
-        return {
-            "content": "",
-            "parsed": parsed,
-            "runtime": _runtime_config_payload(parsed),
-        }
-    try:
-        with open(path, encoding="utf-8") as f:
-            content = f.read()
-        try:
-            parsed = yaml.safe_load(content) or {}
-        except yaml.YAMLError:
-            parsed = {}
-        if not isinstance(parsed, dict):
-            parsed = {}
-        return {
-            "content": content,
-            "parsed": parsed,
-            "runtime": _runtime_config_payload(parsed),
-        }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
 async def _notify_proxy_refresh() -> None:
     """Ask the proxy process to reload its runtime config.
 
@@ -914,26 +935,7 @@ async def _notify_proxy_refresh() -> None:
         )
 
 
-@app.put("/config", dependencies=[Depends(_require_local_profile)])
-async def update_config(update: ConfigUpdate):
-    path = os.path.expanduser(CONFIG_PATH)
-    try:
-        # Validate YAML
-        yaml.safe_load(update.content)
-
-        os.makedirs(os.path.dirname(path), exist_ok=True)
-        with open(path, "w", encoding="utf-8") as f:
-            f.write(update.content)
-        await asyncio.to_thread(refresh_runtime_config, path)
-        asyncio.create_task(_notify_proxy_refresh())
-        return {"status": "success"}
-    except yaml.YAMLError as e:
-        raise HTTPException(status_code=400, detail=f"Invalid YAML: {str(e)}")
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.patch("/config", dependencies=[Depends(_require_local_profile)])
+@app.patch("/config", dependencies=[Depends(_require_local_owner)])
 async def patch_config(update: ConfigPatchUpdate):
     from ruamel.yaml import YAML
     from ruamel.yaml.error import YAMLError as RuamelYAMLError
@@ -975,7 +977,7 @@ async def patch_config(update: ConfigPatchUpdate):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.patch("/config/evaluation", dependencies=[Depends(_require_local_profile)])
+@app.patch("/config/evaluation", dependencies=[Depends(_require_local_owner)])
 async def update_evaluation_config(update: EvaluationConfigUpdate):
     """Update the global evaluator type in config.yaml."""
     if update.evaluator not in VALID_EVALUATOR_AGENTS:
@@ -1170,7 +1172,7 @@ async def get_model_pricing(model: str, provider: str | None = None):
 
 
 @app.post("/usage/{usage_id}/recalculate-cost")
-async def recalculate_usage_cost_route(usage_id: str):
+async def recalculate_usage_cost_route(request: Request, usage_id: str):
     """Recompute one usage row's cost against current pricing.
 
     Uses the same live-resolved pricing snapshot as /pricing/{model} (config
@@ -1179,6 +1181,7 @@ async def recalculate_usage_cost_route(usage_id: str):
     provider/model no longer resolves against current pricing, rather than
     overwriting with a zeroed fallback cost.
     """
+    user_id = _request_user_id(request)
     (
         _config_snapshot,
         _resolved,
@@ -1193,6 +1196,7 @@ async def recalculate_usage_cost_route(usage_id: str):
 
     result = recalculate_usage_cost(
         usage_id,
+        user_id=user_id,
         model_costs=model_costs,
         provider_model_costs=provider_model_costs,
         model_cost_sources=model_cost_sources,
@@ -1213,7 +1217,7 @@ async def recalculate_usage_cost_route(usage_id: str):
     }
 
 
-@app.post("/usage/reprice", dependencies=[Depends(_require_local_profile)])
+@app.post("/usage/reprice", dependencies=[Depends(_require_local_owner)])
 async def reprice_estimated_usage(
     provider: str | None = None,
     model: str | None = None,
@@ -1254,298 +1258,6 @@ async def reprice_estimated_usage(
         model_cost_sources=model_cost_sources,
         provider_model_cost_sources=provider_model_cost_sources,
     )
-
-
-@app.post("/test-connectivity")
-async def test_connectivity(test: ConnectivityTest):
-    url = test.base_url.rstrip("/")
-    headers = {}
-    payload = {}
-
-    # Normalize: ensure /v1 is in the path
-    if "/v1" not in url:
-        url = f"{url}/v1"
-
-    if test.format == "openai":
-        if not url.endswith("/chat/completions"):
-            url = f"{url}/chat/completions"
-        headers = {"Authorization": f"Bearer {test.api_key}"}
-        payload = {
-            "model": test.model or "gpt-5.4",
-            "messages": [{"role": "user", "content": test.message or "What is 2 + 3?"}],
-            "max_tokens": 10,
-        }
-    elif test.format == "anthropic":
-        if not url.endswith("/messages"):
-            url = f"{url}/messages"
-        headers = {
-            "x-api-key": test.api_key,
-            "anthropic-version": "2023-06-01",
-            "content-type": "application/json",
-        }
-        payload = {
-            "model": test.model or "gpt-5.4",
-            "messages": [{"role": "user", "content": test.message or "What is 2 + 3?"}],
-            "max_tokens": 10,
-        }
-    elif test.format == "responses":
-        if not url.endswith("/responses"):
-            url = f"{url}/responses"
-        headers = {"Authorization": f"Bearer {test.api_key}"}
-        payload = {
-            "model": test.model or "gpt-5.4",
-            "messages": [{"role": "user", "content": test.message or "What is 2 + 3?"}],
-            "max_tokens": 10,
-        }
-    else:
-        raise HTTPException(
-            status_code=400, detail=f"Unsupported format: {test.format}"
-        )
-
-    start_time = time.monotonic()
-    try:
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            response = await client.post(url, headers=headers, json=payload)
-            latency_ms = int((time.monotonic() - start_time) * 1000)
-
-            try:
-                body = response.json()
-            except Exception:
-                body = response.text
-
-            return {
-                "status_code": response.status_code,
-                "latency_ms": latency_ms,
-                "body": body,
-                "url": url,
-            }
-    except Exception as e:
-        return {
-            "status_code": 0,
-            "latency_ms": int((time.monotonic() - start_time) * 1000),
-            "error": str(e),
-            "url": url,
-        }
-
-
-@app.get("/local/agents", dependencies=[Depends(_require_local_profile)])
-async def detect_local_agents():
-    """Detect locally installed CLI agents. Only works when API has host access."""
-    import shutil
-    from pathlib import Path
-
-    # Kilo's install script adds ~/.kilo/bin to PATH via ~/.zshrc, but
-    # the supervisor service runs without sourcing .zshrc so it lacks this
-    # directory. Other agents (claude, codex, opencode) are found via
-    # ~/superset/bin which IS on the supervisor PATH, so only Kilo needs
-    # a fallback path check.
-    kilo_fallback = str(Path.home() / ".kilo" / "bin" / "kilo")
-
-    agents = {}
-    for name in ("claude", "codex", "opencode", "kilo"):
-        path = shutil.which(name)
-        if path is None and name == "kilo":
-            path = kilo_fallback if Path(kilo_fallback).exists() else None
-        agents[name] = {"found": path is not None, "path": path}
-    return agents
-
-
-def _local_setup_expected_endpoints() -> dict[str, str]:
-    from src.config.server_config import resolve_server_urls
-
-    urls = resolve_server_urls(CONFIG)
-    base = urls["otlp_url"]
-    return {"otlp_endpoint": base, "otlp_logs_endpoint": f"{base}/v1/logs"}
-
-
-def _read_json_file(path: Path) -> dict:
-    if not path.exists():
-        return {}
-    try:
-        return json.loads(path.read_text(encoding="utf-8"))
-    except Exception:
-        return {}
-
-
-def _read_toml_file(path: Path) -> dict:
-    if not path.exists():
-        return {}
-    try:
-        return tomllib.loads(path.read_text(encoding="utf-8"))
-    except Exception:
-        return {}
-
-
-def _agent_health(
-    configured: bool, configured_endpoint: str | None, expected_endpoint: str
-) -> dict:
-    endpoint_matches = configured and configured_endpoint == expected_endpoint
-    if not configured:
-        status = "missing_config"
-    elif endpoint_matches:
-        status = "ready"
-    else:
-        status = "wrong_endpoint"
-    return {
-        "configured": configured,
-        "endpoint_matches": endpoint_matches,
-        "configured_endpoint": configured_endpoint,
-        "expected_endpoint": expected_endpoint,
-        "status": status,
-    }
-
-
-@app.get("/local/setup-health", dependencies=[Depends(_require_local_profile)])
-async def get_local_setup_health():
-    """Report local AI-agent OTLP config without returning secrets."""
-    home = Path.home()
-    expected = _local_setup_expected_endpoints()
-
-    claude_settings = _read_json_file(home / ".claude" / "settings.json")
-    claude_env = (
-        claude_settings.get("env")
-        if isinstance(claude_settings.get("env"), dict)
-        else {}
-    )
-    claude_endpoint = claude_env.get("OTEL_EXPORTER_OTLP_LOGS_ENDPOINT")
-    claude_configured = (
-        claude_env.get("CLAUDE_CODE_ENABLE_TELEMETRY") in ("1", "true", "True", True)
-        and claude_env.get("OTEL_LOGS_EXPORTER") == "otlp"
-        and isinstance(claude_endpoint, str)
-    )
-
-    codex_config = _read_toml_file(home / ".codex" / "config.toml")
-    codex_otel = (
-        codex_config.get("otel") if isinstance(codex_config.get("otel"), dict) else {}
-    )
-    codex_exporter = (
-        codex_otel.get("exporter", {})
-        if isinstance(codex_otel.get("exporter"), dict)
-        else {}
-    )
-    codex_otlp_http = (
-        codex_exporter.get("otlp-http", {})
-        if isinstance(codex_exporter.get("otlp-http"), dict)
-        else {}
-    )
-    codex_endpoint = codex_otlp_http.get("endpoint")
-    codex_disabled = (
-        codex_otel.get("enabled") is False or codex_otlp_http.get("enabled") is False
-    )
-    codex_configured = not codex_disabled and isinstance(codex_endpoint, str)
-
-    opencode_config_path = home / ".config" / "opencode" / "opencode.json"
-    opencode_config = _read_json_file(opencode_config_path)
-    opencode_plugins = opencode_config.get("plugin", [])
-    opencode_endpoint = None
-    opencode_plugin_registered = False
-    opencode_plugin_suffixes = ("plugins/opencode/dist/index.js",)
-    _otlp_host = (
-        CONFIG["server"]
-        .get("base_url", "")
-        .rstrip("/")
-        .replace("http://", "")
-        .replace("https://", "")
-        if CONFIG["server"].get("base_url")
-        else "localhost"
-    )
-    opencode_default_endpoint = f"http://{_otlp_host}:4005/v1/logs"
-    if isinstance(opencode_plugins, list):
-        for entry in opencode_plugins:
-            entry_path = (
-                str(entry)
-                if isinstance(entry, str)
-                else str(entry[0])
-                if isinstance(entry, list) and len(entry) >= 1
-                else ""
-            )
-            matched_suffix = next(
-                (s for s in opencode_plugin_suffixes if entry_path.endswith(s)),
-                None,
-            )
-            if matched_suffix is None:
-                continue
-            opencode_plugin_registered = True
-            if isinstance(entry, str):
-                opencode_endpoint = opencode_default_endpoint
-            elif (
-                isinstance(entry, list)
-                and len(entry) >= 2
-                and isinstance(entry[1], dict)
-            ):
-                opencode_endpoint = (
-                    entry[1].get("endpoint") or opencode_default_endpoint
-                )
-            else:
-                opencode_endpoint = opencode_default_endpoint
-            break
-
-    kilo_config_path = home / ".config" / "kilo" / "opencode.json"
-    kilo_config = _read_json_file(kilo_config_path)
-    kilo_plugins = kilo_config.get("plugin", [])
-    kilo_endpoint = None
-    kilo_plugin_registered = False
-    kilo_plugin_suffix = "plugins/kilo/dist/index.js"
-    kilo_default_endpoint = f"http://{_otlp_host}:4005/v1/logs"
-    if isinstance(kilo_plugins, list):
-        for entry in kilo_plugins:
-            entry_path = (
-                str(entry)
-                if isinstance(entry, str)
-                else str(entry[0])
-                if isinstance(entry, list) and len(entry) >= 1
-                else ""
-            )
-            if not entry_path.endswith(kilo_plugin_suffix):
-                continue
-            kilo_plugin_registered = True
-            if isinstance(entry, str):
-                kilo_endpoint = kilo_default_endpoint
-            elif (
-                isinstance(entry, list)
-                and len(entry) >= 2
-                and isinstance(entry[1], dict)
-            ):
-                kilo_endpoint = entry[1].get("endpoint") or kilo_default_endpoint
-            else:
-                kilo_endpoint = kilo_default_endpoint
-            break
-
-    agents = {
-        "claude": _agent_health(
-            claude_configured,
-            claude_endpoint if isinstance(claude_endpoint, str) else None,
-            expected["otlp_logs_endpoint"],
-        ),
-        "codex": _agent_health(
-            codex_configured,
-            codex_endpoint if isinstance(codex_endpoint, str) else None,
-            expected["otlp_logs_endpoint"],
-        ),
-        "opencode": _agent_health(
-            opencode_plugin_registered,
-            opencode_endpoint,
-            expected["otlp_logs_endpoint"],
-        ),
-        "kilo": _agent_health(
-            kilo_plugin_registered,
-            kilo_endpoint,
-            expected["otlp_logs_endpoint"],
-        ),
-    }
-    return {
-        "expected": expected,
-        "summary": {
-            "total_agents": len(agents),
-            "configured_agents": sum(
-                1 for agent in agents.values() if agent["configured"]
-            ),
-            "matching_agents": sum(
-                1 for agent in agents.values() if agent["endpoint_matches"]
-            ),
-        },
-        "agents": agents,
-    }
 
 
 def _collector_hint() -> dict[str, str]:
@@ -1622,7 +1334,7 @@ async def version():
 
 @app.get("/install.sh")
 async def hosted_installer():
-    """Publish the client installer pointed at this server's configured API."""
+    """Publish the installer preset to this server: it installs the client."""
     server_url = resolve_server_urls(CONFIG)["api_url"]
     try:
         parsed = urlsplit(server_url)
@@ -1649,9 +1361,7 @@ async def hosted_installer():
         raise HTTPException(
             503, "configure an HTTPS API origin before client installation"
         )
-    installer_path = (
-        Path(__file__).resolve().parent.parent / "scripts" / "hosted-install.sh"
-    )
+    installer_path = Path(__file__).resolve().parent.parent / "install.sh"
     script = installer_path.read_text(encoding="utf-8")
     script = script.replace("__TOKENAGE_SERVER_URL__", shlex.quote(server_url))
     script = script.replace("__TOKENAGE_INSTALL_COMMIT__", shlex.quote(""))

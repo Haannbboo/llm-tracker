@@ -461,12 +461,15 @@ def _normalize_timestamp_filter(value: str) -> int:
 
 def _session_filters(
     *,
+    user_id: str | None = None,
     client_source: str | None = None,
     since: str | None = None,
     until: str | None = None,
     hide_noop: bool = False,
 ) -> list[Any]:
     filters: list[Any] = []
+    if user_id is not None:
+        filters.append(SessionRecord.user_id == user_id)
     if client_source:
         filters.append(SessionRecord.client_source == client_source)
     if since:
@@ -548,6 +551,7 @@ def _selector_row_to_dict(row: Any) -> dict[str, Any]:
 
 def aggregate_model_effectiveness(
     *,
+    user_id: str | None = None,
     group_by: str = "model",
     since: str | None = None,
     until: str | None = None,
@@ -562,6 +566,7 @@ def aggregate_model_effectiveness(
         )
 
     filters = _session_filters(
+        user_id=user_id,
         client_source=client_source,
         since=since,
         until=until,
@@ -746,6 +751,7 @@ def _build_daily_report_text(
 
 def daily_session_effectiveness_report(
     *,
+    user_id: str | None = None,
     date: str,
     db_path: str | None = None,
 ) -> dict[str, Any]:
@@ -753,6 +759,7 @@ def daily_session_effectiveness_report(
     day_start = _parse_report_date(date)
     next_day_start = day_start + timedelta(days=1)
     started_filter = and_(
+        *_session_filters(user_id=user_id),
         SessionRecord.started >= secs_to_micros(calendar.timegm(day_start.timetuple())),
         SessionRecord.started
         < secs_to_micros(calendar.timegm(next_day_start.timetuple())),
@@ -875,6 +882,7 @@ def daily_session_effectiveness_report(
 
 def fetch_sessions(
     *,
+    user_id: str | None = None,
     client_source: str | None = None,
     since: str | None = None,
     until: str | None = None,
@@ -887,6 +895,7 @@ def fetch_sessions(
 ) -> list[dict[str, Any]]:
     """Return sessions from the persisted sessions table."""
     filters = _session_filters(
+        user_id=user_id,
         client_source=client_source,
         since=since,
         until=until,
@@ -917,6 +926,7 @@ def fetch_sessions(
 
 def fetch_session_selector_rows(
     *,
+    user_id: str | None = None,
     client_source: str | None = None,
     since: str | None = None,
     until: str | None = None,
@@ -929,6 +939,7 @@ def fetch_session_selector_rows(
 ) -> list[dict[str, Any]]:
     """Return lightweight session rows for selector/dropdown consumers."""
     filters = _session_filters(
+        user_id=user_id,
         client_source=client_source,
         since=since,
         until=until,
@@ -955,6 +966,7 @@ def fetch_session_selector_rows(
 
 def count_sessions(
     *,
+    user_id: str | None = None,
     client_source: str | None = None,
     since: str | None = None,
     until: str | None = None,
@@ -963,6 +975,7 @@ def count_sessions(
 ) -> int:
     """Count sessions from the persisted sessions table."""
     filters = _session_filters(
+        user_id=user_id,
         client_source=client_source,
         since=since,
         until=until,
@@ -979,6 +992,7 @@ def count_sessions(
 
 def summarize_sessions(
     *,
+    user_id: str | None = None,
     client_source: str | None = None,
     since: str | None = None,
     until: str | None = None,
@@ -987,6 +1001,7 @@ def summarize_sessions(
 ) -> dict[str, Any]:
     """Return aggregate stats across all sessions matching the filters."""
     filters = _session_filters(
+        user_id=user_id,
         client_source=client_source,
         since=since,
         until=until,

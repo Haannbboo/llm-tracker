@@ -37,7 +37,7 @@ def _enable_auth(
         src.config.app.CONFIG,
         "auth",
         {
-            "enabled": True,
+            "provider": "google",
             "allowlist": list(allowlist),
             "google_client_id": client_id,
             "google_client_secret": client_secret,
@@ -134,18 +134,14 @@ def _token_rows(fresh_db):
 # ---------------------------------------------------------------- disabled
 
 
-def test_cli_routes_404_when_auth_disabled(api_module):
-    client = TestClient(api_module.app)
-    params = _start_params()
-    assert client.get("/auth/cli/start", params=params).status_code == 404
-    assert client.post("/auth/cli/start", data=params).status_code == 404
-    assert (
-        client.post(
-            "/auth/cli/exchange",
-            json={"code": "c", "code_verifier": "v", "installation_key": "a" * 64},
-        ).status_code
-        == 404
+def test_cli_start_without_a_user_is_401_under_local_provider(api_module):
+    remote = TestClient(
+        api_module.app, client=("203.0.113.9", 5), base_url="http://tracker.example"
     )
+    response = remote.get("/auth/cli/start", params=_start_params())
+    assert response.status_code == 401
+    assert "login-link" in response.json()["detail"]
+    assert remote.post("/auth/cli/start", data=_start_params()).status_code == 401
 
 
 # ---------------------------------------------------------- session shortcut

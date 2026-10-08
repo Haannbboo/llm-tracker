@@ -1,0 +1,236 @@
+"""src/ops.py with supervisord, git and npm mocked and HOME in a tmp dir."""
+
+from __future__ import annotations
+
+import subprocess
+from types import SimpleNamespace
+
+import pytest
+import yaml
+
+from src import ops
+
+
+@pytest.fixture
+def box(tmp_path, monkeypatch):
+    """A fake checkout + tokenage home. `box.calls` records external commands."""
+    root = tmp_path / "root"
+    (root / "src").mkdir(parents=True)
+    (root / "src" / "pyproject.toml").write_text("[project]\nname='x'\n")
+    (root / "config.example.yaml").write_text(
+        "server:\n  host: 127.0.0.1\n  port: 4000\n  api_port: 4001\n  otlp_port: 4002\n"
+    )
+    (root / ".venv").mkdir()
+    home = tmp_path / "home"
+    monkeypatch.setattr(ops, "ROOT", root)
+    monkeypatch.setenv("TOKENAGE_HOME", str(home))
+    monkeypatch.delenv("TOKENAGE_CONFIG", raising=False)
+    monkeypatch.delenv("OTEL_EXPORTER_OTLP_LOGS_ENDPOINT", raising=False)
+    monkeypatch.setattr(ops.time, "sleep", lambda _: None)
+
+    b = SimpleNamespace(root=root, home=home, calls=[], states={}, busy=set())
+
+    def fake_run(cmd, **kw):
+        b.calls.append(cmd)
+        out = ""
+        if cmd[0].endswith("supervisorctl") and cmd[3] == "status":
+            names = cmd[4:] or ops.PROGRAMS
+            out = "".join(
+                f"{n} {b.states.get(n, 'STOPPED')} pid 1, uptime 0\n" for n in names
+            )
+        return subprocess.CompletedProcess(cmd, 0, out, "")
+
+    monkeypatch.setattr(ops, "_run", fake_run)
+    monkeypatch.setattr(ops, "_bindable", lambda host, port: port not in b.busy)
+    monkeypatch.setattr(
+        ops,
+        "_listeners",
+        lambda port: [ops.PortListener(9, "other")] if port in b.busy else [],
+    )
+    monkeypatch.setattr(
+        ops, "migrate", lambda args=None: b.calls.append("migrate") or 0
+    )
+    b.stamp = lambda: (
+        ops._stamp_file().parent.mkdir(exist_ok=True),
+        ops._stamp_file().write_text(ops._requirements_hash()),
+    )
+    return b
+
+
+def ctl(b, *args):
+    return [c for c in b.calls if isinstance(c, list) and tuple(c[3:]) == args]
+
+
+def test_start_refuses_a_stale_stamp(box, capsys):
+    ops._stamp_file().write_text("0" * 64)
+
+    assert ops.start() == 1
+    out = capsys.readouterr().out
+    assert "Dependencies are out of date" in out
+    assert "run tokenage server bootstrap" in out
+    assert not (box.home / "config.yaml").exists()
+
+
+def test_start_creates_config_checks_ports_then_migrates_then_starts(box):
+    box.stamp()
+
+    assert ops.start() == 0
+
+    assert (box.home / "config.yaml").exists()
+    conf = (box.home / "supervisord.conf").read_text()
+    for prog in ops.PROGRAMS:
+        assert f"[program:{prog}]" in conf
+    assert any(
+        str(c[0]).endswith("supervisord") for c in box.calls if isinstance(c, list)
+    )
+    for prog in ops.PROGRAMS:
+        assert ctl(box, "start", prog)
+    assert "migrate" in box.calls
+
+
+def test_first_run_moves_busy_ports_but_an_existing_config_fails(box, capsys):
+    box.stamp()
+    box.busy = {4000}
+
+    assert ops.start() == 0
+    server = yaml.safe_load((box.home / "config.yaml").read_text())["server"]
+    assert 4000 not in (server["port"], server["api_port"], server["otlp_port"])
+
+    server["port"] = 4000
+    (box.home / "config.yaml").write_text(yaml.safe_dump({"server": server}))
+    assert ops.start() == 1
+    assert "Port check failed" in capsys.readouterr().out
+
+
+def test_restart_reloads_named_programs_and_persists_the_otlp_port(box):
+    (box.home).mkdir()
+    (box.home / "supervisord.conf").write_text("")
+    (box.home / "config.yaml").write_text(
+        "# mine\nserver:\n  otlp_port: 4002  # collector\n"
+    )
+    box.states = {p: "RUNNING" for p in ops.PROGRAMS[:2]}
+
+    assert ops.restart(["tokenage-api"]) == 0
+    assert ctl(box, "signal", "HUP", "tokenage-api")
+    assert not ctl(box, "signal", "HUP", "tokenage-proxy")
+    assert "migrate" in box.calls
+
+    box.states["tokenage-otlp"] = "RUNNING"
+    assert ops.restart(["--otlp-port", "5505"]) == 0
+    assert "# mine" in (box.home / "config.yaml").read_text()  # comments survive
+    assert ctl(box, "restart", "tokenage-otlp")
+    assert (
+        yaml.safe_load((box.home / "config.yaml").read_text())["server"]["otlp_port"]
+        == 5505
+    )
+
+    with pytest.raises(SystemExit):
+        ops.restart(["nope"])
+    with pytest.raises(SystemExit):
+        ops.restart(["--otlp-port", "5505", "tokenage-api"])
+
+
+def test_stop_named_or_everything(box):
+    box.home.mkdir()
+    (box.home / "supervisord.conf").write_text("")
+
+    ops.stop(["tokenage-proxy"])
+    assert ctl(box, "stop", "tokenage-proxy") and not ctl(box, "shutdown")
+    ops.stop()
+    assert ctl(box, "stop", "all") and ctl(box, "shutdown")
+
+
+def test_bootstrap_records_the_stamp_and_reports_display_urls(box, monkeypatch, capsys):
+    (box.home).mkdir()
+    (box.home / "config.yaml").write_text(
+        "server:\n  base_url: https://tok.example.com\n  port: 4000\n"
+    )
+    (box.root / "frontend" / "dist").mkdir(parents=True)
+    monkeypatch.setattr(
+        ops, "_wait_for_port", lambda host, port, retries=10: port != 4002
+    )
+    monkeypatch.setattr(ops, "_content_type", lambda url: "text/html")
+    monkeypatch.setattr(ops, "start", lambda args=None: 0)
+    monkeypatch.setattr(ops.shutil, "which", lambda name: None)
+
+    assert ops.bootstrap() == 1  # OTLP port closed
+
+    out = capsys.readouterr().out
+    assert ops._stamp_file().read_text().strip() == ops._requirements_hash()
+    assert "API running: https://tok.example.com:4001" in out
+    assert "OTLP listening: https://tok.example.com:4002 (not responding)" in out
+    assert ctl(box, "restart", "tokenage-api")  # new frontend/dist is served
+
+
+def test_socket_fallback_sees_an_occupied_port(monkeypatch):
+    import socket
+
+    monkeypatch.setattr(ops.shutil, "which", lambda name: None)
+    with socket.socket() as sock:
+        sock.bind(("127.0.0.1", 0))
+        sock.listen()
+        assert ops._listeners(sock.getsockname()[1])
+
+
+# ── update, against real git repos ──────────────────────────────────
+
+
+@pytest.fixture
+def clone(box, monkeypatch, tmp_path):
+    real_run = subprocess.run
+
+    def git(*args, cwd):
+        real_run(["git", *args], cwd=cwd, check=True, capture_output=True)
+
+    seed = tmp_path / "seed"
+    seed.mkdir()
+    git("init", "-b", "main", cwd=seed)
+    git("config", "user.email", "t@t", cwd=seed)
+    git("config", "user.name", "t", cwd=seed)
+    (seed / "a").write_text("1")
+    git("add", ".", cwd=seed)
+    git("commit", "-m", "one", cwd=seed)
+    origin = tmp_path / "origin.git"
+    git("clone", "--bare", str(seed), str(origin), cwd=tmp_path)
+    work = tmp_path / "work"
+    git("clone", str(origin), str(work), cwd=tmp_path)
+    monkeypatch.setattr(ops, "ROOT", work)
+
+    def run(cmd, **kw):
+        if cmd[0] == "git":
+            return real_run(cmd, **{"text": True, **kw})
+        box.calls.append(cmd)
+        return subprocess.CompletedProcess(cmd, 0, "", "")
+
+    monkeypatch.setattr(ops, "_run", run)
+    (seed / "a").write_text("2")
+    git("commit", "-am", "two", cwd=seed)
+    git("push", str(origin), "main", cwd=seed)
+    return work
+
+
+def test_update_fast_forwards_then_bootstraps_and_restarts(box, clone, capsys):
+    assert ops.update() == 0
+
+    assert (clone / "a").read_text() == "2"
+    names = [" ".join(map(str, c)) for c in box.calls]
+    assert names[0].startswith("bash ") and names[0].endswith(
+        "src/scripts/bootstrap.sh"
+    )
+    assert names[1].endswith("-m src.cli restart")
+    assert ops.update() == 0
+    assert "Already up to date" in capsys.readouterr().out
+
+
+def test_update_check_and_dry_run_change_nothing(box, clone):
+    assert ops.update(["--check"]) == 0
+    assert ops.update(["--dry-run"]) == 0
+    assert (clone / "a").read_text() == "1"
+    assert box.calls == []
+
+
+def test_update_refuses_a_dirty_worktree(box, clone):
+    (clone / "a").write_text("dirty")
+    with pytest.raises(SystemExit):
+        ops.update()
+    assert box.calls == []

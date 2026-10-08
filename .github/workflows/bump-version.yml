@@ -41,14 +41,18 @@ jobs:
           fi
           while IFS= read -r FILE; do
             case "$FILE" in
-              protocol/*|scripts/configure-*)
+              protocol/*)
                 BUMP_SERVER=true
                 BUMP_CLIENT=true
                 ;;
-              client/*|plugins/*|scripts/hosted-install.sh)
+              client/*|plugins/*)
                 BUMP_CLIENT=true
                 ;;
-              server/*|src/*|frontend/*|scripts/*|requirements.txt|config.example.yaml|install.sh|Dockerfile|VERSION)
+              install.sh)
+                BUMP_SERVER=true
+                BUMP_CLIENT=true
+                ;;
+              server/*|src/*|frontend/*|config.example.yaml|Dockerfile|VERSION)
                 BUMP_SERVER=true
                 ;;
             esac

@@ -7,7 +7,8 @@ import type { ActiveFilter, AuthUser, DateRangeOption, EvaluatorOption, Evaluato
 
 export type AuthState = {
   status: 'loading' | 'ready'
-  enabled: boolean
+  // null until /auth/me answers (or when it can't be reached)
+  provider: 'local' | 'google' | null
   user: AuthUser | null
 }
 
@@ -21,16 +22,12 @@ type AppContextType = {
   auth: AuthState
   signOut: () => Promise<void>
 
-  configContent: string
-  setConfigContent: (c: string) => void
-  configParsed: Record<string, any> | null
-  setConfigParsed: (c: Record<string, any> | null) => void
+  configStatus: 'idle' | 'saving' | 'saved' | 'error'
+  setConfigStatus: (s: 'idle' | 'saving' | 'saved' | 'error') => void
   evaluationEvaluator: EvaluatorType
   setEvaluationEvaluator: (e: EvaluatorType) => void
   evaluationEvaluators: EvaluatorOption[]
   setEvaluationEvaluators: (e: EvaluatorOption[]) => void
-  configStatus: 'idle' | 'saving' | 'saved' | 'error'
-  setConfigStatus: (s: 'idle' | 'saving' | 'saved' | 'error') => void
 
   pricingData: PricingMap | null
   setPricingData: (p: PricingMap | null) => void
@@ -69,12 +66,12 @@ export function isApiPath(pathname: string): boolean {
     pathname === '/sessions' ||
     pathname.startsWith('/sessions/') ||
     pathname === '/model-effectiveness' ||
+    pathname === '/devices/status' ||
     pathname === '/config' ||
     pathname.startsWith('/config/') ||
     pathname === '/pricing' ||
     pathname.startsWith('/pricing/') ||
     pathname.startsWith('/local/') ||
-    pathname === '/test-connectivity' ||
     pathname === '/version'
   )
 }
@@ -82,9 +79,7 @@ export function isApiPath(pathname: string): boolean {
 export function AppProvider({ children }: { children: ReactNode }) {
   const [theme, setTheme] = useState<'light' | 'dark'>(getTheme)
   const { lang, setLang } = useLang()
-  const [auth, setAuth] = useState<AuthState>({ status: 'loading', enabled: false, user: null })
-  const [configContent, setConfigContent] = useState('')
-  const [configParsed, setConfigParsed] = useState<Record<string, any> | null>(null)
+  const [auth, setAuth] = useState<AuthState>({ status: 'loading', provider: null, user: null })
   const [evaluationEvaluator, setEvaluationEvaluator] = useState<EvaluatorType>('codex')
   const [evaluationEvaluators, setEvaluationEvaluators] = useState<EvaluatorOption[]>([])
   const [configStatus, setConfigStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle')
@@ -116,9 +111,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const markLoggedOut = useCallback(() => {
     setAuth(current => {
-      if (!current.enabled) return current
       if (current.user === null && current.status === 'ready') return current
-      return { status: 'ready', enabled: true, user: null }
+      return { status: 'ready', provider: current.provider, user: null }
     })
   }, [])
 
@@ -129,8 +123,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
     window.location.reload()
   }, [])
 
-  // Resolve the session on mount. With auth enabled and no session the app
-  // renders the LoginGate instead of the dashboard.
+  // Resolve the session on mount. Without a user (google: not signed in;
+  // local: a browser that is not on the server machine) the app renders the
+  // LoginGate instead of the dashboard.
   useEffect(() => {
     const controller = new AbortController()
     async function fetchAuth() {
@@ -140,37 +135,27 @@ export function AppProvider({ children }: { children: ReactNode }) {
           const data = await response.json()
           setAuth({
             status: 'ready',
-            enabled: data.auth_enabled === true,
+            provider: data.provider === 'google' ? 'google' : 'local',
             user: data.user ?? null,
           })
           return
         }
-        if (response.status === 401) {
-          // A 401 from /auth/me can only happen when auth is enabled
-          // server-side (auth disabled returns 200 auth_enabled: false),
-          // so this is the unauthenticated login-gate state.
-          setAuth({ status: 'ready', enabled: true, user: null })
-          return
-        }
-        // Any other failure (500, ...): fail closed rather than rendering
-        // the dashboard with an unresolved auth state. /auth/me only fails
-        // when auth is enabled (auth-disabled returns 200 with no DB access),
-        // so treat "can't tell" the same as "logged out."
-        setAuth({ status: 'ready', enabled: true, user: null })
+        // Any failure (500, ...): fail closed rather than rendering the
+        // dashboard with an unresolved auth state; "can't tell" is "logged out."
+        setAuth({ status: 'ready', provider: null, user: null })
       } catch (err) {
         if (controller.signal.aborted) return
         console.error('Failed to resolve session:', err)
-        setAuth({ status: 'ready', enabled: true, user: null })
+        setAuth({ status: 'ready', provider: null, user: null })
       }
     }
     void fetchAuth()
     return () => controller.abort()
   }, [])
 
-  // While auth is enabled, any 401 from the API means the session died
-  // (revoked cookie, expired token); drop back to the login gate.
+  // Any 401 from the API means the session died (revoked cookie, expired
+  // token); drop back to the login gate.
   useEffect(() => {
-    if (!auth.enabled) return
     const originalFetch = window.fetch.bind(window)
     window.fetch = async (input, init) => {
       const response = await originalFetch(input, init)
@@ -186,24 +171,25 @@ export function AppProvider({ children }: { children: ReactNode }) {
       return response
     }
     return () => { window.fetch = originalFetch }
-  }, [auth.enabled, markLoggedOut])
+  }, [markLoggedOut])
 
-  // Fetch config on mount. Settings owns pricing fetches because pricing scope
-  // depends on the selected provider.
+  // Seed the global evaluator from the local evaluation metadata on mount.
+  // Settings owns pricing fetches because pricing scope depends on the
+  // selected provider.
   useEffect(() => {
     const controller = new AbortController()
     async function fetchInitialData() {
       try {
-        const configResp = await fetch('/config', { signal: controller.signal })
-        if (configResp.ok) {
-          const data = await configResp.json()
-          setConfigContent(data.content)
-          setConfigParsed(data.parsed)
-          const runtimeEvaluator = data.runtime?.evaluation?.evaluator
-          setEvaluationEvaluator(typeof runtimeEvaluator === 'string' ? runtimeEvaluator as EvaluatorType : 'codex')
-          if (Array.isArray(data.runtime?.evaluation?.evaluators)) {
-            setEvaluationEvaluators(data.runtime.evaluation.evaluators)
-          }
+        const response = await fetch('/local/evaluation-jobs/active', {
+          signal: controller.signal,
+        })
+        if (!response.ok) return
+        const data = await response.json()
+        if (typeof data.global_evaluator_type === 'string') {
+          setEvaluationEvaluator(data.global_evaluator_type as EvaluatorType)
+        }
+        if (Array.isArray(data.evaluators)) {
+          setEvaluationEvaluators(data.evaluators)
         }
       } catch (err) {
         console.error('Failed to load initial data:', err)
@@ -218,7 +204,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       theme, toggleThemeHandler,
       lang, setLang,
       auth, signOut,
-      configContent, setConfigContent, configParsed, setConfigParsed, configStatus, setConfigStatus,
+      configStatus, setConfigStatus,
       evaluationEvaluator, setEvaluationEvaluator, evaluationEvaluators, setEvaluationEvaluators,
       pricingData, setPricingData,
       showToast,

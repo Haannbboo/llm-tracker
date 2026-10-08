@@ -17,7 +17,7 @@ from fastapi import FastAPI, HTTPException, Request
 
 from src.config.app import CONFIG
 
-from .auth import _auth_enabled, resolve_token
+from .auth import get_local_owner, local_owner_allowed, resolve_token
 from .auth.tokens import hash_token
 from .database import init_db
 from .provider_parser import parse_provider_metadata
@@ -74,16 +74,19 @@ _auth_executor = concurrent.futures.ThreadPoolExecutor(
 )
 
 
-def _resolve_ingest_user(request: Request) -> tuple[str | None, str | None]:
-    """Return (user_id, token_id) from x-tokenage-token, or (None, None) when auth is disabled.
+def _resolve_ingest_user(request: Request) -> tuple[str, str | None]:
+    """Return (user_id, token_id) for the request.
 
-    Raises HTTPException(401) for missing/invalid/revoked/wrong-kind tokens.
+    A token (x-tokenage-token, kind ingest) is always checked. Tokenless
+    requests are accepted only as the local owner: local provider and a direct
+    loopback request (keeps agents wired before sign-in working); token_id is
+    None for them. Raises HTTPException(401) for anything else, including a
+    present-but-bad token (no fallback to the owner).
     """
-    if not _auth_enabled():
-        return None, None
-
     token = request.headers.get("x-tokenage-token")
     if not token:
+        if local_owner_allowed(request):
+            return get_local_owner().id, None
         _reject_invalid_token(request)
 
     token_id = hash_token(token)
@@ -138,11 +141,8 @@ def _remember_invalid_token(token_id: str) -> None:
 
 
 def _check_rate_limit(token_id: str) -> None:
-    """Raise HTTPException(429) if token exceeds rate limit. No-op when auth is disabled."""
+    """Raise HTTPException(429) if the token (or rejected caller) exceeds the rate limit."""
     global _last_rate_limit_cleanup
-
-    if not _auth_enabled():
-        return
 
     max_per_minute = CONFIG.get("otlp", {}).get("rate_limit_per_minute", 300)
     with _rate_limit_lock:
@@ -1061,12 +1061,10 @@ async def _read_capped_json(request: Request) -> dict:
     return json.loads(body_bytes)
 
 
-async def _resolve_ingest_request(request: Request) -> tuple[str | None, str | None]:
-    """Auth + rate limit; returns (user_id, token_id) with auth disabled as None."""
-    if _auth_enabled():
-        user_id, token_id = await _resolve_ingest_user_async(request)
-    else:
-        user_id, token_id = None, None
+async def _resolve_ingest_request(request: Request) -> tuple[str, str | None]:
+    """Auth + rate limit; returns (user_id, token_id). Tokenless loopback owner
+    requests have token_id None and are not rate limited (as before auth-off)."""
+    user_id, token_id = await _resolve_ingest_user_async(request)
     if token_id is not None:
         _check_rate_limit(token_id)
     return user_id, token_id

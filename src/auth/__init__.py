@@ -1,16 +1,19 @@
-"""Auth package: Google OAuth web login, session tokens, and the /auth/* routes.
+"""Auth package: sign-in providers (local, Google), session tokens, and the /auth/* routes.
 
 Narrow public surface — only what the rest of the codebase actually imports.
 """
 
 from .routes import (
-    _auth_enabled,
-    _require_local_profile,
+    _require_local_owner,
     _resolve_request_user,
+    auth_provider,
     get_current_user,
+    is_direct_loopback,
+    local_owner_allowed,
     router,
 )
 from .tokens import (
+    get_local_owner,
     list_user_tokens,
     mint_token,
     resolve_token,
@@ -19,11 +22,14 @@ from .tokens import (
 )
 
 __all__ = [
-    "_auth_enabled",
-    "_require_local_profile",
+    "_require_local_owner",
     "_resolve_request_user",
+    "auth_provider",
     "get_current_user",
+    "get_local_owner",
+    "is_direct_loopback",
     "list_user_tokens",
+    "local_owner_allowed",
     "mint_token",
     "resolve_token",
     "revoke_token",

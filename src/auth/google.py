@@ -33,6 +33,7 @@ MAX_PENDING_STATES = 512
 # the OAuth state store, longer TTL — the human paste-back path needs slack.
 CLI_CODE_FILE_NAME = "cli_codes.json"
 CLI_CODE_TTL_SECONDS = 300
+LOGIN_CODE_FILE_NAME = "login_codes.json"
 
 # Google endpoints are pinned (no discovery-document fetch at runtime); the
 # only outbound calls are the token exchange and the JWKS fetch.
@@ -159,6 +160,22 @@ def store_cli_code(code: str, data: dict[str, Any]) -> None:
         CLI_CODE_TTL_SECONDS,
         MAX_PENDING_STATES,
     )
+
+
+def store_login_code(code: str) -> None:
+    """Persist a one-time local-provider browser login code (login-link)."""
+    _store_entry(
+        _state_path(LOGIN_CODE_FILE_NAME),
+        code,
+        {},
+        CLI_CODE_TTL_SECONDS,
+        MAX_PENDING_STATES,
+    )
+
+
+def pop_login_code(code: str) -> dict[str, Any] | None:
+    """Consume a login-link code single-use."""
+    return _pop_entry(_state_path(LOGIN_CODE_FILE_NAME), code)
 
 
 def pop_cli_code(code: str) -> dict[str, Any] | None:

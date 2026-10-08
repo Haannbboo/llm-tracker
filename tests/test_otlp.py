@@ -1343,7 +1343,7 @@ def test_auth_disabled_no_token_records_usage(otlp_module, monkeypatch):
             captured.append(fields) or type("U", (), {"id": "u1", "session_id": "s1"})()
         ),
     )
-    monkeypatch.setitem(otlp_module.CONFIG.get("auth", {}), "enabled", False)
+    monkeypatch.setitem(otlp_module.CONFIG.get("auth", {}), "provider", "local")
 
     client = TestClient(otlp_module.app)
     response = client.post("/v1/logs", json=_minimal_otlp_body())
@@ -1358,7 +1358,7 @@ def test_auth_enabled_valid_ingest_token_records_user_id(
     """auth.enabled=true, valid ingest token: recorded usage carries user_id."""
     from src.auth.tokens import mint_token
 
-    monkeypatch.setitem(otlp_module.CONFIG.get("auth", {}), "enabled", True)
+    monkeypatch.setitem(otlp_module.CONFIG.get("auth", {}), "provider", "google")
     monkeypatch.setitem(otlp_module.CONFIG.get("otlp", {}), "max_body_bytes", 2_000_000)
     monkeypatch.setitem(
         otlp_module.CONFIG.get("otlp", {}), "rate_limit_per_minute", 300
@@ -1391,7 +1391,7 @@ def test_auth_enabled_valid_ingest_token_records_user_id(
 def test_authenticated_otlp_tool_calls_keep_user_id(otlp_module, monkeypatch, fresh_db):
     from src.auth.tokens import mint_token
 
-    monkeypatch.setitem(otlp_module.CONFIG.get("auth", {}), "enabled", True)
+    monkeypatch.setitem(otlp_module.CONFIG.get("auth", {}), "provider", "google")
     token, user = mint_token(
         "test@example.com", kind="ingest", db_path=fresh_db.db_path
     )
@@ -1460,7 +1460,7 @@ def test_authenticated_otlp_tool_calls_keep_user_id(otlp_module, monkeypatch, fr
 
 
 def test_auth_lookup_timeout_returns_503(otlp_module, monkeypatch):
-    monkeypatch.setitem(otlp_module.CONFIG.get("auth", {}), "enabled", True)
+    monkeypatch.setitem(otlp_module.CONFIG.get("auth", {}), "provider", "google")
     monkeypatch.setattr(otlp_module, "AUTH_LOOKUP_TIMEOUT_SECONDS", 0.01)
 
     def blocked_lookup(_request):
@@ -1476,7 +1476,7 @@ def test_auth_lookup_timeout_returns_503(otlp_module, monkeypatch):
 
 def test_auth_enabled_missing_header_returns_401(otlp_module, monkeypatch):
     """auth.enabled=true, missing header → 401, no row recorded."""
-    monkeypatch.setitem(otlp_module.CONFIG.get("auth", {}), "enabled", True)
+    monkeypatch.setitem(otlp_module.CONFIG.get("auth", {}), "provider", "google")
 
     captured = []
     monkeypatch.setattr(
@@ -1494,7 +1494,7 @@ def test_auth_enabled_missing_header_returns_401(otlp_module, monkeypatch):
 def test_auth_failures_are_rate_limited_by_client_before_lookup(
     otlp_module, monkeypatch
 ):
-    monkeypatch.setitem(otlp_module.CONFIG.get("auth", {}), "enabled", True)
+    monkeypatch.setitem(otlp_module.CONFIG.get("auth", {}), "provider", "google")
     monkeypatch.setitem(otlp_module.CONFIG.get("otlp", {}), "rate_limit_per_minute", 1)
     otlp_module._rate_limit_state.clear()
     otlp_module._invalid_token_cache.clear()
@@ -1508,7 +1508,7 @@ def test_auth_failures_are_rate_limited_by_client_before_lookup(
 def test_repeated_invalid_token_is_rate_limited_before_db_lookup(
     otlp_module, monkeypatch
 ):
-    monkeypatch.setitem(otlp_module.CONFIG.get("auth", {}), "enabled", True)
+    monkeypatch.setitem(otlp_module.CONFIG.get("auth", {}), "provider", "google")
     monkeypatch.setitem(otlp_module.CONFIG.get("otlp", {}), "rate_limit_per_minute", 1)
     otlp_module._rate_limit_state.clear()
     otlp_module._invalid_token_cache.clear()
@@ -1535,7 +1535,7 @@ def test_auth_enabled_wrong_kind_token_returns_401(otlp_module, monkeypatch, fre
     """auth.enabled=true, valid cli token → 401 (kind mismatch)."""
     from src.auth.tokens import mint_token
 
-    monkeypatch.setitem(otlp_module.CONFIG.get("auth", {}), "enabled", True)
+    monkeypatch.setitem(otlp_module.CONFIG.get("auth", {}), "provider", "google")
 
     token, _ = mint_token("test@example.com", kind="cli", db_path=fresh_db.db_path)
 
@@ -1559,7 +1559,7 @@ def test_auth_enabled_revoked_token_returns_401(otlp_module, monkeypatch, fresh_
     """auth.enabled=true, revoked ingest token → 401."""
     from src.auth.tokens import mint_token, revoke_token
 
-    monkeypatch.setitem(otlp_module.CONFIG.get("auth", {}), "enabled", True)
+    monkeypatch.setitem(otlp_module.CONFIG.get("auth", {}), "provider", "google")
 
     token, user = mint_token(
         "test@example.com", kind="ingest", db_path=fresh_db.db_path
@@ -1588,7 +1588,7 @@ def test_auth_enabled_revoked_token_returns_401(otlp_module, monkeypatch, fresh_
 
 def test_body_too_large_returns_413(otlp_module, monkeypatch):
     """Body larger than otlp.max_body_bytes → 413; record_usage is never called."""
-    monkeypatch.setitem(otlp_module.CONFIG.get("auth", {}), "enabled", False)
+    monkeypatch.setitem(otlp_module.CONFIG.get("auth", {}), "provider", "local")
     monkeypatch.setitem(otlp_module.CONFIG.get("otlp", {}), "max_body_bytes", 100)
 
     captured = []
@@ -1611,7 +1611,7 @@ def test_body_too_large_returns_413(otlp_module, monkeypatch):
 
 def test_record_count_cap_limits_db_work_per_request(otlp_module, monkeypatch):
     """A 2 MB body of many records must not run unbounded per-record DB work."""
-    monkeypatch.setitem(otlp_module.CONFIG.get("auth", {}), "enabled", False)
+    monkeypatch.setitem(otlp_module.CONFIG.get("auth", {}), "provider", "local")
     monkeypatch.setitem(
         otlp_module.CONFIG.get("otlp", {}), "max_records_per_request", 2
     )
@@ -1659,7 +1659,7 @@ def test_record_count_cap_limits_db_work_per_request(otlp_module, monkeypatch):
 
 def test_batch_within_cap_returns_no_partial_success(otlp_module, monkeypatch):
     """A batch under the cap is a plain success, so clients see no rejection."""
-    monkeypatch.setitem(otlp_module.CONFIG.get("auth", {}), "enabled", False)
+    monkeypatch.setitem(otlp_module.CONFIG.get("auth", {}), "provider", "local")
     monkeypatch.setattr(otlp_module, "record_usage", lambda **fields: None)
 
     client = TestClient(otlp_module.app)
@@ -1671,7 +1671,7 @@ def test_batch_within_cap_returns_no_partial_success(otlp_module, monkeypatch):
 
 def test_body_too_large_streaming_cap_returns_413(otlp_module, monkeypatch):
     """Streaming body cap enforces limit when Content-Length is missing or understated."""
-    monkeypatch.setitem(otlp_module.CONFIG.get("auth", {}), "enabled", False)
+    monkeypatch.setitem(otlp_module.CONFIG.get("auth", {}), "provider", "local")
     monkeypatch.setitem(otlp_module.CONFIG.get("otlp", {}), "max_body_bytes", 100)
 
     captured = []
@@ -1701,7 +1701,7 @@ def test_rate_limit_exceeded_returns_429(otlp_module, monkeypatch, fresh_db):
     """N+1th request within the window → 429; different token unaffected."""
     from src.auth.tokens import mint_token
 
-    monkeypatch.setitem(otlp_module.CONFIG.get("auth", {}), "enabled", True)
+    monkeypatch.setitem(otlp_module.CONFIG.get("auth", {}), "provider", "google")
     monkeypatch.setitem(otlp_module.CONFIG.get("otlp", {}), "rate_limit_per_minute", 2)
 
     token1, user1 = mint_token(
@@ -1749,7 +1749,7 @@ def test_rate_limit_exceeded_returns_429(otlp_module, monkeypatch, fresh_db):
 
 def test_health_routes_stay_unauthenticated(otlp_module, monkeypatch):
     """/health, /v1/metrics, /v1/traces stay unauthenticated regardless of auth.enabled."""
-    monkeypatch.setitem(otlp_module.CONFIG.get("auth", {}), "enabled", True)
+    monkeypatch.setitem(otlp_module.CONFIG.get("auth", {}), "provider", "google")
 
     client = TestClient(otlp_module.app)
 
