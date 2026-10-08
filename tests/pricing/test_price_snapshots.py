@@ -1,7 +1,6 @@
 """Tests for per-day price snapshots and read-time cost splits."""
 
 from dataclasses import asdict
-from decimal import Decimal
 
 from src.pricing.models import ModelCost, ModelTier
 
@@ -20,20 +19,16 @@ def _snapshots_module():
 def _insert_snapshot(
     db_path,
     *,
-    provider="test-provider",
     model="test-model",
     cost=COST,
-    multiplier=Decimal("1.25"),
     date="2026-05-19",
     source="yaml",
 ):
     _snapshots_module().ensure_price_snapshot(
         date=date,
-        provider=provider,
         model=model,
         source=source,
         cost=cost,
-        multiplier=multiplier,
         db_path=db_path,
     )
 
@@ -77,24 +72,21 @@ def test_serialize_parse_roundtrip_with_tiers():
             ),
         ),
     )
-    payload = snapshots.serialize_rates(cost, Decimal("1.25"))
-    parsed_cost, multiplier = snapshots.parse_rates(payload)
+    payload = snapshots.serialize_rates(cost)
+    parsed_cost = snapshots.parse_rates(payload)
 
     # asdict comparison: isolated_home tests reload src.pricing modules, so a
     # top-level ModelCost import can be a different class instance than the
     # one parse_rates constructs.
     assert asdict(parsed_cost) == asdict(cost)
-    assert multiplier == Decimal("1.25")
 
 
 def test_serialize_parse_handles_missing_cache_write():
     snapshots = _snapshots_module()
     payload = snapshots.serialize_rates(
-        ModelCost(input=2.0, output=6.0, cache_read=0.5), Decimal("1.0")
+        ModelCost(input=2.0, output=6.0, cache_read=0.5)
     )
-    cost, multiplier = snapshots.parse_rates(payload)
-    assert cost.cache_write is None
-    assert multiplier == Decimal("1.0")
+    assert snapshots.parse_rates(payload).cache_write is None
 
 
 def test_ensure_snapshot_is_idempotent(fresh_db):
@@ -106,14 +98,12 @@ def test_ensure_snapshot_is_idempotent(fresh_db):
 
     stored = snapshots.get_price_snapshot(
         date="2026-05-19",
-        provider="test-provider",
         model="test-model",
         db_path=db_path,
     )
     assert stored is not None
-    cost, multiplier, _source = stored
+    cost, _source = stored
     assert asdict(cost) == asdict(COST)
-    assert multiplier == Decimal("1.25")
 
 
 def test_get_snapshot_returns_none_when_missing(fresh_db):
@@ -121,7 +111,6 @@ def test_get_snapshot_returns_none_when_missing(fresh_db):
     assert (
         snapshots.get_price_snapshot(
             date="2026-05-19",
-            provider="test-provider",
             model="test-model",
             db_path=fresh_db.db_path,
         )
@@ -133,22 +122,20 @@ def test_get_snapshot_prefers_latest_when_sources_change_mid_day(fresh_db):
     snapshots = _snapshots_module()
     db_path = fresh_db.db_path
 
-    _insert_snapshot(db_path, source="litellm", multiplier=Decimal("1.0"))
+    _insert_snapshot(db_path, source="litellm")
     _insert_snapshot(
         db_path,
         source="yaml",
         cost=ModelCost(input=5.0, output=10.0, cache_read=1.0, cache_write=6.0),
-        multiplier=Decimal("1.0"),
     )
 
     snapshot = snapshots.get_price_snapshot(
         date="2026-05-19",
-        provider="test-provider",
         model="test-model",
         db_path=db_path,
     )
     assert snapshot is not None
-    cost, _, _source = snapshot
+    cost, _source = snapshot
     assert asdict(cost) == asdict(
         ModelCost(input=5.0, output=10.0, cache_read=1.0, cache_write=6.0)
     )
@@ -156,7 +143,7 @@ def test_get_snapshot_prefers_latest_when_sources_change_mid_day(fresh_db):
 
 def test_split_row_uses_snapshot_prices(fresh_db):
     db_path = fresh_db.db_path
-    _insert_snapshot(db_path, multiplier=Decimal("1.0"))
+    _insert_snapshot(db_path)
 
     row = {
         "ts": TS_2026_05_18,
@@ -174,25 +161,6 @@ def test_split_row_uses_snapshot_prices(fresh_db):
         "cache_read_cost_usd": 0.0001,
         "cache_write_cost_usd": 0.0003,
     }
-
-
-def test_split_row_applies_snapshot_multiplier(fresh_db):
-    db_path = fresh_db.db_path
-    _insert_snapshot(db_path, multiplier=Decimal("2.0"))
-
-    row = {
-        "ts": TS_2026_05_18,
-        "provider": "test-provider",
-        "model": "test-model",
-        "prompt_tokens": 1000,
-        "cached_tokens": 200,
-        "cache_creation_tokens": 100,
-    }
-
-    split = _split(row, db_path)
-    assert split["normal_input_cost_usd"] == 0.0032
-    assert split["cache_read_cost_usd"] == 0.0002
-    assert split["cache_write_cost_usd"] == 0.0006
 
 
 def test_split_row_selects_tier_from_snapshot(fresh_db):
@@ -218,7 +186,7 @@ def test_split_row_selects_tier_from_snapshot(fresh_db):
             ),
         ),
     )
-    _insert_snapshot(db_path, cost=tiered, multiplier=Decimal("1.0"))
+    _insert_snapshot(db_path, cost=tiered)
 
     row = {
         "ts": TS_2026_05_18,
@@ -291,7 +259,7 @@ def test_split_row_returns_zeros_without_resolution(
 def test_enrich_rows_merges_split(fresh_db):
     snapshots = _snapshots_module()
     db_path = fresh_db.db_path
-    _insert_snapshot(db_path, multiplier=Decimal("1.0"))
+    _insert_snapshot(db_path)
 
     rows = [
         {
@@ -321,7 +289,7 @@ def test_enrich_rows_includes_pricing_detail(fresh_db):
             ModelTier(256000, None, 1.2, 4.8, 0.24),
         ),
     )
-    _insert_snapshot(db_path, cost=tiered, multiplier=Decimal("1.25"), source="litellm")
+    _insert_snapshot(db_path, cost=tiered, source="litellm")
 
     row = {
         "ts": TS_2026_05_18,
@@ -335,7 +303,6 @@ def test_enrich_rows_includes_pricing_detail(fresh_db):
     pricing = snapshots.enrich_rows([row], db_path=db_path)[0]["pricing"]
 
     assert pricing["source"] == "litellm"
-    assert pricing["multiplier"] == 1.25
     # Second tier selected (300k input tokens).
     assert pricing["input"] == 1.2
     assert pricing["output"] == 4.8

@@ -687,13 +687,74 @@ def test_migrate_database_creates_price_snapshots_table(fresh_db):
     column_names = {row[1] for row in table_info}
     assert {
         "date",
-        "provider",
         "model",
         "source",
         "rates_json",
         "recorded_at",
         "rates_hash",
     } <= column_names
+    assert "provider" not in column_names
+
+
+def test_migrate_database_drops_price_snapshot_provider(fresh_db):
+    """Legacy provider-keyed snapshots merge by model and usage rows follow."""
+    database_module = fresh_db.database_module
+    db_path = fresh_db.db_path
+    database_module.init_db(db_path)
+
+    import sqlite3
+
+    connection = sqlite3.connect(db_path)
+    connection.executescript(
+        """
+        DROP TABLE price_snapshots;
+        CREATE TABLE price_snapshots (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            date TEXT NOT NULL, provider TEXT NOT NULL, model TEXT NOT NULL,
+            source TEXT NOT NULL, rates_hash TEXT NOT NULL,
+            rates_json TEXT NOT NULL, recorded_at BIGINT NOT NULL,
+            UNIQUE (date, provider, model, source, rates_hash)
+        );
+        INSERT INTO price_snapshots VALUES
+            (1, '2026-05-19', 'a', 'm', 'yaml', 'h', '{}', 1),
+            (2, '2026-05-19', 'b', 'm', 'yaml', 'h', '{}', 2),
+            (3, '2026-05-19', 'b', 'm', 'yaml', 'other', '{}', 3);
+        """
+    )
+    connection.commit()
+    connection.close()
+
+    for snapshot_id in (2, 3):
+        database_module.log_usage(
+            database_module.Usage(
+                ts=TS_2026_04_17_00,
+                provider="b",
+                model="m",
+                client_source="c",
+                session_id=f"s{snapshot_id}",
+                endpoint="/v1/chat/completions",
+                price_snapshot_id=snapshot_id,
+                status=200,
+            ),
+            db_path=db_path,
+        )
+
+    from src.schema_migrations import migrate_database
+
+    assert "price_snapshots.drop_provider" in migrate_database(db_path)
+
+    connection = sqlite3.connect(db_path)
+    rows = connection.execute(
+        "SELECT id, model, rates_hash FROM price_snapshots ORDER BY id"
+    ).fetchall()
+    columns = {r[1] for r in connection.execute("PRAGMA table_info(price_snapshots)")}
+    bound = sorted(
+        r[0] for r in connection.execute("SELECT price_snapshot_id FROM usage")
+    )
+    connection.close()
+    assert rows == [(1, "m", "h"), (3, "m", "other")]
+    assert bound == [1, 3]  # the usage row on deleted snapshot 2 now points at 1
+    assert "provider" not in columns
 
 
 def test_get_usage_high_watermark_ts_returns_latest_ts(fresh_db):
@@ -801,24 +862,20 @@ def test_reprice_estimated_rows_rebinds_and_updates_costs(
     model_costs = {"test-model": ModelCost(input=2.0, output=4.0, cache_read=0.5)}
     summary = database_module.reprice_estimated_rows(
         model_costs=model_costs,
-        provider_model_costs={},
         model_cost_sources={},
-        provider_model_cost_sources={},
         db_path=db_path,
     )
 
     assert summary == {"candidates": 1, "repriced": 1, "skipped": 0}
     rows = database_module.fetch_recent_usage(limit=1, db_path=db_path)
     assert rows[0]["price_snapshot_id"] is not None
-    # (1000*2/1e6 + 500*4/1e6) * 1.25 provider multiplier = 0.005
-    assert rows[0]["total_cost_usd"] == pytest.approx(0.005)
+    # 1000*2/1e6 + 500*4/1e6 = 0.004
+    assert rows[0]["total_cost_usd"] == pytest.approx(0.004)
 
     # Already bound: a second pass has nothing to do.
     again = database_module.reprice_estimated_rows(
         model_costs=model_costs,
-        provider_model_costs={},
         model_cost_sources={},
-        provider_model_cost_sources={},
         db_path=db_path,
     )
     assert again == {"candidates": 0, "repriced": 0, "skipped": 0}
@@ -854,9 +911,7 @@ def test_reprice_estimated_rows_respects_filters_and_skips_unresolvable(
     model_costs = {"m1": ModelCost(input=2.0, output=4.0, cache_read=0.5)}
     common = {
         "model_costs": model_costs,
-        "provider_model_costs": {},
         "model_cost_sources": {},
-        "provider_model_cost_sources": {},
         "db_path": db_path,
     }
 
@@ -912,9 +967,7 @@ def test_reprice_limit_scans_past_unresolvable_rows(database_module, isolated_ho
     summary = database_module.reprice_estimated_rows(
         limit=1,
         model_costs={"m1": ModelCost(input=2.0, output=4.0, cache_read=0.5)},
-        provider_model_costs={},
         model_cost_sources={},
-        provider_model_cost_sources={},
         db_path=db_path,
     )
 
@@ -959,9 +1012,7 @@ def test_reprice_counts_snapshot_failure_as_skipped(
 
     summary = database_module.reprice_estimated_rows(
         model_costs={"m1": ModelCost(input=2.0, output=4.0, cache_read=0.5)},
-        provider_model_costs={},
         model_cost_sources={},
-        provider_model_cost_sources={},
         db_path=db_path,
     )
 
@@ -5667,9 +5718,6 @@ def test_recalculate_usage_cost_updates_row_and_daily_rollup(fresh_db):
     database_module.log_usage(
         database_module.Usage(
             ts=TS_2026_04_17_00,
-            # Distinct provider name (not "test-provider") so this test's cost
-            # math isn't sensitive to the shared config fixture's 1.25x
-            # price_multiplier for "test-provider" leaking in from other tests.
             provider="recalc-provider",
             model="recalc-model",
             client_source="proxy-client",
@@ -5720,7 +5768,6 @@ def test_recalculate_usage_cost_updates_row_and_daily_rollup(fresh_db):
     result = database_module.recalculate_usage_cost(
         usage_id,
         model_costs={"recalc-model": new_cost},
-        provider_model_costs={},
         db_path=db_path,
     )
 
@@ -5732,7 +5779,6 @@ def test_recalculate_usage_cost_updates_row_and_daily_rollup(fresh_db):
     assert result.new_costs["total_cost_usd"] == Decimal("6")
     assert result.pricing is not None
     assert result.pricing["source"] == "yaml"
-    assert result.pricing["multiplier"] == 1.0
     assert result.pricing["input"] == 2.0
     assert result.pricing["output"] == 4.0
     assert result.pricing["tier"] is None
@@ -5819,7 +5865,6 @@ def test_recalculate_usage_cost_adjusts_session_rollup(fresh_db):
     result = database_module.recalculate_usage_cost(
         usage_id,
         model_costs={"recalc-model-a": new_cost},
-        provider_model_costs={},
         db_path=db_path,
     )
     assert result is not None
@@ -5867,7 +5912,7 @@ def test_recalculate_usage_cost_skips_when_no_pricing_match(fresh_db):
     usage_id = database_module.fetch_recent_usage(limit=1, db_path=db_path)[0]["id"]
 
     result = database_module.recalculate_usage_cost(
-        usage_id, model_costs={}, provider_model_costs={}, db_path=db_path
+        usage_id, model_costs={}, db_path=db_path
     )
 
     assert result is not None
@@ -6624,7 +6669,6 @@ def test_recalculate_usage_cost_targets_user_slice(fresh_db):
     result = database_module.recalculate_usage_cost(
         usage_id,
         model_costs={"recalc-model": new_cost},
-        provider_model_costs={},
         db_path=db_path,
     )
     assert result is not None

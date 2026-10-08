@@ -58,12 +58,6 @@ class ResolvedCost:
     source: str
 
 
-@dataclass(frozen=True)
-class ResolvedCosts:
-    global_costs: dict[str, ResolvedCost]
-    provider_costs: dict[str, dict[str, ResolvedCost]]
-
-
 def cost_rank(cost: ModelCost) -> tuple[float, ...]:
     """Ordering key for comparing model costs, cheapest first."""
     return (

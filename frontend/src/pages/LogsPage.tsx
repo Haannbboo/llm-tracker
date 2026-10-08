@@ -482,7 +482,6 @@ export function LogsPage() {
               // Rates and provenance come from the backend's pricing snapshot so
               // they reflect exactly how this row was priced.
               const pricing = row.pricing;
-              const multiplierNote = pricing && pricing.multiplier !== 1 ? ` x ${pricing.multiplier}` : '';
 
               return (
                 <div className="has-tooltip" style={{ borderBottom: 'none' }}>
@@ -515,7 +514,7 @@ export function LogsPage() {
                         <div style={{ textAlign: 'right' }}>
                           <div>{formatCost(actualInputCost)}</div>
                           {pricing && (
-                            <div style={{ fontSize: '9px', color: 'rgba(255, 255, 255, 0.4)' }}>{formatNumber(uncachedTokens)} tokens x {formatRate(pricing.input)}{multiplierNote}</div>
+                            <div style={{ fontSize: '9px', color: 'rgba(255, 255, 255, 0.4)' }}>{formatNumber(uncachedTokens)} tokens x {formatRate(pricing.input)}</div>
                           )}
                         </div>
                       </div>
@@ -524,7 +523,7 @@ export function LogsPage() {
                         <div style={{ textAlign: 'right' }}>
                           <div>{formatCost(outputCost)}</div>
                           {pricing && (
-                            <div style={{ fontSize: '9px', color: 'rgba(255, 255, 255, 0.4)' }}>{formatNumber(completionTokens)} tokens x {formatRate(pricing.output)}{multiplierNote}</div>
+                            <div style={{ fontSize: '9px', color: 'rgba(255, 255, 255, 0.4)' }}>{formatNumber(completionTokens)} tokens x {formatRate(pricing.output)}</div>
                           )}
                         </div>
                       </div>
@@ -534,7 +533,7 @@ export function LogsPage() {
                           <div style={{ textAlign: 'right' }}>
                             <div style={{ color: 'var(--color-green)' }}>{formatCost(cacheCost)}</div>
                             {pricing && (
-                              <div style={{ fontSize: '9px', color: 'rgba(255, 255, 255, 0.4)' }}>{formatNumber(cached)} tokens x {formatRate(pricing.cache_read)}{multiplierNote}</div>
+                              <div style={{ fontSize: '9px', color: 'rgba(255, 255, 255, 0.4)' }}>{formatNumber(cached)} tokens x {formatRate(pricing.cache_read)}</div>
                             )}
                           </div>
                         </div>
@@ -545,7 +544,7 @@ export function LogsPage() {
                           <div style={{ textAlign: 'right' }}>
                             <div style={{ color: 'var(--color-purple)' }}>{formatCost(cacheWriteCost)}</div>
                             {pricing && pricing.cache_write !== null && (
-                              <div style={{ fontSize: '9px', color: 'rgba(255, 255, 255, 0.4)' }}>{formatNumber(cacheCreation)} tokens x {formatRate(pricing.cache_write)}{multiplierNote}</div>
+                              <div style={{ fontSize: '9px', color: 'rgba(255, 255, 255, 0.4)' }}>{formatNumber(cacheCreation)} tokens x {formatRate(pricing.cache_write)}</div>
                             )}
                           </div>
                         </div>
@@ -560,9 +559,6 @@ export function LogsPage() {
                             {t('Source:')} {pricing.source ?? t('unknown')}
                             {pricing.estimated && ` (${t('estimated')})`}
                           </div>
-                          {pricing.multiplier !== 1 && (
-                            <div>{t('Multiplier:')} x{pricing.multiplier}</div>
-                          )}
                           {pricing.tier && (
                             <div>
                               {t('Tier:')} {formatNumber(pricing.tier.min_tokens)}

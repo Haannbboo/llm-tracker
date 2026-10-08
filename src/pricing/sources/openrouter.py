@@ -259,7 +259,4 @@ class OpenRouterSource:
             else:
                 costs = parse_openrouter_json(load_cache_json(CACHE_NAME))
 
-        return [
-            SourceEntry(provider=None, key=key, cost=cost)
-            for key, cost in costs.items()
-        ]
+        return [SourceEntry(key=key, cost=cost) for key, cost in costs.items()]

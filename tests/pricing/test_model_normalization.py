@@ -41,9 +41,6 @@ def test_aliases_preserve_price_override_precedence():
             "models": {
                 " STEALTH/SPACE-BUNNY-ALPHA ": {"cost": {"input": 1, "output": 2}}
             },
-            "providers": {
-                "custom": {"models": {"Space-Bunny-Free": {"cost": {"output": 3}}}}
-            },
         },
         [
             FetchedSource(
@@ -51,7 +48,6 @@ def test_aliases_preserve_price_override_precedence():
                 priority=10,
                 entries=(
                     SourceEntry(
-                        provider=None,
                         key=" Space-Bunny-Free ",
                         cost=ModelCost(input=0, output=0, cache_read=0.5),
                     ),
@@ -60,22 +56,12 @@ def test_aliases_preserve_price_override_precedence():
         ],
     )
     key = "stealth/space-bunny-alpha"
-    assert set(resolved.global_costs) == {key}
-    assert set(resolved.provider_costs["custom"]) == {key}
-    global_costs = {key: rc.cost for key, rc in resolved.global_costs.items()}
-    provider_costs = {
-        provider: {key: rc.cost for key, rc in costs.items()}
-        for provider, costs in resolved.provider_costs.items()
-    }
+    assert set(resolved) == {key}
+    costs = {key: rc.cost for key, rc in resolved.items()}
     for name in ("Space-Bunny-Free", " STEALTH/SPACE-BUNNY-ALPHA "):
-        match = resolve_cost_match("custom", name, global_costs, provider_costs)
+        match = resolve_cost_match(name, costs)
         assert match is not None
-        assert (match.key, match.scope, match.source) == (key, "provider", "yaml")
-        assert match.cost == ModelCost(input=1, output=3, cache_read=0.5)
-
-        match = resolve_cost_match(None, name, global_costs, provider_costs)
-        assert match is not None
-        assert (match.key, match.scope) == (key, "global")
+        assert (match.key, match.source) == (key, "yaml")
         assert match.cost == ModelCost(input=1, output=2, cache_read=0.5)
 
 
@@ -84,9 +70,7 @@ def test_unmapped_free_name_has_no_cost():
     from src.pricing.models import ModelCost
 
     costs = {"deepseek-v4.1-flash": ModelCost(input=1, output=2, cache_read=0)}
-    resolved = resolve_pricing(
-        None, "deepseek-v4.1-flash-free", 1779148800000000, costs, {}
-    )
+    resolved = resolve_pricing("deepseek-v4.1-flash-free", 1779148800000000, costs)
     assert resolved.match is None
     assert calculate_costs(
         prompt_tokens=100,
@@ -102,11 +86,9 @@ def test_snapshot_enrichment_resolves_alias(fresh_db):
 
     ensure_price_snapshot(
         date="2026-05-19",
-        provider="CUSTOM",
         model="stealth/space-bunny-alpha",
         source="yaml",
         cost=ModelCost(input=1, output=2, cache_read=0),
-        multiplier=Decimal("1"),
         db_path=fresh_db.db_path,
     )
     row = enrich_rows(
@@ -129,23 +111,18 @@ def test_snapshot_writes_and_lookups_share_model_normalization(fresh_db):
     from src.pricing.snapshots import ensure_price_snapshot, get_price_snapshot
 
     snapshot_ids = []
-    for name, provider in (
-        (" Space-Bunny-Free ", "CUSTOM"),
-        ("STEALTH/SPACE-BUNNY-ALPHA", "Custom"),
-    ):
+    for name in (" Space-Bunny-Free ", "STEALTH/SPACE-BUNNY-ALPHA"):
         snapshot_ids.append(
             ensure_price_snapshot(
                 date="2026-05-19",
-                provider=provider,
                 model=name,
                 source="yaml",
                 cost=ModelCost(input=0, output=0, cache_read=0),
-                multiplier=Decimal("1"),
                 db_path=fresh_db.db_path,
             )
         )
         snapshot = get_price_snapshot(
-            date="2026-05-19", provider=provider, model=name, db_path=fresh_db.db_path
+            date="2026-05-19", model=name, db_path=fresh_db.db_path
         )
         assert snapshot is not None
         assert snapshot[0].input == 0

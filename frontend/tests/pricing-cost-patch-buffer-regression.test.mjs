@@ -33,15 +33,14 @@ test('pricing cost edits keep keystroke path out of YAML serialization', () => {
   assert.match(costChangeSource, /setCostPatches\(/)
 })
 
-test('pricing cost edit patch buffer records set and delete operations by scope', () => {
+test('pricing cost edit patch buffer records set and delete operations', () => {
   assert.match(pricingHook, /type CostPatchOp = 'set' \| 'delete'/)
   assert.match(pricingHook, /type CostPatch = \{ path: string\[\]; op: CostPatchOp; value\?: number \}/)
   assert.match(costChangeSource, /const op: CostPatchOp = val === '' \? 'delete' : 'set'/)
   assert.match(costChangeSource, /Number\(val\)/)
   assert.match(costChangeSource, /Number\.isFinite\(numValue\)/)
-  assert.match(costChangeSource, /costPathPrefix\(selectedPricingProvider, model\)/)
+  assert.match(costChangeSource, /costPathPrefix\(model\)/)
   assert.match(pricingHook, /\['models', model, 'cost'\]/)
-  assert.match(pricingHook, /\['providers', provider, 'models', model, 'cost'\]/)
 })
 
 test('pricing save routes to PATCH config endpoint', () => {
@@ -53,13 +52,9 @@ test('pricing save clears the buffer after a successful save and refetches prici
   assert.doesNotMatch(savePricingSource, /const configResp = await fetch\('\/config'\)/)
 
   const clearIndex = savePricingSource.indexOf('setCostPatches([])')
-  const refetchIndex = savePricingSource.indexOf('fetch(pricingUrlFor(selectedPricingProvider))')
+  const refetchIndex = savePricingSource.indexOf("fetch('/pricing')")
   assert.ok(clearIndex !== -1 && refetchIndex !== -1)
   assert.ok(clearIndex < refetchIndex, 'patch buffer should clear before refetching pricing')
 
   assert.match(savePricingSource, /setPricingData\(await pricingResp\.json\(\)\)/)
-})
-
-test('a provider view seeds only that provider\'s overrides, not global ones', () => {
-  assert.match(pricingHook, /model\.source === 'yaml' && model\.scope === selectedPricingProvider/)
 })

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from decimal import Decimal
 
 from src.pricing.models import ModelCost
 
@@ -19,11 +18,9 @@ def _snapshots():
 def _insert(db_path, *, cost, source="litellm", date="2026-05-19"):
     return _snapshots().ensure_price_snapshot(
         date=date,
-        provider="test-provider",
         model="test-model",
         source=source,
         cost=cost,
-        multiplier=Decimal("1.0"),
         db_path=db_path,
     )
 

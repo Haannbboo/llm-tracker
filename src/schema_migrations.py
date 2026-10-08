@@ -603,7 +603,6 @@ def _create_price_snapshots_table(engine: Engine) -> None:
             CREATE TABLE price_snapshots (
                 id SERIAL PRIMARY KEY,
                 date TEXT NOT NULL,
-                provider TEXT NOT NULL,
                 model TEXT NOT NULL,
                 source TEXT NOT NULL,
                 rates_hash TEXT NOT NULL,
@@ -616,7 +615,6 @@ def _create_price_snapshots_table(engine: Engine) -> None:
             CREATE TABLE price_snapshots (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 date TEXT NOT NULL,
-                provider TEXT NOT NULL,
                 model TEXT NOT NULL,
                 source TEXT NOT NULL,
                 rates_hash TEXT NOT NULL,
@@ -628,19 +626,91 @@ def _create_price_snapshots_table(engine: Engine) -> None:
         connection.execute(text(create_sql))
 
 
+def _drop_price_snapshot_provider(engine: Engine) -> None:
+    """Make snapshots model-keyed: merge rows that differed only by provider
+    (repointing usage rows at the survivor), then drop the column."""
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                """
+                UPDATE usage SET price_snapshot_id = (
+                    SELECT MIN(s2.id) FROM price_snapshots s1
+                    JOIN price_snapshots s2
+                      ON s2.date = s1.date AND s2.model = s1.model
+                     AND s2.source = s1.source AND s2.rates_hash = s1.rates_hash
+                    WHERE s1.id = usage.price_snapshot_id
+                )
+                WHERE price_snapshot_id IS NOT NULL
+                """
+            )
+        )
+        connection.execute(
+            text(
+                """
+                DELETE FROM price_snapshots WHERE id NOT IN (
+                    SELECT MIN(id) FROM price_snapshots
+                    GROUP BY date, model, source, rates_hash
+                )
+                """
+            )
+        )
+        if engine.dialect.name == "postgresql":
+            connection.execute(
+                text(
+                    "ALTER TABLE price_snapshots "
+                    "DROP CONSTRAINT IF EXISTS uq_price_snapshots_version"
+                )
+            )
+            connection.execute(text("DROP INDEX IF EXISTS uq_price_snapshots_version"))
+            connection.execute(text("ALTER TABLE price_snapshots DROP COLUMN provider"))
+        else:
+            # SQLite can't drop a column that sits in a unique constraint.
+            connection.execute(text("DROP INDEX IF EXISTS uq_price_snapshots_version"))
+            connection.execute(
+                text(
+                    """
+                    CREATE TABLE price_snapshots_new (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        date TEXT NOT NULL,
+                        model TEXT NOT NULL,
+                        source TEXT NOT NULL,
+                        rates_hash TEXT NOT NULL,
+                        rates_json TEXT NOT NULL,
+                        recorded_at BIGINT NOT NULL
+                    )
+                    """
+                )
+            )
+            connection.execute(
+                text(
+                    "INSERT INTO price_snapshots_new "
+                    "(id, date, model, source, rates_hash, rates_json, recorded_at) "
+                    "SELECT id, date, model, source, rates_hash, rates_json, "
+                    "recorded_at FROM price_snapshots"
+                )
+            )
+            connection.execute(text("DROP TABLE price_snapshots"))
+            connection.execute(
+                text("ALTER TABLE price_snapshots_new RENAME TO price_snapshots")
+            )
+
+
 def _migrate_price_snapshots(engine: Engine) -> list[str]:
     applied: list[str] = []
     table = "price_snapshots"
     if not _table_exists(engine, table):
         _create_price_snapshots_table(engine)
         applied.append("price_snapshots.create")
+    elif "provider" in _table_column_names(engine, table):
+        _drop_price_snapshot_provider(engine)
+        applied.append("price_snapshots.drop_provider")
 
     if _ensure_index(
         engine,
         table,
         "uq_price_snapshots_version",
         "CREATE UNIQUE INDEX IF NOT EXISTS uq_price_snapshots_version "
-        "ON price_snapshots (date, provider, model, source, rates_hash)",
+        "ON price_snapshots (date, model, source, rates_hash)",
     ):
         applied.append("price_snapshots.uq_version")
     return applied
@@ -1190,10 +1260,6 @@ def migrate_database(db_path: str | None = None) -> list[str]:
     ):
         applied.append("tool_calls.duration_ms")
 
-    # price_snapshots: versioned per-(date, provider, model, source) rates so a
-    # usage row's cost split can be recomputed exactly from the bound snapshot.
-    applied.extend(_migrate_price_snapshots(engine))
-
     if _ensure_column(
         engine,
         "usage",
@@ -1210,6 +1276,10 @@ def migrate_database(db_path: str | None = None) -> list[str]:
         "ON usage (price_snapshot_id)",
     ):
         applied.append("usage.ix_price_snapshot_id")
+
+    # price_snapshots: versioned per-(date, model, source) rates so a
+    # usage row's cost split can be recomputed exactly from the bound snapshot.
+    applied.extend(_migrate_price_snapshots(engine))
 
     if _table_exists(engine, "tool_calls"):
         if _ensure_index(

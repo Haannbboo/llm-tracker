@@ -14,31 +14,14 @@ test('app context initial load does not write pricing data', () => {
   assert.doesNotMatch(appContextSource, /setPricingData\(await pricingResp\.json\(\)\)/)
 })
 
-test('pricing page fetches provider-specific pricing when scope changes', () => {
-  assert.match(hookSource, /useEffect/)
-  assert.match(hookSource, /provider === 'global'/)
-  assert.match(hookSource, /\/pricing\?provider=\$\{encodeURIComponent\(provider\)\}/)
-  assert.match(hookSource, /fetch\(pricingUrlFor\(selectedPricingProvider\)/)
-  assert.match(hookSource, /\[selectedPricingProvider, setPricingData\]/)
+test('pricing page fetches model-only pricing', () => {
+  assert.match(hookSource, /fetch\('\/pricing', \{/)
+  assert.doesNotMatch(hookSource, /provider/i)
+  assert.doesNotMatch(pageSource, /multiplier|\.scope|effective_/i)
 })
 
 test('pricing page keeps slash-bearing model ids visible', () => {
   assert.doesNotMatch(hookSource, /name\.includes\('\/'\)/)
-})
-
-test('pricing refetch after save preserves the selected provider scope', () => {
-  assert.match(hookSource, /fetch\(pricingUrlFor\(selectedPricingProvider\)\)/)
-  assert.match(hookSource, /setPricingData/)
-})
-
-test('provider pricing view shows multiplier and effective prices with base prices visible', () => {
-  assert.match(pageSource, /typeof m\.multiplier === 'number'/)
-  assert.match(pageSource, /model\.effective_input/)
-  assert.match(pageSource, /model\.effective_output/)
-  assert.match(pageSource, /model\.effective_cache_read/)
-  assert.match(pageSource, /model\.effective_cache_write/)
-  assert.match(pageSource, /selectedPricingProvider !== 'global'/)
-  assert.match(pageSource, /Base:/)
 })
 
 test('provider pricing view shows and edits cache write pricing', () => {

@@ -62,7 +62,7 @@ Rules:
 - Cache read and cache write pricing must be separate where supported.
 - Missing prices should produce visible unknown/fallback behavior, not fake precision.
 - Historical/backfill changes must be called out explicitly.
-- Provider multipliers and LiteLLM/OpenRouter data must not silently override user-configured pricing without clear precedence.
+- LiteLLM/OpenRouter data must not silently override user-configured pricing without clear precedence.
 
 Test cases should cover:
 

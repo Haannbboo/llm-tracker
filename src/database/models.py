@@ -93,7 +93,7 @@ class BaseUrl(Base):
 
 
 class PriceSnapshot(Base):
-    """Pricing in effect for a (provider, model) on a given UTC date.
+    """Pricing in effect for a model on a given UTC date.
 
     Written lazily at record time so the cost split of any usage row can be
     recomputed exactly later, even after config/LiteLLM prices change.
@@ -105,7 +105,6 @@ class PriceSnapshot(Base):
     __table_args__ = (
         UniqueConstraint(
             "date",
-            "provider",
             "model",
             "source",
             "rates_hash",
@@ -115,7 +114,6 @@ class PriceSnapshot(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     date: Mapped[str] = mapped_column(String, nullable=False)
-    provider: Mapped[str] = mapped_column(String, nullable=False)
     model: Mapped[str] = mapped_column(String, nullable=False)
     source: Mapped[str] = mapped_column(String, nullable=False)
     rates_hash: Mapped[str] = mapped_column(String, nullable=False)
