@@ -457,58 +457,6 @@ exporter = {{ otlp-http = {{ endpoint = "https://foreign.example/v1/logs" }} }}
     assert config.read_text() == content
 
 
-def test_claude_disable_preserves_user_hooks_in_shared_entry(tmp_path):
-    settings = tmp_path / "settings.json"
-    user_hook = {"type": "command", "command": "/usr/local/bin/user-hook.sh"}
-    user_root = tmp_path / "user-project"
-    (user_root / "scripts").mkdir(parents=True)
-    (user_root / "src").mkdir()
-    (user_root / "scripts" / "tokenage").write_text("# user launcher\n")
-    similar_hook = {
-        "type": "command",
-        "command": str(user_root / "scripts" / "claude-hook.sh"),
-    }
-    old_root = tmp_path / "old-tracker"
-    (old_root / "scripts").mkdir(parents=True)
-    (old_root / "src").mkdir()
-    (old_root / "scripts" / "tokenage").write_text("# tokenage launcher\n")
-    settings.write_text(
-        json.dumps(
-            {
-                "env": {
-                    "OTEL_EXPORTER_OTLP_LOGS_ENDPOINT": ENDPOINT,
-                    "OTEL_EXPORTER_OTLP_HEADERS": "x-custom=keep,x-tokenage-token=secret",
-                },
-                "hooks": {
-                    "PreToolUse": [
-                        {
-                            "matcher": "Bash",
-                            "timeout": 30,
-                            "hooks": [
-                                {
-                                    "type": "command",
-                                    "command": str(
-                                        old_root / "scripts" / "claude-hook.sh"
-                                    ),
-                                },
-                                user_hook,
-                                similar_hook,
-                            ],
-                        }
-                    ]
-                },
-            }
-        )
-    )
-    result = _run("claude", [str(settings), "--disable", ENDPOINT], tmp_path)
-    assert result.returncode == 0, result.stderr
-    after = json.loads(settings.read_text())
-    assert after["env"] == {"OTEL_EXPORTER_OTLP_HEADERS": "x-custom=keep"}
-    assert after["hooks"]["PreToolUse"] == [
-        {"matcher": "Bash", "timeout": 30, "hooks": [user_hook, similar_hook]}
-    ]
-
-
 @pytest.mark.parametrize(
     "current", [None, "https://user:secret@collector.example/v1/logs?token=secret"]
 )

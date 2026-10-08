@@ -2,8 +2,8 @@
 
 Everything a per-user client does — the tracking wrapper, sign-in, agent
 configuration, status — lives in ``client/`` and never imports this module.
-``tokenage server <command>`` routes the service commands to the shell
-scripts; the launcher routes ``tokenage server token`` here.
+``tokenage server <command>`` is routed here by the launcher (``bootstrap``
+goes through ``src/scripts/bootstrap.sh`` first, which exec's back into this).
 """
 
 from __future__ import annotations
@@ -12,8 +12,7 @@ import argparse
 import secrets
 import sys
 
-from src.auth import mint_token
-from src.database import init_db
+from src import ops
 
 PROG = "tokenage server"
 
@@ -36,6 +35,10 @@ def parse_token_args(argv: list[str]) -> argparse.Namespace:
 
 
 def run_token_command(argv: list[str]) -> int:
+    # Lazy: importing these loads the config, which `start` has to create first.
+    from src.auth import mint_token
+    from src.database import init_db
+
     token_args = parse_token_args(argv)
 
     init_db()
@@ -74,7 +77,10 @@ def main(argv: list[str] | None = None) -> int:
         return run_token_command(args[1:])
     if args and args[0] == "login-link":
         return run_login_link_command()
-    print(f"usage: {PROG} token create --email <email> | login-link", file=sys.stderr)
+    if args and args[0] in ops.COMMANDS:
+        return ops.COMMANDS[args[0]](args[1:])
+    commands = " | ".join(["login-link", *ops.COMMANDS])
+    print(f"usage: {PROG} token create --email <email> | {commands}", file=sys.stderr)
     return 2
 
 

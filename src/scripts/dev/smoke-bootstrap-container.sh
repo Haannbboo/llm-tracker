@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# Manual smoke test for scripts/bootstrap.sh in a disposable container runtime.
+# Manual smoke test for src/scripts/bootstrap.sh in a disposable container runtime.
 set -euo pipefail
 set +x
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-ROOT_DIR="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+ROOT_DIR="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
 
 IMAGE="${BOOTSTRAP_SMOKE_IMAGE:-python:3.11-slim}"
 CONTAINER_TIMEOUT_SECONDS="${BOOTSTRAP_SMOKE_TIMEOUT_SECONDS:-900}"
@@ -13,9 +13,9 @@ CONTAINER_NAME="tokenage-bootstrap-smoke-$(date +%s)-$$"
 
 usage() {
   cat <<'EOF'
-Usage: scripts/dev/smoke-bootstrap-container.sh
+Usage: src/scripts/dev/smoke-bootstrap-container.sh
 
-Runs a manual smoke test for scripts/bootstrap.sh in Docker or Apple's
+Runs a manual smoke test for src/scripts/bootstrap.sh in Docker or Apple's
 container CLI. Docker is preferred when it is installed and reachable.
 
 The repo is mounted read-only and copied to a temporary workspace inside the
@@ -40,13 +40,13 @@ Environment variables:
 Examples:
 
   # Quick smoke (bootstrap only, skip pytest):
-  BOOTSTRAP_SMOKE_RUN_TESTS=0 bash scripts/dev/smoke-bootstrap-container.sh
+  BOOTSTRAP_SMOKE_RUN_TESTS=0 bash src/scripts/dev/smoke-bootstrap-container.sh
 
   # Full smoke with a different image:
-  BOOTSTRAP_SMOKE_IMAGE=python:3.12-slim bash scripts/dev/smoke-bootstrap-container.sh
+  BOOTSTRAP_SMOKE_IMAGE=python:3.12-slim bash src/scripts/dev/smoke-bootstrap-container.sh
 
   # Longer timeout for slow environments:
-  BOOTSTRAP_SMOKE_TIMEOUT_SECONDS=1200 bash scripts/dev/smoke-bootstrap-container.sh
+  BOOTSTRAP_SMOKE_TIMEOUT_SECONDS=1200 bash src/scripts/dev/smoke-bootstrap-container.sh
 EOF
 }
 
@@ -156,8 +156,8 @@ if [[ "$#" -ne 0 ]]; then
   exit 2
 fi
 
-[[ -f "${ROOT_DIR}/scripts/bootstrap.sh" ]] || fail "scripts/bootstrap.sh not found from ${ROOT_DIR}"
-[[ -f "${ROOT_DIR}/scripts/start.sh" ]] || fail "scripts/start.sh not found from ${ROOT_DIR}"
+[[ -f "${ROOT_DIR}/src/scripts/bootstrap.sh" ]] || fail "src/scripts/bootstrap.sh not found from ${ROOT_DIR}"
+[[ -f "${ROOT_DIR}/src/ops.py" ]] || fail "src/ops.py not found from ${ROOT_DIR}"
 
 if [[ "${ROOT_DIR}" == *","* ]]; then
   fail "repo path contains a comma, which cannot be safely encoded in a --mount spec: ${ROOT_DIR}"
@@ -257,20 +257,20 @@ log "Copying mounted repo to temporary workspace"
 
 cd "${WORK_ROOT}/repo"
 
-run_step 30 bash -n scripts/bootstrap.sh
-run_step 30 bash -n scripts/start.sh
+run_step 30 bash -n src/scripts/bootstrap.sh
 
-if [[ "${RUN_TESTS}" == "1" && -f tests/scripts/test_bootstrap.py && -f tests/scripts/test_runtime_ports.py ]]; then
+if [[ "${RUN_TESTS}" == "1" && -f tests/scripts/test_ops.py ]]; then
   run_step 120 "${PYTHON_BIN}" -m venv .smoke-venv
   run_step 300 .smoke-venv/bin/python -m pip install --upgrade pip
-  run_step 600 .smoke-venv/bin/python -m pip install -r requirements.txt
+  run_step 300 .smoke-venv/bin/python -m pip install uv
+  run_step 600 .smoke-venv/bin/python -m uv pip install --python .smoke-venv/bin/python -r src/pyproject.toml --extra dev
 
   run_step 180 env -i \
     HOME="${PYTEST_HOME}" \
     PATH="${PWD}/.smoke-venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" \
     PYTHONPATH=. \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
-    pytest tests/scripts/test_bootstrap.py tests/scripts/test_runtime_ports.py -q
+    pytest tests/scripts/test_ops.py -q
 elif [[ "${RUN_TESTS}" == "1" ]]; then
   log "Focused pytest files are not available; skipping pytest smoke"
 else
@@ -282,7 +282,7 @@ run_step 600 env -i \
   PATH="${SMOKE_HOME}/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" \
   TOKENAGE_PYTHON_VERSION=3.11 \
   UV_LINK_MODE=copy \
-  bash scripts/bootstrap.sh
+  bash src/scripts/bootstrap.sh
 EOF
 
 case "${RUNTIME}" in

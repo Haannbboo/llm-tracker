@@ -7,7 +7,7 @@ import yaml
 
 def _load_script():
     repo_root = Path(__file__).resolve().parents[2]
-    script_path = repo_root / "scripts" / "check-otlp-ready.py"
+    script_path = repo_root / "src" / "scripts" / "check-otlp-ready.py"
     spec = importlib.util.spec_from_file_location("check_otlp_ready", script_path)
     module = importlib.util.module_from_spec(spec)
     assert spec.loader is not None

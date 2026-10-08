@@ -3,11 +3,11 @@
 # Each invocation gets its own ephemeral DB (copied from main), free ports, and
 # independent processes. Multiple worktrees can run concurrently.
 #
-# Usage: ./scripts/dev/dev-start.sh
-# Stop:  ./scripts/dev/dev-stop.sh
+# Usage: ./src/scripts/dev/dev-start.sh
+# Stop:  ./src/scripts/dev/dev-stop.sh
 set -euo pipefail
 
-ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 STATE_FILE="${ROOT_DIR}/.dev-env.json"
 MAIN_DB="${HOME}/.tokenage/usage.db"
 VENV_DIR="${ROOT_DIR}/.venv"
@@ -26,11 +26,11 @@ if [[ ! -x "${PYTHON}" ]]; then
   uv venv --python 3.13 "${VENV_DIR}"
 fi
 
-CURRENT_HASH="$(shasum -a 256 "${ROOT_DIR}/requirements.txt" | awk '{print $1}')"
+CURRENT_HASH="$(shasum -a 256 "${ROOT_DIR}/src/pyproject.toml" | awk '{print $1}')"
 SAVED_HASH="$(cat "${REQS_STAMP}" 2>/dev/null || true)"
 if [[ "${CURRENT_HASH}" != "${SAVED_HASH}" ]]; then
   echo "==> Installing Python dependencies..."
-  uv pip install --python "${PYTHON}" -r "${ROOT_DIR}/requirements.txt"
+  uv pip install --python "${PYTHON}" -r "${ROOT_DIR}/src/pyproject.toml" --extra dev
   echo "${CURRENT_HASH}" > "${REQS_STAMP}"
 fi
 
@@ -76,7 +76,7 @@ else
 fi
 
 # --- Migrate schema (in case worktree has newer schema) ---
-"${PYTHON}" "${ROOT_DIR}/scripts/migrate_schema.py" --db-url "${DB_URL}"
+TOKENAGE_DB_URL="${DB_URL}" PYTHONPATH="${ROOT_DIR}" "${PYTHON}" -m src.cli migrate
 
 # --- Cleanup on exit ---
 cleanup() {
@@ -135,7 +135,7 @@ echo "    API:      http://127.0.0.1:${API_PORT}"
 echo "    Frontend: http://localhost:${VITE_PORT}"
 echo "    DB copy:  ${DB_PATH}"
 echo ""
-echo "    Stop with: ./scripts/dev/dev-stop.sh"
+echo "    Stop with: ./src/scripts/dev/dev-stop.sh"
 echo ""
 
 # Wait for background processes (trap handles cleanup)

@@ -6,8 +6,7 @@
 # Either component may be installed alone. This script finds each under
 # $TOKENAGE_HOME (client: `current`, server: `src`) and routes to whichever one
 # the arguments call for. The server install links it into its clone; the client
-# install copies it to ~/.local/bin, so it must not depend on its own location
-# for anything but the server dev fallback.
+# install copies it to ~/.local/bin, so it must not depend on its own location.
 set -euo pipefail
 
 TRACKER_HOME="${TOKENAGE_HOME:-$HOME/.tokenage}"
@@ -16,19 +15,6 @@ REPOSITORY="Haannbboo/tokenage"
 
 # ── Locate the server component ─────────────────────────────────────────────
 # TOKENAGE_ROOT wins so a worktree or a test can point at any checkout.
-_self_dir() {
-  local source="${BASH_SOURCE[0]}"
-  while [[ -L "$source" ]]; do
-    local target
-    target="$(readlink "$source")"
-    case "$target" in
-      /*) source="$target" ;;
-      *) source="$(dirname "$source")/$target" ;;
-    esac
-  done
-  cd "$(dirname "$source")/.." && pwd
-}
-
 server_root() {
   local candidate
   for candidate in "${TOKENAGE_ROOT:-}" "${TRACKER_HOME}/src"; do
@@ -36,17 +22,6 @@ server_root() {
     printf '%s' "$candidate"
     return 0
   done
-  candidate="$(_self_dir)"
-  # A hosted source snapshot includes server source but no server environment.
-  local snapshot
-  snapshot="$(client_root 2>/dev/null || true)"
-  if [[ -n "$snapshot" && "$candidate" == "$(cd "$snapshot" && pwd)" ]]; then
-    return 1
-  fi
-  if [[ -x "${candidate}/.venv/bin/python" && -f "${candidate}/scripts/tokenage" && -d "${candidate}/src" ]]; then
-    printf '%s' "$candidate"
-    return 0
-  fi
   return 1
 }
 
@@ -87,22 +62,11 @@ client_commit() {
 }
 
 missing_client() {
-  local root keep=""
-  if root="$(server_root 2>/dev/null)" && [[ -f "${root}/install.sh" ]]; then
-    # An existing sign-in is kept; a fresh machine signs in.
-    [[ -f "${TRACKER_HOME}/credentials.json" ]] && keep="TOKENAGE_SKIP_LOGIN=1 "
-    cat >&2 <<EOF
-tokenage: the client is not installed. It no longer runs from the server clone;
-install it, pointed at this machine's server, with:
-  ${keep}bash "${root}/install.sh" --client
-EOF
-  else
-    cat >&2 <<EOF
+  cat >&2 <<EOF
 tokenage: the client component is not installed on this machine.
 Install it with:
   curl -fsSL https://YOUR_SERVER/install.sh | sh
 EOF
-  fi
   exit 1
 }
 
@@ -117,8 +81,7 @@ EOF
 }
 
 # ── Banner ──────────────────────────────────────────────────────────────────
-# Printed by the launcher so every command starts the same way, and only once:
-# TOKENAGE_SKIP_BANNER keeps the scripts it calls from printing a second one.
+# Printed by the launcher so every command starts the same way, and only once.
 print_banner() {
   # The banner is decoration: it goes to stderr so a tracked child's stdout is
   # exactly what the child wrote. A machine-readable flag suppresses it.
@@ -134,21 +97,15 @@ print_banner() {
   done
   [[ -n "${TOKENAGE_SKIP_BANNER:-}" ]] && return 0
 
-  local helpers=""
-  local root
-  if root="$(server_root 2>/dev/null)"; then
-    helpers="${root}/scripts/lib/terminal.sh"
-  fi
-  if [[ ! -f "$helpers" ]]; then
-    local snapshot
-    snapshot="$(client_root 2>/dev/null || true)"
-    [[ -n "$snapshot" ]] && helpers="${snapshot}/scripts/lib/terminal.sh"
-  fi
-  [[ -f "$helpers" ]] || return 0
-  # shellcheck source=/dev/null
-  source "$helpers"
-  banner >&2
-  printf "\n" >&2
+  printf '\n\033[1;35m' >&2
+  cat >&2 <<'ART'
+  ████████  ██████  ██   ██ ███████ ███    ██  █████   ██████  ███████
+     ██    ██    ██ ██  ██  ██      ████   ██ ██   ██ ██       ██
+     ██    ██    ██ █████   █████   ██ ██  ██ ███████ ██   ███ █████
+     ██    ██    ██ ██  ██  ██      ██  ██ ██ ██   ██ ██    ██ ██
+     ██     ██████  ██   ██ ███████ ██   ████ ██   ██  ██████  ███████
+ART
+  printf '\033[0m\n' >&2
 }
 
 # ── Version ─────────────────────────────────────────────────────────────────
@@ -186,16 +143,14 @@ run_server_script() {
   shift
   local root
   root="$(server_root)" || missing_server
-  [[ -f "${root}/scripts/${name}.sh" ]] || missing_server
-  export TOKENAGE_SKIP_BANNER="${TOKENAGE_SKIP_BANNER:-1}"
-  exec bash "${root}/scripts/${name}.sh" "$@"
+  [[ -f "${root}/src/scripts/${name}.sh" ]] || missing_server
+  exec bash "${root}/src/scripts/${name}.sh" "$@"
 }
 
-# Operator commands that talk to the database run in the server's own Python.
+# Everything but bootstrap runs in the server's own Python (src/ops.py, src/cli.py).
 run_server_python() {
   local root
   root="$(server_root)" || missing_server
-  export TOKENAGE_SKIP_BANNER="${TOKENAGE_SKIP_BANNER:-1}"
   export PYTHONPATH="${root}${PYTHONPATH:+:${PYTHONPATH}}"
   # -P so a checkout the user happens to be standing in cannot shadow this one.
   exec "${root}/.venv/bin/python" -P -m src.cli "$@"
@@ -217,27 +172,25 @@ usage: tokenage server <command>
   bootstrap              install, build the dashboard, start, verify
   start                  turn the services on
   stop [program...]      stop all services, or the named ones
-  restart [program...]   reload running services
+  restart [program...] [--otlp-port N]
+                         reload running services (programs: tokenage-proxy,
+                         tokenage-api, tokenage-otlp)
   status [program...]    supervisord table, ports, port check
-  update [--check]       update the server clone and rebuild
+  update [--check|--dry-run]
+                         fast-forward the server clone, bootstrap, restart
   token create ...       mint an operator token
   login-link             one-time browser sign-in link (local provider)
 EOF
     return 2
   fi
   case "$sub" in
-    token|login-link) shift; run_server_python "$sub" "$@" ;;
-    bootstrap|start|stop|restart|status|update) shift; run_server_script "$sub" "$@" ;;
+    bootstrap) shift; run_server_script bootstrap "$@" ;;
+    start|stop|restart|status|update|token|login-link) shift; run_server_python "$sub" "$@" ;;
     *)
       printf 'tokenage: unknown server command: %s\n' "$sub" >&2
       return 2
       ;;
   esac
-}
-
-# Legacy spellings, kept until the next major release of the server.
-alias_notice() {
-  printf 'note: "tokenage %s" is now "tokenage server %s"\n' "$1" "$1" >&2
 }
 
 main() {
@@ -260,14 +213,6 @@ main() {
       ;;
     server)
       shift
-      print_banner "$@"
-      run_server "$@"
-      return $?
-      ;;
-    bootstrap|start|stop|restart|token)
-      # `status` is deliberately not here: it is the component report now, not an
-      # alias. The old service view is `tokenage server status`.
-      alias_notice "$1"
       print_banner "$@"
       run_server "$@"
       return $?

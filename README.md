@@ -75,11 +75,11 @@ followed by the client install pointed at `http://127.0.0.1:<api_port>`. The
 `tokenage` launcher in `~/.local/bin` is shared. `tokenage update` updates the
 client and `tokenage server update` the server.
 
-From a checkout, `bash scripts/bootstrap.sh` is the server install alone. It:
+From a checkout, `bash src/scripts/bootstrap.sh` is the server install alone. It:
 
 1. installs Python dependencies into `.venv`
 2. builds the dashboard when Node/npm are available
-3. creates a launcher symlink at `~/.local/bin/tokenage` if there is none
+3. creates a launcher symlink at `~/.local/bin/tokenage` if there is none (steps 1 and 3 are shell, the rest `src/ops.py`)
 4. creates `~/.tokenage/config.yaml` if needed
 5. starts proxy, API, and OTLP services with Supervisor
 6. verifies service ports and the dashboard
@@ -130,8 +130,8 @@ tokenage claude
 Repo-local fallback, useful before the symlink is on your `PATH`:
 
 ```bash
-./scripts/tokenage codex exec "hello"
-./scripts/tokenage claude
+TOKENAGE_ROOT="$PWD" ./client/bin/tokenage codex exec "hello"
+TOKENAGE_ROOT="$PWD" ./client/bin/tokenage claude
 ```
 
 The empty dashboard automatically checks for your first event. No fake demo data, no manual seeding.
@@ -284,7 +284,13 @@ For Anthropic-compatible clients:
 export ANTHROPIC_BASE_URL=http://127.0.0.1:4000
 ```
 
-By default, if a provider sets `api_key`, the proxy injects it upstream as `Authorization: Bearer <key>`. For providers using Anthropic's native auth scheme (e.g. `api.anthropic.com`), set `auth_scheme: x-api-key` on that provider so the proxy sends `x-api-key: <key>` instead. The client must still send its own `anthropic-version` header (real Anthropic clients like Claude Code always do; the proxy passes it through unchanged and does not set a default):
+The proxy spends your provider keys, so every model call is signed in. Put this device's ingest token (`ingest_token` in `~/.tokenage/credentials.json`, written by `tokenage login`) where the client expects its API key — it arrives as `Authorization: Bearer …` or `x-api-key` — and usage is recorded under your account. The token is never forwarded upstream. Under the `local` provider, calls straight from this machine need no token.
+
+```bash
+export OPENAI_API_KEY="$(python3 -c 'import json,os;print(json.load(open(os.path.expanduser("~/.tokenage/credentials.json")))["ingest_token"])')"
+```
+
+If a provider sets `api_key`, the proxy injects it upstream as `Authorization: Bearer <key>`. For providers using Anthropic's native auth scheme (e.g. `api.anthropic.com`), set `auth_scheme: x-api-key` on that provider so the proxy sends `x-api-key: <key>` instead. The client must still send its own `anthropic-version` header (real Anthropic clients like Claude Code always do; the proxy passes it through unchanged and does not set a default):
 
 ```yaml
 providers:
@@ -350,7 +356,7 @@ Query params for `/usage/daily`: `since`, `until`, `provider`, `model`, `granula
 Install/start backend services:
 
 ```bash
-bash scripts/start.sh
+TOKENAGE_ROOT="$PWD" tokenage server start
 ```
 
 Run backend tests:
@@ -372,18 +378,17 @@ npm run build
 Maintainer-only bootstrap smoke test:
 
 ```bash
-bash scripts/dev/smoke-bootstrap-container.sh
+bash src/scripts/dev/smoke-bootstrap-container.sh
 ```
 
-That check runs `scripts/bootstrap.sh` in a fresh Docker or Apple `container` environment. It is not part of normal user setup.
+That check runs `src/scripts/bootstrap.sh` in a fresh Docker or Apple `container` environment. It is not part of normal user setup.
 
 ## Privacy and security notes
 
 - `tokenage` is intended to run locally.
 - Usage is stored in `~/.tokenage/usage.db` by default.
 - If you configure `db.url`, usage data is written to that database instead.
-- The proxy forwards auth headers unchanged.
-- API keys are not managed by `tokenage`.
+- The proxy requires a tokenage ingest token (or a loopback call under the `local` provider) and replaces it with the provider key from `config.yaml`; the client's own credential headers are never forwarded upstream.
 - OTLP payloads are emitted by the agents themselves; review agent telemetry settings if you need strict metadata control.
 
 ## Contributing

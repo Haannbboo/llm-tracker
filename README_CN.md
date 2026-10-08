@@ -74,7 +74,7 @@ snapshot 和 virtualenv，即使与 server 在同一台机器上也一样，两�
 `~/.local/bin` 里的 `tokenage` launcher 是共享的。`tokenage update` 更新 client，
 `tokenage server update` 更新 server。
 
-在 checkout 里，`bash scripts/bootstrap.sh` 只是 server 安装：
+在 checkout 里，`bash src/scripts/bootstrap.sh` 只是 server 安装：
 
 1. 把 Python 依赖安装到 `.venv`
 2. Node/npm 可用时构建 Dashboard
@@ -124,8 +124,8 @@ tokenage claude
 如果 symlink 还没进 `PATH`，可以用 repo-local fallback：
 
 ```bash
-./scripts/tokenage codex exec "hello"
-./scripts/tokenage claude
+TOKENAGE_ROOT="$PWD" ./client/bin/tokenage codex exec "hello"
+TOKENAGE_ROOT="$PWD" ./client/bin/tokenage claude
 ```
 
 空 Dashboard 会自动检查第一条 event。没有假 demo 数据，也不用手动 seed。
@@ -329,7 +329,7 @@ tokenage status --json
 安装/启动后端服务：
 
 ```bash
-bash scripts/start.sh
+TOKENAGE_ROOT="$PWD" tokenage server start
 ```
 
 运行后端测试：
@@ -349,18 +349,17 @@ npm run build
 维护者专用 bootstrap smoke test：
 
 ```bash
-bash scripts/dev/smoke-bootstrap-container.sh
+bash src/scripts/dev/smoke-bootstrap-container.sh
 ```
 
-这个检查会在全新的 Docker 或 Apple `container` 环境里运行 `scripts/bootstrap.sh`。它不是普通用户 setup 的一部分。
+这个检查会在全新的 Docker 或 Apple `container` 环境里运行 `src/scripts/bootstrap.sh`。它不是普通用户 setup 的一部分。
 
 ## 隐私和安全说明
 
 - `tokenage` 设计为本地运行。
 - 使用量默认存储在 `~/.tokenage/usage.db`。
 - 如果配置了 `db.url`，使用量数据会写入该数据库。
-- Proxy 会原样转发 auth headers。
-- `tokenage` 不管理 API keys。
+- Proxy 要求 tokenage ingest token（`local` provider 下本机直连除外），并把它替换成 `config.yaml` 里的 provider key；客户端自己的凭证 header 不会转发到上游。把 `~/.tokenage/credentials.json` 里的 `ingest_token` 填到客户端的 API key 位置即可。
 - OTLP payload 由 Agent 自己发出；如果你需要严格控制 metadata，请检查 Agent telemetry settings。
 
 ## 贡献

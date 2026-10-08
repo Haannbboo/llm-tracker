@@ -646,86 +646,6 @@ def _migrate_price_snapshots(engine: Engine) -> list[str]:
     return applied
 
 
-_OWNED_TABLES = ("usage", "usage_daily", "sessions", "tool_calls", "evaluation_jobs")
-_USAGE_DAILY_KEY = {"id", "user_id", "date", "provider", "model", "client_source"}
-
-
-def _assign_orphan_rows_to_local_owner(
-    engine: Engine, db_path: str | None
-) -> list[str]:
-    """Under the local provider, give user-less rows to the built-in owner.
-
-    usage_daily is a per-day cache split by two partial unique indexes (NULL /
-    NOT NULL user_id), so a NULL row whose key already exists for the owner is
-    summed into it and deleted; the rest just change owner. Idempotent: once no
-    NULL rows remain it does nothing, and under google it never runs.
-    """
-    from .auth.tokens import get_local_owner
-    from .config.app import CONFIG
-
-    if CONFIG.get("auth", {}).get("provider", "local") != "local":
-        return []
-    tables = [
-        table
-        for table in _OWNED_TABLES
-        if _table_exists(engine, table)
-        and "user_id" in _table_column_names(engine, table)
-    ]
-    with engine.connect() as connection:
-        pending = [
-            table
-            for table in tables
-            if connection.execute(
-                text(f"SELECT 1 FROM {table} WHERE user_id IS NULL LIMIT 1")
-            ).first()
-        ]
-    if not pending:
-        return []
-    owner_id = get_local_owner(db_path).id
-    applied = []
-    with engine.begin() as connection:
-        params = {"owner": owner_id}
-        if "usage_daily" in pending:
-            key = "date", "provider", "model", "client_source"
-            same_key = " AND ".join(f"n.{c} = usage_daily.{c}" for c in key)
-            sums = [
-                c
-                for c in sorted(_table_column_names(engine, "usage_daily"))
-                if c not in _USAGE_DAILY_KEY
-            ]
-            match = (
-                f"SELECT 1 FROM usage_daily n WHERE n.user_id IS NULL AND {same_key}"
-            )
-            connection.execute(
-                text(
-                    "UPDATE usage_daily SET "
-                    + ", ".join(
-                        f"{c} = {c} + (SELECT n.{c} FROM usage_daily n "
-                        f"WHERE n.user_id IS NULL AND {same_key})"
-                        for c in sums
-                    )
-                    + f" WHERE user_id = :owner AND EXISTS ({match})"
-                ),
-                params,
-            )
-            connection.execute(
-                text(
-                    "DELETE FROM usage_daily WHERE user_id IS NULL AND EXISTS ("
-                    "SELECT 1 FROM usage_daily o WHERE o.user_id = :owner AND "
-                    + " AND ".join(f"o.{c} = usage_daily.{c}" for c in key)
-                    + ")"
-                ),
-                params,
-            )
-        for table in pending:
-            connection.execute(
-                text(f"UPDATE {table} SET user_id = :owner WHERE user_id IS NULL"),
-                params,
-            )
-            applied.append(f"{table}.assign_local_owner")
-    return applied
-
-
 def migrate_database(db_path: str | None = None) -> list[str]:
     engine = get_engine(db_path)
     applied: list[str] = []
@@ -769,11 +689,6 @@ def migrate_database(db_path: str | None = None) -> list[str]:
 
     init_db(db_path)
 
-    # The status report lives on `devices`; the hash-keyed table was unreleased.
-    if _table_exists(engine, "device_status"):
-        with engine.begin() as connection:
-            connection.execute(text("DROP TABLE device_status"))
-        applied.append("device_status.drop")
     if _table_exists(engine, "devices"):
         if _ensure_column(
             engine,
@@ -1368,7 +1283,5 @@ def migrate_database(db_path: str | None = None) -> list[str]:
             engine, table_name, index_name, index_sql
         ):
             applied.append(f"{table_name}.{index_name}")
-
-    applied.extend(_assign_orphan_rows_to_local_owner(engine, db_path))
 
     return applied

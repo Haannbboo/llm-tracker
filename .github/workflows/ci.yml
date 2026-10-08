@@ -40,7 +40,7 @@ jobs:
         run: npm run build --prefix plugins/opencode && npm run build --prefix plugins/kilo
 
       - name: Install backend dependencies
-        run: python -m pip install -r requirements.txt
+        run: python -m pip install uv && uv pip install --system -r src/pyproject.toml --extra dev
 
       - name: Create test config
         run: |
@@ -48,16 +48,16 @@ jobs:
           cp config.example.yaml ~/.tokenage/config.yaml
 
       - name: Ruff format and lint
-        run: python -m ruff format --check . && python -m ruff check src/ client/ protocol/ scripts/ tests/
+        run: python -m ruff format --check . && python -m ruff check src/ client/ protocol/ tests/
 
       - name: Import contracts
         run: lint-imports
 
       - name: Mypy type check
-        run: python -m mypy src/ client/ protocol/ scripts/ --ignore-missing-imports
+        run: python -m mypy src/ client/ protocol/ --ignore-missing-imports
 
       - name: Run backend tests with coverage
-        run: python -m pytest -q -n auto --cov=src --cov=scripts --cov-report=term-missing --cov-fail-under=75
+        run: python -m pytest -q -n auto --cov=src --cov-report=term-missing --cov-fail-under=75
 
   hosted-client:
     name: Hosted install (${{ matrix.os }})
@@ -93,10 +93,10 @@ jobs:
         run: npm run build --prefix plugins/opencode && npm run build --prefix plugins/kilo
 
       - name: Install client test dependencies
-        run: python -m pip install -r client/requirements.txt pytest
+        run: python -m pip install uv && uv pip install --system -r client/pyproject.toml pytest
 
       - name: Test source install, login, and plugin builds
-        run: python -m pytest tests/client/ tests/scripts/test_hosted_install.py -q
+        run: python -m pytest tests/client/ tests/scripts/test_install.py -q
 
   frontend:
     name: Frontend

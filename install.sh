@@ -104,16 +104,15 @@ if [ "$WANT_SERVER" = 1 ]; then
     mkdir -p "$TRACKER_HOME"
     git clone --branch "$BRANCH" "https://github.com/$REPOSITORY.git" "$INSTALL_DIR"
   fi
-  bash "$INSTALL_DIR/scripts/bootstrap.sh" "$@"
+  bash "$INSTALL_DIR/src/scripts/bootstrap.sh" "$@"
   # Same version on both sides of a both-install.
   [ -n "$TOKENAGE_INSTALL_COMMIT" ] || TOKENAGE_INSTALL_COMMIT=$(git -C "$INSTALL_DIR" rev-parse HEAD)
 fi
 [ "$WANT_CLIENT" = 1 ] || exit 0
 
 # ── Client ─────────────────────────────────────────────────────────
-# A server on this machine is the client's server: the both-install, and the
-# migration of a client that used to run from the server clone.
-if [ "$WANT_SERVER" = 1 ] || { [ -z "$SERVER_URL" ] && [ -f "$TRACKER_HOME/config.yaml" ]; }; then
+# In the both-install the client's server is the one just installed here.
+if [ "$WANT_SERVER" = 1 ]; then
   api_port=$(grep -E '^[[:space:]]+api_port:' "$TRACKER_HOME/config.yaml" 2>/dev/null | head -1 | awk '{print $2}')
   SERVER_URL=http://127.0.0.1:${api_port:-4001}
 fi
@@ -211,7 +210,7 @@ if [ ! -x "$VERSION_DIR/.venv/bin/python" ]; then
   tar -xzf "$WORK_DIR/source.tar.gz" -C "$WORK_DIR/extracted" || fail 'could not extract the source snapshot'
   SOURCE_DIR=$WORK_DIR/extracted/tokenage-$COMMIT
   [ -d "$SOURCE_DIR/client" ] || fail 'source snapshot does not contain the client package'
-  [ -f "$SOURCE_DIR/client/requirements.txt" ] || fail 'client runtime requirements are missing'
+  [ -f "$SOURCE_DIR/client/pyproject.toml" ] || fail 'client runtime requirements are missing'
 
   STAGING_CANDIDATE=$VERSIONS_DIR/.install-$COMMIT-$$
   [ ! -e "$VERSION_DIR" ] || fail 'an incomplete version directory already exists; remove it and retry'
@@ -223,7 +222,7 @@ if [ ! -x "$VERSION_DIR/.venv/bin/python" ]; then
   say 'Installing client runtime dependencies...'
   uv venv --managed-python --python "$PYTHON_VERSION" "$STAGING_DIR/.venv"
   uv pip install --python "$STAGING_DIR/.venv/bin/python" \
-    -r "$STAGING_DIR/client/requirements.txt"
+    -r "$STAGING_DIR/client/pyproject.toml"
   mv "$STAGING_DIR" "$VERSION_DIR"
   STAGING_DIR=
 fi
@@ -237,9 +236,9 @@ TOKENAGE_CLIENT_COMMIT=$COMMIT PYTHONPATH=$VERSION_DIR \
 
 # Install the shared launcher. It resolves the client and the server (when one
 # is installed) from $TOKENAGE_HOME on every run.
-[ -f "$VERSION_DIR/scripts/tokenage" ] || fail 'the source snapshot is missing scripts/tokenage'
+[ -f "$VERSION_DIR/client/bin/tokenage" ] || fail 'the source snapshot is missing client/bin/tokenage'
 LAUNCHER_TMP=$BIN_DIR/.tokenage-$$
-cp "$VERSION_DIR/scripts/tokenage" "$LAUNCHER_TMP"
+cp "$VERSION_DIR/client/bin/tokenage" "$LAUNCHER_TMP"
 chmod 755 "$LAUNCHER_TMP"
 mv -f "$LAUNCHER_TMP" "$LAUNCHER"
 

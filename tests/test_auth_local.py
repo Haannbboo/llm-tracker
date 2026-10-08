@@ -292,89 +292,12 @@ def test_otlp_tokenless_loopback_is_401_under_google(
 # ------------------------------------------------------------------- proxy
 
 
-def test_proxy_forward_is_unavailable_under_google(proxy_module, monkeypatch):
+def test_proxy_forward_needs_a_token_under_google(proxy_module, monkeypatch):
     _set_provider(monkeypatch, "google")
     response = TestClient(proxy_module.app).post(
         "/v1/chat/completions", json={"model": "test-model", "messages": []}
     )
-    assert response.status_code == 404
+    assert response.status_code == 401
 
 
 # --------------------------------------------------------------- migration
-
-
-def _seed_orphans(fresh_db):
-    engine = fresh_db.database_module.get_engine(fresh_db.db_path)
-    with engine.begin() as conn:
-        conn.execute(
-            text("INSERT INTO users (id, email, created_at) VALUES ('o', :e, 1)"),
-            {"e": OWNER},
-        )
-        conn.execute(
-            text(
-                "INSERT INTO usage_daily (user_id, date, provider, model,"
-                " client_source, request_count, total_cost_usd) VALUES"
-                " (NULL, '2026-01-01', 'p', 'm', '', 3, 1.5),"
-                " ('o', '2026-01-01', 'p', 'm', '', 2, 0.5),"
-                " (NULL, '2026-01-02', 'p', 'm', '', 5, 2)"
-            )
-        )
-        conn.execute(
-            text(
-                "INSERT INTO sessions (session_id, user_id, started, ended,"
-                " updated_at) VALUES ('s1', NULL, 1, 2, 'x')"
-            )
-        )
-        conn.execute(
-            text(
-                "INSERT INTO evaluation_jobs (job_id, user_id, kind, session_id,"
-                " status, created_at) VALUES ('j', NULL, 'k', 's1', 'done', 'x')"
-            )
-        )
-    return engine
-
-
-def _daily(engine):
-    with engine.connect() as conn:
-        return conn.execute(
-            text(
-                "SELECT user_id, date, request_count, CAST(total_cost_usd AS REAL)"
-                " FROM usage_daily ORDER BY date"
-            )
-        ).all()
-
-
-def test_migration_assigns_orphans_to_the_owner_and_merges_daily(
-    fresh_db, schema_migrations_module
-):
-    engine = _seed_orphans(fresh_db)
-
-    applied = schema_migrations_module.migrate_database(fresh_db.db_path)
-
-    assert "usage_daily.assign_local_owner" in applied
-    assert "sessions.assign_local_owner" in applied
-    assert "evaluation_jobs.assign_local_owner" in applied
-    assert _daily(engine) == [("o", "2026-01-01", 5, 2.0), ("o", "2026-01-02", 5, 2.0)]
-    with engine.connect() as conn:
-        for table in ("sessions", "evaluation_jobs"):
-            assert (
-                conn.execute(
-                    text(f"SELECT COUNT(*) FROM {table} WHERE user_id IS NULL")
-                ).scalar()
-                == 0
-            )
-    # Idempotent.
-    again = schema_migrations_module.migrate_database(fresh_db.db_path)
-    assert not [name for name in again if name.endswith("assign_local_owner")]
-    assert _daily(engine) == [("o", "2026-01-01", 5, 2.0), ("o", "2026-01-02", 5, 2.0)]
-
-
-def test_migration_leaves_orphans_alone_under_google(
-    fresh_db, schema_migrations_module, monkeypatch
-):
-    engine = _seed_orphans(fresh_db)
-    _set_provider(monkeypatch, "google")
-
-    schema_migrations_module.migrate_database(fresh_db.db_path)
-
-    assert [row[0] for row in _daily(engine)] == [None, "o", None]

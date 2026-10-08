@@ -81,64 +81,12 @@ def _disable(settings_path: Path, expected_endpoint: str | None) -> int:
     else:
         settings.pop("env", None)
 
-    hooks = settings.get("hooks")
-    if isinstance(hooks, dict):
-        for event in ("PreToolUse", "PostToolUse"):
-            entries = hooks.get(event)
-            if not isinstance(entries, list):
-                continue
-            kept = []
-            for entry in entries:
-                if not isinstance(entry, dict) or not isinstance(
-                    entry.get("hooks"), list
-                ):
-                    kept.append(entry)
-                    continue
-                remaining = [
-                    hook for hook in entry["hooks"] if not _is_tracker_hook(hook)
-                ]
-                if len(remaining) != len(entry["hooks"]):
-                    changed = True
-                    if remaining:
-                        kept.append({**entry, "hooks": remaining})
-                else:
-                    kept.append(entry)
-            if kept:
-                hooks[event] = kept
-            else:
-                hooks.pop(event)
-        if hooks:
-            settings["hooks"] = hooks
-        else:
-            settings.pop("hooks", None)
-
     if not changed:
         _info(f"No tokenage telemetry in {settings_path}")
         return SKIPPED
     write_private(settings_path, json.dumps(settings, indent=2) + "\n")
     _info(f"Claude Code telemetry removed from {settings_path}")
     return DONE
-
-
-def _is_tracker_hook(hook: object) -> bool:
-    if not isinstance(hook, dict) or hook.get("type") != "command":
-        return False
-    # Historical registration used an absolute scripts/claude-hook.sh path.
-    # A user's similarly named command is not ours.
-    command = hook.get("command")
-    if not isinstance(command, str):
-        return False
-    path = Path(command)
-    if not path.is_absolute() or path.parts[-2:] != ("scripts", "claude-hook.sh"):
-        return False
-    root = path.parent.parent
-    try:
-        launcher = (root / "scripts" / "tokenage").read_text(encoding="utf-8")
-    except (OSError, UnicodeError):
-        return False
-    return "# tokenage launcher" in launcher.splitlines() and (
-        (root / "client").is_dir() or (root / "src").is_dir()
-    )
 
 
 def configure(target: str | Path, logs_endpoint: str, token: str | None = None) -> int:

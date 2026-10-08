@@ -1,7 +1,4 @@
-import os
 import runpy
-import subprocess
-import sys
 import threading
 from pathlib import Path
 
@@ -556,63 +553,6 @@ def test_merge_missing_config_defaults_skips_example_provider_backfill(config_mo
     assert "my-provider" not in merged_config["providers"]
 
 
-def test_sync_config_script_runs_without_pythonpath(tmp_path):
-    repo_root = Path(__file__).resolve().parents[1]
-    script_path = repo_root / "scripts" / "sync-config.py"
-    user_config_path = tmp_path / "config.yaml"
-    default_config_path = tmp_path / "config.example.yaml"
-
-    user_config_path.write_text(
-        """
-models:
-  gpt-5:
-    cost:
-      input: 9.0
-""",
-        encoding="utf-8",
-    )
-    default_config_path.write_text(
-        """
-models:
-  gpt-5:
-    cost:
-      input: 1.25
-      output: 10.0
-  gpt-5.5:
-    cost:
-      input: 5.0
-      output: 30.0
-server:
-  host: 127.0.0.1
-""",
-        encoding="utf-8",
-    )
-
-    env = dict(os.environ)
-    env.pop("PYTHONPATH", None)
-
-    result = subprocess.run(
-        [
-            sys.executable,
-            str(script_path),
-            str(user_config_path),
-            str(default_config_path),
-        ],
-        cwd=repo_root,
-        capture_output=True,
-        text=True,
-        env=env,
-    )
-
-    assert result.returncode == 0, result.stderr
-
-    merged_config = yaml.safe_load(user_config_path.read_text(encoding="utf-8"))
-    assert merged_config["models"]["gpt-5"]["cost"]["input"] == 9.0
-    assert merged_config["models"]["gpt-5"]["cost"]["output"] == 10.0
-    assert merged_config["models"]["gpt-5.5"]["cost"]["input"] == 5.0
-    assert merged_config["server"]["host"] == "127.0.0.1"
-
-
 def test_otlp_gunicorn_config_prefers_otlp_endpoint_env(tmp_path, monkeypatch):
     repo_root = Path(__file__).resolve().parents[1]
     config_dir = tmp_path / ".tokenage"
@@ -766,9 +706,7 @@ def test_load_config_auth_defaults(config_module, tmp_path, monkeypatch):
 @pytest.mark.parametrize(
     "auth_yaml,provider",
     [
-        ("auth:\n  enabled: false\n", "local"),
-        ("auth:\n  enabled: true\n", "google"),
-        ("auth:\n  provider: local\n  enabled: true\n", "local"),
+        ("auth: {}\n", "local"),
         ("auth:\n  provider: google\n", "google"),
     ],
 )
@@ -792,7 +730,7 @@ def test_load_config_rejects_unknown_auth_provider(config_module, tmp_path):
 def test_load_config_google_creds_prefer_env(config_module, tmp_path, monkeypatch):
     config_path = tmp_path / "config.yaml"
     config_path.write_text(
-        "auth:\n  enabled: true\n  google_client_id: from-yaml\n",
+        "auth:\n  provider: google\n  google_client_id: from-yaml\n",
         encoding="utf-8",
     )
     monkeypatch.setenv("TOKENAGE_AUTH__GOOGLE_CLIENT_ID", "from-env")
@@ -800,7 +738,7 @@ def test_load_config_google_creds_prefer_env(config_module, tmp_path, monkeypatc
 
     config = config_module.load_config(str(config_path))
 
-    assert config["auth"]["provider"] == "google"  # legacy enabled: true
+    assert config["auth"]["provider"] == "google"
     assert config["auth"]["google_client_id"] == "from-env"
     assert config["auth"]["google_client_secret"] == "from-env-secret"
 

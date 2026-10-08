@@ -45,9 +45,7 @@ def load_config(path: str | None = None) -> dict[str, Any]:
     server.setdefault("otlp_port", server["api_port"] + 1)
 
     auth = config.setdefault("auth", {})
-    # `enabled` is only read to map pre-provider configs: true meant Google.
-    if "provider" not in auth:
-        auth["provider"] = "google" if auth.get("enabled") else "local"
+    auth.setdefault("provider", "local")
     if auth["provider"] not in ("local", "google"):
         raise ValueError("auth.provider must be 'local' or 'google'")
     auth.setdefault("allowlist", [])

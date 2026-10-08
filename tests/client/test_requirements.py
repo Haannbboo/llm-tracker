@@ -1,15 +1,15 @@
 """The client installs on machines that have no server, so it stays light."""
 
+import re
 from pathlib import Path
 
+import tomllib
 
-def test_client_requirements_stay_small() -> None:
-    requirements = (
-        Path(__file__).resolve().parents[2] / "client" / "requirements.txt"
-    ).read_text(encoding="utf-8")
-    names = {
-        line.split(">=")[0].split("==")[0].split("<")[0].strip().lower()
-        for line in requirements.splitlines()
-        if line.strip() and not line.startswith("#")
-    }
+
+def test_client_dependencies_stay_small() -> None:
+    pyproject = Path(__file__).resolve().parents[2] / "client" / "pyproject.toml"
+    dependencies = tomllib.loads(pyproject.read_text(encoding="utf-8"))["project"][
+        "dependencies"
+    ]
+    names = {re.split(r"[<>=\[ ]", dep, maxsplit=1)[0].lower() for dep in dependencies}
     assert names == {"httpx", "pydantic"}

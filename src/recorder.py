@@ -10,7 +10,7 @@ import logging
 import time
 from datetime import datetime, timezone
 
-from sqlalchemy import or_, select, update
+from sqlalchemy import update
 from sqlalchemy.exc import IntegrityError
 
 from .database.base_url import resolve_base_url_id
@@ -226,29 +226,6 @@ def record_tool_call(
     with SASession(engine, expire_on_commit=False) as session:
         if session.get(ToolCall, tool_use_id) is not None:
             return  # already recorded; avoid double-counting on redelivery
-        if user_id is not None:
-            prefix = f"{user_id}:"
-            if (
-                session_id
-                and tool_use_id.startswith(prefix)
-                and session_id.startswith(prefix)
-            ):
-                # ponytail: only match a legacy row with the same session and
-                # source; raw input has no tenant identity, so never guess a
-                # scoped owner.
-                legacy_tool_use_id = tool_use_id[len(prefix) :]
-                legacy_session_id = session_id[len(prefix) :]
-                legacy = session.scalar(
-                    select(ToolCall).where(
-                        ToolCall.tool_use_id == legacy_tool_use_id,
-                        or_(ToolCall.user_id.is_(None), ToolCall.user_id == user_id),
-                        ToolCall.session_id == legacy_session_id,
-                        ToolCall.tool_name == normalized_tool_name,
-                        ToolCall.client_source == client_source,
-                    )
-                )
-                if legacy is not None:
-                    return  # match a pre-auth raw provider ID on redelivery
         session.add(tc)
         try:
             session.commit()

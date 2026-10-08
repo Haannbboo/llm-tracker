@@ -1,10 +1,11 @@
-# Metadata only: installers still use requirements.txt and copy the tree (phase 9 wires packaging).
+# Wire schemas shared by client and server, versioned with the server.
 [project]
 name = "tokenage-protocol"
-description = "tokenage wire schemas shared by client and server (versioned with the server)"
+description = "tokenage wire schemas shared by client and server"
 requires-python = ">=3.12"
-dynamic = ["version", "dependencies"]
+dynamic = ["version"]
+dependencies = ["pydantic>=2,<3"]
 
+# ponytail: metadata only, like src/pyproject.toml.
 [tool.setuptools.dynamic]
 version = { file = ["../VERSION"] }
-dependencies = { file = ["requirements.txt"] }

@@ -13,8 +13,8 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 INSTALLER = REPO_ROOT / "install.sh"
-SHARED_LAUNCHER = REPO_ROOT / "scripts" / "tokenage"
-REQUIREMENTS = REPO_ROOT / "client" / "requirements.txt"
+SHARED_LAUNCHER = REPO_ROOT / "client" / "bin" / "tokenage"
+CLIENT_PYPROJECT = REPO_ROOT / "client" / "pyproject.toml"
 COMMIT = "a" * 40
 NEXT_COMMIT = "b" * 40
 # The installer runs the snapshot's interpreter twice: as `python -c <code> A B`
@@ -43,10 +43,10 @@ if 'setup' in args and os.environ.get('TOKENAGE_FAKE_SETUP_FAIL') == '1':
 def _write_snapshot(source: Path) -> None:
     """The minimum a real client-only snapshot contains for the installer."""
     (source / "client").mkdir(parents=True)
-    (source / "client" / "requirements.txt").write_text(REQUIREMENTS.read_text())
-    (source / "scripts").mkdir()
+    (source / "client" / "pyproject.toml").write_text(CLIENT_PYPROJECT.read_text())
+    (source / "client" / "bin").mkdir()
     # The installer copies the shared launcher out of the snapshot.
-    (source / "scripts" / "tokenage").write_text(SHARED_LAUNCHER.read_text())
+    (source / "client" / "bin" / "tokenage").write_text(SHARED_LAUNCHER.read_text())
 
 
 def _render_installer(
@@ -150,7 +150,7 @@ def test_installs_sha_snapshot_and_preserves_user_state(tmp_path: Path) -> None:
     assert "venv --managed-python --python 3.13" in uv_log
     # Whatever the snapshot pins — httpx and pyyaml today — not a baked-in list.
     pip = next(line for line in uv_log.splitlines() if line.startswith("pip install"))
-    assert pip.endswith("/client/requirements.txt")
+    assert pip.endswith("/client/pyproject.toml")
     check_server = (tmp_path / "python.log").read_text()
     assert (
         "-P -m client check-server --server https://host.example tty=no" in check_server
@@ -497,21 +497,22 @@ def _both_fixture(tmp_path: Path, *, api_port: int = 4123):
     home, fake_bin, archive = _fixture(tmp_path)
     src = home / ".tokenage" / "src"
     (src / ".git").mkdir(parents=True)
-    (src / "scripts").mkdir()
-    (src / "scripts" / "bootstrap.sh").write_text(
+    (src / "src" / "scripts").mkdir(parents=True)
+    (src / "src" / "scripts" / "bootstrap.sh").write_text(
         "#!/bin/bash\n"
         'echo "bootstrap $*" >> "$TOKENAGE_FAKE_PYTHON_LOG.server"\n'
         f'printf "server:\\n  api_port: {api_port}\\n" > "$HOME/.tokenage/config.yaml"\n'
         'mkdir -p "$HOME/.local/bin"\n'
-        'ln -sf "$HOME/.tokenage/src/scripts/tokenage" "$HOME/.local/bin/tokenage"\n'
+        'ln -sf "$HOME/.tokenage/src/client/bin/tokenage" "$HOME/.local/bin/tokenage"\n'
     )
-    (src / "scripts" / "tokenage").write_text(SHARED_LAUNCHER.read_text())
+    (src / "client" / "bin").mkdir(parents=True)
+    (src / "client" / "bin" / "tokenage").write_text(SHARED_LAUNCHER.read_text())
     git = fake_bin / "git"
     git.write_text(
         "#!/bin/sh\n"
         'case "$*" in\n'
         f'  *"remote get-url"*) echo https://github.com/Haannbboo/tokenage.git ;;\n'
-        f'  *rev-parse*) echo {COMMIT} ;;\n'
+        f"  *rev-parse*) echo {COMMIT} ;;\n"
         "esac\n"
     )
     git.chmod(0o755)
@@ -567,29 +568,6 @@ def test_server_only_installs_no_client(tmp_path: Path) -> None:
     assert not (home / ".tokenage" / "current").exists()
     assert not (tmp_path / "uv.log").exists()
     assert (home / ".local" / "bin" / "tokenage").is_symlink()
-
-
-def test_client_install_replaces_the_server_launcher_and_migrates_a_local_server(
-    tmp_path: Path,
-) -> None:
-    # An all-in-one machine from before the split: server clone, config, a
-    # launcher symlinked into the clone, no client snapshot.
-    home, env = _both_fixture(tmp_path, api_port=4555)
-    (home / ".tokenage" / "config.yaml").write_text("server:\n  api_port: 4555\n")
-    launcher = home / ".local" / "bin" / "tokenage"
-    launcher.parent.mkdir(parents=True)
-    launcher.symlink_to(home / ".tokenage" / "src" / "scripts" / "tokenage")
-    env["TOKENAGE_SKIP_LOGIN"] = "1"
-
-    result = _run_raw(tmp_path, env, "--client")
-
-    assert result.returncode == 0, result.stdout + result.stderr
-    assert not (tmp_path / "python.log.server").exists()
-    assert not launcher.is_symlink()
-    assert (home / ".tokenage" / "current").is_symlink()
-    assert "check-server --server http://127.0.0.1:4555" in (
-        tmp_path / "python.log"
-    ).read_text()
 
 
 def test_unknown_option_is_refused_for_a_client_install(tmp_path: Path) -> None:

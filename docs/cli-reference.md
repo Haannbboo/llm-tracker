@@ -62,10 +62,6 @@ as a wrapper option.
 | `tokenage --version` | either | Client version, plus the server release when it is installed. |
 | `tokenage --help`, `tokenage server --help` | either | Usage for the client and the service commands. |
 
-`tokenage start`, `stop`, `restart`, `bootstrap` and `token` still work and
-forward to the matching `tokenage server` command, printing a one-line note
-on stderr. `status` is not one of them: it is the client report, and the
-service view is `tokenage server status`.
 
 ## Sign-in providers
 
@@ -173,7 +169,7 @@ curl -fsSL https://YOUR_SERVER/install.sh | sh                                  
 
 `GET /install.sh` on a server serves the same script preset to that server, so
 it installs the client. The server install is a clone in `~/.tokenage/src` plus
-`scripts/bootstrap.sh`, which never starts or configures a client. The client
+`src/scripts/bootstrap.sh`, which never starts or configures a client. The client
 install is a snapshot and virtualenv under `~/.tokenage/versions` with a
 `current` link. Both = server, then client pointed at
 `http://127.0.0.1:<api_port>`: interactive sign-in (otherwise the command to run
@@ -187,7 +183,7 @@ server clone has no snapshot: `tokenage` prints the one command that installs it
 ```bash
 tokenage server status                              # supervisord table, ports, port check
 tokenage server status tokenage-api              # one program
-tokenage server start                               # services on; refuses if requirements.txt changed
+tokenage server start                               # services on; refuses if src/pyproject.toml changed
 tokenage server stop                                # all services
 tokenage server stop tokenage-proxy              # one program
 tokenage server restart                             # migrate, then SIGHUP the running services
@@ -198,12 +194,9 @@ tokenage server login-link                          # open the printed URL in a 
 ```
 
 Valid program names: `tokenage-proxy`, `tokenage-api`, `tokenage-otlp`.
-The same scripts are in the checkout as `scripts/start.sh`, `scripts/stop.sh`,
-`scripts/restart.sh`, `scripts/status.sh`, `scripts/bootstrap.sh` and
-`scripts/update.sh`; `tokenage server …` is the interface to use.
-
-`tokenage start`, `stop`, `restart`, `bootstrap` and `token` are still
-accepted as aliases, with a one-line note on stderr.
+`tokenage server <command>` runs `python -m src.cli <command>` (`src/ops.py`);
+`bootstrap` goes through `src/scripts/bootstrap.sh` first, because it must run
+before the virtualenv exists. `restart`, `stop` and `status` accept program names.
 
 ## Exit Codes
 
@@ -320,11 +313,10 @@ Query params for `/usage/run-summary`: `after_ts`, `until_ts`, `since`, `until`,
 `client_source`, `session_id`, `provider`, `model`, `include_rows`. The wrapper
 sends only `after_ts`, plus `until_ts` on the re-anchor pass.
 
-## Helper Scripts
+## Helper Commands
 
-| Script | Purpose |
+| Command | Purpose |
 |---|---|
-| `scripts/sync-config.py` | Merge missing defaults into the user config. Run by `server start`. |
-| `scripts/migrate_schema.py` | Apply database schema migrations. Run by `server start` and `server restart`. |
-| `scripts/check-service-ports.py` | Detect port conflicts before starting services. |
-| `scripts/auto-assign-ports.py` | Pick free ports on a first run. |
+| `python -m src.cli sync-config` | Merge missing defaults from `config.example.yaml` into the user config. Run by `server start` and the Docker entrypoint. |
+| `python -m src.cli migrate` | Apply database schema migrations (`TOKENAGE_DB_URL` overrides the target). Run by `server start`, `server restart`, Docker and the dev scripts. |
+| `src/scripts/check-otlp-ready.py` | Pre-commit hook: the collector answers and detected agents are wired. |
