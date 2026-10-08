@@ -336,9 +336,13 @@ def _loopback_test_client(monkeypatch: pytest.MonkeyPatch) -> None:
 
     Starlette's default peer is "testclient" with Host "testserver", which the
     local provider correctly treats as remote. Tests of the remote path pass
-    their own ``client=``/``base_url=``/headers.
+    their own ``client=``/``base_url=``/headers. A client-only environment
+    (CI's hosted-install job) has no fastapi and no TestClient to patch.
     """
-    from fastapi.testclient import TestClient
+    try:
+        from fastapi.testclient import TestClient
+    except ImportError:
+        return
 
     original = TestClient.__init__
 
