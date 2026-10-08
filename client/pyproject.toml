@@ -1,0 +1,14 @@
+# The client's dependencies. Installers read them with `uv pip install -r client/pyproject.toml`.
+# The client installs on machines that have no server, so keep this list short.
+[project]
+name = "tokenage-client"
+description = "tokenage client: tracking wrapper, agent setup, device service"
+requires-python = ">=3.12"
+dynamic = ["version"]
+dependencies = [
+    "httpx>=0.27,<1",
+    "pydantic>=2,<3",
+]
+
+[tool.setuptools.dynamic]
+version = { file = ["VERSION"] }

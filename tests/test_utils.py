@@ -4,6 +4,8 @@ def test_normalize_model_name():
     cases = {
         " Space-Bunny-Free ": "stealth/space-bunny-alpha",
         "STEALTH/SPACE-BUNNY-ALPHA": "stealth/space-bunny-alpha",
+        "ling-3.1-flash-free": "inclusionai/ling-3.1-flash",
+        " Ling-3.1-Flash-Free ": "inclusionai/ling-3.1-flash",
         " MiniMax-M2.7 ": "minimax-m2.7",
         "deepseek-v4.1-flash-free": "deepseek-v4.1-flash-free",
         "vendor/model:free": "vendor/model:free",

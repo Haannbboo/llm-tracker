@@ -1,0 +1,583 @@
+from __future__ import annotations
+
+import json
+import os
+import pty
+import select
+import shlex
+import stat
+import subprocess
+import tarfile
+import time
+from pathlib import Path
+
+import pytest
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+INSTALLER = REPO_ROOT / "install.sh"
+SHARED_LAUNCHER = REPO_ROOT / "client" / "bin" / "tokenage"
+CLIENT_PYPROJECT = REPO_ROOT / "client" / "pyproject.toml"
+COMMIT = "a" * 40
+NEXT_COMMIT = "b" * 40
+# The installer runs the snapshot's interpreter twice: as `python -c <code> A B`
+# to swap the `current` symlink, and as `python -m client <subcommand>` for the
+# pre-flight and the sign-in. The interpreter is a script, so it is handed the
+# flags verbatim: argv[1:] is ['-c', <code>, A, B] or ['-m', 'client', ...].
+FAKE_PYTHON = """#!/usr/bin/env python3
+import os
+import sys
+
+args = sys.argv[1:]
+if args[0] == '-c':
+    os.replace(args[2], args[3])
+    raise SystemExit(0)
+with open(os.environ['TOKENAGE_FAKE_PYTHON_LOG'], 'a') as log:
+    log.write(f"{' '.join(args)} tty={'yes' if sys.stdin.isatty() else 'no'}\\n")
+    if 'login' in args:
+        log.write(f"login-input={sys.stdin.readline().strip()}\\n")
+if 'check-server' in args and os.environ.get('TOKENAGE_FAKE_PROTOCOL_FAIL') == '1':
+    raise SystemExit(1)
+if 'setup' in args and os.environ.get('TOKENAGE_FAKE_SETUP_FAIL') == '1':
+    raise SystemExit(1)
+"""
+
+
+def _write_snapshot(source: Path) -> None:
+    """The minimum a real client-only snapshot contains for the installer."""
+    (source / "client").mkdir(parents=True)
+    (source / "client" / "pyproject.toml").write_text(CLIENT_PYPROJECT.read_text())
+    (source / "client" / "bin").mkdir()
+    # The installer copies the shared launcher out of the snapshot.
+    (source / "client" / "bin" / "tokenage").write_text(SHARED_LAUNCHER.read_text())
+
+
+def _render_installer(
+    text: str | None = None,
+    *,
+    server_url: str = "https://host.example",
+    commit: str = "",
+) -> str:
+    return (
+        (text if text is not None else INSTALLER.read_text())
+        .replace("__TOKENAGE_SERVER_URL__", shlex.quote(server_url))
+        .replace("__TOKENAGE_INSTALL_COMMIT__", shlex.quote(commit))
+    )
+
+
+def _fixture(tmp_path: Path, *, sha: str = COMMIT) -> tuple[Path, Path, Path]:
+    home = tmp_path / "home with spaces"
+    home.mkdir()
+    tracker_home = home / ".tokenage"
+    tracker_home.mkdir()
+    (tracker_home / "config.yaml").write_text("provider: keep\n")
+    (tracker_home / "credentials.json").write_text('{"token":"keep"}\n')
+    bin_dir = tmp_path / "fake-bin"
+    bin_dir.mkdir()
+    archive = tmp_path / "snapshot.tar.gz"
+    source = tmp_path / "source" / f"tokenage-{sha}"
+    _write_snapshot(source)
+    with tarfile.open(archive, "w:gz") as tar:
+        tar.add(source, arcname=source.name)
+
+    curl = bin_dir / "curl"
+    curl.write_text(
+        "#!/usr/bin/env python3\n"
+        "import os, pathlib, sys\n"
+        "args = sys.argv[1:]\n"
+        "url = next(arg for arg in args if arg.startswith('https://'))\n"
+        "out = pathlib.Path(args[args.index('-o') + 1])\n"
+        "if 'api.github.com' in url:\n"
+        "    if os.environ.get('TOKENAGE_FAKE_API_FAIL') == '1': sys.exit(79)\n"
+        f"    out.write_text({json.dumps({'sha': sha})!r})\n"
+        "else:\n"
+        "    out.write_bytes(pathlib.Path(os.environ['TOKENAGE_FIXTURE_ARCHIVE']).read_bytes())\n"
+    )
+    curl.chmod(0o755)
+
+    uv = bin_dir / "uv"
+    uv.write_text(
+        "#!/usr/bin/env python3\n"
+        "import os, pathlib, sys\n"
+        "args = sys.argv[1:]\n"
+        "if args[0] == 'venv':\n"
+        "    path = pathlib.Path(args[-1]); path.mkdir(parents=True)\n"
+        "    bindir = path / 'bin'; bindir.mkdir()\n"
+        "    python = bindir / 'python'\n"
+        f"    python.write_text({FAKE_PYTHON!r})\n"
+        "    python.chmod(0o755)\n"
+        "with open(os.environ['TOKENAGE_FAKE_UV_LOG'], 'a') as log:\n"
+        "    log.write(' '.join(args) + '\\n')\n"
+    )
+    uv.chmod(0o755)
+    return home, bin_dir, archive
+
+
+def _run_install(
+    tmp_path: Path,
+    *,
+    installer_text: str | None = None,
+    sha: str = COMMIT,
+) -> tuple[subprocess.CompletedProcess[str], Path, Path]:
+    home, fake_bin, archive = _fixture(tmp_path, sha=sha)
+    script = tmp_path / "install.sh"
+    script.write_text(_render_installer(installer_text))
+    env = {
+        **os.environ,
+        "HOME": str(home),
+        "PATH": f"{fake_bin}:/usr/bin:/bin",
+        "TOKENAGE_FIXTURE_ARCHIVE": str(archive),
+        "TOKENAGE_FAKE_UV_LOG": str(tmp_path / "uv.log"),
+        "TOKENAGE_FAKE_PYTHON_LOG": str(tmp_path / "python.log"),
+    }
+    result = subprocess.run(
+        ["/bin/sh", str(script)],
+        text=True,
+        capture_output=True,
+        env=env,
+        timeout=30,
+    )
+    return result, home, fake_bin
+
+
+def test_installs_sha_snapshot_and_preserves_user_state(tmp_path: Path) -> None:
+    result, home, _ = _run_install(tmp_path)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    tracker_home = home / ".tokenage"
+    version_dir = tracker_home / "versions" / COMMIT
+    assert (tracker_home / "current").resolve() == version_dir
+    assert (version_dir / "client" / "COMMIT").read_text().strip() == COMMIT
+    uv_log = (tmp_path / "uv.log").read_text()
+    assert "python install 3.13" in uv_log
+    assert "venv --managed-python --python 3.13" in uv_log
+    # Whatever the snapshot pins — httpx and pyyaml today — not a baked-in list.
+    pip = next(line for line in uv_log.splitlines() if line.startswith("pip install"))
+    assert pip.endswith("/client/pyproject.toml")
+    check_server = (tmp_path / "python.log").read_text()
+    assert (
+        "-P -m client check-server --server https://host.example tty=no" in check_server
+    )
+    assert "No interactive terminal is available" in result.stdout
+    assert "TOKENAGE_CLIENT_COMMIT" in INSTALLER.read_text()
+
+    config = tracker_home / "config.yaml"
+    credentials = tracker_home / "credentials.json"
+    assert config.read_text() == "provider: keep\n"
+    assert credentials.read_text() == '{"token":"keep"}\n'
+
+
+def test_preview_uses_pinned_commit_without_looking_up_main(
+    tmp_path: Path, monkeypatch
+) -> None:
+    monkeypatch.setenv("TOKENAGE_FAKE_API_FAIL", "1")
+    result, home, _ = _run_install(
+        tmp_path,
+        sha=NEXT_COMMIT,
+        installer_text=_render_installer(commit=NEXT_COMMIT),
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert (home / ".tokenage" / "current").resolve() == (
+        home / ".tokenage" / "versions" / NEXT_COMMIT
+    )
+    assert "Resolving the latest client source" not in result.stdout
+
+
+def test_launcher_runs_the_current_snapshot_and_failed_sha_keeps_it(
+    tmp_path: Path,
+) -> None:
+    result, home, fake_bin = _run_install(tmp_path)
+    assert result.returncode == 0, result.stdout + result.stderr
+    tracker_home = home / ".tokenage"
+    config = tracker_home / "config.yaml"
+    credentials = tracker_home / "credentials.json"
+
+    launcher = home / ".local" / "bin" / "tokenage"
+    # The shared launcher, copied out of the snapshot — not a private shim.
+    assert launcher.read_text() == SHARED_LAUNCHER.read_text()
+    assert stat.S_IMODE(launcher.stat().st_mode) == 0o755
+
+    launcher_env = {
+        **os.environ,
+        "HOME": str(home),
+        "PATH": f"{fake_bin}:/usr/bin:/bin",
+        "TOKENAGE_FAKE_UV_LOG": str(tmp_path / "uv.log"),
+        "TOKENAGE_FAKE_PYTHON_LOG": str(tmp_path / "python.log"),
+    }
+    # The fake interpreter exists only in the snapshot's own virtualenv, so a
+    # logged call proves the launcher resolved `current` and used its client.
+    run_cli = subprocess.run(
+        [str(launcher), "check-server", "--server", "https://launcher.example"],
+        text=True,
+        capture_output=True,
+        env=launcher_env,
+        timeout=10,
+    )
+    assert run_cli.returncode == 0, run_cli.stderr
+    assert (
+        "-m client check-server --server https://launcher.example tty=no"
+        in (tmp_path / "python.log").read_text()
+    )
+    assert config.read_text() == "provider: keep\n"
+    assert credentials.read_text() == '{"token":"keep"}\n'
+
+    invalid_script = tmp_path / "bad-installer.sh"
+    invalid_script.write_text(_render_installer())
+    env = {
+        **launcher_env,
+        "TOKENAGE_SERVER": "https://host.example",
+    }
+    # The fake API response contains a short SHA; the installer must reject it before switching.
+    curl = fake_bin / "curl"
+    curl.write_text(
+        "#!/usr/bin/env python3\n"
+        "import pathlib, sys\n"
+        f"args=sys.argv[1:]; pathlib.Path(args[args.index('-o')+1]).write_text({json.dumps({'sha': 'bad'})!r})\n"
+    )
+    curl.chmod(0o755)
+    previous = (tracker_home / "current").resolve()
+    failed = subprocess.run(
+        ["/bin/sh", str(invalid_script)],
+        text=True,
+        capture_output=True,
+        env=env,
+        timeout=30,
+    )
+    assert failed.returncode != 0
+    assert "source commit SHA is invalid" in failed.stderr
+    assert (tracker_home / "current").resolve() == previous
+    assert config.read_text() == "provider: keep\n"
+    assert credentials.read_text() == '{"token":"keep"}\n'
+
+
+def test_reinstall_checks_protocol_before_replacing_current_symlink(
+    tmp_path: Path,
+) -> None:
+    first, home, fake_bin = _run_install(tmp_path)
+    assert first.returncode == 0, first.stdout + first.stderr
+    tracker_home = home / ".tokenage"
+    current = tracker_home / "current"
+    original_version = current.resolve()
+
+    next_source = tmp_path / "source" / f"tokenage-{NEXT_COMMIT}"
+    _write_snapshot(next_source)
+    next_archive = tmp_path / "next-snapshot.tar.gz"
+    with tarfile.open(next_archive, "w:gz") as tar:
+        tar.add(next_source, arcname=next_source.name)
+    curl = fake_bin / "curl"
+    curl.write_text(
+        "#!/usr/bin/env python3\n"
+        "import os, pathlib, sys\n"
+        "args = sys.argv[1:]\n"
+        "url = next(arg for arg in args if arg.startswith('https://'))\n"
+        "out = pathlib.Path(args[args.index('-o') + 1])\n"
+        "if 'api.github.com' in url:\n"
+        f"    out.write_text({json.dumps({'sha': NEXT_COMMIT})!r})\n"
+        "else:\n"
+        "    out.write_bytes(pathlib.Path(os.environ['TOKENAGE_FIXTURE_ARCHIVE']).read_bytes())\n"
+    )
+    curl.chmod(0o755)
+    env = {
+        **os.environ,
+        "HOME": str(home),
+        "PATH": f"{fake_bin}:/usr/bin:/bin",
+        "TOKENAGE_FIXTURE_ARCHIVE": str(next_archive),
+        "TOKENAGE_FAKE_UV_LOG": str(tmp_path / "uv.log"),
+        "TOKENAGE_FAKE_PYTHON_LOG": str(tmp_path / "python.log"),
+        "TOKENAGE_FAKE_PROTOCOL_FAIL": "1",
+    }
+    command = ["/bin/sh", str(tmp_path / "install.sh")]
+    incompatible = subprocess.run(
+        command, text=True, capture_output=True, env=env, timeout=30
+    )
+    assert incompatible.returncode != 0
+    assert current.resolve() == original_version
+
+    env.pop("TOKENAGE_FAKE_PROTOCOL_FAIL")
+    updated = subprocess.run(
+        command, text=True, capture_output=True, env=env, timeout=30
+    )
+    assert updated.returncode == 0, updated.stdout + updated.stderr
+    assert current.is_symlink()
+    assert current.resolve() == tracker_home / "versions" / NEXT_COMMIT
+    assert original_version.is_dir()
+    assert not list(original_version.glob(".current-*"))
+    assert (tracker_home / "config.yaml").read_text() == "provider: keep\n"
+    assert (tracker_home / "credentials.json").read_text() == '{"token":"keep"}\n'
+
+
+def test_refuses_to_overwrite_a_foreign_launcher(tmp_path: Path) -> None:
+    home, fake_bin, _ = _fixture(tmp_path)
+    bin_dir = home / ".local" / "bin"
+    bin_dir.mkdir(parents=True)
+    foreign = bin_dir / "tokenage"
+    foreign.write_text("#!/bin/sh\nexit 0\n")
+    script = tmp_path / "install.sh"
+    script.write_text(_render_installer())
+    result = subprocess.run(
+        ["/bin/sh", str(script)],
+        text=True,
+        capture_output=True,
+        env={
+            **os.environ,
+            "HOME": str(home),
+            "PATH": f"{fake_bin}:/usr/bin:/bin",
+            "TOKENAGE_FIXTURE_ARCHIVE": str(tmp_path / "snapshot.tar.gz"),
+            "TOKENAGE_FAKE_UV_LOG": str(tmp_path / "uv.log"),
+            "TOKENAGE_FAKE_PYTHON_LOG": str(tmp_path / "python.log"),
+        },
+        timeout=10,
+    )
+    assert result.returncode != 0
+    assert "already exists" in result.stderr
+    # Refused before anything was written: the other installation still works.
+    assert foreign.read_text() == "#!/bin/sh\nexit 0\n"
+    assert not (home / ".tokenage" / "current").exists()
+    assert not (tmp_path / "uv.log").exists()
+
+
+def test_existing_current_directory_fails_before_installing_launcher(
+    tmp_path: Path,
+) -> None:
+    home, fake_bin, _ = _fixture(tmp_path)
+    (home / ".tokenage" / "current").mkdir()
+    script = tmp_path / "install.sh"
+    script.write_text(_render_installer())
+    result = subprocess.run(
+        ["/bin/sh", str(script)],
+        text=True,
+        capture_output=True,
+        env={**os.environ, "HOME": str(home), "PATH": f"{fake_bin}:/usr/bin:/bin"},
+        timeout=10,
+    )
+    assert result.returncode != 0
+    assert "not a managed link" in result.stderr
+    assert not (home / ".local" / "bin" / "tokenage").exists()
+    assert not (tmp_path / "uv.log").exists()
+
+
+def test_login_reads_code_from_tty_when_installer_runs_from_pipe(
+    tmp_path: Path,
+) -> None:
+    home, fake_bin, archive = _fixture(tmp_path)
+    script = tmp_path / "install.sh"
+    script.write_text(_render_installer())
+    env = {
+        **os.environ,
+        "HOME": str(home),
+        "PATH": f"{fake_bin}:/usr/bin:/bin",
+        "TOKENAGE_FIXTURE_ARCHIVE": str(archive),
+        "TOKENAGE_FAKE_UV_LOG": str(tmp_path / "uv.log"),
+        "TOKENAGE_FAKE_PYTHON_LOG": str(tmp_path / "python.log"),
+    }
+    pid, terminal = pty.fork()
+    if pid == 0:
+        os.execve(
+            "/bin/sh",
+            ["/bin/sh", "-c", 'cat "$1" | /bin/sh', "sh", str(script)],
+            env,
+        )
+    os.write(terminal, b"browser-code-1234\n")
+    output = bytearray()
+    deadline = time.monotonic() + 30
+    while time.monotonic() < deadline:
+        ready, _, _ = select.select([terminal], [], [], 0.2)
+        if ready:
+            try:
+                output.extend(os.read(terminal, 4096))
+            except OSError:
+                break
+        finished, _ = os.waitpid(pid, os.WNOHANG)
+        if finished:
+            break
+    else:
+        os.kill(pid, 9)
+        os.waitpid(pid, 0)
+        raise AssertionError("installer did not finish")
+    log = (tmp_path / "python.log").read_text()
+    assert "-m client login --server https://host.example tty=yes" in log
+    assert "login-input=browser-code-1234" in log
+    assert b"No interactive terminal is available" not in output
+
+
+def test_updater_skip_login_mode_preserves_existing_credentials(
+    tmp_path: Path,
+) -> None:
+    home, fake_bin, archive = _fixture(tmp_path)
+    script = tmp_path / "install.sh"
+    script.write_text(_render_installer())
+    env = {
+        **os.environ,
+        "HOME": str(home),
+        "PATH": f"{fake_bin}:/usr/bin:/bin",
+        "TOKENAGE_FIXTURE_ARCHIVE": str(archive),
+        "TOKENAGE_FAKE_UV_LOG": str(tmp_path / "uv.log"),
+        "TOKENAGE_FAKE_PYTHON_LOG": str(tmp_path / "python.log"),
+        "TOKENAGE_SKIP_LOGIN": "1",
+    }
+
+    result = subprocess.run(
+        ["/bin/sh", str(script)],
+        text=True,
+        capture_output=True,
+        env=env,
+        timeout=30,
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    log = (tmp_path / "python.log").read_text()
+    assert "-m client check-server --server https://host.example" in log
+    assert "-P -m client setup" in log
+    assert "login" not in log
+    assert "Existing credentials were preserved; sign-in skipped." in result.stdout
+    assert (home / ".tokenage" / "credentials.json").read_text() == (
+        '{"token":"keep"}\n'
+    )
+
+
+def test_updater_reports_agent_configuration_refresh_failure(tmp_path: Path) -> None:
+    home, fake_bin, archive = _fixture(tmp_path)
+    script = tmp_path / "install.sh"
+    script.write_text(_render_installer())
+
+    result = subprocess.run(
+        ["/bin/sh", str(script)],
+        text=True,
+        capture_output=True,
+        env={
+            **os.environ,
+            "HOME": str(home),
+            "PATH": f"{fake_bin}:/usr/bin:/bin",
+            "TOKENAGE_FIXTURE_ARCHIVE": str(archive),
+            "TOKENAGE_FAKE_UV_LOG": str(tmp_path / "uv.log"),
+            "TOKENAGE_FAKE_PYTHON_LOG": str(tmp_path / "python.log"),
+            "TOKENAGE_SKIP_LOGIN": "1",
+            "TOKENAGE_FAKE_SETUP_FAIL": "1",
+        },
+        timeout=30,
+    )
+
+    assert result.returncode != 0
+    assert "agent configuration refresh failed" in result.stderr
+    log = (tmp_path / "python.log").read_text()
+    assert "-P -m client setup" in log
+    assert "login" not in log
+    assert (home / ".tokenage" / "credentials.json").read_text() == (
+        '{"token":"keep"}\n'
+    )
+
+
+def test_rejects_unrendered_or_insecure_server_url_before_install(
+    tmp_path: Path,
+) -> None:
+    script = tmp_path / "install.sh"
+    script.write_text(INSTALLER.read_text())
+    result = subprocess.run(
+        ["/bin/sh", str(script), "--client"],
+        text=True,
+        capture_output=True,
+        env={**os.environ, "HOME": str(tmp_path), "PATH": "/usr/bin:/bin"},
+        timeout=10,
+    )
+    assert result.returncode != 0
+    assert "no server URL" in result.stderr
+
+    script.write_text(_render_installer(server_url="http://remote.example"))
+    result = subprocess.run(
+        ["/bin/sh", str(script)],
+        text=True,
+        capture_output=True,
+        env={**os.environ, "HOME": str(tmp_path), "PATH": "/usr/bin:/bin"},
+        timeout=10,
+    )
+    assert result.returncode != 0
+    assert "must use HTTPS" in result.stderr
+
+
+def _both_fixture(tmp_path: Path, *, api_port: int = 4123):
+    """A fake server clone, bootstrap and git next to the client fixtures."""
+    home, fake_bin, archive = _fixture(tmp_path)
+    src = home / ".tokenage" / "src"
+    (src / ".git").mkdir(parents=True)
+    (src / "src" / "scripts").mkdir(parents=True)
+    (src / "src" / "scripts" / "bootstrap.sh").write_text(
+        "#!/bin/bash\n"
+        'echo "bootstrap $*" >> "$TOKENAGE_FAKE_PYTHON_LOG.server"\n'
+        f'printf "server:\\n  api_port: {api_port}\\n" > "$HOME/.tokenage/config.yaml"\n'
+        'mkdir -p "$HOME/.local/bin"\n'
+        'ln -sf "$HOME/.tokenage/src/client/bin/tokenage" "$HOME/.local/bin/tokenage"\n'
+    )
+    (src / "client" / "bin").mkdir(parents=True)
+    (src / "client" / "bin" / "tokenage").write_text(SHARED_LAUNCHER.read_text())
+    git = fake_bin / "git"
+    git.write_text(
+        "#!/bin/sh\n"
+        'case "$*" in\n'
+        f'  *"remote get-url"*) echo https://github.com/Haannbboo/tokenage.git ;;\n'
+        f"  *rev-parse*) echo {COMMIT} ;;\n"
+        "esac\n"
+    )
+    git.chmod(0o755)
+    env = {
+        **os.environ,
+        "HOME": str(home),
+        "PATH": f"{fake_bin}:/usr/bin:/bin",
+        "TOKENAGE_FIXTURE_ARCHIVE": str(archive),
+        "TOKENAGE_FAKE_UV_LOG": str(tmp_path / "uv.log"),
+        "TOKENAGE_FAKE_PYTHON_LOG": str(tmp_path / "python.log"),
+    }
+    return home, env
+
+
+def _run_raw(tmp_path: Path, env: dict, *args: str):
+    return subprocess.run(
+        ["/bin/sh", str(INSTALLER), *args],
+        text=True,
+        capture_output=True,
+        env=env,
+        timeout=30,
+    )
+
+
+def test_default_install_is_server_then_client_pointed_at_it(tmp_path: Path) -> None:
+    home, env = _both_fixture(tmp_path)
+
+    result = _run_raw(tmp_path, env)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert (tmp_path / "python.log.server").read_text() == "bootstrap \n"
+    tracker_home = home / ".tokenage"
+    # The client has its own snapshot, and the launcher no longer points into the
+    # server clone.
+    assert (tracker_home / "current").resolve() == tracker_home / "versions" / COMMIT
+    launcher = home / ".local" / "bin" / "tokenage"
+    assert not launcher.is_symlink()
+    log = (tmp_path / "python.log").read_text()
+    assert "check-server --server http://127.0.0.1:4123" in log
+    assert "No interactive terminal is available" in result.stdout
+    assert "tokenage login --server http://127.0.0.1:4123" in result.stdout
+    assert "-P -m client client start" in log
+
+
+def test_server_only_installs_no_client(tmp_path: Path) -> None:
+    home, env = _both_fixture(tmp_path)
+
+    result = _run_raw(tmp_path, env, "--server")
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert (tmp_path / "python.log.server").exists()
+    assert not (home / ".tokenage" / "current").exists()
+    assert not (tmp_path / "uv.log").exists()
+    assert (home / ".local" / "bin" / "tokenage").is_symlink()
+
+
+@pytest.mark.parametrize("flags", [["--client"], ["--server"], []])
+def test_unknown_option_is_refused_before_any_install(
+    tmp_path: Path, flags: list[str]
+) -> None:
+    _, env = _both_fixture(tmp_path)
+
+    result = _run_raw(tmp_path, env, *flags, "--bogus")
+
+    assert result.returncode != 0
+    assert "unknown option: --bogus" in result.stderr

@@ -1,0 +1,11 @@
+# Wire schemas shared by client and server, versioned with the server.
+[project]
+name = "tokenage-protocol"
+description = "tokenage wire schemas shared by client and server"
+requires-python = ">=3.12"
+dynamic = ["version"]
+dependencies = ["pydantic>=2,<3"]
+
+# ponytail: metadata only, like src/pyproject.toml.
+[tool.setuptools.dynamic]
+version = { file = ["../VERSION"] }

@@ -23,7 +23,7 @@ export function Navbar({ currentView, onNavigate }: { currentView: View; onNavig
           📜 {t('Request Logs')}
         </button>
         <button className={`nav-item nav-item-settings ${currentView === 'settings' ? 'active' : ''}`} onClick={() => onNavigate('settings')}>
-          {auth.enabled && auth.user ? (
+          {auth.provider === 'google' && auth.user ? (
             <>
               <span className="user-avatar">
                 {(auth.user.name || auth.user.email).charAt(0).toUpperCase()}

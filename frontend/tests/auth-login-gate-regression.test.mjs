@@ -18,9 +18,9 @@ describe('Login gate', () => {
     assert.match(context, /fetch\(['"]\/auth\/me['"]/)
   })
 
-  test('a 401 from /auth/me means auth is enabled without a session', () => {
-    assert.match(context, /response\.status === 401/)
-    assert.match(context, /enabled: true, user: null/)
+  test('a failed /auth/me fails closed to the gate and the provider comes from the payload', () => {
+    assert.match(context, /provider: null, user: null/)
+    assert.match(context, /data\.provider === 'google'/)
   })
 
   test('isApiPath treats /local/* routes as API paths so a 401 there logs out', () => {
@@ -31,13 +31,17 @@ describe('Login gate', () => {
     assert.doesNotMatch(context, /pathname === '\/local\/'/)
   })
 
-  test('App renders LoginGate when auth is enabled without a user', () => {
-    assert.match(app, /auth\.enabled && !auth\.user/)
+  test('App renders LoginGate whenever there is no user', () => {
+    assert.match(app, /!auth\.user/)
     assert.match(app, /<LoginGate \/>/)
   })
 
   test('LoginGate links to the Google login route', () => {
     assert.match(gate, /href=\{?['"]\/auth\/google\/login/)
+  })
+
+  test('LoginGate tells local-provider browsers to use login-link', () => {
+    assert.match(gate, /tokenage server login-link/)
   })
 
   test('LoginGate maps auth_error query values to messages', () => {
@@ -57,8 +61,8 @@ describe('Login gate', () => {
 })
 
 describe('User identity', () => {
-  test('Navbar settings tab shows the user avatar and name only when auth is enabled', () => {
-    assert.match(navbar, /auth\.enabled && auth\.user/)
+  test('Navbar settings tab shows the user avatar and name only for the google provider', () => {
+    assert.match(navbar, /auth\.provider === 'google' && auth\.user/)
     assert.match(navbar, /user-avatar/)
     assert.match(navbar, /user-email/)
   })
@@ -83,9 +87,9 @@ describe('User identity', () => {
 })
 
 describe('Devices list', () => {
-  test('SettingsPage offers a Devices tab only when auth is enabled', () => {
-    assert.match(settings, /auth\.enabled && auth\.user/)
-    assert.match(settings, /\{ id: 'devices', label: t\('Devices'\) \}\]/)
+  test('SettingsPage offers the Devices tab for every provider', () => {
+    assert.match(settings, /\{ id: 'devices', label: t\('Devices'\) \}/)
+    assert.doesNotMatch(settings, /auth\.enabled/)
   })
 
   test('SettingsPage fetches /auth/devices and revokes via POST', () => {

@@ -246,15 +246,6 @@ export type SetupAgentHealth = {
 }
 
 export type SetupDiagnostics = {
-  expected: {
-    otlp_endpoint: string
-    otlp_logs_endpoint: string
-  }
-  summary: {
-    total_agents: number
-    configured_agents: number
-    matching_agents: number
-  }
   agents: Record<string, SetupAgentHealth>
 }
 
@@ -318,4 +309,13 @@ export type DeviceRow = {
   client_version: string | null
   client_commit: string | null
   current: boolean
+}
+
+export type DeviceStatus = {
+  device_id: string | null
+  device_name: string | null
+  client_version: string | null
+  client_commit: string | null
+  reported_at: number
+  status: Record<string, any> | null
 }

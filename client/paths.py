@@ -1,13 +1,8 @@
 """Where things live on disk, for both installation modes.
 
-The client never imports the server. It discovers what is installed by looking
-at ``$TOKENAGE_HOME``:
-
-- ``$TOKENAGE_HOME/current``  -> a client source snapshot (client-only installs)
-- ``$TOKENAGE_HOME/src``      -> the server clone (all-in-one installs)
-
-A client-only install brings its own virtualenv. An all-in-one install reuses the
-server's, because the client needs nothing the server does not already have.
+The client never imports the server and never reads its state. It knows the
+server only by the URL it signed in to. ``$TOKENAGE_HOME/current`` is the client
+source snapshot, if one is installed.
 """
 
 from __future__ import annotations
@@ -19,20 +14,15 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
-import yaml
-
 # Root of the source tree this client was loaded from. The agent-configuration
 # scripts live in <root>/scripts, so the client needs the snapshot on disk, not
 # just the client package.
 PACKAGE_ROOT = Path(__file__).resolve().parent.parent
-SCRIPTS_DIR = PACKAGE_ROOT / "scripts"
 
 VERSION_FILE = Path(__file__).resolve().parent / "VERSION"
 COMMIT_FILE = Path(__file__).resolve().parent / "COMMIT"
 
 _COMMIT_RE = re.compile(r"[0-9a-f]{40}")
-
-DEFAULT_PROXY_PORT = 4000
 
 
 def tracker_home() -> Path:
@@ -46,12 +36,6 @@ def credentials_path() -> Path:
 def installation_key_path() -> Path:
     """Machine-scoped installation secret; it survives logout and re-login."""
     return tracker_home() / "installation_key"
-
-
-def config_path() -> Path:
-    return Path(
-        os.environ.get("TOKENAGE_CONFIG", "~/.tokenage/config.yaml")
-    ).expanduser()
 
 
 def read_object(path: Path) -> dict[str, Any] | None:
@@ -115,86 +99,3 @@ def client_root() -> Path | None:
     except OSError:
         return None
     return resolved if (resolved / "client").is_dir() else None
-
-
-def server_root() -> Path | None:
-    """The server clone, if this machine has the server component installed.
-
-    ``TOKENAGE_ROOT`` wins so worktrees and tests can point at any checkout.
-    """
-    candidates = []
-    override = os.environ.get("TOKENAGE_ROOT")
-    if override:
-        candidates.append(Path(override).expanduser())
-    discovered = os.environ.get("TOKENAGE_SERVER_ROOT")
-    if discovered:
-        candidates.append(Path(discovered).expanduser())
-    candidates.append(tracker_home() / "src")
-    for candidate in candidates:
-        if (candidate / ".venv" / "bin" / "python").is_file():
-            return candidate
-    return None
-
-
-def local_config() -> dict[str, Any]:
-    """The user config, or an empty dict when the server component is absent.
-
-    Only the ``server`` section is read, so a config written by a different
-    version cannot break the client.
-    """
-    try:
-        raw = yaml.safe_load(config_path().read_text(encoding="utf-8"))
-    except (OSError, UnicodeError, yaml.YAMLError):
-        return {}
-    if not isinstance(raw, dict):
-        return {}
-    section = raw.get("server")
-    return section if isinstance(section, dict) else {}
-
-
-def _port(section: dict[str, Any], key: str, default: int) -> int:
-    value = section.get(key, default)
-    try:
-        port = int(value)
-    except (TypeError, ValueError):
-        return default
-    return port if 1 <= port <= 65535 else default
-
-
-def local_server_info() -> dict[str, Any]:
-    """Ports and URLs for the local server, from config plus the usual defaults.
-
-    Uses the server's port derivation and URL rules without importing its package.
-    """
-    section = local_config()
-    proxy_port = _port(section, "port", DEFAULT_PROXY_PORT)
-    api_port = _port(section, "api_port", proxy_port + 1)
-    otlp_port = _port(section, "otlp_port", api_port + 1)
-
-    base = str(section.get("base_url") or "").strip().rstrip("/")
-    host = str(section.get("host") or "127.0.0.1")
-    scheme = "http"
-    parsed_host = None
-    if base:
-        try:
-            parsed = urlparse(base if "://" in base else f"//{base}")
-            parsed_host = parsed.hostname
-        except ValueError:
-            parsed_host = None
-        if parsed_host:
-            host = parsed_host
-            scheme = parsed.scheme or "http"
-    if not parsed_host and host in {"0.0.0.0", "127.0.0.1", "::", ""}:
-        host = "localhost"
-    authority = f"[{host}]" if ":" in host and not host.startswith("[") else host
-    origin = f"{scheme}://{authority}"
-
-    return {
-        "host": host,
-        "proxy_port": proxy_port,
-        "api_port": api_port,
-        "otlp_port": otlp_port,
-        "api_url": f"{origin}:{api_port}",
-        "proxy_url": f"{origin}:{proxy_port}",
-        "otlp_logs_endpoint": f"{origin}:{otlp_port}/v1/logs",
-    }

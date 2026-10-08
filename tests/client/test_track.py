@@ -171,69 +171,6 @@ def test_child_output_kwargs_only_quietens_when_asked():
     }
 
 
-def test_build_child_env_returns_none_without_proxy_env(monkeypatch):
-    monkeypatch.setenv("OTEL_RESOURCE_ATTRIBUTES", "service.name=test-agent")
-
-    env = track.build_child_env(track.RunOptions())
-
-    assert env is None
-
-
-def test_build_child_env_points_at_the_local_proxy_overriding_stale_values(
-    monkeypatch,
-):
-    monkeypatch.setattr(
-        track, "local_server_info", lambda: {"proxy_url": "http://localhost:4999"}
-    )
-    monkeypatch.setenv("OPENAI_BASE_URL", "https://existing.example/v1")
-    monkeypatch.delenv("ANTHROPIC_BASE_URL", raising=False)
-    from contextlib import nullcontext
-
-    monkeypatch.setattr(
-        track.socket, "create_connection", lambda *a, **k: nullcontext()
-    )
-
-    env = track.build_child_env(track.RunOptions(proxy_env=True))
-
-    assert env["OPENAI_BASE_URL"] == "http://localhost:4999/v1"
-    assert env["ANTHROPIC_BASE_URL"] == "http://localhost:4999"
-    assert "OTEL_RESOURCE_ATTRIBUTES" not in env
-
-
-def test_build_child_env_does_not_leak_the_db_override(monkeypatch):
-    monkeypatch.setattr(
-        track, "local_server_info", lambda: {"proxy_url": "http://localhost:49152"}
-    )
-    monkeypatch.setenv("TOKENAGE_DB_URL", "sqlite:///main-should-not-leak.db")
-    from contextlib import nullcontext
-
-    monkeypatch.setattr(
-        track.socket, "create_connection", lambda *a, **k: nullcontext()
-    )
-
-    env = track.build_child_env(track.RunOptions(proxy_env=True))
-
-    assert env["OPENAI_BASE_URL"] == "http://localhost:49152/v1"
-    assert env["ANTHROPIC_BASE_URL"] == "http://localhost:49152"
-    assert "TOKENAGE_DB_URL" not in env
-
-
-def test_proxy_env_fails_before_launch_when_proxy_is_unavailable(monkeypatch, capsys):
-    monkeypatch.setattr(
-        track, "local_server_info", lambda: {"proxy_url": "http://localhost:4999"}
-    )
-
-    def unavailable(*args, **kwargs):
-        raise ConnectionRefusedError("no proxy")
-
-    monkeypatch.setattr(track.socket, "create_connection", unavailable)
-    monkeypatch.setattr(
-        track.subprocess, "run", lambda *a, **k: pytest.fail("must not run the child")
-    )
-    assert client_cli.main(["--proxy-env", "--", "agent"]) == 1
-    assert "requires a running proxy" in capsys.readouterr().err
-
-
 # ----------------------------------------------------------------- api client
 
 

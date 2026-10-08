@@ -7,8 +7,9 @@ behavior — including exit codes, the banner and the removed commands — is in
 
 ## Overview
 
-`tokenage` is one command with two components. The client is always
-installed; the server component is optional.
+`tokenage` is one command with two components, and a machine can have either
+or both. They are installed separately and share only the launcher; the client
+never runs from the server clone, even on the same machine.
 
 - **Client** — the tracking wrapper, agent configuration, sign-in, the component
   report. Reports to whichever collector it is pointed at.
@@ -43,8 +44,11 @@ as a wrapper option.
 | `tokenage login [--server URL] [--device-name NAME] [--no-browser]` | client | Register this machine and sign in; wires detected agents. Persists an installation key (survives logout) so re-login rotates the machine's tokens instead of duplicating it. Stores the server's `otlp_logs_endpoint`. |
 | `tokenage logout [--keep-agents]` | client | Delete this machine's credentials, then un-wire the agents. |
 | `tokenage setup [--disable]` | client | Point detected agents at a collector, or take tokenage's telemetry keys back off. |
-| `tokenage status [--json]` | either | Report installed components, whether they run, and where agents point. |
-| `tokenage update [--check\|--dry-run] [--scope all\|client\|server]` | either | Update installed components; `--check` checks server availability, while client availability is not published. |
+| `tokenage status [--json]` | client | Report this client: version, sign-in (server URL), detected agents and where they point. `--json` is the device status report the client service sends to the server, plus `account`. Exits 1 when a detected agent points at the wrong collector. The service view is `tokenage server status`. |
+| `tokenage client start\|stop\|restart` | client | Install and start the client service under systemd `--user` (Linux) or launchd (macOS), so it also starts at login. `stop` stops it and disables start at login; `start` re-enables. Elsewhere these exit 1: run `tokenage client run` under your own supervisor. |
+| `tokenage client status [--json]` | client | Ask the OS service manager whether the client service runs (exit 0 running, 1 not), plus its last check and report. |
+| `tokenage client run` | client | Run the client service in the foreground; the unit/agent executes this. |
+| `tokenage update [--check\|--dry-run]` | client | Update the client snapshot from the signed-in server; client availability is not published. The server clone updates with `tokenage server update`. |
 | `tokenage check-server --server URL` | client | Internal: verify reachability and wire protocol. Writes nothing. |
 | `tokenage <command> [args...]` | client | Run any command with usage tracking. |
 | `tokenage server bootstrap` | server | Install, build the dashboard, start, verify, restart the API. |
@@ -52,14 +56,23 @@ as a wrapper option.
 | `tokenage server stop [program...]` | server | Stop all services, or the named ones. |
 | `tokenage server restart [--otlp-port N]` | server | Migrate, then reload the running services. |
 | `tokenage server status [program...]` | server | Supervisord table, ports, port check. |
+| `tokenage server update [--check\|--dry-run]` | server | Fast-forward the server clone, bootstrap, restart. |
 | `tokenage server token create --email EMAIL [--kind cli\|ingest\|web] [--name NAME]` | server | Mint an operator token on the server box. |
+| `tokenage server login-link` | server | Print a one-time, 5-minute browser sign-in link for the local owner (local provider). Needed only for browsers that are not on the server machine; a browser on the server machine is signed in automatically. |
 | `tokenage --version` | either | Client version, plus the server release when it is installed. |
 | `tokenage --help`, `tokenage server --help` | either | Usage for the client and the service commands. |
 
-`tokenage start`, `stop`, `restart`, `bootstrap` and `token` still work and
-forward to the matching `tokenage server` command, printing a one-line note
-on stderr. `status` is not one of them: it is the component report, and the
-service view is `tokenage server status`.
+
+## Sign-in providers
+
+`auth.provider` in the server's `config.yaml` is `local` (default) or `google`;
+an older `auth.enabled: true` still means `google`. Under `local` the server has
+one built-in owner (`owner@localhost`): a request that comes straight from the
+server machine (loopback peer, no forwarding headers, `localhost`/`127.0.0.1`/`::1`
+Host) is that owner with no token, so the dashboard and already-wired agents work
+untouched. Anything else needs a token. `tokenage login` works on loopback with no
+Google account; for a browser on another machine run `tokenage server login-link`
+on the server and open the URL it prints (single use, 5 minutes).
 
 ## Examples
 
@@ -82,16 +95,13 @@ tokenage --usage-only --json -- codex exec "hello"
 # Write summary to a file
 tokenage --summary-dest file --summary-file /tmp/llm-summary.json -- claude
 
-# Route through the long-running local proxy
-tokenage --proxy-env -- some-openai-compatible-cli
-
 # Longer wait for late-arriving telemetry
 tokenage --wait-ms 5000 -- codex exec "hello"
 
 # No summary at all
 tokenage --no-summary -- codex exec "say hello"
 
-# What is installed, is it running, where do agents point
+# Sign-in and where agents point
 tokenage status
 tokenage status --json
 
@@ -118,7 +128,6 @@ All tracking flags go before the child command; use `--` when they do.
 | `--summary-file` | (none) | Path for `--summary-dest file`. Required when using that mode. |
 | `--wait-ms` | `3000` | Milliseconds to poll for usage data after the child exits. |
 | `--poll-ms` | `250` | Milliseconds between poll attempts. |
-| `--proxy-env` | off | Replace `OPENAI_BASE_URL` and `ANTHROPIC_BASE_URL` for the child with the configured proxy. Refuse to launch if the proxy port is unreachable. |
 | `--no-summary` | off | Skip the summary; just run the command and return its exit code. |
 | `--no-banner` | off | Do not print the tokenage banner. Accepted by every subcommand too. |
 | `--version` | — | Print the client version, and the server release when the server component is installed. |
@@ -127,10 +136,9 @@ All tracking flags go before the child command; use `--` when they do.
 
 One path, in both installation modes:
 
-1. Read the usage high-watermark from the API — the signed-in server when the
-   machine is signed in, the local server otherwise (`GET /usage/high-watermark`).
-2. Run the child command. Nothing is started, and `--proxy-env` only adds two
-   environment variables.
+1. Read the usage high-watermark from the signed-in server
+   (`GET /usage/high-watermark`).
+2. Run the child command. Nothing is started.
 3. Poll `GET /usage/run-summary?after_ts=…` until `--wait-ms` expires. If
    nothing arrived, re-anchor on the current watermark and ask once more, so a
    run that recorded usage just after the deadline is not reported as empty.
@@ -148,30 +156,47 @@ The API being unreachable is not an error: the child runs, the exit code is the
 child's, and the wrapper says so on stderr before the child starts and once more
 after it.
 
-`--proxy-env` requires a running proxy configured locally. Installing the hosted
-client alone does not provide a proxy.
+## Installing
+
+One installer, `install.sh`, installs the components you name:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Haannbboo/tokenage/main/install.sh | bash                # both (default)
+curl -fsSL https://raw.githubusercontent.com/Haannbboo/tokenage/main/install.sh | bash -s -- --server # server only
+curl -fsSL https://raw.githubusercontent.com/Haannbboo/tokenage/main/install.sh | bash -s -- --client # client only (set TOKENAGE_SERVER=URL)
+curl -fsSL https://YOUR_SERVER/install.sh | sh                                                         # client for that server
+```
+
+`GET /install.sh` on a server serves the same script preset to that server, so
+it installs the client. The server install is a clone in `~/.tokenage/src` plus
+`src/scripts/bootstrap.sh`, which never starts or configures a client. The client
+install is a snapshot and virtualenv under `~/.tokenage/versions` with a
+`current` link. Both = server, then client pointed at
+`http://127.0.0.1:<api_port>`: interactive sign-in (otherwise the command to run
+is printed), then `tokenage client start`, which may fail without being fatal.
+Either install may place the launcher first; the client install replaces the
+server's symlink with its own copy. A machine whose client used to run from the
+server clone has no snapshot: `tokenage` prints the one command that installs it.
 
 ## Service Management
 
 ```bash
 tokenage server status                              # supervisord table, ports, port check
 tokenage server status tokenage-api              # one program
-tokenage server start                               # services on; refuses if requirements.txt changed
+tokenage server start                               # services on; refuses if src/pyproject.toml changed
 tokenage server stop                                # all services
 tokenage server stop tokenage-proxy              # one program
 tokenage server restart                             # migrate, then SIGHUP the running services
 tokenage server restart --otlp-port 5002            # persist a new OTLP port, then restart the collector
 tokenage server bootstrap                           # install, build, start, verify, restart the API
 tokenage server token create --email ops@example.com
+tokenage server login-link                          # open the printed URL in a remote browser
 ```
 
 Valid program names: `tokenage-proxy`, `tokenage-api`, `tokenage-otlp`.
-The same scripts are in the checkout as `scripts/start.sh`, `scripts/stop.sh`,
-`scripts/restart.sh`, `scripts/status.sh`, `scripts/bootstrap.sh` and
-`scripts/update.sh`; `tokenage server …` is the interface to use.
-
-`tokenage start`, `stop`, `restart`, `bootstrap` and `token` are still
-accepted as aliases, with a one-line note on stderr.
+`tokenage server <command>` runs `python -m src.cli <command>` (`src/ops.py`);
+`bootstrap` goes through `src/scripts/bootstrap.sh` first, because it must run
+before the virtualenv exists. `restart`, `stop` and `status` accept program names.
 
 ## Exit Codes
 
@@ -243,12 +268,9 @@ Client state, all under `$TOKENAGE_HOME` (default `~/.tokenage`):
 | `TOKENAGE_CLIENT_COMMIT` | Commit to report for the client, when the snapshot has no `COMMIT` file. |
 | `TOKENAGE_SKIP_BANNER` | Set by the launcher so a script it calls does not print a second banner. `bootstrap.sh` and `start.sh` honor it; `restart.sh`, `status.sh` and `update.sh` do not. |
 | `TOKENAGE_SKIP_INSTALL` | `1` makes `bootstrap` skip dependency installation and record the requirements stamp anyway. |
-| `TOKENAGE_SERVER` | Fallback server URL for `tokenage login` when `--server` is absent; passed by `tokenage update` to the hosted installer, which reads it instead of its baked-in server URL. |
-| `TOKENAGE_INGEST_TOKEN` | Set by `tokenage setup` on the agent configure scripts when signed in, so agents send the device ingest token. |
-| `TOKENAGE_DB_URL` | Override the database URL at runtime (server side; removed from the child's env by `--proxy-env`). |
+| `TOKENAGE_SERVER` | Fallback server URL for `tokenage login` when `--server` is absent; passed by `tokenage update` to `install.sh`, which reads it instead of its baked-in server URL. |
+| `TOKENAGE_DB_URL` | Override the database URL at runtime (server side). |
 | `TOKENAGE_API_URL` | Frontend-only: override the API base URL used by the Vite dev server. |
-| `OPENAI_BASE_URL` | Set by `--proxy-env` to route OpenAI-compatible clients through the proxy. |
-| `ANTHROPIC_BASE_URL` | Set by `--proxy-env` to route Anthropic-compatible clients through the proxy. |
 | `OTEL_EXPORTER_OTLP_LOGS_ENDPOINT` | The agent telemetry endpoint. `tokenage setup` strips any pre-existing value before writing its own. |
 | `NO_COLOR` | No color. The banner still prints. |
 
@@ -264,11 +286,16 @@ curl http://127.0.0.1:4001/usage/daily
 curl http://127.0.0.1:4001/usage/high-watermark
 curl http://127.0.0.1:4001/usage/run-summary?after_ts=0
 curl http://127.0.0.1:4001/config
-curl http://127.0.0.1:4001/local/setup-health
 curl http://127.0.0.1:4001/version
 ```
 
-`/version` is public when auth is enabled, and carries the wire protocol range,
+Device status and agent wiring come from the client service, not the API:
+
+```bash
+tokenage status --json
+```
+
+`/version` is public, and carries the wire protocol range,
 the server release, and `otlp_logs_endpoint` — the collector clients point agents
 at. Its `collector_bind` host/port fields describe server-local listener
 addresses for status diagnostics; they are not hosted client wiring targets.
@@ -286,18 +313,10 @@ Query params for `/usage/run-summary`: `after_ts`, `until_ts`, `since`, `until`,
 `client_source`, `session_id`, `provider`, `model`, `include_rows`. The wrapper
 sends only `after_ts`, plus `until_ts` on the re-anchor pass.
 
-## Helper Scripts
+## Helper Commands
 
-| Script | Purpose |
+| Command | Purpose |
 |---|---|
-| `scripts/sync-config.py` | Merge missing defaults into the user config. Run by `server start`. |
-| `scripts/migrate_schema.py` | Apply database schema migrations. Run by `server start` and `server restart`. |
-| `scripts/check-service-ports.py` | Detect port conflicts before starting services. |
-| `scripts/auto-assign-ports.py` | Pick free ports on a first run. |
-| `scripts/configure-claude-settings.py` | Configure Claude Code OTLP telemetry. |
-| `scripts/configure-codex-settings.py` | Configure Codex OTLP telemetry. |
-| `scripts/configure-opencode-plugin.py` | Configure the OpenCode plugin OTLP telemetry. |
-| `scripts/configure-kilo-plugin.py` | Configure the Kilo Code plugin OTLP telemetry. |
-
-The four `configure-*.py` scripts are the ones `tokenage setup` shells out to;
-they own the agent file formats. The server never calls them.
+| `python -m src.cli sync-config` | Merge missing defaults from `config.example.yaml` into the user config. Run by `server start` and the Docker entrypoint. |
+| `python -m src.cli migrate` | Apply database schema migrations (`TOKENAGE_DB_URL` overrides the target). Run by `server start`, `server restart`, Docker and the dev scripts. |
+| `src/scripts/check-otlp-ready.py` | Pre-commit hook: the collector answers and detected agents are wired. |

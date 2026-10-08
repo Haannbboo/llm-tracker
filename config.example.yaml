@@ -108,3 +108,9 @@ db:
   # For PostgreSQL/MySQL, use `url` instead of `path`, for example:
   # url: postgresql+psycopg://user:password@db-host:5432/tokenage
   # url: mysql+pymysql://user:password@db-host:3306/tokenage
+
+# auth:
+#   provider: local   # local (default): one built-in owner; requests straight from
+#                     # this machine need no token, others use a token or
+#                     # `tokenage server login-link`. google: hosted Google sign-in.
+#   # google_client_id / google_client_secret / allowlist apply to `google` only.

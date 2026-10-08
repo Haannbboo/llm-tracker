@@ -41,7 +41,6 @@ def test_corrupt_credentials_are_reported_without_a_traceback(
     monkeypatch.delenv("TOKENAGE_SERVER", raising=False)
     monkeypatch.setattr(setup, "installed_agents", lambda: ["codex"])
     monkeypatch.setattr(client_cli.update, "client_root", lambda: paths.tracker_home())
-    monkeypatch.setattr(client_cli.update, "server_root", lambda: None)
     path = paths.credentials_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(content)
@@ -58,6 +57,14 @@ def client_home(tmp_path, monkeypatch):
     """Credentials and agent config never touch real $HOME."""
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setenv("TOKENAGE_HOME", str(tmp_path / "tracker"))
+
+
+@pytest.fixture(autouse=True)
+def no_client_daemon(monkeypatch):
+    """A successful login starts the daemon; tests must never spawn processes."""
+    from client import service
+
+    monkeypatch.setattr(service, "start", lambda: 0)
 
 
 class FakeHttpx:
@@ -276,6 +283,25 @@ def test_login_regenerates_a_corrupt_installation_key(monkeypatch):
         assert key_path.read_text(encoding="utf-8").strip() == body["installation_key"]
 
 
+def test_login_starts_the_client_daemon(monkeypatch):
+    from client import service
+
+    started = []
+    monkeypatch.setattr(service, "start", lambda: started.append(True) or 0)
+    code, _, _ = _run_login(monkeypatch, inputs=["the-code"])
+    assert code == 0
+    assert started == [True]
+
+
+def test_login_daemon_failure_is_only_a_warning(monkeypatch, capsys):
+    from client import service
+
+    monkeypatch.setattr(service, "start", lambda: 1)
+    code, _, _ = _run_login(monkeypatch, inputs=["the-code"])
+    assert code == 0
+    assert "client service did not start" in capsys.readouterr().err
+
+
 def test_login_three_failures_exit_1_no_credentials(monkeypatch):
     code, fake, _ = _run_login(
         monkeypatch,
@@ -478,10 +504,12 @@ def test_usage_client_sends_bearer_from_credentials():
     assert client.token == "tok-1"
 
 
-def test_usage_client_without_credentials_uses_the_local_api():
+def test_usage_client_without_credentials_has_no_server():
     client = track.UsageApiClient()
     assert client.token is None
-    assert client.base_url == paths.local_server_info()["api_url"]
+    assert client.base_url is None
+    with pytest.raises(track.ApiError, match="login --server"):
+        client.get_high_watermark()
 
 
 def test_usage_client_401_surfaces_relogin_message(monkeypatch):
@@ -502,82 +530,43 @@ def test_usage_client_401_surfaces_relogin_message(monkeypatch):
 # ------------------------------------------------------------------ wiring
 
 
-def test_wire_agents_for_hosted_invokes_scripts(monkeypatch):
+def _fake_agents(monkeypatch, code=0):
     calls = []
 
-    def fake_which(name):
-        return f"/usr/bin/{name}" if name in ("codex", "claude") else None
+    class Fake:
+        def __init__(self, name):
+            self.name = name
 
-    def fake_run(cmd, **kwargs):
-        calls.append(cmd)
-        return SimpleNamespace(returncode=0, stdout="", stderr="")
+        def configure(self, target, endpoint, token):
+            calls.append((self.name, target, endpoint, token))
+            return code
 
-    monkeypatch.setattr(setup.shutil, "which", fake_which)
-    monkeypatch.setattr(setup.subprocess, "run", fake_run)
+    monkeypatch.setattr(setup.shutil, "which", lambda name: "/usr/bin/" + name)
+    monkeypatch.setattr(
+        setup, "AGENT_MODULES", {n: Fake(n) for n in setup.AGENT_MODULES}
+    )
+    return calls
+
+
+def test_wire_agents_configures_each_detected_agent_in_process(monkeypatch):
+    calls = _fake_agents(monkeypatch)
+    monkeypatch.setattr(
+        setup.shutil,
+        "which",
+        lambda name: f"/usr/bin/{name}" if name in ("codex", "claude") else None,
+    )
 
     wired = setup.wire_agents(
-        logs_endpoint="https://api.example.com:4005/v1/logs",
-        token=None,
+        logs_endpoint="https://api.example.com:4005/v1/logs", token="ingest-secret"
     )
     assert wired == ["codex", "claude"]
-    assert len(calls) == 2
-    assert calls[0][-1] == "https://api.example.com:4005/v1/logs"
-    assert calls[1][-1] == "https://api.example.com:4005/v1/logs"
-    for cmd in calls:
-        assert cmd[1].endswith("configure-codex-settings.py") or cmd[1].endswith(
-            "configure-claude-settings.py"
-        )
+    assert [(n, e, t) for n, _, e, t in calls] == [
+        ("codex", "https://api.example.com:4005/v1/logs", "ingest-secret"),
+        ("claude", "https://api.example.com:4005/v1/logs", "ingest-secret"),
+    ]
 
 
-def test_wire_agents_passes_ingest_token_via_environment(monkeypatch):
-    calls = []
-
-    monkeypatch.setattr(setup.shutil, "which", lambda name: "/usr/bin/" + name)
-
-    def fake_run(cmd, **kwargs):
-        calls.append((cmd, kwargs))
-        return SimpleNamespace(returncode=0, stdout="", stderr="")
-
-    monkeypatch.setattr(setup.subprocess, "run", fake_run)
-
-    wired = setup.wire_agents(
-        logs_endpoint="https://api.example.com:4005/v1/logs",
-        token="ingest-secret",
-    )
-
-    assert wired == ["codex", "claude", "opencode", "kilo"]
-    assert calls
-    for cmd, kwargs in calls:
-        assert all("ingest-secret" not in str(arg) for arg in cmd)
-        assert kwargs["env"]["TOKENAGE_INGEST_TOKEN"] == "ingest-secret"
-
-
-def test_wire_agents_strips_otel_env_var(monkeypatch):
-    envs = []
-
-    def fake_run(cmd, **kwargs):
-        envs.append(kwargs.get("env") or {})
-        return SimpleNamespace(returncode=0, stdout="", stderr="")
-
-    monkeypatch.setattr(setup.shutil, "which", lambda name: "/usr/bin/" + name)
-    monkeypatch.setattr(setup.subprocess, "run", fake_run)
-    monkeypatch.setenv("OTEL_EXPORTER_OTLP_LOGS_ENDPOINT", "http://local:4005/v1/logs")
-
-    setup.wire_agents(logs_endpoint="https://api.example.com/v1/logs", token=None)
-    assert envs
-    assert all("OTEL_EXPORTER_OTLP_LOGS_ENDPOINT" not in env for env in envs)
-    assert all("PATH" in env for env in envs)
-
-
-def test_wire_agents_timeout_warns_and_skips(monkeypatch, capsys):
-    def fake_run(cmd, **kwargs):
-        raise setup.subprocess.TimeoutExpired(cmd, kwargs.get("timeout"))
-
-    monkeypatch.setattr(setup.shutil, "which", lambda name: "/usr/bin/" + name)
-    monkeypatch.setattr(setup.subprocess, "run", fake_run)
-
-    wired = setup.wire_agents(
-        logs_endpoint="https://api.example.com/v1/logs", token=None
-    )
-    assert wired == []
-    assert "timed out" in capsys.readouterr().err
+def test_wire_agents_warns_when_an_agent_is_not_wired(monkeypatch, capsys):
+    _fake_agents(monkeypatch, code=1)
+    assert setup.wire_agents(logs_endpoint="https://x/v1/logs", token=None) == []
+    assert "wiring codex failed" in capsys.readouterr().err

@@ -21,6 +21,7 @@ from ..database.engine import get_engine
 from ..database.models import AuthToken, Device, User
 
 TOKEN_KINDS = ("cli", "ingest", "web")
+LOCAL_OWNER_EMAIL = "owner@localhost"
 AUTH_STATEMENT_TIMEOUT_MILLISECONDS = 10_000
 
 
@@ -74,6 +75,11 @@ def get_or_create_user(email: str, db_path: str | None = None) -> User:
                     continue
                 raise
     raise RuntimeError(f"Failed to resolve user for {email}")
+
+
+def get_local_owner(db_path: str | None = None) -> User:
+    """The single built-in user of the local provider, created on demand."""
+    return get_or_create_user(LOCAL_OWNER_EMAIL, db_path)
 
 
 def get_user_by_id(user_id: str, db_path: str | None = None) -> User | None:
@@ -350,3 +356,16 @@ def revoke_device(device_id: str, user_id: str, db_path: str | None = None) -> b
             )
         session.commit()
     return changed
+
+
+def set_device_status(
+    device_id: str, status_json: str, db_path: str | None = None
+) -> None:
+    """Store the latest status report on the device row."""
+    with Session(get_engine(db_path)) as session:
+        session.execute(
+            sa_update(Device)
+            .where(Device.id == device_id)
+            .values(status_json=status_json, status_reported_at=_now_micros())
+        )
+        session.commit()

@@ -689,6 +689,24 @@ def migrate_database(db_path: str | None = None) -> list[str]:
 
     init_db(db_path)
 
+    if _table_exists(engine, "devices"):
+        if _ensure_column(
+            engine,
+            "devices",
+            "status_json",
+            sqlite_definition="TEXT",
+            postgresql_definition="TEXT",
+        ):
+            applied.append("devices.status_json")
+        if _ensure_column(
+            engine,
+            "devices",
+            "status_reported_at",
+            sqlite_definition="BIGINT",
+            postgresql_definition="BIGINT",
+        ):
+            applied.append("devices.status_reported_at")
+
     if _table_exists(engine, "auth_tokens") and _ensure_column(
         engine,
         "auth_tokens",
