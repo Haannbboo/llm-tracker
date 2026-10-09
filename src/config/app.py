@@ -141,7 +141,6 @@ def build_maps(
         provider_config = ProviderConfig(
             name=provider_name,
             base_url=provider["base_url"],
-            price_multiplier=float(provider.get("price_multiplier", 1.0)),
             api_key=provider.get("api_key") or None,
             auth_scheme=provider.get("auth_scheme", "bearer"),
         )
@@ -168,7 +167,7 @@ def refresh_runtime_config(path: str | None = None) -> dict[str, Any]:
     provider_map, model_map = build_maps(updated_config)
 
     # Swap the pricing maps and PROVIDER_MAP under one lock so a record never
-    # pairs new rates with an old multiplier (or vice versa).
+    # observes them half-applied.
     with MAPS_LOCK:
         refresh_pricing_maps(updated_config, fetched)
         with _config_lock:

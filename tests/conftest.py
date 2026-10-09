@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib
 import os
+import sqlite3
 import sys
 from collections.abc import Callable, Generator
 from pathlib import Path
@@ -14,6 +15,23 @@ NO_REMOTE_PRICING_CONFIG = (
     Path(__file__).parent / "fixtures" / "no-remote-pricing-config.yaml"
 )
 os.environ.setdefault("TOKENAGE_CONFIG", str(NO_REMOTE_PRICING_CONFIG))
+
+
+# Tests never need SQLite durability; fsync per DDL/commit dominated runtime
+# on slow disks (>90% of wall time). Applies to every engine in the process.
+# Client-only CI (hosted-install job) has no sqlalchemy, so skip it there.
+try:
+    from sqlalchemy import event
+    from sqlalchemy.engine import Engine
+except ImportError:
+    pass
+else:
+
+    @event.listens_for(Engine, "connect")
+    def _sqlite_fast_pragmas(dbapi_conn: Any, _record: Any) -> None:
+        if isinstance(dbapi_conn, sqlite3.Connection):
+            dbapi_conn.execute("PRAGMA synchronous=OFF")
+            dbapi_conn.execute("PRAGMA journal_mode=MEMORY")
 
 
 CONFIG_TEMPLATE = """
@@ -43,7 +61,6 @@ providers:
   test-provider:
     base_url: https://api.example.com/v1
     api_key: test-key
-    price_multiplier: 1.25
     models:
       test-model: {{}}
       gpt-4.1: {{}}

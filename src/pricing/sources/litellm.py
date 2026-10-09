@@ -384,6 +384,6 @@ class LiteLLMSource:
 
     def fetch(self) -> list[SourceEntry]:
         return [
-            SourceEntry(provider=None, key=key, cost=cost)
+            SourceEntry(key=key, cost=cost)
             for key, cost in fetch_remote_pricing(self.ttl_seconds).items()
         ]

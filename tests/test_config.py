@@ -169,28 +169,6 @@ def test_build_maps_allows_provider_model_mapping(config_module):
     assert model_map["alpha-2"] == provider_map["alpha"]
 
 
-def test_build_maps_parses_provider_price_multiplier(config_module):
-    provider_map, model_map = config_module.build_maps(
-        {
-            "models": {"alpha-1": {}},
-            "providers": {
-                "AlPhA": {
-                    "base_url": "https://alpha.example/v1",
-                    "price_multiplier": 1.35,
-                    "models": {"alpha-1": {}},
-                },
-            },
-        }
-    )
-
-    assert provider_map["alpha"] == config_module.ProviderConfig(
-        name="alpha",
-        base_url="https://alpha.example/v1",
-        price_multiplier=1.35,
-    )
-    assert model_map["alpha-1"] == provider_map["alpha"]
-
-
 def test_build_maps_allows_provider_without_models(config_module):
     provider_map, model_map = config_module.build_maps(
         {
@@ -270,15 +248,14 @@ def test_build_maps_normalizes_empty_api_key_to_none(config_module):
     assert provider_map["empty-key"].api_key is None
 
 
-def test_resolve_all_costs_parses_global_and_provider_model_costs(
-    config_module, pricing_maps_module
-):
+def test_resolve_all_costs_parses_model_costs(config_module, pricing_maps_module):
     resolved = pricing_maps_module.resolve_all_costs(
         {
             "models": {
                 "alpha-1": {"cost": {"input": 1.5, "output": 2.5, "cacheRead": 0.15}},
                 "beta-1": {},
             },
+            # Provider-scoped model costs are no longer read.
             "providers": {
                 "alpha": {
                     "base_url": "https://alpha.example/v1",
@@ -286,27 +263,18 @@ def test_resolve_all_costs_parses_global_and_provider_model_costs(
                         "alpha-1": {
                             "cost": {"input": 3.0, "output": 4.0, "cacheRead": 0.3}
                         },
-                        "beta-1": {},
                     },
                 },
             },
         }
     )
 
-    assert resolved.global_costs["alpha-1"].cost == pricing_maps_module.ModelCost(
+    assert resolved["alpha-1"].cost == pricing_maps_module.ModelCost(
         input=1.5,
         output=2.5,
         cache_read=0.15,
     )
-    assert "beta-1" not in resolved.global_costs
-    assert set(resolved.provider_costs) == {"alpha"}
-    assert resolved.provider_costs["alpha"]["alpha-1"].cost == (
-        pricing_maps_module.ModelCost(
-            input=3.0,
-            output=4.0,
-            cache_read=0.3,
-        )
-    )
+    assert "beta-1" not in resolved
 
 
 def test_resolve_all_costs_preserves_cache_write_metadata(
@@ -324,37 +292,14 @@ def test_resolve_all_costs_preserves_cache_write_metadata(
                     }
                 }
             },
-            "providers": {
-                "alpha": {
-                    "base_url": "https://alpha.example/v1",
-                    "models": {
-                        "alpha-1": {
-                            "cost": {
-                                "input": 3.0,
-                                "output": 4.0,
-                                "cacheRead": 0.3,
-                                "cacheWrite": 3.75,
-                            }
-                        }
-                    },
-                }
-            },
         }
     )
 
-    assert resolved.global_costs["alpha-1"].cost == pricing_maps_module.ModelCost(
+    assert resolved["alpha-1"].cost == pricing_maps_module.ModelCost(
         input=1.5,
         output=2.5,
         cache_read=0.15,
         cache_write=1.875,
-    )
-    assert resolved.provider_costs["alpha"]["alpha-1"].cost == (
-        pricing_maps_module.ModelCost(
-            input=3.0,
-            output=4.0,
-            cache_read=0.3,
-            cache_write=3.75,
-        )
     )
 
 
@@ -368,32 +313,14 @@ def test_resolve_all_costs_normalizes_model_keys_to_lowercase(
                     "cost": {"input": 1.5, "output": 2.5, "cacheRead": 0.15}
                 }
             },
-            "providers": {
-                "minimax": {
-                    "base_url": "https://api.minimax.example/v1",
-                    "models": {
-                        "MiniMax-M2.7": {
-                            "cost": {"input": 3.0, "output": 4.0, "cacheRead": 0.3}
-                        }
-                    },
-                }
-            },
         }
     )
 
-    assert "MiniMax-M2.7" not in resolved.global_costs
-    assert resolved.global_costs["minimax-m2.7"].cost == pricing_maps_module.ModelCost(
+    assert "MiniMax-M2.7" not in resolved
+    assert resolved["minimax-m2.7"].cost == pricing_maps_module.ModelCost(
         input=1.5,
         output=2.5,
         cache_read=0.15,
-    )
-    assert "MiniMax-M2.7" not in resolved.provider_costs["minimax"]
-    assert resolved.provider_costs["minimax"]["minimax-m2.7"].cost == (
-        pricing_maps_module.ModelCost(
-            input=3.0,
-            output=4.0,
-            cache_read=0.3,
-        )
     )
 
 
@@ -418,11 +345,7 @@ providers:
   alpha:
     base_url: https://alpha.example/v1
     models:
-      alpha-1:
-        cost:
-          input: 3.0
-          output: 4.0
-          cacheRead: 0.3
+      alpha-1: {}
 """,
         encoding="utf-8",
     )
@@ -450,13 +373,6 @@ providers:
         input=1.0,
         output=2.0,
         cache_read=0.1,
-    )
-    assert pricing_maps_module.PROVIDER_MODEL_COSTS["alpha"]["alpha-1"] == (
-        pricing_maps_module.ModelCost(
-            input=3.0,
-            output=4.0,
-            cache_read=0.3,
-        )
     )
 
 

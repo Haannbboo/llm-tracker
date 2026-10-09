@@ -112,52 +112,20 @@ def test_record_usage_normalizes_provider_without_losing_pricing(test_db, monkey
     from sqlalchemy import select
     from sqlalchemy.orm import Session
 
-    from src.config.app import build_maps
     from src.database import count_usage, get_engine, summarize_usage_window
     from src.database.models import BaseUrl, PriceSnapshot, SessionRecord, UsageDaily
     from src.pricing import costs
-    from src.pricing.maps import resolve_all_costs
     from src.pricing.models import ModelCost
-    from src.pricing.sources.base import FetchedSource, SourceEntry
     from src.recorder import record_usage
 
-    config = {
-        "providers": {
-            "Custom-Provider": {
-                "base_url": "https://api.example.com/v1",
-                "price_multiplier": 2,
-                "models": {"test-model": {"cost": {"output": 3}}},
-            }
-        }
-    }
-    provider_map, _ = build_maps(config)
-    resolved = resolve_all_costs(
-        config,
-        [
-            FetchedSource(
-                name="test-source",
-                priority=0,
-                entries=(
-                    SourceEntry(
-                        provider="CUSTOM-PROVIDER",
-                        key="test-model",
-                        cost=ModelCost(
-                            input=1, output=2, cache_read=0.25, cache_write=0.5
-                        ),
-                    ),
-                ),
-            )
-        ],
-    )
     provider = "custom-provider"
-    monkeypatch.setitem(costs.PROVIDER_MAP, provider, provider_map[provider])
     monkeypatch.setitem(
-        costs.PROVIDER_MODEL_COSTS,
-        provider,
-        {key: rc.cost for key, rc in resolved.provider_costs[provider].items()},
+        costs.MODEL_COSTS,
+        "test-model",
+        ModelCost(input=1, output=2, cache_read=0.25, cache_write=0.5),
     )
-    assert costs.get_provider_price_multiplier("CUSTOM-PROVIDER") == Decimal("2")
-    assert costs.resolve_cost_match("Custom-Provider", "test-model").scope == "provider"
+    monkeypatch.setitem(costs.MODEL_COST_SOURCES, "test-model", "test-source")
+    assert costs.resolve_cost_match("test-model").source == "test-source"
 
     for name in ("CUSTOM-PROVIDER", "Custom-Provider"):
         usage = record_usage(
@@ -177,7 +145,7 @@ def test_record_usage_normalizes_provider_without_losing_pricing(test_db, monkey
         )
         assert usage is not None
         assert usage.provider == provider
-        assert usage.total_cost_usd == Decimal("0.0048")
+        assert usage.total_cost_usd == Decimal("0.0019")
         assert usage.price_snapshot_id is not None
 
     with Session(get_engine(test_db)) as session:
@@ -186,8 +154,8 @@ def test_record_usage_normalizes_provider_without_losing_pricing(test_db, monkey
         assert daily.request_count == 2
         record = session.get(SessionRecord, "provider-normalization")
         assert record.primary_provider == provider
-        assert json.loads(record.providers_json) == {provider: 0.0096}
-        assert session.scalars(select(PriceSnapshot)).one().provider == provider
+        assert json.loads(record.providers_json) == {provider: 0.0038}
+        assert session.scalars(select(PriceSnapshot)).one().model == "test-model"
         assert session.scalars(select(BaseUrl)).one().provider_name == provider
 
     assert (
@@ -217,14 +185,7 @@ def test_record_usage_computes_costs(test_db):
     from src.recorder import record_usage
 
     original_model_costs = costs_module.MODEL_COSTS.copy()
-    original_provider_costs = {
-        provider: costs.copy()
-        for provider, costs in costs_module.PROVIDER_MODEL_COSTS.items()
-    }
-    original_provider_map = costs_module.PROVIDER_MAP.copy()
     costs_module.MODEL_COSTS.clear()
-    costs_module.PROVIDER_MODEL_COSTS.clear()
-    costs_module.PROVIDER_MAP.clear()
     costs_module.MODEL_COSTS["test-model"] = ModelCost(
         input=1.0, output=2.0, cache_read=0.5
     )
@@ -255,10 +216,6 @@ def test_record_usage_computes_costs(test_db):
     finally:
         costs_module.MODEL_COSTS.clear()
         costs_module.MODEL_COSTS.update(original_model_costs)
-        costs_module.PROVIDER_MODEL_COSTS.clear()
-        costs_module.PROVIDER_MODEL_COSTS.update(original_provider_costs)
-        costs_module.PROVIDER_MAP.clear()
-        costs_module.PROVIDER_MAP.update(original_provider_map)
 
 
 def test_record_usage_writes_price_snapshot(test_db):
@@ -269,10 +226,8 @@ def test_record_usage_writes_price_snapshot(test_db):
 
     original_model_costs = costs_module.MODEL_COSTS.copy()
     original_model_cost_sources = costs_module.MODEL_COST_SOURCES.copy()
-    original_provider_map = costs_module.PROVIDER_MAP.copy()
     costs_module.MODEL_COSTS.clear()
     costs_module.MODEL_COST_SOURCES.clear()
-    costs_module.PROVIDER_MAP.clear()
     costs_module.MODEL_COSTS["snap-model"] = ModelCost(
         input=1.0, output=2.0, cache_read=0.5, cache_write=3.0
     )
@@ -297,18 +252,16 @@ def test_record_usage_writes_price_snapshot(test_db):
 
         snapshot = get_price_snapshot(
             date="2026-05-19",
-            provider="snap-provider",
             model="snap-model",
             db_path=test_db,
         )
         assert snapshot is not None
-        cost, multiplier, _source = snapshot
+        cost, _source = snapshot
         from dataclasses import asdict
 
         assert asdict(cost) == asdict(
             ModelCost(input=1.0, output=2.0, cache_read=0.5, cache_write=3.0)
         )
-        assert multiplier == 1.0
 
         from src.pricing.snapshots import enrich_rows
 
@@ -333,8 +286,6 @@ def test_record_usage_writes_price_snapshot(test_db):
         costs_module.MODEL_COSTS.update(original_model_costs)
         costs_module.MODEL_COST_SOURCES.clear()
         costs_module.MODEL_COST_SOURCES.update(original_model_cost_sources)
-        costs_module.PROVIDER_MAP.clear()
-        costs_module.PROVIDER_MAP.update(original_provider_map)
 
 
 def test_record_usage_persists_client_ip(test_db):

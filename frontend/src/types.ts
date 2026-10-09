@@ -27,7 +27,6 @@ export type UsageSummary = {
 
 export type PricingDetail = {
   source: string | null
-  multiplier: number
   input: number
   output: number
   cache_read: number
@@ -281,14 +280,8 @@ export type PricingEntry = {
   cache_read: number
   cache_write: number | null
   source: PricingSource
-  scope: string
   tiers?: PricingTier[]
   time_rates?: PricingTimeRate[]
-  effective_input?: number
-  effective_output?: number
-  effective_cache_read?: number
-  effective_cache_write?: number | null
-  multiplier?: number
 }
 
 export type PricingMap = Record<string, PricingEntry>

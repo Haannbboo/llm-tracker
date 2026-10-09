@@ -32,7 +32,6 @@ from src.config.server_config import (
     resolve_otlp_host_port,
     resolve_server_urls,
 )
-from src.pricing.models import ResolvedCost
 
 from ._version import get_version
 from .auth import (
@@ -87,7 +86,7 @@ from .evaluation import (
 from .evaluation_worker import load_evaluation_worker_config, run_evaluation_worker
 from .pricing.costs import resolve_cost_match
 from .pricing.snapshots import enrich_rows
-from .utils import normalize_model_name, normalize_provider_name
+from .utils import normalize_model_name
 
 logger = logging.getLogger(__name__)
 EVALUATION_WORKER_SHUTDOWN_TIMEOUT_SECONDS = 5
@@ -991,7 +990,7 @@ async def update_evaluation_config(update: EvaluationConfigUpdate):
     return {"global_evaluator_type": update.evaluator}
 
 
-def _pricing_entry(resolved_cost, scope: str, multiplier: float) -> dict:
+def _pricing_entry(resolved_cost) -> dict:
     cost = resolved_cost.cost
     return {
         "input": cost.input,
@@ -1022,26 +1021,7 @@ def _pricing_entry(resolved_cost, scope: str, multiplier: float) -> dict:
             for rate in cost.time_rates
         ],
         "source": resolved_cost.source,
-        "scope": scope,
-        "effective_input": cost.input * multiplier,
-        "effective_output": cost.output * multiplier,
-        "effective_cache_read": cost.cache_read * multiplier,
-        "effective_cache_write": (
-            cost.cache_write * multiplier if cost.cache_write is not None else None
-        ),
-        "multiplier": multiplier,
     }
-
-
-def _resolve_provider_multiplier(config_snapshot: dict, provider: str | None) -> float:
-    if provider is None:
-        return 1.0
-    provider_config = config_snapshot.get("providers", {}).get(
-        normalize_provider_name(provider), {}
-    )
-    if not isinstance(provider_config, dict):
-        return 1.0
-    return float(provider_config.get("price_multiplier", 1.0))
 
 
 def _fetch_live_sources(config_snapshot):
@@ -1057,7 +1037,10 @@ def _fetch_live_sources(config_snapshot):
 async def _resolve_live_cost_maps():
     """Live-resolved pricing (config overrides + freshest source data), shared
     by /pricing/{model} and /usage/{id}/recalculate-cost so both price a model
-    identically instead of drifting from independently maintained copies."""
+    identically instead of drifting from independently maintained copies.
+
+    Returns ``(resolved, model_costs, model_cost_sources)``.
+    """
     from src.pricing.maps import resolve_all_costs
 
     with _config_lock:
@@ -1065,51 +1048,20 @@ async def _resolve_live_cost_maps():
     resolved = resolve_all_costs(
         config_snapshot, await asyncio.to_thread(_fetch_live_sources, config_snapshot)
     )
-    model_costs = {key: rc.cost for key, rc in resolved.global_costs.items()}
-    provider_model_costs = {
-        provider_name: {key: rc.cost for key, rc in costs.items()}
-        for provider_name, costs in resolved.provider_costs.items()
-    }
-    return config_snapshot, resolved, model_costs, provider_model_costs
+    model_costs = {key: rc.cost for key, rc in resolved.items()}
+    model_cost_sources = {key: rc.source for key, rc in resolved.items()}
+    return resolved, model_costs, model_cost_sources
 
 
 @app.get("/pricing")
-async def get_pricing(provider: str | None = None):
+async def get_pricing():
     """Return all models with resolved pricing and source metadata."""
-    from src.pricing.maps import resolve_all_costs
-
-    with _config_lock:
-        config_snapshot = dict(CONFIG)
-
-    resolved = resolve_all_costs(
-        config_snapshot, await asyncio.to_thread(_fetch_live_sources, config_snapshot)
-    )
-    result: dict[str, dict] = {}
-
-    if provider is not None:
-        provider = normalize_provider_name(provider)
-        multiplier = _resolve_provider_multiplier(config_snapshot, provider)
-
-        for key, resolved_cost in resolved.global_costs.items():
-            result[key] = _pricing_entry(resolved_cost, "global", multiplier)
-
-        for key, resolved_cost in resolved.provider_costs.get(provider, {}).items():
-            result[key] = _pricing_entry(resolved_cost, provider, multiplier)
-
-        return result
-
-    for key, resolved_cost in resolved.global_costs.items():
-        result[key] = _pricing_entry(resolved_cost, "global", 1.0)
-
-    for provider_name, costs in resolved.provider_costs.items():
-        for key, resolved_cost in costs.items():
-            result[key] = _pricing_entry(resolved_cost, provider_name, 1.0)
-
-    return result
+    resolved, _costs, _sources = await _resolve_live_cost_maps()
+    return {key: _pricing_entry(rc) for key, rc in resolved.items()}
 
 
 @app.get("/pricing/{model:path}")
-async def get_model_pricing(model: str, provider: str | None = None):
+async def get_model_pricing(model: str):
     """Return resolved pricing for a single model.
 
     Follows the same resolution used at record time: config overrides first,
@@ -1117,57 +1069,27 @@ async def get_model_pricing(model: str, provider: str | None = None):
     containing-name fallback when no exact match exists.
     """
     model = normalize_model_name(model)
-    if provider is not None:
-        provider = normalize_provider_name(provider)
     if not model:
         raise HTTPException(status_code=422, detail="model must not be empty")
 
-    (
-        config_snapshot,
-        resolved,
-        model_costs,
-        provider_model_costs,
-    ) = await _resolve_live_cost_maps()
-    multiplier = _resolve_provider_multiplier(config_snapshot, provider)
-    match = resolve_cost_match(
-        provider,
-        model,
-        model_costs,
-        provider_model_costs,
-    )
+    resolved, model_costs, model_cost_sources = await _resolve_live_cost_maps()
+    match = resolve_cost_match(model, model_costs, model_cost_sources)
     if match is None:
         return {
             "model": model,
-            "provider": provider,
             "resolved": False,
-            "scope": None,
             "source": None,
             "input": 0.0,
             "output": 0.0,
             "cache_read": 0.0,
             "cache_write": None,
             "tiers": [],
-            "effective_input": 0.0,
-            "effective_output": 0.0,
-            "effective_cache_read": 0.0,
-            "effective_cache_write": None,
-            "multiplier": multiplier,
         }
-
-    if match.scope == "provider" and provider is not None:
-        source = resolved.provider_costs[provider][match.key].source
-        scope = provider
-    else:
-        source = resolved.global_costs[match.key].source
-        scope = "global"
 
     return {
         "model": match.key,
-        "provider": provider,
         "resolved": True,
-        **_pricing_entry(
-            ResolvedCost(cost=match.cost, source=source), scope, multiplier
-        ),
+        **_pricing_entry(resolved[match.key]),
     }
 
 
@@ -1178,29 +1100,17 @@ async def recalculate_usage_cost_route(request: Request, usage_id: str):
     Uses the same live-resolved pricing snapshot as /pricing/{model} (config
     overrides + freshest source data), not the periodically-refreshed
     record-time cache. Skips (leaves the row untouched) when the row's
-    provider/model no longer resolves against current pricing, rather than
+    model no longer resolves against current pricing, rather than
     overwriting with a zeroed fallback cost.
     """
     user_id = _request_user_id(request)
-    (
-        _config_snapshot,
-        _resolved,
-        model_costs,
-        provider_model_costs,
-    ) = await _resolve_live_cost_maps()
-    model_cost_sources = {key: rc.source for key, rc in _resolved.global_costs.items()}
-    provider_model_cost_sources = {
-        provider_name: {key: rc.source for key, rc in costs.items()}
-        for provider_name, costs in _resolved.provider_costs.items()
-    }
+    _resolved, model_costs, model_cost_sources = await _resolve_live_cost_maps()
 
     result = recalculate_usage_cost(
         usage_id,
         user_id=user_id,
         model_costs=model_costs,
-        provider_model_costs=provider_model_costs,
         model_cost_sources=model_cost_sources,
-        provider_model_cost_sources=provider_model_cost_sources,
     )
     if result is None:
         raise HTTPException(status_code=404, detail="usage row not found")
@@ -1230,21 +1140,11 @@ async def reprice_estimated_usage(
     Recomputes stored costs, session/daily rollups, and the snapshot binding for
     every row with no ``price_snapshot_id``, optionally filtered by
     provider/model/date range and capped with ``limit``. Rows whose
-    provider/model no longer resolves are left untouched and reported as
+    model no longer resolves are left untouched and reported as
     skipped. Bulk work runs in a worker thread; an unfiltered run over a large
     history can take a while.
     """
-    (
-        _config_snapshot,
-        _resolved,
-        model_costs,
-        provider_model_costs,
-    ) = await _resolve_live_cost_maps()
-    model_cost_sources = {key: rc.source for key, rc in _resolved.global_costs.items()}
-    provider_model_cost_sources = {
-        provider_name: {key: rc.source for key, rc in costs.items()}
-        for provider_name, costs in _resolved.provider_costs.items()
-    }
+    _resolved, model_costs, model_cost_sources = await _resolve_live_cost_maps()
 
     return await asyncio.to_thread(
         reprice_estimated_rows,
@@ -1254,9 +1154,7 @@ async def reprice_estimated_usage(
         until=until,
         limit=limit,
         model_costs=model_costs,
-        provider_model_costs=provider_model_costs,
         model_cost_sources=model_cost_sources,
-        provider_model_cost_sources=provider_model_cost_sources,
     )
 
 

@@ -28,7 +28,7 @@ def _litellm(costs: dict[str, ModelCost]) -> list[FetchedSource]:
         FetchedSource(
             name="litellm",
             priority=0,
-            entries=tuple(SourceEntry(None, key, cost) for key, cost in costs.items()),
+            entries=tuple(SourceEntry(key, cost) for key, cost in costs.items()),
         )
     ]
 
@@ -690,36 +690,8 @@ def test_resolve_all_costs_yaml_global(config_module, pricing_maps_module):
 
     resolved = pricing_maps_module.resolve_all_costs(config)
 
-    assert resolved.global_costs["claude-sonnet-4-6"].source == "yaml"
-    assert resolved.global_costs["claude-sonnet-4-6"].cost.input == 3.0
-    assert resolved.provider_costs == {}
-
-
-def test_resolve_all_costs_provider_override_keeps_global(
-    config_module, pricing_maps_module
-):
-    config = {
-        "models": {
-            "test-model": {"cost": {"input": 1.0, "output": 2.0, "cacheRead": 0.1}},
-        },
-        "providers": {
-            "my-provider": {
-                "base_url": "https://example.com",
-                "models": {
-                    "test-model": {
-                        "cost": {"input": 5.0, "output": 10.0, "cacheRead": 0.5}
-                    },
-                },
-            },
-        },
-    }
-
-    resolved = pricing_maps_module.resolve_all_costs(config)
-
-    assert resolved.global_costs["test-model"].cost.input == 1.0
-    assert resolved.global_costs["test-model"].source == "yaml"
-    assert resolved.provider_costs["my-provider"]["test-model"].cost.input == 5.0
-    assert resolved.provider_costs["my-provider"]["test-model"].source == "yaml"
+    assert resolved["claude-sonnet-4-6"].source == "yaml"
+    assert resolved["claude-sonnet-4-6"].cost.input == 3.0
 
 
 def test_resolve_all_costs_litellm_gap_fill(config_module, pricing_maps_module):
@@ -733,8 +705,8 @@ def test_resolve_all_costs_litellm_gap_fill(config_module, pricing_maps_module):
 
     resolved = pricing_maps_module.resolve_all_costs(config, _litellm(remote))
 
-    assert resolved.global_costs["claude-sonnet-4-6"].source == "litellm"
-    assert resolved.global_costs["claude-sonnet-4-6"].cost.input == 3.0
+    assert resolved["claude-sonnet-4-6"].source == "litellm"
+    assert resolved["claude-sonnet-4-6"].cost.input == 3.0
 
 
 def test_resolve_all_costs_yaml_wins_over_litellm(config_module, pricing_maps_module):
@@ -750,8 +722,8 @@ def test_resolve_all_costs_yaml_wins_over_litellm(config_module, pricing_maps_mo
 
     resolved = pricing_maps_module.resolve_all_costs(config, _litellm(remote))
 
-    assert resolved.global_costs["test-model"].cost.input == 1.0
-    assert resolved.global_costs["test-model"].source == "yaml"
+    assert resolved["test-model"].cost.input == 1.0
+    assert resolved["test-model"].source == "yaml"
 
 
 def test_resolve_all_costs_partial_yaml_merges_with_litellm(
@@ -774,250 +746,20 @@ def test_resolve_all_costs_partial_yaml_merges_with_litellm(
 
     resolved = pricing_maps_module.resolve_all_costs(config, _litellm(remote))
 
-    cost = resolved.global_costs["test-model"].cost
-    assert resolved.global_costs["test-model"].source == "yaml"
+    cost = resolved["test-model"].cost
+    assert resolved["test-model"].source == "yaml"
     assert cost.input == 9.0
     assert cost.output == 2.0
     assert cost.cache_read == 0.1
     assert cost.cache_write == 0.25
 
 
-def test_resolve_all_costs_partial_provider_yaml_merges_with_global(
-    config_module, pricing_maps_module
-):
-    config = {
-        "models": {
-            "test-model": {
-                "cost": {
-                    "input": 1.0,
-                    "output": 2.0,
-                    "cacheRead": 0.1,
-                    "cacheWrite": 0.25,
-                }
-            },
-        },
-        "providers": {
-            "prov-a": {
-                "base_url": "https://a.com",
-                "models": {
-                    "test-model": {
-                        "cost": {"input": 9.0},
-                    },
-                },
-            },
-        },
-    }
-
-    resolved = pricing_maps_module.resolve_all_costs(config)
-
-    cost = resolved.provider_costs["prov-a"]["test-model"].cost
-    assert resolved.provider_costs["prov-a"]["test-model"].source == "yaml"
-    assert cost.input == 9.0
-    assert cost.output == 2.0
-    assert cost.cache_read == 0.1
-    assert cost.cache_write == 0.25
-
-
-def test_resolve_all_costs_both_scopes_coexist(config_module, pricing_maps_module):
-    config = {
-        "models": {
-            "test-model": {"cost": {"input": 1.0, "output": 2.0, "cacheRead": 0.1}},
-        },
-        "providers": {
-            "prov-a": {
-                "base_url": "https://a.com",
-                "models": {
-                    "test-model": {
-                        "cost": {"input": 5.0, "output": 10.0, "cacheRead": 0.5}
-                    },
-                },
-            },
-        },
-    }
-
-    resolved = pricing_maps_module.resolve_all_costs(config)
-
-    assert resolved.global_costs["test-model"].cost.input == 1.0
-    assert resolved.provider_costs["prov-a"]["test-model"].cost.input == 5.0
-
-
-def test_resolve_all_costs_provider_override_inherits_provider_scoped_base(
-    config_module, pricing_maps_module
-):
-    config = {
-        "models": {},
-        "providers": {
-            "prov-a": {
-                "base_url": "https://a.com",
-                "models": {"test-model": {"cost": {"input": 9.0}}},
-            },
-        },
-    }
-    fetched = [
-        FetchedSource(
-            name="prov-src",
-            priority=0,
-            entries=(
-                SourceEntry(
-                    provider="prov-a",
-                    key="test-model",
-                    cost=ModelCost(
-                        input=1.0, output=2.0, cache_read=0.1, cache_write=0.25
-                    ),
-                ),
-            ),
-        )
-    ]
-
-    resolved = pricing_maps_module.resolve_all_costs(config, fetched)
-
-    cost = resolved.provider_costs["prov-a"]["test-model"].cost
-    assert cost.input == 9.0  # YAML override wins
-    assert cost.output == 2.0  # inherited from provider-scoped fetched cost
-    assert cost.cache_read == 0.1
-    assert cost.cache_write == 0.25
-
-
-def test_resolve_all_costs_remote_and_yaml_scopes_coexist(
-    config_module, pricing_maps_module
-):
-    config = {
-        "models": {
-            "test-model": {"cost": {"input": 1.0, "output": 2.0, "cacheRead": 0.1}},
-        },
-        "providers": {
-            "prov-a": {
-                "base_url": "https://a.com",
-                "models": {
-                    "test-model": {
-                        "cost": {"input": 5.0, "output": 10.0, "cacheRead": 0.5}
-                    },
-                },
-            },
-        },
-    }
-    remote = {
-        "remote-only": ModelCost(input=3.0, output=6.0, cache_read=0.3),
-        "test-model": ModelCost(input=99.0, output=99.0, cache_read=99.0),
-    }
-
-    resolved = pricing_maps_module.resolve_all_costs(config, _litellm(remote))
-
-    assert resolved.global_costs["test-model"].cost.input == 1.0
-    assert resolved.global_costs["remote-only"].cost.input == 3.0
-    assert resolved.provider_costs["prov-a"]["test-model"].cost.input == 5.0
-
-
-def test_pricing_endpoint_provider_display_overwrites_global_same_key(
-    api_module, monkeypatch
-):
+def test_pricing_lists_yaml_and_source_models(api_module, monkeypatch):
     _reset_config(api_module)
     api_module.CONFIG.update(
         {
             "models": {
                 "test-model": {"cost": {"input": 1.0, "output": 2.0, "cacheRead": 0.1}},
-            },
-            "providers": {
-                "prov-a": {
-                    "base_url": "https://a.com",
-                    "models": {
-                        "test-model": {
-                            "cost": {
-                                "input": 5.0,
-                                "output": 10.0,
-                                "cacheRead": 0.5,
-                            }
-                        },
-                    },
-                },
-            },
-        }
-    )
-    monkeypatch.setattr(
-        "src.pricing.sources.litellm.fetch_remote_pricing", lambda *args, **kwargs: {}
-    )
-
-    response = TestClient(api_module.app).get("/pricing")
-
-    assert response.status_code == 200
-    data = response.json()
-    assert data["test-model"]["scope"] == "prov-a"
-    assert data["test-model"]["source"] == "yaml"
-    assert data["test-model"]["input"] == 5.0
-
-
-def test_pricing_with_multiplier(api_module, monkeypatch):
-    _reset_config(api_module)
-    api_module.CONFIG.update(
-        {
-            "models": {
-                "fallback-model": {
-                    "cost": {"input": 1.0, "output": 2.0, "cacheRead": 0.25}
-                },
-            },
-            "providers": {
-                "prov-a": {
-                    "base_url": "https://a.com",
-                    "price_multiplier": 1.5,
-                    "models": {
-                        "override-model": {
-                            "cost": {
-                                "input": 5.0,
-                                "output": 10.0,
-                                "cacheRead": 0.5,
-                                "cacheWrite": 6.0,
-                            }
-                        },
-                    },
-                },
-            },
-        }
-    )
-    monkeypatch.setattr(
-        "src.pricing.sources.litellm.fetch_remote_pricing", lambda *args, **kwargs: {}
-    )
-
-    response = TestClient(api_module.app).get("/pricing?provider=prov-a")
-
-    assert response.status_code == 200
-    data = response.json()
-    assert data["override-model"]["input"] == 5.0
-    assert data["override-model"]["output"] == 10.0
-    assert data["override-model"]["cache_read"] == 0.5
-    assert data["override-model"]["cache_write"] == 6.0
-    assert data["override-model"]["scope"] == "prov-a"
-    assert data["override-model"]["multiplier"] == 1.5
-    assert data["override-model"]["effective_input"] == 7.5
-    assert data["override-model"]["effective_output"] == 15.0
-    assert data["override-model"]["effective_cache_read"] == 0.75
-    assert data["override-model"]["effective_cache_write"] == 9.0
-
-
-def test_pricing_without_provider_shows_all(api_module, monkeypatch):
-    _reset_config(api_module)
-    api_module.CONFIG.update(
-        {
-            "models": {
-                "test-model": {"cost": {"input": 1.0, "output": 2.0, "cacheRead": 0.1}},
-            },
-            "providers": {
-                "prov-a": {
-                    "base_url": "https://a.com",
-                    "price_multiplier": 2.0,
-                    "models": {
-                        "test-model": {
-                            "cost": {"input": 5.0, "output": 10.0, "cacheRead": 0.5}
-                        },
-                    },
-                },
-                "prov-b": {
-                    "base_url": "https://b.com",
-                    "models": {
-                        "other-model": {
-                            "cost": {"input": 7.0, "output": 14.0, "cacheRead": 0.7}
-                        },
-                    },
-                },
             },
         }
     )
@@ -1032,125 +774,11 @@ def test_pricing_without_provider_shows_all(api_module, monkeypatch):
 
     assert response.status_code == 200
     data = response.json()
-    assert data["test-model"]["scope"] == "prov-a"
-    assert data["test-model"]["input"] == 5.0
-    assert data["test-model"]["effective_input"] == 5.0
-    assert data["test-model"]["multiplier"] == 1.0
-    assert data["other-model"]["scope"] == "prov-b"
-    assert data["remote-model"]["scope"] == "global"
-
-
-def test_pricing_unknown_provider_defaults_multiplier_1(api_module, monkeypatch):
-    _reset_config(api_module)
-    api_module.CONFIG.update(
-        {
-            "models": {
-                "global-model": {
-                    "cost": {"input": 1.0, "output": 2.0, "cacheRead": 0.1}
-                },
-            },
-            "providers": {},
-        }
-    )
-    monkeypatch.setattr(
-        "src.pricing.sources.litellm.fetch_remote_pricing", lambda *args, **kwargs: {}
-    )
-
-    response = TestClient(api_module.app).get("/pricing?provider=missing")
-
-    assert response.status_code == 200
-    data = response.json()
-    assert data["global-model"]["scope"] == "global"
-    assert data["global-model"]["multiplier"] == 1.0
-    assert data["global-model"]["effective_input"] == 1.0
-    assert data["global-model"]["effective_output"] == 2.0
-    assert data["global-model"]["effective_cache_read"] == 0.1
-
-
-def test_pricing_two_providers_same_model_route_correctly(api_module, monkeypatch):
-    _reset_config(api_module)
-    api_module.CONFIG.update(
-        {
-            "models": {},
-            "providers": {
-                "prov-a": {
-                    "base_url": "https://a.com",
-                    "price_multiplier": 2.0,
-                    "models": {
-                        "shared-model": {
-                            "cost": {"input": 1.0, "output": 2.0, "cacheRead": 0.1}
-                        },
-                    },
-                },
-                "prov-b": {
-                    "base_url": "https://b.com",
-                    "price_multiplier": 3.0,
-                    "models": {
-                        "shared-model": {
-                            "cost": {"input": 4.0, "output": 8.0, "cacheRead": 0.4}
-                        },
-                    },
-                },
-            },
-        }
-    )
-    monkeypatch.setattr(
-        "src.pricing.sources.litellm.fetch_remote_pricing", lambda *args, **kwargs: {}
-    )
-
-    prov_a = TestClient(api_module.app).get("/pricing?provider=prov-a").json()
-    prov_b = TestClient(api_module.app).get("/pricing?provider=prov-b").json()
-
-    assert prov_a["shared-model"]["scope"] == "prov-a"
-    assert prov_a["shared-model"]["input"] == 1.0
-    assert prov_a["shared-model"]["effective_input"] == 2.0
-    assert prov_b["shared-model"]["scope"] == "prov-b"
-    assert prov_b["shared-model"]["input"] == 4.0
-    assert prov_b["shared-model"]["effective_input"] == 12.0
-
-
-def test_pricing_provider_override_beats_global_and_fallback_gets_multiplier(
-    api_module, monkeypatch
-):
-    _reset_config(api_module)
-    api_module.CONFIG.update(
-        {
-            "models": {
-                "shared-model": {
-                    "cost": {"input": 1.0, "output": 2.0, "cacheRead": 0.1}
-                },
-                "global-only": {
-                    "cost": {"input": 3.0, "output": 6.0, "cacheRead": 0.3}
-                },
-            },
-            "providers": {
-                "prov-a": {
-                    "base_url": "https://a.com",
-                    "price_multiplier": 2.0,
-                    "models": {
-                        "shared-model": {
-                            "cost": {"input": 5.0, "output": 10.0, "cacheRead": 0.5}
-                        },
-                    },
-                },
-            },
-        }
-    )
-    monkeypatch.setattr(
-        "src.pricing.sources.litellm.fetch_remote_pricing", lambda *args, **kwargs: {}
-    )
-
-    response = TestClient(api_module.app).get("/pricing?provider=prov-a")
-
-    assert response.status_code == 200
-    data = response.json()
-    assert data["shared-model"]["scope"] == "prov-a"
-    assert data["shared-model"]["input"] == 5.0
-    assert data["shared-model"]["effective_input"] == 10.0
-    assert data["global-only"]["scope"] == "global"
-    assert data["global-only"]["input"] == 3.0
-    assert data["global-only"]["multiplier"] == 2.0
-    assert data["global-only"]["effective_input"] == 6.0
+    assert data["test-model"]["input"] == 1.0
+    assert data["test-model"]["source"] == "yaml"
+    assert data["remote-model"]["source"] == "litellm"
+    assert "scope" not in data["test-model"]
+    assert "multiplier" not in data["test-model"]
 
 
 def test_single_model_pricing_contains_litellm_match(api_module, monkeypatch):
@@ -1171,12 +799,10 @@ def test_single_model_pricing_contains_litellm_match(api_module, monkeypatch):
     data = response.json()
     assert data["resolved"] is True
     assert data["model"] == "openrouter/xiaomi/mimo-v2.5-pro"
-    assert data["scope"] == "global"
     assert data["source"] == "litellm"
     assert data["input"] == 1.0
     assert data["output"] == 3.0
     assert data["cache_read"] == 0.2
-    assert data["multiplier"] == 1.0
     assert data["tiers"] == []
 
 
@@ -1278,53 +904,6 @@ def test_single_model_pricing_yaml_override_beats_litellm(api_module, monkeypatc
     assert data["output"] == 4.0
 
 
-@pytest.mark.parametrize("provider", ["prov-a", "PROV-A", "Prov-A"])
-def test_single_model_pricing_provider_scope_and_multiplier(
-    api_module, monkeypatch, provider
-):
-    _reset_config(api_module)
-    api_module.CONFIG.update(
-        {
-            "models": {
-                "test-model": {"cost": {"input": 1.0, "output": 2.0, "cacheRead": 0.1}},
-            },
-            "providers": {
-                "prov-a": {
-                    "base_url": "https://a.com",
-                    "price_multiplier": 2.0,
-                    "models": {
-                        "test-model": {
-                            "cost": {"input": 5.0, "output": 10.0, "cacheRead": 0.5}
-                        },
-                    },
-                },
-            },
-        }
-    )
-    monkeypatch.setattr(
-        "src.pricing.sources.litellm.fetch_remote_pricing", lambda *args, **kwargs: {}
-    )
-
-    client = TestClient(api_module.app)
-    response = client.get("/pricing/test-model", params={"provider": provider})
-
-    assert response.status_code == 200
-    data = response.json()
-    assert data["resolved"] is True
-    assert data["provider"] == "prov-a"
-    assert data["model"] == "test-model"
-    assert data["scope"] == "prov-a"
-    assert data["source"] == "yaml"
-    assert data["input"] == 5.0
-    assert data["multiplier"] == 2.0
-    assert data["effective_input"] == 10.0
-    assert data["effective_output"] == 20.0
-
-    listing = client.get("/pricing", params={"provider": provider}).json()
-    assert listing["test-model"]["scope"] == "prov-a"
-    assert listing["test-model"]["effective_input"] == 10.0
-
-
 def test_single_model_pricing_cheapest_contains_match(api_module, monkeypatch):
     _reset_config(api_module)
     api_module.CONFIG.update({"models": {}, "providers": {}})
@@ -1398,38 +977,6 @@ def test_single_model_pricing_unresolved(api_module, monkeypatch, model, expecte
     assert data["model"] == expected
     assert data["input"] == 0.0
     assert data["output"] == 0.0
-
-
-def test_single_model_pricing_provider_contains_match(api_module, monkeypatch):
-    _reset_config(api_module)
-    api_module.CONFIG.update(
-        {
-            "models": {},
-            "providers": {
-                "prov-a": {
-                    "base_url": "https://a.com",
-                    "models": {
-                        "gateway/mimo-v2.5-pro": {
-                            "cost": {"input": 2.0, "output": 4.0, "cacheRead": 0.2}
-                        },
-                    },
-                },
-            },
-        }
-    )
-    monkeypatch.setattr(
-        "src.pricing.sources.litellm.fetch_remote_pricing", lambda *args, **kwargs: {}
-    )
-
-    response = TestClient(api_module.app).get("/pricing/mimo-v2.5-pro?provider=prov-a")
-
-    assert response.status_code == 200
-    data = response.json()
-    assert data["resolved"] is True
-    assert data["model"] == "gateway/mimo-v2.5-pro"
-    assert data["scope"] == "prov-a"
-    assert data["source"] == "yaml"
-    assert data["input"] == 2.0
 
 
 def test_single_model_pricing_case_insensitive(api_module, monkeypatch):
@@ -1795,3 +1342,17 @@ def test_fetch_litellm_json_does_not_mutate_global_getaddrinfo(monkeypatch):
 
     assert result is None
     assert base_module.socket.getaddrinfo is original_getaddrinfo
+
+
+def test_refresh_pricing_maps_warns_on_ignored_legacy_keys(pricing_maps_module, caplog):
+    config = {
+        "models": {"m": {"cost": {"input": 1.0, "output": 2.0}}},
+        "providers": {
+            "p": {"price_multiplier": 2, "models": {"m": {"cost": {"input": 9.0}}}}
+        },
+    }
+    with caplog.at_level("WARNING"):
+        pricing_maps_module.refresh_pricing_maps(config)
+    assert "providers.p.price_multiplier" in caplog.text
+    assert "providers.p.models.m" in caplog.text
+    assert pricing_maps_module.MODEL_COSTS["m"].input == 1.0

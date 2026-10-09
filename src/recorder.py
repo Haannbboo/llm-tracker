@@ -87,16 +87,14 @@ def record_usage(
     if duplicate is not None:
         return duplicate
 
-    resolved = resolve_pricing(provider, model, usage_ts)
+    resolved = resolve_pricing(model, usage_ts)
     costs = calculate_costs(
         prompt_tokens=prompt_tokens,
         completion_tokens=completion_tokens,
         cached_tokens=cached_tokens,
         cache_creation_tokens=cache_creation_tokens,
-        provider=provider,
         model=model,
         model_cost=resolved.cost,
-        multiplier=resolved.multiplier,
     )
     base_url_id = resolve_base_url_id(
         base_url=base_url,
@@ -108,7 +106,7 @@ def record_usage(
     # Snapshot the pricing that was in effect so the row's cost split can be
     # recomputed exactly later. Best-effort: a snapshot failure must never turn
     # a persisted usage row into a failed request.
-    snapshot_id = _record_price_snapshot(resolved, provider, model, usage_ts, db_path)
+    snapshot_id = _record_price_snapshot(resolved, model, usage_ts, db_path)
 
     usage = Usage(
         ts=usage_ts,
@@ -140,7 +138,6 @@ def record_usage(
 
 def _record_price_snapshot(
     resolved: ResolvedPricing,
-    provider: str,
     model: str,
     usage_ts: int,
     db_path: str | None,
@@ -154,15 +151,13 @@ def _record_price_snapshot(
     try:
         return ensure_price_snapshot(
             date=date,
-            provider=provider,
             model=model,
             source=resolved.source or "unknown",
             cost=resolved.cost,
-            multiplier=resolved.multiplier,
             db_path=db_path,
         )
     except Exception:
-        log.warning("Failed to record price snapshot for %s/%s", provider, model)
+        log.warning("Failed to record price snapshot for %s", model)
         return None
 
 

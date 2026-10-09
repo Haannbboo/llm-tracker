@@ -36,13 +36,8 @@ _CACHE_NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
 
 @dataclass(frozen=True)
 class SourceEntry:
-    """One model's pricing from one source.
+    """One model's pricing from one source."""
 
-    ``provider`` is ``None`` for global (aggregator) entries or a
-    provider-scoped name for provider-specific sources.
-    """
-
-    provider: str | None
     key: str
     cost: ModelCost
 

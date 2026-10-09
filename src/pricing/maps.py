@@ -7,19 +7,21 @@ plus fetched LiteLLM pricing). ``src.config.app.refresh_runtime_config`` calls
 
 from __future__ import annotations
 
+import logging
 import threading
 from typing import Any
 
-from ..utils import normalize_model_name, normalize_provider_name
+from ..utils import normalize_model_name
 from ..utils import replace_contents as _replace_contents
 from .models import (
     ModelCost,
     ModelTier,
     ResolvedCost,
-    ResolvedCosts,
     build_segment_index,
 )
 from .sources.base import FetchedSource
+
+logger = logging.getLogger(__name__)
 
 
 def _parse_tiered_cost(cost: dict[str, Any], flat: ModelCost) -> tuple[ModelTier, ...]:
@@ -137,14 +139,13 @@ def _parse_model_cost(
 def resolve_all_costs(
     config: dict[str, Any],
     fetched: list[FetchedSource] | None = None,
-) -> ResolvedCosts:
-    """Resolve global and provider model costs with source metadata.
+) -> dict[str, ResolvedCost]:
+    """Resolve model costs with source metadata.
 
     Sources are layered lowest-priority first so higher-priority entries
     overwrite lower ones; YAML config is applied last as the top layer.
     """
-    global_costs: dict[str, ResolvedCost] = {}
-    provider_costs: dict[str, dict[str, ResolvedCost]] = {}
+    costs: dict[str, ResolvedCost] = {}
 
     # Process lowest priority first; on equal priority, later list entries are
     # processed first so the earlier config source wins the final overwrite.
@@ -154,66 +155,56 @@ def resolve_all_costs(
         reverse=True,
     ):
         for entry in source.entries:
-            resolved = ResolvedCost(cost=entry.cost, source=source.name)
-            key = normalize_model_name(entry.key)
-            if entry.provider:
-                provider = normalize_provider_name(entry.provider)
-                provider_costs.setdefault(provider, {})[key] = resolved
-            else:
-                global_costs[key] = resolved
+            costs[normalize_model_name(entry.key)] = ResolvedCost(
+                cost=entry.cost, source=source.name
+            )
 
     for model_name, model_config in config.get("models", {}).items():
         normalized_model = normalize_model_name(model_name)
-        base_cost = global_costs.get(normalized_model)
+        base_cost = costs.get(normalized_model)
         model_cost = _parse_model_cost(
             model_config,
             base_cost.cost if base_cost is not None else None,
         )
         if model_cost is not None:
-            global_costs[normalized_model] = ResolvedCost(
-                cost=model_cost,
-                source="yaml",
-            )
+            costs[normalized_model] = ResolvedCost(cost=model_cost, source="yaml")
 
-    for provider_name, provider in config.get("providers", {}).items():
-        if not isinstance(provider, dict):
-            continue
-        provider_name = normalize_provider_name(provider_name)
-        models = provider.get("models", {})
-        if isinstance(models, dict):
-            for model_name, model_config in models.items():
-                normalized_model = normalize_model_name(model_name)
-                base_cost = provider_costs.get(provider_name, {}).get(
-                    normalized_model
-                ) or global_costs.get(normalized_model)
-                model_cost = _parse_model_cost(
-                    model_config,
-                    base_cost.cost if base_cost is not None else None,
-                )
-                if model_cost is not None:
-                    provider_costs.setdefault(provider_name, {})[normalized_model] = (
-                        ResolvedCost(
-                            cost=model_cost,
-                            source="yaml",
-                        )
-                    )
-
-    return ResolvedCosts(global_costs=global_costs, provider_costs=provider_costs)
+    return costs
 
 
 # Runtime pricing maps, populated by refresh_pricing_maps().
 MODEL_COSTS: dict[str, ModelCost] = {}
-PROVIDER_MODEL_COSTS: dict[str, dict[str, ModelCost]] = {}
 MODEL_COST_SOURCES: dict[str, str] = {}
-PROVIDER_MODEL_COST_SOURCES: dict[str, dict[str, str]] = {}
 MODEL_SEGMENT_COSTS: dict[str, tuple[str, ModelCost]] = {}
-PROVIDER_MODEL_SEGMENT_COSTS: dict[str, dict[str, tuple[str, ModelCost]]] = {}
 
-# Guards the runtime pricing maps and the provider-multiplier map so a
-# concurrent config refresh cannot be observed half-applied (new rates with an
-# old multiplier/source). Reentrant so refresh_runtime_config can hold it across
-# both refresh_pricing_maps() and the PROVIDER_MAP swap.
+# Guards the runtime pricing maps so a concurrent config refresh cannot be
+# observed half-applied (new rates with an old source). Reentrant so
+# refresh_runtime_config can hold it across both refresh_pricing_maps() and the
+# PROVIDER_MAP swap.
 MAPS_LOCK = threading.RLock()
+
+
+def _warn_ignored_pricing_keys(config: dict[str, Any]) -> None:
+    """Pricing is model-keyed only; tell the operator about legacy keys that no
+    longer take effect instead of silently ignoring them."""
+    ignored = []
+    if "price_multiplier" in config:
+        ignored.append("price_multiplier")
+    for provider, provider_config in (config.get("providers") or {}).items():
+        if not isinstance(provider_config, dict):
+            continue
+        if "price_multiplier" in provider_config:
+            ignored.append(f"providers.{provider}.price_multiplier")
+        for model, model_config in (provider_config.get("models") or {}).items():
+            if isinstance(model_config, dict) and (
+                "cost" in model_config or "price_multiplier" in model_config
+            ):
+                ignored.append(f"providers.{provider}.models.{model}")
+    if ignored:
+        logger.warning(
+            "Ignoring legacy pricing config (move costs to top-level models.<name>.cost): %s",
+            ", ".join(ignored),
+        )
 
 
 def refresh_pricing_maps(
@@ -221,27 +212,13 @@ def refresh_pricing_maps(
     fetched: list[FetchedSource] | None = None,
 ) -> None:
     """Rebuild the runtime pricing maps from a config dict + fetched sources."""
+    _warn_ignored_pricing_keys(config)
     resolved = resolve_all_costs(config, fetched)
-    model_costs = {key: rc.cost for key, rc in resolved.global_costs.items()}
-    provider_model_costs = {
-        provider: {key: rc.cost for key, rc in costs.items()}
-        for provider, costs in resolved.provider_costs.items()
-    }
-    model_cost_sources = {key: rc.source for key, rc in resolved.global_costs.items()}
-    provider_model_cost_sources = {
-        provider: {key: rc.source for key, rc in costs.items()}
-        for provider, costs in resolved.provider_costs.items()
-    }
+    model_costs = {key: rc.cost for key, rc in resolved.items()}
+    model_cost_sources = {key: rc.source for key, rc in resolved.items()}
     model_segment_costs = build_segment_index(model_costs)
-    provider_model_segment_costs = {
-        provider_name: build_segment_index(costs)
-        for provider_name, costs in provider_model_costs.items()
-    }
 
     with MAPS_LOCK:
         _replace_contents(MODEL_COSTS, model_costs)
-        _replace_contents(PROVIDER_MODEL_COSTS, provider_model_costs)
         _replace_contents(MODEL_COST_SOURCES, model_cost_sources)
-        _replace_contents(PROVIDER_MODEL_COST_SOURCES, provider_model_cost_sources)
         _replace_contents(MODEL_SEGMENT_COSTS, model_segment_costs)
-        _replace_contents(PROVIDER_MODEL_SEGMENT_COSTS, provider_model_segment_costs)

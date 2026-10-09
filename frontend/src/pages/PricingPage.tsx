@@ -39,9 +39,6 @@ const PAGE_SIZE = 200
 export function PricingPage() {
   const { configStatus } = useApp()
   const {
-    selectedPricingProvider,
-    setSelectedPricingProvider,
-    providerOptions,
     pricingSearch,
     setPricingSearch,
     filteredPricingModels,
@@ -90,10 +87,6 @@ export function PricingPage() {
     return bySource
   }, [filteredPricingModels])
 
-  const pricingMultiplier = selectedPricingProvider === 'global'
-    ? 1
-    : filteredPricingModels.find((m) => typeof m.multiplier === 'number')?.multiplier ?? 1
-
   const formatPrice = (v: number | null | undefined) => (typeof v === 'number' ? v.toFixed(3) : '—')
 
   const modelPrice = (model: Model, field: string) => {
@@ -130,15 +123,6 @@ export function PricingPage() {
       },
     }
   }
-
-  const providerPriceDetail = (base: number | null | undefined, effective: number | null | undefined) => (
-    selectedPricingProvider !== 'global' && effective !== undefined ? (
-      <div style={{ marginTop: '4px', fontSize: '11px', color: 'var(--text-muted)', lineHeight: 1.4 }}>
-        <div style={{ color: 'var(--text-secondary)', fontWeight: 600 }}>{t('Effective:')} {formatPrice(effective)}</div>
-        <div>{t('Base:')} {formatPrice(base)}</div>
-      </div>
-    ) : null
-  )
 
   const statCard = (label: string, value: string | number, accent?: string, opts?: { key?: string; active?: boolean; onClick?: () => void; rank?: number }) => (
     <div
@@ -198,30 +182,6 @@ export function PricingPage() {
         <div className="panel-tabs" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
           <div className="tab active"><span>💎</span> {t('Model Pricing')}</div>
           <div style={{ paddingRight: '16px', display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-            <span style={{ fontSize: '11px', fontWeight: 500, color: 'var(--text-muted)', textTransform: 'uppercase' }}>{t('Scope:')}</span>
-            <select
-              value={selectedPricingProvider}
-              onChange={(e) => setSelectedPricingProvider(e.target.value)}
-              style={{
-                padding: '4px 12px',
-                borderRadius: '6px',
-                border: '1px solid var(--border-color)',
-                fontSize: '13px',
-                fontWeight: 600,
-                background: 'var(--surface-hover)',
-                outline: 'none',
-              }}
-            >
-              <option value="global">{t('Global Default')}</option>
-              {providerOptions.map((p) => (
-                <option key={p} value={p}>{t('Provider:')} {p}</option>
-              ))}
-            </select>
-            {selectedPricingProvider !== 'global' && (
-              <span style={{ fontSize: '11px', color: 'var(--text-secondary)', fontWeight: 600 }}>
-                {t('Multiplier:')} {pricingMultiplier.toFixed(3)}x
-              </span>
-            )}
             <button
               type="button"
               className="nav-item"
@@ -304,7 +264,6 @@ export function PricingPage() {
                       </td>
                       <td>
                         <span
-                          title={`${t('Scope:')} ${model.scope}`}
                           style={{
                             fontSize: '10px',
                             fontWeight: 600,
@@ -319,19 +278,15 @@ export function PricingPage() {
                       </td>
                       <td>
                         <input {...inputProps(model, 'input')} />
-                        {providerPriceDetail(model.input, model.effective_input)}
                       </td>
                       <td>
                         <input {...inputProps(model, 'output')} />
-                        {providerPriceDetail(model.output, model.effective_output)}
                       </td>
                       <td>
                         <input {...inputProps(model, 'cacheRead')} />
-                        {providerPriceDetail(model.cache_read, model.effective_cache_read)}
                       </td>
                       <td>
                         <input {...inputProps(model, 'cacheWrite')} />
-                        {providerPriceDetail(model.cache_write, model.effective_cache_write)}
                       </td>
                       <td>
                         {(hasTiers || hasWindows) && (

@@ -406,9 +406,7 @@ def recalculate_usage_cost(
     *,
     user_id: str | None = None,
     model_costs: dict[str, Any] | None = None,
-    provider_model_costs: dict[str, dict[str, Any]] | None = None,
     model_cost_sources: dict[str, str] | None = None,
-    provider_model_cost_sources: dict[str, dict[str, str]] | None = None,
     db_path: str | None = None,
 ) -> CostRecalcResult | None:
     """Recompute one Usage row's cost against current pricing and keep its
@@ -437,18 +435,10 @@ def recalculate_usage_cost(
             return None
 
         resolved = resolve_pricing(
-            usage.provider,
-            usage.model,
-            usage.ts,
-            model_costs,
-            provider_model_costs,
-            model_cost_sources,
-            provider_model_cost_sources,
+            usage.model, usage.ts, model_costs, model_cost_sources
         )
         if resolved.match is None:
-            return CostRecalcResult(
-                skipped=True, reason="no pricing match for provider/model"
-            )
+            return CostRecalcResult(skipped=True, reason="no pricing match for model")
 
         old_costs = {
             "input_cost_usd": Decimal(str(usage.input_cost_usd)),
@@ -460,9 +450,7 @@ def recalculate_usage_cost(
             completion_tokens=usage.completion_tokens,
             cached_tokens=usage.cached_tokens,
             cache_creation_tokens=usage.cache_creation_tokens,
-            provider=usage.provider,
             model_cost=resolved.cost,
-            multiplier=resolved.multiplier,
         )
         deltas = {field: new_costs[field] - old_costs[field] for field in old_costs}
 
@@ -476,11 +464,9 @@ def recalculate_usage_cost(
 
             usage.price_snapshot_id = ensure_price_snapshot(
                 date=date,
-                provider=usage.provider,
                 model=usage.model,
                 source=resolved.source or "unknown",
                 cost=resolved.cost,
-                multiplier=resolved.multiplier,
                 db_path=db_path,
             )
         except Exception:
@@ -488,9 +474,7 @@ def recalculate_usage_cost(
             # was written, so clear the binding and let reads mark it estimated.
             usage.price_snapshot_id = None
             logger.warning(
-                "recalculate_usage_cost: failed to record price snapshot for "
-                "provider=%s model=%s",
-                usage.provider,
+                "recalculate_usage_cost: failed to record price snapshot for model=%s",
                 usage.model,
             )
         # Atomic `col = col + delta` UPDATE rather than a select-mutate-commit
@@ -560,13 +544,11 @@ def recalculate_usage_cost(
             cached_tokens=usage.cached_tokens,
             cache_creation_tokens=usage.cache_creation_tokens,
             cost=resolved.cost,
-            multiplier=resolved.multiplier,
         )
         from ..pricing.snapshots import build_pricing_detail
 
         pricing = build_pricing_detail(
             resolved.cost,
-            resolved.multiplier,
             resolved.source,
             {
                 "prompt_tokens": usage.prompt_tokens,
@@ -608,9 +590,7 @@ def reprice_estimated_rows(
     until: str | None = None,
     limit: int | None = None,
     model_costs: dict[str, Any] | None = None,
-    provider_model_costs: dict[str, dict[str, Any]] | None = None,
     model_cost_sources: dict[str, str] | None = None,
-    provider_model_cost_sources: dict[str, dict[str, str]] | None = None,
     db_path: str | None = None,
 ) -> dict[str, int]:
     """Rebind and recompute estimated (unbound) usage rows to current pricing.
@@ -641,9 +621,7 @@ def reprice_estimated_rows(
         result = recalculate_usage_cost(
             usage_id,
             model_costs=model_costs,
-            provider_model_costs=provider_model_costs,
             model_cost_sources=model_cost_sources,
-            provider_model_cost_sources=provider_model_cost_sources,
             db_path=db_path,
         )
         # A snapshot failure leaves the row unbound, so don't report it as

@@ -40,11 +40,8 @@ def test_api_defines_bounded_evaluation_worker_shutdown(api_module):
 
 
 def test_reprice_estimated_usage_endpoint_passes_filters(api_module, monkeypatch):
-    from types import SimpleNamespace
-
     async def fake_live_cost_maps():
-        resolved = SimpleNamespace(global_costs={}, provider_costs={})
-        return {}, resolved, {}, {}
+        return {}, {}, {}
 
     captured = {}
 
@@ -89,9 +86,7 @@ def test_pricing_entry_includes_tiers_and_time_rates(api_module):
         ),
     )
 
-    entry = api_module._pricing_entry(
-        ResolvedCost(cost=cost, source="openrouter"), "global", 1.0
-    )
+    entry = api_module._pricing_entry(ResolvedCost(cost=cost, source="openrouter"))
 
     assert entry["tiers"][0]["max_tokens"] == 1000
     assert entry["time_rates"][0]["days"] == [0, 6]
@@ -341,10 +336,10 @@ def test_usage_endpoint_includes_cost_split_components(api_module, monkeypatch):
     assert response.status_code == 200
     rows = response.json()
     assert len(rows) == 1
-    # test-model: input 2.0, cacheRead 0.5, provider multiplier 1.25.
-    # normal: 800*2/1e6*1.25 = 0.002; cache_read: 200*0.5/1e6*1.25 = 0.000125
-    assert rows[0]["normal_input_cost_usd"] == pytest.approx(0.002)
-    assert rows[0]["cache_read_cost_usd"] == pytest.approx(0.000125)
+    # test-model: input 2.0, cacheRead 0.5.
+    # normal: 800*2/1e6 = 0.0016; cache_read: 200*0.5/1e6 = 0.0001
+    assert rows[0]["normal_input_cost_usd"] == pytest.approx(0.0016)
+    assert rows[0]["cache_read_cost_usd"] == pytest.approx(0.0001)
     assert rows[0]["cache_write_cost_usd"] == 0
 
 
