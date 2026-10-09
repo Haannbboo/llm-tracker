@@ -10,8 +10,6 @@ from types import ModuleType, SimpleNamespace
 from typing import Any
 
 import pytest
-from sqlalchemy import event
-from sqlalchemy.engine import Engine
 
 NO_REMOTE_PRICING_CONFIG = (
     Path(__file__).parent / "fixtures" / "no-remote-pricing-config.yaml"
@@ -21,11 +19,19 @@ os.environ.setdefault("TOKENAGE_CONFIG", str(NO_REMOTE_PRICING_CONFIG))
 
 # Tests never need SQLite durability; fsync per DDL/commit dominated runtime
 # on slow disks (>90% of wall time). Applies to every engine in the process.
-@event.listens_for(Engine, "connect")
-def _sqlite_fast_pragmas(dbapi_conn: Any, _record: Any) -> None:
-    if isinstance(dbapi_conn, sqlite3.Connection):
-        dbapi_conn.execute("PRAGMA synchronous=OFF")
-        dbapi_conn.execute("PRAGMA journal_mode=MEMORY")
+# Client-only CI (hosted-install job) has no sqlalchemy, so skip it there.
+try:
+    from sqlalchemy import event
+    from sqlalchemy.engine import Engine
+except ImportError:
+    pass
+else:
+
+    @event.listens_for(Engine, "connect")
+    def _sqlite_fast_pragmas(dbapi_conn: Any, _record: Any) -> None:
+        if isinstance(dbapi_conn, sqlite3.Connection):
+            dbapi_conn.execute("PRAGMA synchronous=OFF")
+            dbapi_conn.execute("PRAGMA journal_mode=MEMORY")
 
 
 CONFIG_TEMPLATE = """

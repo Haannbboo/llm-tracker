@@ -1342,3 +1342,17 @@ def test_fetch_litellm_json_does_not_mutate_global_getaddrinfo(monkeypatch):
 
     assert result is None
     assert base_module.socket.getaddrinfo is original_getaddrinfo
+
+
+def test_refresh_pricing_maps_warns_on_ignored_legacy_keys(pricing_maps_module, caplog):
+    config = {
+        "models": {"m": {"cost": {"input": 1.0, "output": 2.0}}},
+        "providers": {
+            "p": {"price_multiplier": 2, "models": {"m": {"cost": {"input": 9.0}}}}
+        },
+    }
+    with caplog.at_level("WARNING"):
+        pricing_maps_module.refresh_pricing_maps(config)
+    assert "providers.p.price_multiplier" in caplog.text
+    assert "providers.p.models.m" in caplog.text
+    assert pricing_maps_module.MODEL_COSTS["m"].input == 1.0

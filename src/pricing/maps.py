@@ -7,6 +7,7 @@ plus fetched LiteLLM pricing). ``src.config.app.refresh_runtime_config`` calls
 
 from __future__ import annotations
 
+import logging
 import threading
 from typing import Any
 
@@ -19,6 +20,8 @@ from .models import (
     build_segment_index,
 )
 from .sources.base import FetchedSource
+
+logger = logging.getLogger(__name__)
 
 
 def _parse_tiered_cost(cost: dict[str, Any], flat: ModelCost) -> tuple[ModelTier, ...]:
@@ -181,11 +184,35 @@ MODEL_SEGMENT_COSTS: dict[str, tuple[str, ModelCost]] = {}
 MAPS_LOCK = threading.RLock()
 
 
+def _warn_ignored_pricing_keys(config: dict[str, Any]) -> None:
+    """Pricing is model-keyed only; tell the operator about legacy keys that no
+    longer take effect instead of silently ignoring them."""
+    ignored = []
+    if "price_multiplier" in config:
+        ignored.append("price_multiplier")
+    for provider, provider_config in (config.get("providers") or {}).items():
+        if not isinstance(provider_config, dict):
+            continue
+        if "price_multiplier" in provider_config:
+            ignored.append(f"providers.{provider}.price_multiplier")
+        for model, model_config in (provider_config.get("models") or {}).items():
+            if isinstance(model_config, dict) and (
+                "cost" in model_config or "price_multiplier" in model_config
+            ):
+                ignored.append(f"providers.{provider}.models.{model}")
+    if ignored:
+        logger.warning(
+            "Ignoring legacy pricing config (move costs to top-level models.<name>.cost): %s",
+            ", ".join(ignored),
+        )
+
+
 def refresh_pricing_maps(
     config: dict[str, Any],
     fetched: list[FetchedSource] | None = None,
 ) -> None:
     """Rebuild the runtime pricing maps from a config dict + fetched sources."""
+    _warn_ignored_pricing_keys(config)
     resolved = resolve_all_costs(config, fetched)
     model_costs = {key: rc.cost for key, rc in resolved.items()}
     model_cost_sources = {key: rc.source for key, rc in resolved.items()}
